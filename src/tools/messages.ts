@@ -126,9 +126,12 @@ function formatMessage(msg: WeixinMessage) {
 
   let text = textParts.join("\n");
 
-  if (msg.ref_msg) {
-    const refItem = msg.ref_msg.message_item;
-    const refText = refItem?.text_item?.text ?? msg.ref_msg.title ?? "";
+  // ref_msg（引用/回复的原消息）挂在 MessageItem 上，不在 WeixinMessage 上。
+  // 原实现读 msg.ref_msg 恒为 undefined，是死代码；这里从消息项中取。
+  const refMsg = items.find((item) => item.ref_msg)?.ref_msg;
+  if (refMsg) {
+    const refItem = refMsg.message_item;
+    const refText = refItem?.text_item?.text ?? refMsg.title ?? "";
     text = `[Reply to: ${refText}]\n${text}`;
   }
 
