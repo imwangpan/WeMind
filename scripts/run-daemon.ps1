@@ -2,6 +2,9 @@
 # 由 Windows 计划任务（登录触发）调用：定位仓库 -> 循环运行 daemon -> 崩溃后延迟重拉。
 # 可移植：用 $PSScriptRoot 定位仓库根（本脚本位于 <repo>/scripts/），node/kiro-cli 走 PATH。
 $ErrorActionPreference = "Continue"
+# 以 UTF-8 解码子进程（node/kiro-cli）输出，否则中文按 GBK 代码页解码会乱码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 $log = Join-Path $repo "daemon.log"

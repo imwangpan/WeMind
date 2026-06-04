@@ -28,9 +28,17 @@ const PREAMBLE =
 
 const histories = new Map<string, string[]>();
 
-/** 去除 kiro-cli 输出里的 ANSI 转义码与开头的 "> " 应答标记。 */
+/**
+ * 提取 kiro-cli 的最终回复：它把回复用带色的 "> " 标记前缀，工具调用旁白在其之前。
+ * 取最后一个标记之后的内容（丢弃旁白），再去 ANSI、去残留 "> "。
+ */
 function cleanOutput(s: string): string {
-  return s.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").replace(/^\s*>\s?/, "").trim();
+  const markerRe = /\u001b\[[0-9;]*m>\s\u001b\[0m/g;
+  let lastEnd = -1;
+  let m: RegExpExecArray | null;
+  while ((m = markerRe.exec(s)) !== null) lastEnd = m.index + m[0].length;
+  const answer = lastEnd >= 0 ? s.slice(lastEnd) : s;
+  return answer.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").replace(/^\s*>\s?/, "").trim();
 }
 
 /** 以 argv 传入 prompt（shell:false），避免命令注入。 */
