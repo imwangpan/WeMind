@@ -2,7 +2,17 @@
 
 基于 MCP（Model Context Protocol）的微信机器人服务器，让任何 AI Agent 都能收发微信消息。
 
-![npm version](https://img.shields.io/npm/v/mcp-wechat-server)
+> **关于本 Fork**
+>
+> Fork 自 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server)，主要改动：
+> - **支持 Node.js 运行**（原项目仅支持 Bun）：`tsc` 构建到 `dist/`，用 `node` 运行
+> - **补齐 iLink 协议请求头** `iLink-App-Id` / `iLink-App-ClientVersion`（连接所需）
+> - **处理会话超时**（errcode `-14`），补 `notifyStart` / `notifyStop` 上下线通知
+> - 修复回复引用（`ref_msg`）死代码、修复 server 版本号硬编码
+> - Windows 凭证权限处理与安全提示、补单元测试与 CI
+>
+> iLink 协议细节、session-guard 与上下线通知实现借鉴自微信官方插件
+> [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)（MIT）。
 
 ## 功能
 
@@ -13,7 +23,14 @@
 - **状态持久化**：重启不丢失登录凭证和消息游标
 - **独立运行**：无需 OpenClaw 框架，开箱即用
 
+## 环境要求
+
+- [Node.js](https://nodejs.org/) >= 20（已在 Node 24 验证）
+- 仍兼容 Bun（可选）
+
 ## 快速开始
+
+本 Fork 运行在 **Node.js** 上，未发布到 npm。请先按「本地开发」构建，再用绝对路径接入 MCP 客户端。
 
 ### Claude Desktop
 
@@ -23,8 +40,8 @@
 {
   "mcpServers": {
     "wechat": {
-      "command": "bunx",
-      "args": ["mcp-wechat-server"]
+      "command": "node",
+      "args": ["/abs/path/to/mcp-wechat-server/dist/index.js"]
     }
   }
 }
@@ -39,7 +56,7 @@
   "mcp": {
     "wechat": {
       "type": "local",
-      "command": ["bunx", "mcp-wechat-server"],
+      "command": ["node", "/abs/path/to/mcp-wechat-server/dist/index.js"],
       "enabled": true
     }
   }
@@ -50,16 +67,10 @@
 
 ```json
 {
-  "command": "bunx",
-  "args": ["mcp-wechat-server"]
+  "command": "node",
+  "args": ["/abs/path/to/mcp-wechat-server/dist/index.js"]
 }
 ```
-
-> `bunx` 会自动从 npm 下载并运行，无需手动安装。
-
-## 环境要求
-
-- [Bun](https://bun.sh/) >= 1.0.0
 
 ## 使用方法
 
@@ -111,7 +122,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 
 | 文件 | 说明 |
 |------|------|
-| `account.json` | Bot Token 和用户 ID（权限 600） |
+| `account.json` | Bot Token 和用户 ID（POSIX 下权限 600；**Windows 下为明文**，见「安全说明」） |
 | `state.json` | 消息游标和上下文 Token |
 | `qrcode.png` | 生成的二维码图片 |
 | `qrcode.txt` | 生成的终端二维码文本 |
@@ -119,12 +130,32 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 ## 本地开发
 
 ```bash
-git clone https://github.com/Howardzhangdqs/mcp-wechat-server.git
+git clone https://github.com/imwangpan/mcp-wechat-server.git
 cd mcp-wechat-server
-bun install
-bun run dev
+npm install
+npm run build      # 编译到 dist/
+npm start          # 运行 node dist/index.js
+npm test           # 运行单元测试
+npm run dev        # tsx 热重载开发（可选）
 ```
+
+## 安全说明
+
+- **凭证存储**：`account.json` 含 Bot Token。POSIX 系统会设为权限 `600`；**Windows 上 `chmod` 无效，文件以明文存放且不受权限限制**——启动保存时会有一次性告警。请用文件夹权限或磁盘加密保护 `~/.mcp-wechat-server/` 目录。
+- **隐私**：消息经由腾讯 iLink 渠道与本地 Agent 流转，涉及对话内容外发，请自行评估。
+
+## 关于 iLink 渠道与限制
+
+- 后端为腾讯官方 **iLink / 微信 ClawBot** 接口（`ilinkai.weixin.qq.com`），面向**个人微信账号**，区别于企业微信。按官方用途使用，不存在逆向 bot 那类封号风险。
+- **不能主动发起对话**：只能在收到用户消息后、于该会话上下文内回复（发送依赖收消息得到的 `context_token`）。
+- **服务稳定性**：这是腾讯新开放的插件功能，官方条款保留随时停服的权利，请勿用于关键业务。
+- 需要较新的微信客户端并启用 ClawBot 插件。
+
+## 致谢
+
+- Fork 自 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server)（MIT）。
+- iLink 协议细节、session-guard 与上下线通知实现借鉴自微信官方插件 [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)（MIT）。
 
 ## 许可证
 
-MIT
+MIT（沿用原项目）
