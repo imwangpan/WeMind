@@ -151,6 +151,49 @@ npm run dev        # tsx 热重载开发（可选）
 - **服务稳定性**：这是腾讯新开放的插件功能，官方条款保留随时停服的权利，请勿用于关键业务。
 - 需要较新的微信客户端并启用 ClawBot 插件。
 
+## 守护进程（daemon）：脱离 kiro-cli 常驻自动收发
+
+`src/daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
+调 **headless kiro-cli**（`kiro-cli chat --no-interactive --trust-all-tools`）当大脑生成回复 → 自动回发。
+它**只依赖 `api/` + `store/`**，不碰 MCP 那层，便于日后独立拆出。
+
+```bash
+npm run build
+npm run daemon      # 前台运行；需先完成扫码登录（见上文）
+```
+
+> ⚠️ **安全（务必读）**：daemon 用 `--trust-all-tools`，意味着**任何能给这个微信 ClawBot 会话发消息的人，都能让 Kiro 在运行 daemon 的电脑上执行任意工具（含 shell / 写文件）**。
+> 唯一的安全闸是**发件人白名单**：daemon 默认只处理登录账号本人（`account.userId`）发来的消息，其余忽略。**不要关掉它。** 可用 `WECHAT_OWNER_ID` 覆盖白名单。
+
+环境变量：
+
+| 变量 | 说明 |
+|------|------|
+| `WECHAT_OWNER_ID` | 发件人白名单（默认登录账号本人 user id） |
+| `KIRO_CLI_BIN` | kiro-cli 可执行文件路径（默认走 PATH） |
+| `WECHAT_BRAIN_TIMEOUT_MS` | 单次 kiro-cli 调用超时（默认 120000） |
+
+限制：
+
+- **只在电脑开机且 daemon 运行时在线**（不是云端常驻）；
+- **不能主动发起对话**（iLink 限制），需你先发消息；
+- iLink 会话超时（errcode `-14`）会进入 1 小时冷却，重发消息恢复。
+
+### Windows 登录自启
+
+优先用计划任务（PS7 全路径、登录触发、崩溃重拉由 `scripts/run-daemon.ps1` 的循环负责）：
+
+```powershell
+$pwsh = "C:\Program Files\PowerShell\7\pwsh.exe"
+$wrapper = "<仓库绝对路径>\scripts\run-daemon.ps1"
+$action = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`""
+Register-ScheduledTask -TaskName "mcp-wechat-daemon" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew) -Force
+```
+
+若环境禁止创建计划任务（提示「拒绝访问」），改用**启动文件夹**自启：在
+`shell:startup`（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`）放一个
+`.vbs`，用 `WScript.Shell.Run` 以隐藏窗口调用上面的 `pwsh ... -File scripts/run-daemon.ps1`。
+
 ## 致谢
 
 - Fork 自 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server)（MIT）。
