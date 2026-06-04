@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
 import { getUpdates } from "../api/client.js";
+import { SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs } from "../api/session-guard.js";
 import { loadAccount, loadState, saveState } from "../store/account.js";
 import type { WeixinMessage } from "../api/types.js";
 
@@ -20,12 +21,37 @@ export const getMessagesSchema = z.object({
     .describe("Long-poll timeout in ms (default: 10000). Ignored when wait=true."),
 });
 
+function sessionExpiredResult(botId: string): {
+  content: Array<{ type: "text"; text: string }>;
+} {
+  const mins = Math.ceil(getRemainingPauseMs(botId) / 60_000);
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(
+          {
+            status: "session_expired",
+            message: `WeChat bot session expired (errcode ${SESSION_EXPIRED_ERRCODE}). Call login_qrcode to re-authenticate. Polling paused for ~${mins} min.`,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  };
+}
+
 export async function getMessages(input: { wait?: boolean; timeout?: number }): Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> {
   const account = loadAccount();
   if (!account?.botToken) {
     throw new McpError(ErrorCode.InvalidParams, "Not logged in. Call login_qrcode first.");
+  }
+
+  if (isSessionPaused(account.botId)) {
+    return sessionExpiredResult(account.botId);
   }
 
   const pollMs = input.wait ? LONG_POLL_MS : (input.timeout ?? 10000);
@@ -49,6 +75,11 @@ export async function getMessages(input: { wait?: boolean; timeout?: number }): 
       timeoutMs: pollMs,
     });
 
+    if (resp.errcode === SESSION_EXPIRED_ERRCODE) {
+      pauseSession(account.botId);
+      saveState(state);
+      return sessionExpiredResult(account.botId);
+    }
     if (resp.errcode) {
       throw new McpError(
         ErrorCode.InternalError,

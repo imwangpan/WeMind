@@ -218,3 +218,27 @@ export async function sendTyping(params: {
     label: "sendTyping",
   });
 }
+
+/** 通知服务端该 bot 客户端上线（best-effort，失败不阻断）。 */
+export async function notifyStart(params: { baseUrl: string; token?: string }): Promise<void> {
+  await apiFetch({
+    baseUrl: params.baseUrl,
+    endpoint: "ilink/bot/msg/notifystart",
+    body: JSON.stringify({ base_info: buildBaseInfo() }),
+    token: params.token,
+    timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
+    label: "notifyStart",
+  });
+}
+
+/** 通知服务端该 bot 客户端下线（best-effort，失败不阻断）。 */
+export async function notifyStop(params: { baseUrl: string; token?: string }): Promise<void> {
+  await apiFetch({
+    baseUrl: params.baseUrl,
+    endpoint: "ilink/bot/msg/notifystop",
+    body: JSON.stringify({ base_info: buildBaseInfo() }),
+    token: params.token,
+    timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
+    label: "notifyStop",
+  });
+}
