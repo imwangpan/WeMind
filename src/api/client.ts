@@ -13,7 +13,10 @@ const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const DEFAULT_API_TIMEOUT_MS = 15_000;
 const QR_LONG_POLL_TIMEOUT_MS = 35_000;
 
-const CHANNEL_VERSION = PKG.version;
+// 对外声明的 iLink 客户端版本：模仿官方 openclaw-weixin 的版本，
+// 避免后端因客户端版本过低而拒绝/快速过期二维码。需随官方更新。
+const ILINK_CLIENT_VERSION = "2.4.3";
+const CHANNEL_VERSION = ILINK_CLIENT_VERSION;
 const ILINK_APP_ID = PKG.ilinkAppId;
 
 /**
@@ -24,7 +27,7 @@ function buildClientVersion(version: string): number {
   const [major = 0, minor = 0, patch = 0] = version.split(".").map((p) => parseInt(p, 10) || 0);
   return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff);
 }
-const ILINK_APP_CLIENT_VERSION = String(buildClientVersion(PKG.version));
+const ILINK_APP_CLIENT_VERSION = String(buildClientVersion(ILINK_CLIENT_VERSION));
 
 /** iLink 公共请求头：所有 GET/POST 都需携带，缺失会导致服务端拒绝连接。 */
 function buildCommonHeaders(): Record<string, string> {
@@ -139,14 +142,15 @@ export async function sendMessage(params: {
 }
 
 export async function fetchQRCode(apiBaseUrl: string): Promise<QRCodeResponse> {
-  const base = ensureTrailingSlash(apiBaseUrl);
-  const url = new URL("ilink/bot/get_bot_qrcode?bot_type=3", base);
-  const response = await fetch(url.toString(), { headers: buildCommonHeaders() });
-  if (!response.ok) {
-    const body = await response.text().catch(() => "(unreadable)");
-    throw new Error(`Failed to fetch QR code: ${response.status} ${response.statusText} ${body}`);
-  }
-  return response.json() as Promise<QRCodeResponse>;
+  // 对齐官方：get_bot_qrcode 为 POST，body 带 local_token_list，并走全套请求头。
+  const rawText = await apiFetch({
+    baseUrl: apiBaseUrl,
+    endpoint: "ilink/bot/get_bot_qrcode?bot_type=3",
+    body: JSON.stringify({ local_token_list: [] }),
+    timeoutMs: DEFAULT_API_TIMEOUT_MS,
+    label: "fetchQRCode",
+  });
+  return JSON.parse(rawText) as QRCodeResponse;
 }
 
 export async function pollQRStatus(

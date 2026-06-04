@@ -12,6 +12,7 @@
 - 单元测试（vitest）覆盖 session-guard 与 package 元数据读取；GitHub Actions CI 跑 typecheck + build + test。
 
 ### Fixed
+- **登录二维码流程**：`get_bot_qrcode` 改为 POST + `local_token_list`；iLink 客户端版本对齐官方 `2.4.3`。此前用 GET 且声明的客户端版本过低，导致扫码「无反应 / 秒过期」。已实测登录、入站、出站全链路打通。
 - 回复引用（`ref_msg`）此前从 `WeixinMessage` 读取（恒为 `undefined`，死代码），改为从 `MessageItem` 读取。
 - server 版本号从硬编码 `1.0.0` 改为读取 `package.json`。
 - Windows 下 `chmod 600` 为 no-op 导致 token 明文且无提示：限定 chmod 仅在 POSIX 执行，Windows 下输出一次性明文告警。
