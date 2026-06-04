@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+import { PKG } from "../pkg.js";
 import type { GetUpdatesResp, SendMessageReq, QRCodeResponse, QRStatusResponse, SendTypingReq, GetConfigResp } from "./types.js";
 
 export type ApiOptions = {
@@ -11,7 +12,27 @@ export type ApiOptions = {
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const DEFAULT_API_TIMEOUT_MS = 15_000;
 const QR_LONG_POLL_TIMEOUT_MS = 35_000;
-const CHANNEL_VERSION = "1.0.0";
+
+const CHANNEL_VERSION = PKG.version;
+const ILINK_APP_ID = PKG.ilinkAppId;
+
+/**
+ * iLink-App-ClientVersion: uint32 编码 0x00MMNNPP（major<<16 | minor<<8 | patch）。
+ * 编码方式借鉴自官方 Tencent/openclaw-weixin（MIT）。
+ */
+function buildClientVersion(version: string): number {
+  const [major = 0, minor = 0, patch = 0] = version.split(".").map((p) => parseInt(p, 10) || 0);
+  return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff);
+}
+const ILINK_APP_CLIENT_VERSION = String(buildClientVersion(PKG.version));
+
+/** iLink 公共请求头：所有 GET/POST 都需携带，缺失会导致服务端拒绝连接。 */
+function buildCommonHeaders(): Record<string, string> {
+  return {
+    "iLink-App-Id": ILINK_APP_ID,
+    "iLink-App-ClientVersion": ILINK_APP_CLIENT_VERSION,
+  };
+}
 
 function ensureTrailingSlash(url: string): string {
   return url.endsWith("/") ? url : `${url}/`;
@@ -28,6 +49,7 @@ function buildHeaders(opts: { token?: string; body: string }): Record<string, st
     AuthorizationType: "ilink_bot_token",
     "Content-Length": String(Buffer.byteLength(opts.body, "utf-8")),
     "X-WECHAT-UIN": randomWechatUin(),
+    ...buildCommonHeaders(),
   };
   if (opts.token?.trim()) {
     headers.Authorization = `Bearer ${opts.token.trim()}`;
@@ -119,7 +141,7 @@ export async function sendMessage(params: {
 export async function fetchQRCode(apiBaseUrl: string): Promise<QRCodeResponse> {
   const base = ensureTrailingSlash(apiBaseUrl);
   const url = new URL("ilink/bot/get_bot_qrcode?bot_type=3", base);
-  const response = await fetch(url.toString(), {});
+  const response = await fetch(url.toString(), { headers: buildCommonHeaders() });
   if (!response.ok) {
     const body = await response.text().catch(() => "(unreadable)");
     throw new Error(`Failed to fetch QR code: ${response.status} ${response.statusText} ${body}`);
@@ -137,7 +159,7 @@ export async function pollQRStatus(
   const timer = setTimeout(() => controller.abort(), QR_LONG_POLL_TIMEOUT_MS);
   try {
     const response = await fetch(url.toString(), {
-      headers: { "iLink-App-ClientVersion": "1" },
+      headers: buildCommonHeaders(),
       signal: controller.signal,
     });
     clearTimeout(timer);
