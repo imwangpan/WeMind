@@ -92,16 +92,29 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   await setTyping(account, to, ctx, 1);
   // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
   const keepAlive = setInterval(() => { void setTyping(account, to, ctx, 1).catch(() => {}); }, 8000);
-  let answer: string;
-  let step = 0;
-  try {
-    answer = await askKiroForUser(to, text, (title) => {
+
+  // 一次尝试：带工具进度（步骤编号每次尝试重置）
+  const attempt = (): Promise<string> => {
+    let step = 0;
+    return askKiroForUser(to, text, (title) => {
       step += 1;
       void reply(account, to, ctx, `🔧 步骤 ${step}：${zhTool(title)}`).catch(() => {});
     });
-  } catch (e) {
-    log("brain error:", String(e));
-    answer = "（我这边处理出错了，稍后再发一次试试）";
+  };
+
+  let answer: string;
+  try {
+    try {
+      answer = await attempt();
+    } catch (e1) {
+      log("brain error (try 1):", String(e1));
+      // 偶发卡顿：自愈已重建进程，自动重试一次（session/load 上下文仍在）
+      await reply(account, to, ctx, "⏳ 这次响应超时了，正在自动重试…").catch(() => {});
+      answer = await attempt();
+    }
+  } catch (e2) {
+    log("brain error (try 2):", String(e2));
+    answer = "（处理出错了，可能联网卡住了，稍后再发一次试试）";
   } finally {
     clearInterval(keepAlive);
   }
