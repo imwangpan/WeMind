@@ -93,12 +93,22 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
   const keepAlive = setInterval(() => { void setTyping(account, to, ctx, 1).catch(() => {}); }, 8000);
 
-  // 一次尝试：带工具进度（步骤编号每次尝试重置）
+  const t0 = Date.now();
+  let lastProgressAt = Date.now();
+  const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void reply(account, to, ctx, msg).catch(() => {}); };
+  // 心跳：超过 15s 没有任何进度消息，就发一条带计时的"仍在处理"，让用户确信没卡死
+  const heartbeat = setInterval(() => {
+    if (Date.now() - lastProgressAt >= 15000) {
+      sendProgress(`⏳ 仍在处理中…（已 ${Math.round((Date.now() - t0) / 1000)} 秒）`);
+    }
+  }, 15000);
+
+  // 一次尝试：带进度（步骤编号每次尝试重置）
   const attempt = (): Promise<string> => {
     let step = 0;
-    return askKiroForUser(to, text, (title) => {
-      step += 1;
-      void reply(account, to, ctx, `🔧 步骤 ${step}：${zhTool(title)}`).catch(() => {});
+    return askKiroForUser(to, text, (ev) => {
+      if (ev.type === "tool") { step += 1; sendProgress(`🔧 步骤 ${step}：${zhTool(ev.title)}`); }
+      else sendProgress("✍️ 正在整理回复…");
     });
   };
 
@@ -108,8 +118,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
       answer = await attempt();
     } catch (e1) {
       log("brain error (try 1):", String(e1));
-      // 偶发卡顿：自愈已重建进程，自动重试一次（session/load 上下文仍在）
-      await reply(account, to, ctx, "⏳ 这次响应超时了，正在自动重试…").catch(() => {});
+      sendProgress("⏳ 这次响应超时了，正在自动重试…");
       answer = await attempt();
     }
   } catch (e2) {
@@ -117,6 +126,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
     answer = "（处理出错了，可能联网卡住了，稍后再发一次试试）";
   } finally {
     clearInterval(keepAlive);
+    clearInterval(heartbeat);
   }
   await setTyping(account, to, ctx, 2);
   try {
