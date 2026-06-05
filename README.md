@@ -172,12 +172,25 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_OWNER_ID` | 发件人白名单（默认登录账号本人 user id） |
 | `KIRO_CLI_BIN` | kiro-cli 可执行文件路径（默认走 PATH） |
 | `WECHAT_BRAIN_TIMEOUT_MS` | 单次 kiro-cli 调用超时（默认 120000） |
+| `WECHAT_BRAIN_HOME` | brain 沙箱目录（默认 `~/.mcp-wechat-server/brain-home`） |
 
 限制：
 
 - **只在电脑开机且 daemon 运行时在线**（不是云端常驻）；
 - **不能主动发起对话**（iLink 限制），需你先发消息；
 - iLink 会话超时（errcode `-14`）会进入 1 小时冷却，重发消息恢复。
+
+### MCP 沙箱与对话式加载
+
+brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认不加载任何 MCP**——既快又杜绝 `wechat` 自身回环（内置工具如 `web_search` 仍可用）。需要某个 MCP 时，直接**在微信里发指令**（daemon 拦截处理，不进 brain）：
+
+| 指令 | 作用 |
+|------|------|
+| `MCP` / `列出 MCP` | 列出可选 MCP（来自全局 `mcp.json`）与当前已激活 |
+| `加载 <名>` / `load <名>` | 把指定 MCP 加入激活集（`wechat` 永久禁止） |
+| `卸载 <名>` / `unload <名>` | 移除 |
+
+激活集变更后**下一条消息生效**（spawn 模式每条新进程）。激活的 MCP 等于对白名单发件人全权开放（brain 是 `--trust-all-tools`），按需加载、用完可卸载。
 
 ### Windows 登录自启
 

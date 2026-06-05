@@ -5,6 +5,7 @@
 ## [Unreleased] — fork
 
 ### Added
+- **brain MCP 沙箱 + 对话式动态加载**：brain 跑在独立 `KIRO_HOME`（`WECHAT_BRAIN_HOME`），**默认不加载任何 MCP**（杜绝 wechat 回环、不连本地浏览器）。微信指令 `加载/卸载/列出 MCP` 由 daemon 拦截，从全局 `mcp.json` 取定义动态写入沙箱（`wechat` 永久禁止）。
 - **守护进程（`src/daemon/`）**：脱离 kiro-cli 的独立 WeChat bot。自长轮询 iLink → 调 headless `kiro-cli`（`--no-interactive --trust-all-tools`）当大脑 → 自动回发；带每用户滚动上下文、typing 指示、session-guard、发件人白名单（默认仅登录账号本人，`WECHAT_OWNER_ID` 可覆盖）。仅依赖 `api/` + `store/`，便于独立拆出。`npm run daemon` 启动；`scripts/run-daemon.ps1` 为常驻包装（循环重拉）。
 - **Node.js 支持**：`tsc` 构建到 `dist/`，`node` 直接运行；新增 `build` / `typecheck` / `start` / `dev` / `test` / `daemon` 脚本，`engines.node >= 20`。
 - iLink 公共请求头 `iLink-App-Id`（`bot`）与 `iLink-App-ClientVersion`（应用到所有 GET/POST 请求）。
