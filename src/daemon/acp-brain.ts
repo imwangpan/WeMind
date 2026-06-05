@@ -1,16 +1,19 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 
 import { BRAIN_HOME } from "./mcp-sandbox.js";
 
 /**
  * ACP 大脑：维护一个常驻的 `kiro-cli acp` 进程（JSON-RPC over stdio，换行分隔）。
- * - 每次用前探活，进程不在则重启 + 重新 initialize（按需重建 session）。
- * - 每个用户一个 ACP session（原生多轮记忆）。
- * - 回复从 session/update 的 agent_message_chunk 流式拼接（天然无旁白/无 ANSI）。
+ * - 每用户一个 ACP session（原生多轮记忆）；session 映射持久化到磁盘。
+ * - 自愈：session/prompt 超时/失败 → 杀进程重建；重建后用 session/load 恢复上下文。
+ * - 诊断日志（[acp] 前缀，进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差。
  * 跑在 brain 沙箱 KIRO_HOME 下（默认空 MCP）。只用 node 标准库 + mcp-sandbox，便于独立拆出。
  */
+
+function dlog(...a: unknown[]): void { console.error("[acp]", ...a); }
 
 function resolveKiroCli(): string {
   const override = process.env.KIRO_CLI_BIN?.trim();
@@ -23,53 +26,67 @@ function resolveKiroCli(): string {
 }
 
 const KIRO_CLI = resolveKiroCli();
-const TIMEOUT_MS = Number(process.env.WECHAT_BRAIN_TIMEOUT_MS) || 120_000;
+const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
+const PROMPT_TIMEOUT = Number(process.env.WECHAT_BRAIN_TIMEOUT_MS) || 90_000;
+const DATA_DIR = path.join(os.homedir(), ".mcp-wechat-server");
+const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout };
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout; method: string };
 
 let child: ChildProcessWithoutNullStreams | null = null;
 let initialized = false;
 let idCounter = 0;
 const pending = new Map<number, Pending>();
-const userSessions = new Map<string, string>();
+const userSessions = new Map<string, string>(); // 本进程已建立的 session
 const assembling = new Map<string, string[]>(); // sessionId -> 当前回合文本块
 let stdoutBuf = "";
+let lastFrameAt = 0; // 最近一次收到任何 stdout 帧的时间
 
 function isAlive(): boolean {
   return !!child && child.exitCode === null && !child.killed;
 }
 
-/** 杀进程并清空所有内部态（pending 全部 reject）。 */
+/** 杀进程（按 PID 进程树）并清空内部态；不清磁盘 session 映射（留给重建后 load）。 */
 function reset(): void {
-  if (child?.pid) {
-    const pid = child.pid;
-    try {
-      // 只按本进程的 PID 杀整棵树（含 MCP 子进程），绝不按进程名误伤其它 kiro-cli。
-      if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-      else child.kill();
-    } catch { /* ignore */ }
-  }
-  for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error("acp process gone")); }
-  pending.clear();
+  const c = child;
   child = null;
   initialized = false;
+  if (c?.pid) {
+    try {
+      if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
+      else c.kill();
+    } catch { /* ignore */ }
+  }
+  for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error("acp process reset")); }
+  pending.clear();
   userSessions.clear();
   assembling.clear();
   stdoutBuf = "";
 }
 
+// ---- 磁盘 session 映射（userId -> sessionId），跨进程重建保上下文 ----
+function loadSessionMap(): Record<string, string> {
+  try {
+    const j = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, "utf-8"));
+    return j && typeof j === "object" ? j : {};
+  } catch { return {}; }
+}
+function saveSessionMap(m: Record<string, string>): void {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(SESSION_MAP_FILE, JSON.stringify(m, null, 2), "utf-8");
+}
+
 function handleFrame(f: Record<string, any>): void {
-  // 响应（带 id）
+  lastFrameAt = Date.now();
   if (typeof f.id === "number" && (f.result !== undefined || f.error !== undefined)) {
     const p = pending.get(f.id);
     if (!p) return;
     clearTimeout(p.timer);
     pending.delete(f.id);
-    if (f.error) p.reject(new Error(JSON.stringify(f.error)));
+    if (f.error) { dlog(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`); p.reject(new Error(JSON.stringify(f.error))); }
     else p.resolve(f.result);
     return;
   }
-  // 流式更新：只收 agent_message_chunk 的文本
   if (f.method === "session/update") {
     const u = f.params?.update;
     if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
@@ -77,7 +94,6 @@ function handleFrame(f: Record<string, any>): void {
       if (arr) arr.push(String(u.content.text ?? ""));
     }
   }
-  // 其余 _kiro.dev/* 通知忽略
 }
 
 function onStdout(d: Buffer): void {
@@ -93,17 +109,17 @@ function onStdout(d: Buffer): void {
   }
 }
 
-function request(method: string, params: unknown): Promise<any> {
+function request(method: string, params: unknown, timeoutMs: number): Promise<any> {
   return new Promise((resolve, reject) => {
     if (!child) { reject(new Error("no acp process")); return; }
     const id = ++idCounter;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timeout`)); }, TIMEOUT_MS);
-    pending.set(id, { resolve, reject, timer });
+    dlog(`→ ${method}#${id}`);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timeout after ${timeoutMs}ms`)); }, timeoutMs);
+    pending.set(id, { resolve, reject, timer, method });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
 }
 
-/** 存活检测：进程不在/未初始化则重启并 initialize。 */
 async function ensureProcess(): Promise<void> {
   if (isAlive() && initialized) return;
   reset();
@@ -113,44 +129,73 @@ async function ensureProcess(): Promise<void> {
     cwd: BRAIN_HOME,
     env: { ...process.env, KIRO_HOME: BRAIN_HOME },
   });
+  dlog(`spawn acp pid=${child.pid}`);
   child.stdout.on("data", onStdout);
   child.stderr.on("data", () => { /* ignore */ });
-  child.on("exit", () => { reset(); });
-  child.on("error", () => { reset(); });
-  await request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+  child.on("exit", (code) => { dlog(`acp exited code=${code}`); reset(); });
+  child.on("error", (e) => { dlog(`acp error ${String(e)}`); reset(); });
+  await request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
   initialized = true;
+  dlog("initialized");
 }
 
 async function ensureSession(userId: string): Promise<string> {
   const existing = userSessions.get(userId);
   if (existing) return existing;
-  const res = (await request("session/new", { cwd: BRAIN_HOME, mcpServers: [] })) as { sessionId?: string };
+  const map = loadSessionMap();
+  const saved = map[userId];
+  if (saved) {
+    try {
+      await request("session/load", { sessionId: saved, cwd: BRAIN_HOME, mcpServers: [] }, REQ_TIMEOUT);
+      userSessions.set(userId, saved);
+      dlog(`session/load ok ${saved}`);
+      return saved;
+    } catch (e) {
+      dlog(`session/load failed (${String(e)}), creating new`);
+    }
+  }
+  const res = (await request("session/new", { cwd: BRAIN_HOME, mcpServers: [] }, REQ_TIMEOUT)) as { sessionId?: string };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   userSessions.set(userId, res.sessionId);
+  map[userId] = res.sessionId;
+  saveSessionMap(map);
+  dlog(`session/new ok ${res.sessionId}`);
   return res.sessionId;
 }
 
-/** 向 Kiro 提问（常驻 + 原生多轮），返回纯文本回复。 */
+/** 向 Kiro 提问（常驻 + 原生多轮）。失败即重建进程（下条用 session/load 恢复上下文）。 */
 export async function askKiroForUser(userId: string, message: string): Promise<string> {
   await ensureProcess();
   const sid = await ensureSession(userId);
   assembling.set(sid, []);
+  const t0 = Date.now();
   try {
-    await request("session/prompt", { sessionId: sid, prompt: [{ type: "text", text: message }] });
-    return (assembling.get(sid) ?? []).join("").trim();
+    await request("session/prompt", { sessionId: sid, prompt: [{ type: "text", text: message }] }, PROMPT_TIMEOUT);
+    const txt = (assembling.get(sid) ?? []).join("").trim();
+    dlog(`prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length}`);
+    return txt;
+  } catch (e) {
+    const chunks = (assembling.get(sid) ?? []).length;
+    const sinceFrame = lastFrameAt ? Date.now() - lastFrameAt : -1;
+    dlog(`prompt FAIL ${Date.now() - t0}ms chunks=${chunks} lastFrameAgo=${sinceFrame}ms err=${String(e)} -> rebuild`);
+    reset(); // 自愈：杀掉可能假死的进程，下条消息重建并 session/load 恢复
+    throw e;
   } finally {
     assembling.delete(sid);
   }
 }
 
-/** 用户主动开新会话：丢弃旧 session，立即建新（清空上下文）。 */
+/** 用户主动开新会话：丢弃旧 session（含磁盘映射），重建一个全新 session。 */
 export async function newSession(userId: string): Promise<void> {
+  const map = loadSessionMap();
+  delete map[userId];
+  saveSessionMap(map);
   userSessions.delete(userId);
   await ensureProcess();
   await ensureSession(userId);
 }
 
-/** MCP 激活集变更后调用：重启 acp 进程，使其按新的沙箱 mcp.json 重新加载。 */
+/** MCP 激活集变更后调用：重启 acp 进程（重建后会 session/load 恢复上下文）。 */
 export function restart(): void {
   reset();
 }
