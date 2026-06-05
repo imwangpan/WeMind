@@ -123,7 +123,7 @@ function request(method: string, params: unknown, timeoutMs: number): Promise<an
 async function ensureProcess(): Promise<void> {
   if (isAlive() && initialized) return;
   reset();
-  child = spawn(KIRO_CLI, ["acp"], {
+  child = spawn(KIRO_CLI, ["acp", "--trust-all-tools"], {
     shell: false,
     windowsHide: true,
     cwd: BRAIN_HOME,
