@@ -81,12 +81,19 @@ async function reply(account: AccountData, to: string, ctx: string | undefined, 
 
 async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string): Promise<void> {
   await setTyping(account, to, ctx, 1);
+  // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
+  const keepAlive = setInterval(() => { void setTyping(account, to, ctx, 1).catch(() => {}); }, 8000);
   let answer: string;
   try {
-    answer = await askKiroForUser(to, text);
+    answer = await askKiroForUser(to, text, (title) => {
+      // 工具进度：给微信发一条简短提示，露出"在干什么"
+      void reply(account, to, ctx, "🔧 " + title).catch(() => {});
+    });
   } catch (e) {
     log("brain error:", String(e));
     answer = "（我这边处理出错了，稍后再发一次试试）";
+  } finally {
+    clearInterval(keepAlive);
   }
   await setTyping(account, to, ctx, 2);
   try {

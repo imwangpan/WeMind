@@ -41,6 +41,8 @@ const userSessions = new Map<string, string>(); // 本进程已建立的 session
 const assembling = new Map<string, string[]>(); // sessionId -> 当前回合文本块
 let stdoutBuf = "";
 let lastFrameAt = 0; // 最近一次收到任何 stdout 帧的时间
+let currentOnTool: ((title: string) => void) | null = null; // 当前回合的工具进度回调
+const seenTools = new Set<string>(); // 当前回合已上报的 toolCallId，去重
 
 function isAlive(): boolean {
   return !!child && child.exitCode === null && !child.killed;
@@ -92,6 +94,12 @@ function handleFrame(f: Record<string, any>): void {
     if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
       const arr = assembling.get(f.params.sessionId);
       if (arr) arr.push(String(u.content.text ?? ""));
+    } else if (u?.sessionUpdate === "tool_call" && currentOnTool && u.title) {
+      const key = String(u.toolCallId ?? u.title);
+      if (!seenTools.has(key)) {
+        seenTools.add(key);
+        try { currentOnTool(String(u.title)); } catch { /* ignore */ }
+      }
     }
   }
 }
@@ -164,10 +172,12 @@ async function ensureSession(userId: string): Promise<string> {
 }
 
 /** 向 Kiro 提问（常驻 + 原生多轮）。失败即重建进程（下条用 session/load 恢复上下文）。 */
-export async function askKiroForUser(userId: string, message: string): Promise<string> {
+export async function askKiroForUser(userId: string, message: string, onTool?: (title: string) => void): Promise<string> {
   await ensureProcess();
   const sid = await ensureSession(userId);
   assembling.set(sid, []);
+  currentOnTool = onTool ?? null;
+  seenTools.clear();
   const t0 = Date.now();
   try {
     await request("session/prompt", { sessionId: sid, prompt: [{ type: "text", text: message }] }, PROMPT_TIMEOUT);
@@ -181,6 +191,7 @@ export async function askKiroForUser(userId: string, message: string): Promise<s
     reset(); // 自愈：杀掉可能假死的进程，下条消息重建并 session/load 恢复
     throw e;
   } finally {
+    currentOnTool = null;
     assembling.delete(sid);
   }
 }
