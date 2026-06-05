@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 
+import { BRAIN_HOME } from "./mcp-sandbox.js";
+
 /**
  * daemon 的「大脑」：调 headless kiro-cli 生成回复。
  * 本模块不依赖 iLink/MCP，便于日后随 daemon 一起独立拆出。
@@ -47,7 +49,14 @@ function askKiro(prompt: string): Promise<string> {
     const child = spawn(
       KIRO_CLI,
       ["chat", "--no-interactive", "--trust-all-tools", prompt],
-      { shell: false, windowsHide: true },
+      {
+        shell: false,
+        windowsHide: true,
+        cwd: BRAIN_HOME,
+        // 用沙箱 KIRO_HOME 隔离全局 mcp.json（默认空 MCP，杜绝 wechat 回环）。
+        // auth 在平台数据目录、不随 KIRO_HOME 移动，故 brain 仍是登录态。
+        env: { ...process.env, KIRO_HOME: BRAIN_HOME },
+      },
     );
     let out = "";
     let err = "";

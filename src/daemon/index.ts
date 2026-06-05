@@ -9,6 +9,7 @@ import { loadAccount, loadState, saveState } from "../store/account.js";
 import { MessageItemType, MessageState, MessageType } from "../api/types.js";
 import type { AccountData, ServerState, WeixinMessage, SendMessageReq } from "../api/types.js";
 import { askKiroForUser } from "./brain.js";
+import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
 
 const log = (...a: unknown[]) => console.error("[daemon]", ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -19,6 +20,25 @@ function extractText(msg: WeixinMessage): string {
     .map((it) => it.text_item?.text ?? "")
     .join("\n")
     .trim();
+}
+
+type Ctrl = { kind: "list" } | { kind: "add"; name: string } | { kind: "remove"; name: string };
+
+/** 解析 MCP 控制指令（命中则由 daemon 直接处理，不转发给 brain）。 */
+function parseControl(text: string): Ctrl | null {
+  const t = text.trim();
+  if (/^(\/?mcp|列出\s*mcp|mcp\s*list)$/i.test(t)) return { kind: "list" };
+  let m = t.match(/^(?:加载|load)\s+(\S+)$/i);
+  if (m) return { kind: "add", name: m[1] };
+  m = t.match(/^(?:卸载|unload)\s+(\S+)$/i);
+  if (m) return { kind: "remove", name: m[1] };
+  return null;
+}
+
+function handleControl(c: Ctrl): string {
+  if (c.kind === "list") return listMcp();
+  if (c.kind === "add") return addMcp(c.name);
+  return removeMcp(c.name);
 }
 
 async function setTyping(
@@ -73,6 +93,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId; // 发件人白名单：默认仅本人
+  ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
   log(`up. bot=${account.botId} owner=${owner}`);
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
 
@@ -116,7 +137,15 @@ async function main(): Promise<void> {
       if (from !== owner) { log("ignore non-owner sender:", from); continue; }
       const text = extractText(msg);
       if (!text) { log("skip non-text message"); continue; }
-      await handleMessage(account, state.contextTokens[`${account.botId}:${from}`], from, text);
+      const ctx = state.contextTokens[`${account.botId}:${from}`];
+      const ctrl = parseControl(text);
+      if (ctrl) {
+        const r = handleControl(ctrl);
+        log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
+        await reply(account, from, ctx, r).catch((e) => log("send error:", String(e)));
+        continue;
+      }
+      await handleMessage(account, ctx, from, text);
     }
     saveState(state);
   }
