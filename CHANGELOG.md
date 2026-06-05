@@ -5,6 +5,7 @@
 ## [Unreleased] — fork
 
 ### Added
+- **ACP 常驻大脑**：daemon 默认改用常驻的 `kiro-cli acp` 进程（JSON-RPC over stdio）当大脑，取代「每条消息 spawn」。原生多轮记忆、暖进程（~3s，原 spawn ~6s）、回复从 `agent_message_chunk` 流式拼接（无旁白/ANSI）；带存活检测自动重启、PID 进程树清杀；新增微信指令 `新会话`/`重置` 开启新会话。`brain.ts`（spawn 版）保留作回退。
 - **brain MCP 沙箱 + 对话式动态加载**：brain 跑在独立 `KIRO_HOME`（`WECHAT_BRAIN_HOME`），**默认不加载任何 MCP**（杜绝 wechat 回环、不连本地浏览器）。微信指令 `加载/卸载/列出 MCP` 由 daemon 拦截，从全局 `mcp.json` 取定义动态写入沙箱（`wechat` 永久禁止）。
 - **守护进程（`src/daemon/`）**：脱离 kiro-cli 的独立 WeChat bot。自长轮询 iLink → 调 headless `kiro-cli`（`--no-interactive --trust-all-tools`）当大脑 → 自动回发；带每用户滚动上下文、typing 指示、session-guard、发件人白名单（默认仅登录账号本人，`WECHAT_OWNER_ID` 可覆盖）。仅依赖 `api/` + `store/`，便于独立拆出。`npm run daemon` 启动；`scripts/run-daemon.ps1` 为常驻包装（循环重拉）。
 - **Node.js 支持**：`tsc` 构建到 `dist/`，`node` 直接运行；新增 `build` / `typecheck` / `start` / `dev` / `test` / `daemon` 脚本，`engines.node >= 20`。

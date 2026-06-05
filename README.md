@@ -154,8 +154,11 @@ npm run dev        # tsx 热重载开发（可选）
 ## 守护进程（daemon）：脱离 kiro-cli 常驻自动收发
 
 `src/daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
-调 **headless kiro-cli**（`kiro-cli chat --no-interactive --trust-all-tools`）当大脑生成回复 → 自动回发。
-它**只依赖 `api/` + `store/`**，不碰 MCP 那层，便于日后独立拆出。
+调 **常驻 `kiro-cli acp` 进程**（JSON-RPC over stdio）当大脑生成回复 → 自动回发。
+进程常驻、原生多轮记忆，回复从 `agent_message_chunk` 流式拼接（天然无 ANSI/工具旁白）；
+带**存活检测**（进程不在自动重启）。它**只依赖 `api/` + `store/`**，不碰 MCP 那层，便于日后独立拆出。
+
+> 备注：`acp-brain.ts` 是默认大脑；`brain.ts`（每条消息 spawn `kiro-cli chat` 的无状态版）保留作为可回退实现。
 
 ```bash
 npm run build
@@ -189,8 +192,9 @@ brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认�
 | `MCP` / `列出 MCP` | 列出可选 MCP（来自全局 `mcp.json`）与当前已激活 |
 | `加载 <名>` / `load <名>` | 把指定 MCP 加入激活集（`wechat` 永久禁止） |
 | `卸载 <名>` / `unload <名>` | 移除 |
+| `新会话` / `重置` / `/new` | 开启新 ACP 会话（清空多轮上下文） |
 
-激活集变更后**下一条消息生效**（spawn 模式每条新进程）。激活的 MCP 等于对白名单发件人全权开放（brain 是 `--trust-all-tools`），按需加载、用完可卸载。
+加载/卸载 MCP 后 daemon 会**重启 ACP 进程**以按新沙箱 `mcp.json` 重载，下一条消息生效。激活的 MCP 等于对白名单发件人全权开放（brain 是 `--trust-all-tools`），按需加载、用完可卸载。
 
 ### Windows 登录自启
 
