@@ -27,11 +27,12 @@ function resolveKiroCli(): string {
 
 const KIRO_CLI = resolveKiroCli();
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
-const PROMPT_TIMEOUT = Number(process.env.WECHAT_BRAIN_TIMEOUT_MS) || 90_000;
+const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 45_000; // 多久没收到任何帧才算"卡死"
+const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 300_000; // 单回合硬上限
 const DATA_DIR = path.join(os.homedir(), ".mcp-wechat-server");
 const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout; method: string };
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; clear: () => void; method: string };
 
 let child: ChildProcessWithoutNullStreams | null = null;
 let initialized = false;
@@ -59,7 +60,7 @@ function reset(): void {
       else c.kill();
     } catch { /* ignore */ }
   }
-  for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error("acp process reset")); }
+  for (const p of pending.values()) { p.clear(); p.reject(new Error("acp process reset")); }
   pending.clear();
   userSessions.clear();
   assembling.clear();
@@ -83,7 +84,7 @@ function handleFrame(f: Record<string, any>): void {
   if (typeof f.id === "number" && (f.result !== undefined || f.error !== undefined)) {
     const p = pending.get(f.id);
     if (!p) return;
-    clearTimeout(p.timer);
+    p.clear();
     pending.delete(f.id);
     if (f.error) { dlog(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`); p.reject(new Error(JSON.stringify(f.error))); }
     else p.resolve(f.result);
@@ -122,9 +123,34 @@ function request(method: string, params: unknown, timeoutMs: number): Promise<an
     if (!child) { reject(new Error("no acp process")); return; }
     const id = ++idCounter;
     dlog(`→ ${method}#${id}`);
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timeout after ${timeoutMs}ms`)); }, timeoutMs);
-    pending.set(id, { resolve, reject, timer, method });
+    const t = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timeout after ${timeoutMs}ms`)); }, timeoutMs);
+    pending.set(id, { resolve, reject, clear: () => clearTimeout(t), method });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+  });
+}
+
+/**
+ * session/prompt 专用：空闲超时（PROMPT_IDLE_MS 内无任何帧才判卡死）+ 硬上限（PROMPT_CAP_MS）。
+ * 只要 brain 还在出帧（工具进度/正文），就不打断——避免误杀"慢但在干活"的长查询。
+ */
+function promptRequest(params: unknown): Promise<any> {
+  return new Promise((resolve, reject) => {
+    if (!child) { reject(new Error("no acp process")); return; }
+    const id = ++idCounter;
+    const startedAt = Date.now();
+    dlog(`→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms)`);
+    const iv = setInterval(() => {
+      const idle = Date.now() - lastFrameAt;
+      const total = Date.now() - startedAt;
+      if (idle > PROMPT_IDLE_MS || total > PROMPT_CAP_MS) {
+        if (pending.delete(id)) {
+          clearInterval(iv);
+          reject(new Error(`session/prompt ${idle > PROMPT_IDLE_MS ? "idle" : "cap"} timeout (idle=${idle}ms total=${total}ms)`));
+        }
+      }
+    }, 5000);
+    pending.set(id, { resolve, reject, clear: () => clearInterval(iv), method: "session/prompt" });
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "session/prompt", params }) + "\n");
   });
 }
 
@@ -180,7 +206,7 @@ export async function askKiroForUser(userId: string, message: string, onTool?: (
   seenTools.clear();
   const t0 = Date.now();
   try {
-    await request("session/prompt", { sessionId: sid, prompt: [{ type: "text", text: message }] }, PROMPT_TIMEOUT);
+    await promptRequest({ sessionId: sid, prompt: [{ type: "text", text: message }] });
     const txt = (assembling.get(sid) ?? []).join("").trim();
     dlog(`prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length}`);
     return txt;
