@@ -95,7 +95,7 @@ function handleFrame(f: Record<string, any>): void {
       const arr = assembling.get(f.params.sessionId);
       if (arr) arr.push(String(u.content.text ?? ""));
     } else if (u?.sessionUpdate === "tool_call" && currentOnTool && u.title) {
-      const key = String(u.toolCallId ?? u.title);
+      const key = String(u.title); // 按标题去重，相同动作只上报一次
       if (!seenTools.has(key)) {
         seenTools.add(key);
         try { currentOnTool(String(u.title)); } catch { /* ignore */ }

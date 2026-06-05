@@ -22,6 +22,15 @@ function extractText(msg: WeixinMessage): string {
     .trim();
 }
 
+/** 工具标题中文化（用于微信进度提示）。 */
+function zhTool(t: string): string {
+  return t
+    .replace(/^Searching the web for:?\s*/i, "联网搜索：")
+    .replace(/^Running:?\s*/i, "执行：")
+    .replace(/^Reading\s+/i, "读取 ")
+    .replace(/^Writing\s+/i, "写入 ");
+}
+
 type Ctrl = { kind: "list" } | { kind: "new" } | { kind: "add"; name: string } | { kind: "remove"; name: string };
 
 /** 解析控制指令（命中则由 daemon 直接处理，不转发给 brain）。 */
@@ -84,10 +93,11 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
   const keepAlive = setInterval(() => { void setTyping(account, to, ctx, 1).catch(() => {}); }, 8000);
   let answer: string;
+  let step = 0;
   try {
     answer = await askKiroForUser(to, text, (title) => {
-      // 工具进度：给微信发一条简短提示，露出"在干什么"
-      void reply(account, to, ctx, "🔧 " + title).catch(() => {});
+      step += 1;
+      void reply(account, to, ctx, `🔧 步骤 ${step}：${zhTool(title)}`).catch(() => {});
     });
   } catch (e) {
     log("brain error:", String(e));
