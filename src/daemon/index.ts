@@ -8,7 +8,7 @@ import {
 import { loadAccount, loadState, saveState } from "../store/account.js";
 import { MessageItemType, MessageState, MessageType } from "../api/types.js";
 import type { AccountData, ServerState, WeixinMessage, SendMessageReq } from "../api/types.js";
-import { askKiroForUser } from "./brain.js";
+import { askKiroForUser, newSession, restart } from "./acp-brain.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
 
 const log = (...a: unknown[]) => console.error("[daemon]", ...a);
@@ -22,12 +22,13 @@ function extractText(msg: WeixinMessage): string {
     .trim();
 }
 
-type Ctrl = { kind: "list" } | { kind: "add"; name: string } | { kind: "remove"; name: string };
+type Ctrl = { kind: "list" } | { kind: "new" } | { kind: "add"; name: string } | { kind: "remove"; name: string };
 
-/** 解析 MCP 控制指令（命中则由 daemon 直接处理，不转发给 brain）。 */
+/** 解析控制指令（命中则由 daemon 直接处理，不转发给 brain）。 */
 function parseControl(text: string): Ctrl | null {
   const t = text.trim();
   if (/^(\/?mcp|列出\s*mcp|mcp\s*list)$/i.test(t)) return { kind: "list" };
+  if (/^(新会话|重置|清空上下文|\/new|new\s*session)$/i.test(t)) return { kind: "new" };
   let m = t.match(/^(?:加载|load)\s+(\S+)$/i);
   if (m) return { kind: "add", name: m[1] };
   m = t.match(/^(?:卸载|unload)\s+(\S+)$/i);
@@ -35,10 +36,20 @@ function parseControl(text: string): Ctrl | null {
   return null;
 }
 
-function handleControl(c: Ctrl): string {
+async function handleControl(c: Ctrl, userId: string): Promise<string> {
   if (c.kind === "list") return listMcp();
-  if (c.kind === "add") return addMcp(c.name);
-  return removeMcp(c.name);
+  if (c.kind === "new") {
+    await newSession(userId);
+    return "已开启新会话（上下文已清空）。";
+  }
+  if (c.kind === "add") {
+    const r = addMcp(c.name);
+    restart(); // 重启 acp 进程，使其按新沙箱 mcp.json 重新加载
+    return r;
+  }
+  const r = removeMcp(c.name);
+  restart();
+  return r;
 }
 
 async function setTyping(
@@ -140,7 +151,9 @@ async function main(): Promise<void> {
       const ctx = state.contextTokens[`${account.botId}:${from}`];
       const ctrl = parseControl(text);
       if (ctrl) {
-        const r = handleControl(ctrl);
+        let r: string;
+        try { r = await handleControl(ctrl, from); }
+        catch (e) { r = "处理指令出错：" + String(e); }
         log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
         await reply(account, from, ctx, r).catch((e) => log("send error:", String(e)));
         continue;
