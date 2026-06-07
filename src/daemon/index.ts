@@ -22,13 +22,28 @@ function extractText(msg: WeixinMessage): string {
     .trim();
 }
 
-/** 工具标题中文化（用于微信进度提示）。 */
+/** 工具标题中文化（无 purpose 时的兜底）。 */
 function zhTool(t: string): string {
   return t
     .replace(/^Searching the web for:?\s*/i, "联网搜索：")
     .replace(/^Running:?\s*/i, "执行：")
     .replace(/^Reading\s+/i, "读取 ")
-    .replace(/^Writing\s+/i, "写入 ");
+    .replace(/^Writing\s+/i, "写入 ")
+    .replace(/^Finding\s+/i, "查找 ");
+}
+
+/** 按工具类型给图标。 */
+function toolIcon(kind?: string): string {
+  switch (kind) {
+    case "read": return "📄";
+    case "search": return "🔍";
+    case "execute": return "⌨️";
+    case "fetch": return "🌐";
+    case "edit":
+    case "write": return "✏️";
+    case "delete": return "🗑️";
+    default: return "🔧";
+  }
 }
 
 type Ctrl = { kind: "list" } | { kind: "new" } | { kind: "add"; name: string } | { kind: "remove"; name: string };
@@ -107,8 +122,13 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   const attempt = (): Promise<string> => {
     let step = 0;
     return askKiroForUser(to, text, (ev) => {
-      if (ev.type === "tool") { step += 1; sendProgress(`🔧 步骤 ${step}：${zhTool(ev.title)}`); }
-      else sendProgress("✍️ 正在整理回复…");
+      if (ev.type === "tool") {
+        step += 1;
+        const desc = ev.purpose || (ev.title ? zhTool(ev.title) : "") || "调用工具";
+        sendProgress(`${toolIcon(ev.kind)} 步骤 ${step}：${desc}`);
+      } else {
+        sendProgress("✍️ 正在整理回复…");
+      }
     });
   };
 

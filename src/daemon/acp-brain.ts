@@ -42,7 +42,7 @@ const userSessions = new Map<string, string>(); // 本进程已建立的 session
 const assembling = new Map<string, string[]>(); // sessionId -> 当前回合文本块
 let stdoutBuf = "";
 let lastFrameAt = 0; // 最近一次收到任何 stdout 帧的时间
-type ProgressEvent = { type: "tool"; title: string } | { type: "answer" };
+type ProgressEvent = { type: "tool"; kind?: string; purpose?: string; title?: string } | { type: "answer" };
 let currentOnProgress: ((ev: ProgressEvent) => void) | null = null; // 当前回合进度回调
 let answerStarted = false; // 当前回合是否已通知"开始写回复"
 const seenTools = new Set<string>(); // 当前回合已上报的工具标题，去重
@@ -98,11 +98,12 @@ function handleFrame(f: Record<string, any>): void {
       const arr = assembling.get(f.params.sessionId);
       if (arr) arr.push(String(u.content.text ?? ""));
       if (!answerStarted && currentOnProgress) { answerStarted = true; try { currentOnProgress({ type: "answer" }); } catch { /* ignore */ } }
-    } else if (u?.sessionUpdate === "tool_call" && currentOnProgress && u.title) {
-      const key = String(u.title); // 按标题去重，相同动作只上报一次
-      if (!seenTools.has(key)) {
-        seenTools.add(key);
-        try { currentOnProgress({ type: "tool", title: String(u.title) }); } catch { /* ignore */ }
+    } else if ((u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") && currentOnProgress) {
+      const tid = String(u.toolCallId ?? u.title ?? ""); // 每个工具调用只上报一次
+      if (tid && !seenTools.has(tid)) {
+        seenTools.add(tid);
+        const purpose = typeof u.rawInput?.__tool_use_purpose === "string" ? u.rawInput.__tool_use_purpose : undefined;
+        try { currentOnProgress({ type: "tool", kind: u.kind, purpose, title: u.title }); } catch { /* ignore */ }
       }
     }
   }
