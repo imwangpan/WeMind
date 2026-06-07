@@ -141,6 +141,7 @@ function promptRequest(params: unknown): Promise<any> {
     if (!child) { reject(new Error("no acp process")); return; }
     const id = ++idCounter;
     const startedAt = Date.now();
+    lastFrameAt = Date.now(); // 重置空闲基线：从本次 prompt 发出算起，避免用上一回合的旧时间戳误判
     dlog(`→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms)`);
     const iv = setInterval(() => {
       const idle = Date.now() - lastFrameAt;
@@ -160,17 +161,19 @@ function promptRequest(params: unknown): Promise<any> {
 async function ensureProcess(): Promise<void> {
   if (isAlive() && initialized) return;
   reset();
-  child = spawn(KIRO_CLI, ["acp", "--trust-all-tools"], {
+  const proc = spawn(KIRO_CLI, ["acp", "--trust-all-tools"], {
     shell: false,
     windowsHide: true,
     cwd: BRAIN_HOME,
     env: { ...process.env, KIRO_HOME: BRAIN_HOME },
   });
-  dlog(`spawn acp pid=${child.pid}`);
-  child.stdout.on("data", onStdout);
-  child.stderr.on("data", () => { /* ignore */ });
-  child.on("exit", (code) => { dlog(`acp exited code=${code}`); reset(); });
-  child.on("error", (e) => { dlog(`acp error ${String(e)}`); reset(); });
+  child = proc;
+  dlog(`spawn acp pid=${proc.pid}`);
+  proc.stdout.on("data", onStdout);
+  proc.stderr.on("data", () => { /* ignore */ });
+  // 只在"退出的就是当前 child"时才重置，避免旧进程迟到的 exit 误杀新进程
+  proc.on("exit", (code) => { dlog(`acp exited code=${code}`); if (child === proc) reset(); });
+  proc.on("error", (e) => { dlog(`acp error ${String(e)}`); if (child === proc) reset(); });
   await request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
   initialized = true;
   dlog("initialized");
