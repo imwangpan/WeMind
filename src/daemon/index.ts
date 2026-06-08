@@ -103,6 +103,13 @@ async function reply(account: AccountData, to: string, ctx: string | undefined, 
   await sendMessage({ baseUrl: account.baseUrl, token: account.botToken, body: req });
 }
 
+// 串行发送队列：保证多条消息（进度/答案）按入队顺序送达，不并发乱序
+let replyChain: Promise<void> = Promise.resolve();
+function sendOrdered(account: AccountData, to: string, ctx: string | undefined, text: string): Promise<void> {
+  replyChain = replyChain.then(() => reply(account, to, ctx, text).catch((e) => log("send error:", String(e))));
+  return replyChain;
+}
+
 async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string): Promise<void> {
   await setTyping(account, to, ctx, 1);
   // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
@@ -110,7 +117,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
-  const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void reply(account, to, ctx, msg).catch(() => {}); };
+  const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, ctx, msg); };
   // 心跳：超过 15s 没有任何进度消息，就发一条带计时的"仍在处理"，让用户确信没卡死
   const heartbeat = setInterval(() => {
     if (Date.now() - lastProgressAt >= 15000) {
@@ -149,12 +156,8 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
     clearInterval(heartbeat);
   }
   await setTyping(account, to, ctx, 2);
-  try {
-    await reply(account, to, ctx, answer || "（没有内容）");
-    log(`replied to ${to}: ${answer.slice(0, 60)}`);
-  } catch (e) {
-    log("send error:", String(e));
-  }
+  await sendOrdered(account, to, ctx, answer || "（没有内容）");
+  log(`replied to ${to}: ${answer.slice(0, 60)}`);
 }
 
 async function main(): Promise<void> {
