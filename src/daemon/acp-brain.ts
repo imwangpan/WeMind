@@ -205,7 +205,7 @@ async function ensureSession(userId: string): Promise<string> {
 }
 
 /** 向 Kiro 提问（常驻 + 原生多轮）。失败即重建进程（下条用 session/load 恢复上下文）。 */
-export async function askKiroForUser(userId: string, message: string, onProgress?: (ev: ProgressEvent) => void): Promise<string> {
+export async function askKiroForUser(userId: string, message: string, onProgress?: (ev: ProgressEvent) => void, images?: Array<{ data: string; mimeType: string }>): Promise<string> {
   await ensureProcess();
   const sid = await ensureSession(userId);
   assembling.set(sid, []);
@@ -213,8 +213,11 @@ export async function askKiroForUser(userId: string, message: string, onProgress
   answerStarted = false;
   seenTools.clear();
   const t0 = Date.now();
+  const prompt: unknown[] = [];
+  for (const im of images ?? []) prompt.push({ type: "image", mimeType: im.mimeType, data: im.data });
+  prompt.push({ type: "text", text: message || "（用户发来一张图片，请查看并回应）" });
   try {
-    await promptRequest({ sessionId: sid, prompt: [{ type: "text", text: message }] });
+    await promptRequest({ sessionId: sid, prompt });
     const txt = (assembling.get(sid) ?? []).join("").trim();
     dlog(`prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length}`);
     return txt;

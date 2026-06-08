@@ -7,9 +7,10 @@ import {
 } from "../api/session-guard.js";
 import { loadAccount, loadState, saveState } from "../store/account.js";
 import { MessageItemType, MessageState, MessageType } from "../api/types.js";
-import type { AccountData, ServerState, WeixinMessage, SendMessageReq } from "../api/types.js";
+import type { AccountData, ServerState, WeixinMessage, SendMessageReq, ImageItem } from "../api/types.js";
 import { askKiroForUser, newSession, restart } from "./acp-brain.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
+import { downloadImage } from "../cdn/image.js";
 
 const log = (...a: unknown[]) => console.error("[daemon]", ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -110,7 +111,16 @@ function sendOrdered(account: AccountData, to: string, ctx: string | undefined, 
   return replyChain;
 }
 
-async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string): Promise<void> {
+/** 从解密后的字节嗅探图片 MIME。 */
+function sniffMime(b: Buffer): string {
+  const h = b.subarray(0, 4).toString("hex");
+  if (h.startsWith("89504e47")) return "image/png";
+  if (h.startsWith("47494638")) return "image/gif";
+  if (h.startsWith("52494646")) return "image/webp";
+  return "image/jpeg";
+}
+
+async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string, imageItems: ImageItem[]): Promise<void> {
   await setTyping(account, to, ctx, 1);
   // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
   const keepAlive = setInterval(() => { void setTyping(account, to, ctx, 1).catch(() => {}); }, 8000);
@@ -125,6 +135,18 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
     }
   }, 15000);
 
+  // 收图：下载并解密（失败的跳过）
+  const images: Array<{ data: string; mimeType: string }> = [];
+  if (imageItems.length > 0) {
+    sendProgress(`🖼️ 收到 ${imageItems.length} 张图片，下载识别中…`);
+    for (const im of imageItems) {
+      try {
+        const buf = await downloadImage(im);
+        images.push({ data: buf.toString("base64"), mimeType: sniffMime(buf) });
+      } catch (e) { log("image download failed:", String(e)); }
+    }
+  }
+
   // 一次尝试：带进度（步骤编号每次尝试重置）
   const attempt = (): Promise<string> => {
     let step = 0;
@@ -136,7 +158,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
       } else {
         sendProgress("✍️ 正在整理回复…");
       }
-    });
+    }, images);
   };
 
   let answer: string;
@@ -210,9 +232,12 @@ async function main(): Promise<void> {
       saveState(state);
       if (from !== owner) { log("ignore non-owner sender:", from); continue; }
       const text = extractText(msg);
-      if (!text) { log("skip non-text message"); continue; }
+      const imageItems = (msg.item_list ?? [])
+        .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
+        .map((it) => it.image_item as ImageItem);
+      if (!text && imageItems.length === 0) { log("skip empty/unsupported message"); continue; }
       const ctx = state.contextTokens[`${account.botId}:${from}`];
-      const ctrl = parseControl(text);
+      const ctrl = text ? parseControl(text) : null;
       if (ctrl) {
         let r: string;
         try { r = await handleControl(ctrl, from); }
@@ -221,7 +246,7 @@ async function main(): Promise<void> {
         await reply(account, from, ctx, r).catch((e) => log("send error:", String(e)));
         continue;
       }
-      await handleMessage(account, ctx, from, text);
+      await handleMessage(account, ctx, from, text, imageItems);
     }
     saveState(state);
   }
