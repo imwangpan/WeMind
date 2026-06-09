@@ -49,6 +49,7 @@ type ProgressEvent =
 let currentOnProgress: ((ev: ProgressEvent) => void) | null = null; // 当前回合进度回调
 let answerStarted = false; // 当前回合是否已通知"开始写回复"
 let thoughtStarted = false; // 当前回合是否已通知"正在思考"
+const seenUpdateTypes = new Set<string>(); // 诊断：本回合出现过的 sessionUpdate 类型
 const seenTools = new Set<string>(); // 当前回合已上报的工具标题，去重
 
 function isAlive(): boolean {
@@ -98,6 +99,7 @@ function handleFrame(f: Record<string, any>): void {
   }
   if (f.method === "session/update") {
     const u = f.params?.update;
+    if (u?.sessionUpdate) seenUpdateTypes.add(String(u.sessionUpdate)); // 诊断
     // 任意 session/update 帧都视为"活动" → 让 daemon 静默刷新心跳基线（流式期间不误报"仍在处理"）
     if (currentOnProgress) { try { currentOnProgress({ type: "activity" }); } catch { /* ignore */ } }
     if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
@@ -220,6 +222,7 @@ export async function askKiroForUser(userId: string, message: string, onProgress
   currentOnProgress = onProgress ?? null;
   answerStarted = false;
   thoughtStarted = false;
+  seenUpdateTypes.clear();
   seenTools.clear();
   const t0 = Date.now();
   const prompt: unknown[] = [];
@@ -228,7 +231,7 @@ export async function askKiroForUser(userId: string, message: string, onProgress
   try {
     await promptRequest({ sessionId: sid, prompt });
     const txt = (assembling.get(sid) ?? []).join("").trim();
-    dlog(`prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length}`);
+    dlog(`prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length} updateTypes=[${[...seenUpdateTypes].join(",")}]`);
     return txt;
   } catch (e) {
     const chunks = (assembling.get(sid) ?? []).length;
