@@ -36,10 +36,12 @@ function stopDaemon(key: string): string {
   const dir = accountDir(key);
   const wpid = readPid(dir, "wrapper.pid");
   const dpid = readPid(dir, "daemon.pid");
+  const bpid = readPid(dir, "brain.pid");
   const stopped: string[] = [];
   if (wpid && alive(wpid)) { killPid(wpid); stopped.push(`wrapper ${wpid}`); }
   if (dpid && alive(dpid)) { killPid(dpid); stopped.push(`daemon ${dpid}`); }
-  for (const f of ["wrapper.pid", "daemon.pid"]) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ } }
+  if (bpid && alive(bpid)) { killPid(bpid); stopped.push(`brain ${bpid}`); }
+  for (const f of ["wrapper.pid", "daemon.pid", "brain.pid"]) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ } }
   return stopped.length ? `已停止 ${stopped.join(" + ")}` : "无运行中的进程";
 }
 
@@ -71,8 +73,10 @@ function cmdList(): string {
   if (!accs.length) return "（无已登记账号）。用 finalize / adopt 添加。";
   return accs.map((a) => {
     const dpid = readPid(accountDir(a.key), "daemon.pid");
+    const bpid = readPid(accountDir(a.key), "brain.pid");
     const running = dpid && alive(dpid) ? `运行中(pid ${dpid})` : "已停止";
-    return `- ${a.key}${a.key === def ? " [默认]" : ""}  label=${a.label}  botId=${a.botId}  ${running}`;
+    const brain = bpid && alive(bpid) ? `  brain(pid ${bpid})` : "";
+    return `- ${a.key}${a.key === def ? " [默认]" : ""}  label=${a.label}  botId=${a.botId}  ${running}${brain}`;
   }).join("\n");
 }
 

@@ -30,6 +30,7 @@ const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 45_000; // 多久没收到任何帧才算"卡死"
 const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 300_000; // 单回合硬上限
 const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
+const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 标记当前账号的大脑 kiro-cli pid，便于与用户自己的会话区分/清理
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; clear: () => void; method: string };
 
@@ -67,6 +68,7 @@ function reset(): void {
       else c.kill();
     } catch { /* ignore */ }
   }
+  try { fs.unlinkSync(BRAIN_PID_FILE); } catch { /* ignore */ }
   for (const p of pending.values()) { p.clear(); p.reject(new Error("acp process reset")); }
   pending.clear();
   userSessions.clear();
@@ -180,6 +182,7 @@ async function ensureProcess(): Promise<void> {
   });
   child = proc;
   dlog(`spawn acp pid=${proc.pid}`);
+  try { fs.writeFileSync(BRAIN_PID_FILE, String(proc.pid), "utf-8"); } catch { /* best-effort */ }
   proc.stdout.on("data", onStdout);
   proc.stderr.on("data", () => { /* ignore */ });
   // 只在"退出的就是当前 child"时才重置，避免旧进程迟到的 exit 误杀新进程
