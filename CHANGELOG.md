@@ -4,7 +4,15 @@
 
 ## [Unreleased] — fork
 
+### Changed
+- **状态目录改为 `~/.wemind/<account>/` 并支持多账号**：默认目录由 `~/.mcp-wechat-server` 改为 `~/.wemind/default`；新增 `WECHAT_ACCOUNT` 选择子目录、`WECHAT_DATA_DIR` 指定完整路径覆盖。`DATA_DIR` 在 core 单点定义、daemon 从 core 导入。多账号即「不同 `WECHAT_ACCOUNT` → 不同目录 → 各自独立登录/状态/会话，各跑一个 daemon」。`run-daemon.ps1` 的单实例 Mutex 也按账号区分，多账号可共存。
+- **重构为 npm workspaces 三包布局**：原 `src/` 平铺结构拆为 `packages/wechat-ilink-core`（`@wemind/wechat-ilink-core`，iLink 协议内核，私有）、`packages/wechat-mcp`（`@wemind/wechat-mcp`，可发布的 MCP server，`bin: wemind-mcp`）、`packages/wechat-daemon`（`@wemind/wechat-daemon`，私有常驻进程）。三包共享同一内核，消费方只依赖 `core`，不再互相耦合。
+  - `core` 去掉对 `package.json`（`pkg.ts`）的 `ilink_appid` 耦合，固化为 `config.ts` 常量（`ILINK_APP_ID`，env 可覆盖）；新增 barrel `index.ts` 统一导出。
+  - `mcp-server` 用 [tsup](https://tsup.egoist.dev/) 把 `core` **内联**进单一产物，发布时无需单独发 `core`；版本号改由 `version.ts` 向上查找自身 `package.json` 读取（打包后亦可用）。
+  - 构建顺序 `core → daemon/mcp-server`，由 root 编排脚本保证；daemon 入口由 `dist/daemon/index.js` 变更为 `packages/wechat-daemon/dist/index.js`（`scripts/run-daemon.ps1` 已同步）。
+
 ### Added
+- **多账号登录/登出/删除**：账号注册表 `~/.wemind/accounts.json`，每账号独立目录 `~/.wemind/<key>/`（`key` 由微信 botId 派生，唯一；另存可编辑 `label` 别名）。新增管理 CLI `packages/wechat-daemon/dist/manage.js`：`list`/`finalize`(暂存登录→按 botId 归档)/`adopt`/`label`/`set-default`/`logout`(停 daemon+下线+清凭证)/`delete`(停 daemon+删目录+注销)。daemon 启动写 `daemon.pid`、wrapper 写 `wrapper.pid` 到账号目录，供管理命令精确停止整条链。多账号自启脚本 `scripts/run-all-daemons.ps1` 遍历注册表逐账号拉起（各账号 Mutex 独立、可共存）。
 - **ACP 常驻大脑**：daemon 默认改用常驻的 `kiro-cli acp` 进程（JSON-RPC over stdio）当大脑，取代「每条消息 spawn」。原生多轮记忆、暖进程（~3s，原 spawn ~6s）、回复从 `agent_message_chunk` 流式拼接（无旁白/ANSI）；带存活检测自动重启、PID 进程树清杀；新增微信指令 `新会话`/`重置` 开启新会话。`brain.ts`（spawn 版）保留作回退。
 - **brain MCP 沙箱 + 对话式动态加载**：brain 跑在独立 `KIRO_HOME`（`WECHAT_BRAIN_HOME`），**默认不加载任何 MCP**（杜绝 wechat 回环、不连本地浏览器）。微信指令 `加载/卸载/列出 MCP` 由 daemon 拦截，从全局 `mcp.json` 取定义动态写入沙箱（`wechat` 永久禁止）。
 - **守护进程（`src/daemon/`）**：脱离 kiro-cli 的独立 WeChat bot。自长轮询 iLink → 调 headless `kiro-cli`（`--no-interactive --trust-all-tools`）当大脑 → 自动回发；带每用户滚动上下文、typing 指示、session-guard、发件人白名单（默认仅登录账号本人，`WECHAT_OWNER_ID` 可覆盖）。仅依赖 `api/` + `store/`，便于独立拆出。`npm run daemon` 启动；`scripts/run-daemon.ps1` 为常驻包装（循环重拉）。

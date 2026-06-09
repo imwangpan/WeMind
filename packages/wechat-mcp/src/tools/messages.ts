@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-import { getUpdates } from "../api/client.js";
-import { SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs } from "../api/session-guard.js";
-import { loadAccount, loadState, saveState } from "../store/account.js";
-import type { WeixinMessage } from "../api/types.js";
+import {
+  getUpdates,
+  SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs,
+  loadAccount, loadState, saveState,
+} from "@wemind/wechat-ilink-core";
+import type { WeixinMessage } from "@wemind/wechat-ilink-core";
 
 const LONG_POLL_MS = 25_000;
 

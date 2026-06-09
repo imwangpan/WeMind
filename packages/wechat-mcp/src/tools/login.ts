@@ -4,13 +4,13 @@ import { z } from "zod";
 import QRCode from "qrcode";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-import { fetchQRCode, pollQRStatus, notifyStart, notifyStop } from "../api/client.js";
-import { clearSessionPause } from "../api/session-guard.js";
 import {
+  fetchQRCode, pollQRStatus, notifyStart, notifyStop,
+  clearSessionPause,
   loadAccount, saveAccount, clearAccount,
   loadQrState, saveQrState, clearQrState,
   loadState, resetState, DATA_DIR,
-} from "../store/account.js";
+} from "@wemind/wechat-ilink-core";
 
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 

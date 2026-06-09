@@ -2,13 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
+import { DATA_DIR } from "@wemind/wechat-ilink-core";
+
 /**
  * brain 的 MCP 沙箱：brain 跑在独立 KIRO_HOME 下，默认不加载任何 MCP。
  * 通过对话指令（加载/卸载/列出）动态调整「激活集」，从全局 mcp.json（目录）取定义写入沙箱。
- * 仅用 node 标准库，便于随 daemon 独立拆出。
+ * DATA_DIR 从 core 导入（支持 WECHAT_DATA_DIR 覆盖，便于多账号隔离）。
  */
-
-const DATA_DIR = path.join(os.homedir(), ".mcp-wechat-server");
 
 /** brain 专用 KIRO_HOME（auth 在平台数据目录、不随 KIRO_HOME 移动，故 brain 仍登录态）。 */
 export const BRAIN_HOME = process.env.WECHAT_BRAIN_HOME?.trim() || path.join(DATA_DIR, "brain-home");

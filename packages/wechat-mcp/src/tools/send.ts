@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-import { sendMessage, generateId } from "../api/client.js";
-import { loadAccount, loadState, saveState } from "../store/account.js";
-import { MessageItemType, MessageState, MessageType } from "../api/types.js";
-import type { SendMessageReq } from "../api/types.js";
+import {
+  sendMessage, generateId,
+  loadAccount, loadState, saveState,
+  MessageItemType, MessageState, MessageType,
+} from "@wemind/wechat-ilink-core";
+import type { SendMessageReq } from "@wemind/wechat-ilink-core";
 
 export const sendTextMessageSchema = z.object({
   to: z.string().min(1).describe("The WeChat user ID to send the message to."),

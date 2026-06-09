@@ -1,23 +1,18 @@
 {
-  "name": "mcp-wechat-server",
+  "name": "wemind",
   "version": "1.0.1",
-  "ilink_appid": "bot",
-  "description": "MCP Server for WeChat iLink Bot - enables AI agents to send/receive WeChat messages via the Model Context Protocol",
+  "private": true,
+  "description": "WeMind — your AI mind, reachable on WeChat. Monorepo: reusable iLink protocol core, a publishable MCP server, and a private always-on daemon.",
   "type": "module",
-  "main": "dist/index.js",
-  "bin": {
-    "mcp-wechat-server": "dist/index.js"
-  },
-  "files": [
-    "dist"
+  "workspaces": [
+    "packages/*"
   ],
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "start": "node dist/index.js",
-    "daemon": "node dist/daemon/index.js",
-    "dev": "tsx watch src/index.ts",
-    "test": "vitest run"
+    "build": "npm run build -w @wemind/wechat-ilink-core && npm run build -w @wemind/wechat-daemon -w @wemind/wechat-mcp",
+    "typecheck": "npm run build -w @wemind/wechat-ilink-core && npm run typecheck -w @wemind/wechat-daemon -w @wemind/wechat-mcp",
+    "test": "vitest run",
+    "daemon": "node packages/wechat-daemon/dist/index.js",
+    "start": "node packages/wechat-mcp/dist/index.js"
   },
   "keywords": [
     "mcp",
@@ -32,14 +27,8 @@
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "qrcode": "^1.5.4",
-    "zod": "^3.24.0"
-  },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/qrcode": "^1.5.5",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^3.1.0"

@@ -1,6 +1,8 @@
-# mcp-wechat-server
+# WeMind
 
-基于 MCP（Model Context Protocol）的微信机器人服务器，让任何 AI Agent 都能收发微信消息。
+> *Your AI mind, reachable on WeChat.*
+
+基于 MCP（Model Context Protocol）的微信 AI 机器人，让任何 AI Agent 都能收发微信消息。
 
 > **关于本 Fork**
 >
@@ -28,9 +30,21 @@
 - [Node.js](https://nodejs.org/) >= 20（已在 Node 24 验证）
 - 仍兼容 Bun（可选）
 
+## 项目结构（npm workspaces 三包）
+
+本仓库是一个 monorepo，按职责拆为三个包，共享同一套 iLink 协议内核：
+
+| 包 | 路径 | 说明 | 发布 |
+|------|------|------|------|
+| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（内联进 mcp-server） |
+| `@wemind/wechat-mcp` | `packages/wechat-mcp` | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入 | **可发布**（bin: `wemind-mcp`） |
+| `@wemind/wechat-daemon` | `packages/wechat-daemon` | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发 | 私有（本机运行） |
+
+`mcp-server` 发布时用 [tsup](https://tsup.egoist.dev/) 把 `core` **内联**进单一产物，因此对外只需发布这一个自包含的包；`daemon` 在本仓库内通过 workspace 直接引用 `core` 源码，永不发布。
+
 ## 快速开始
 
-本 Fork 运行在 **Node.js** 上，未发布到 npm。请先按「本地开发」构建，再用绝对路径接入 MCP 客户端。
+> **接入形态**：`@wemind/wechat-mcp` 设计为可发布的独立 npm 包，未来可用 `npx -y @wemind/wechat-mcp` 直接接入。当前尚未发布到公共 registry，请先按「本地开发」构建，再用绝对路径指向 `packages/wechat-mcp/dist/index.js` 接入 MCP 客户端。
 
 ### Claude Desktop
 
@@ -41,7 +55,7 @@
   "mcpServers": {
     "wechat": {
       "command": "node",
-      "args": ["/abs/path/to/mcp-wechat-server/dist/index.js"]
+      "args": ["/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"]
     }
   }
 }
@@ -56,7 +70,7 @@
   "mcp": {
     "wechat": {
       "type": "local",
-      "command": ["node", "/abs/path/to/mcp-wechat-server/dist/index.js"],
+      "command": ["node", "/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"],
       "enabled": true
     }
   }
@@ -68,7 +82,7 @@
 ```json
 {
   "command": "node",
-  "args": ["/abs/path/to/mcp-wechat-server/dist/index.js"]
+  "args": ["/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"]
 }
 ```
 
@@ -118,14 +132,20 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 
 ## 数据存储
 
-所有数据保存在 `~/.mcp-wechat-server/` 目录下：
+运行时状态保存在 **`~/.wemind/<account>/`** 下(默认账号 `default`，即 `~/.wemind/default/`)。该目录**独立于代码仓库**——改名/重装/重新 clone 代码都不影响登录态。
 
-| 文件 | 说明 |
+| 文件/目录 | 说明 |
 |------|------|
-| `account.json` | Bot Token 和用户 ID（POSIX 下权限 600；**Windows 下为明文**，见「安全说明」） |
-| `state.json` | 消息游标和上下文 Token |
-| `qrcode.png` | 生成的二维码图片 |
-| `qrcode.txt` | 生成的终端二维码文本 |
+| `account.json` | Bot Token、botId、userId、baseUrl（POSIX 下权限 600；**Windows 下为明文**，见「安全说明」） |
+| `state.json` | 长轮询游标（`updatesBuf`）、各会话 `context_token`、`lastMessageId`（去重） |
+| `qr_login.json` / `qrcode.png` / `qrcode.txt` | 扫码登录临时态与二维码（登录后即失效） |
+| `brain-sessions.json` | `userId → ACP sessionId` 映射，daemon 重启后据此 `session/load` 恢复多轮上下文 |
+| `brain-mcps.json` | brain 当前激活的 MCP 集（默认空） |
+| `brain-home/` | brain 的沙箱 `KIRO_HOME`（独立于你本人的 `~/.kiro`），含 `settings/mcp.json`（默认空）与各 ACP 会话落盘记录 |
+
+**多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<名>` 切换（→ `~/.wemind/<名>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。
+
+> **重置**：删 `account.json`+`state.json` = 退出登录重新扫码；删 `brain-sessions.json`+`brain-home/sessions/` = 清空对话记忆。
 
 ## 本地开发
 
@@ -133,10 +153,10 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 git clone https://github.com/imwangpan/mcp-wechat-server.git
 cd mcp-wechat-server
 npm install
-npm run build      # 编译到 dist/
-npm start          # 运行 node dist/index.js
+npm run build      # 按 core → daemon/mcp-server 顺序构建各包
+npm start          # 运行 node packages/wechat-mcp/dist/index.js
 npm test           # 运行单元测试
-npm run dev        # tsx 热重载开发（可选）
+npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 ```
 
 ## 安全说明
@@ -153,10 +173,10 @@ npm run dev        # tsx 热重载开发（可选）
 
 ## 守护进程（daemon）：脱离 kiro-cli 常驻自动收发
 
-`src/daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
+`packages/wechat-daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
 调 **常驻 `kiro-cli acp` 进程**（JSON-RPC over stdio）当大脑生成回复 → 自动回发。
 进程常驻、原生多轮记忆，回复从 `agent_message_chunk` 流式拼接（天然无 ANSI/工具旁白）；
-带**存活检测**（进程不在自动重启）。它**只依赖 `api/` + `store/`**，不碰 MCP 那层，便于日后独立拆出。
+带**存活检测**（进程不在自动重启）。它**只依赖内核包 `@wemind/wechat-ilink-core`**，不碰 MCP 那层，是一个完全独立、可单独运行的包。
 
 > 备注：`acp-brain.ts` 是默认大脑；`brain.ts`（每条消息 spawn `kiro-cli chat` 的无状态版）保留作为可回退实现。
 
@@ -173,9 +193,11 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | 变量 | 说明 |
 |------|------|
 | `WECHAT_OWNER_ID` | 发件人白名单（默认登录账号本人 user id） |
+| `WECHAT_ACCOUNT` | 账号标识，决定状态子目录 `~/.wemind/<account>/`（默认 `default`）。多账号用不同值隔离 |
+| `WECHAT_DATA_DIR` | 直接指定完整状态目录路径，覆盖上面的 `~/.wemind/<account>` 规则 |
 | `KIRO_CLI_BIN` | kiro-cli 可执行文件路径（默认走 PATH） |
 | `WECHAT_BRAIN_TIMEOUT_MS` | 单次 kiro-cli 调用超时（默认 120000） |
-| `WECHAT_BRAIN_HOME` | brain 沙箱目录（默认 `~/.mcp-wechat-server/brain-home`） |
+| `WECHAT_BRAIN_HOME` | brain 沙箱目录（默认 `<数据目录>/brain-home`） |
 
 限制：
 
@@ -210,6 +232,39 @@ Register-ScheduledTask -TaskName "mcp-wechat-daemon" -Action $action -Trigger (N
 若环境禁止创建计划任务（提示「拒绝访问」），改用**启动文件夹**自启：在
 `shell:startup`（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`）放一个
 `.vbs`，用 `WScript.Shell.Run` 以隐藏窗口调用上面的 `pwsh ... -File scripts/run-daemon.ps1`。
+
+## 多账号管理
+
+支持登录多个微信账号，每个账号一份独立目录 `~/.wemind/<key>/`，`key` 由微信 **botId** 派生（唯一、自动获取；当前 iLink 接口不返回昵称/微信号，故用 botId，另存可编辑的 `label` 别名）。账号清单记录在 `~/.wemind/accounts.json`。不同账号 = 不同 token = 各跑一个 daemon，互不冲突。
+
+管理命令（`node packages/wechat-daemon/dist/manage.js <command>`）：
+
+| 命令 | 作用 |
+|------|------|
+| `list` | 列出账号、别名、botId、运行状态 |
+| `finalize [--label 名]` | 把暂存登录按 botId 归档为新账号 |
+| `adopt <key> [--label 名]` | 把已存在的账号目录登记进注册表 |
+| `label <key> <文本>` | 设置人类可读别名 |
+| `set-default <key>` | 设默认账号 |
+| `logout <key>` | 停该账号 daemon + 通知下线 + 清凭证（保留目录，可重登） |
+| `delete <key>` | 停该账号 daemon + 删除目录 + 移除注册 |
+
+**新增一个账号（扫码登录）**：先用暂存目录跑 MCP server 扫码，再归档：
+
+```powershell
+# 1) 用暂存目录登录（Agent 调 login_qrcode 扫码、check_qrcode_status 确认）
+$env:WECHAT_DATA_DIR = "$env:USERPROFILE\.wemind\.staging"
+node packages/wechat-mcp/dist/index.js   # 接入 MCP 客户端走登录流程
+Remove-Item Env:\WECHAT_DATA_DIR
+
+# 2) 按 botId 归档 + 登记（可起别名）
+node packages/wechat-daemon/dist/manage.js finalize --label 工作号
+
+# 3) 启动该账号 daemon（或交给下面的自启脚本）
+$env:WECHAT_ACCOUNT = "<上一步输出的 key>"; node packages/wechat-daemon/dist/index.js
+```
+
+**自启全部账号**：`scripts/run-all-daemons.ps1` 读注册表为每个账号起一个 daemon（各账号单实例守卫，重复运行安全）。Windows 启动文件夹的 VBS 已指向它，开机自动拉起所有已登记账号。
 
 ## 致谢
 

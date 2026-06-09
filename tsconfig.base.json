@@ -6,11 +6,8 @@
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": "src",
     "declaration": true,
-    "resolveJsonModule": true
-  },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts"]
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true
+  }
 }

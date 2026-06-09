@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-import { sendTyping, getConfig } from "../api/client.js";
-import { loadAccount, loadState, saveState } from "../store/account.js";
+import {
+  sendTyping, getConfig,
+  loadAccount, loadState, saveState,
+} from "@wemind/wechat-ilink-core";
 
 export const sendTypingSchema = z.object({
   to: z.string().min(1).describe("The WeChat user ID to send the typing indicator to."),

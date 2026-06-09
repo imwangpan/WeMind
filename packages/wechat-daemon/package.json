@@ -1,0 +1,20 @@
+{
+  "name": "@wemind/wechat-daemon",
+  "version": "1.0.1",
+  "private": true,
+  "description": "Always-on WeChat bot daemon driven by a resident kiro-cli ACP brain (private, not published).",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@wemind/wechat-ilink-core": "*"
+  }
+}

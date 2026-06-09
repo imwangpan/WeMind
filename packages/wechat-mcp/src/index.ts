@@ -3,9 +3,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { loadAccount } from "./store/account.js";
-import { notifyStart } from "./api/client.js";
-import { PKG } from "./pkg.js";
+import { loadAccount, notifyStart } from "@wemind/wechat-ilink-core";
+import { VERSION } from "./version.js";
 import { loginQrcode, checkQrcodeStatus, loginQrcodeSchema, checkQrcodeStatusSchema, logoutSchema, logout } from "./tools/login.js";
 import { getMessages, getMessagesSchema } from "./tools/messages.js";
 import { sendTextMessage, sendTextMessageSchema } from "./tools/send.js";
@@ -13,8 +12,8 @@ import { sendTypingIndicator, sendTypingSchema } from "./tools/typing.js";
 
 const server = new McpServer(
   {
-    name: "mcp-wechat-server",
-    version: PKG.version,
+    name: "wemind",
+    version: VERSION,
   },
   {
     capabilities: {

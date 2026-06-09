@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { PKG } from "../pkg.js";
+import { ILINK_APP_ID } from "../config.js";
 import type { GetUpdatesResp, SendMessageReq, QRCodeResponse, QRStatusResponse, SendTypingReq, GetConfigResp } from "./types.js";
 
 export type ApiOptions = {
@@ -17,7 +17,6 @@ const QR_LONG_POLL_TIMEOUT_MS = 35_000;
 // 避免后端因客户端版本过低而拒绝/快速过期二维码。需随官方更新。
 const ILINK_CLIENT_VERSION = "2.4.3";
 const CHANNEL_VERSION = ILINK_CLIENT_VERSION;
-const ILINK_APP_ID = PKG.ilinkAppId;
 
 /**
  * iLink-App-ClientVersion: uint32 编码 0x00MMNNPP（major<<16 | minor<<8 | patch）。

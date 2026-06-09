@@ -4,5 +4,6 @@ dist/
 *.js.map
 .opencode/
 .mcp-wechat-server/
+.wemind/
 daemon.log
 _daemon.*

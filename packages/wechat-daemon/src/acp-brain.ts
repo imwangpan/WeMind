@@ -1,8 +1,8 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
-import os from "node:os";
 
+import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME } from "./mcp-sandbox.js";
 
 /**
@@ -29,7 +29,6 @@ const KIRO_CLI = resolveKiroCli();
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 45_000; // 多久没收到任何帧才算"卡死"
 const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 300_000; // 单回合硬上限
-const DATA_DIR = path.join(os.homedir(), ".mcp-wechat-server");
 const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; clear: () => void; method: string };

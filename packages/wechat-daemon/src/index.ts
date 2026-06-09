@@ -1,16 +1,16 @@
 #!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
 import {
   getUpdates, sendMessage, sendTyping, getConfig, notifyStart, generateId,
-} from "../api/client.js";
-import {
   SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs,
-} from "../api/session-guard.js";
-import { loadAccount, loadState, saveState } from "../store/account.js";
-import { MessageItemType, MessageState, MessageType } from "../api/types.js";
-import type { AccountData, ServerState, WeixinMessage, SendMessageReq, ImageItem } from "../api/types.js";
+  loadAccount, loadState, saveState, DATA_DIR,
+  MessageItemType, MessageState, MessageType,
+  downloadImage,
+} from "@wemind/wechat-ilink-core";
+import type { AccountData, ServerState, WeixinMessage, SendMessageReq, ImageItem } from "@wemind/wechat-ilink-core";
 import { askKiroForUser, newSession, restart } from "./acp-brain.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
-import { downloadImage } from "../cdn/image.js";
 
 const log = (...a: unknown[]) => console.error("[daemon]", ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -189,6 +189,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId; // 发件人白名单：默认仅本人
+  // 写 PID 文件，供管理命令（logout/delete）精确定位并停止本账号的 daemon
+  const pidFile = path.join(DATA_DIR, "daemon.pid");
+  try { fs.writeFileSync(pidFile, String(process.pid), "utf-8"); } catch { /* best-effort */ }
+  const cleanupPid = () => { try { fs.unlinkSync(pidFile); } catch { /* ignore */ } };
+  process.on("exit", cleanupPid);
+  process.on("SIGINT", () => { cleanupPid(); process.exit(0); });
+  process.on("SIGTERM", () => { cleanupPid(); process.exit(0); });
   ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
   log(`up. bot=${account.botId} owner=${owner}`);
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});

@@ -1,0 +1,45 @@
+{
+  "name": "@wemind/wechat-mcp",
+  "version": "1.0.1",
+  "description": "MCP server for WeChat iLink Bot - lets any MCP-compatible AI agent send/receive WeChat messages.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "wemind-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "keywords": [
+    "mcp",
+    "wechat",
+    "weixin",
+    "ai",
+    "agent",
+    "model-context-protocol",
+    "bot"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "qrcode": "^1.5.4",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@wemind/wechat-ilink-core": "*",
+    "@types/qrcode": "^1.5.5",
+    "tsup": "^8.0.0"
+  }
+}

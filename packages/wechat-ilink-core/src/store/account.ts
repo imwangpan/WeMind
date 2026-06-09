@@ -1,10 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 
+import { WEMIND_ROOT } from "./accounts.js";
 import type { AccountData, ServerState, QrLoginState } from "../api/types.js";
 
-export const DATA_DIR = path.join(os.homedir(), ".mcp-wechat-server");
+/**
+ * 数据目录解析（按优先级）：
+ *  1. WECHAT_DATA_DIR：显式指定完整路径（最高优先级，便于任意自定义/多账号）。
+ *  2. 否则 ~/.wemind/<account>，其中 <account> 取自 WECHAT_ACCOUNT，默认 "default"。
+ * account.json / state.json / brain-sessions.json / brain-mcps.json / brain-home 等都落在此目录下。
+ * 多账号即「不同 WECHAT_ACCOUNT（或 WECHAT_DATA_DIR）→ 不同目录 → 互相隔离」。
+ */
+export const ACCOUNT_KEY = process.env.WECHAT_ACCOUNT?.trim() || "default";
+export const DATA_DIR =
+  process.env.WECHAT_DATA_DIR?.trim() || path.join(WEMIND_ROOT, ACCOUNT_KEY);
 
 function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
