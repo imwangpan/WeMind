@@ -41,9 +41,14 @@ const userSessions = new Map<string, string>(); // 本进程已建立的 session
 const assembling = new Map<string, string[]>(); // sessionId -> 当前回合文本块
 let stdoutBuf = "";
 let lastFrameAt = 0; // 最近一次收到任何 stdout 帧的时间
-type ProgressEvent = { type: "tool"; kind?: string; purpose?: string; title?: string } | { type: "answer" };
+type ProgressEvent =
+  | { type: "tool"; kind?: string; purpose?: string; title?: string }
+  | { type: "answer" }
+  | { type: "thinking" }
+  | { type: "activity" };
 let currentOnProgress: ((ev: ProgressEvent) => void) | null = null; // 当前回合进度回调
 let answerStarted = false; // 当前回合是否已通知"开始写回复"
+let thoughtStarted = false; // 当前回合是否已通知"正在思考"
 const seenTools = new Set<string>(); // 当前回合已上报的工具标题，去重
 
 function isAlive(): boolean {
@@ -93,10 +98,14 @@ function handleFrame(f: Record<string, any>): void {
   }
   if (f.method === "session/update") {
     const u = f.params?.update;
+    // 任意 session/update 帧都视为"活动" → 让 daemon 静默刷新心跳基线（流式期间不误报"仍在处理"）
+    if (currentOnProgress) { try { currentOnProgress({ type: "activity" }); } catch { /* ignore */ } }
     if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
       const arr = assembling.get(f.params.sessionId);
       if (arr) arr.push(String(u.content.text ?? ""));
       if (!answerStarted && currentOnProgress) { answerStarted = true; try { currentOnProgress({ type: "answer" }); } catch { /* ignore */ } }
+    } else if (u?.sessionUpdate === "agent_thought_chunk") {
+      if (!thoughtStarted && currentOnProgress) { thoughtStarted = true; try { currentOnProgress({ type: "thinking" }); } catch { /* ignore */ } }
     } else if ((u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") && currentOnProgress) {
       const tid = String(u.toolCallId ?? u.title ?? ""); // 每个工具调用只上报一次
       if (tid && !seenTools.has(tid)) {
@@ -210,6 +219,7 @@ export async function askKiroForUser(userId: string, message: string, onProgress
   assembling.set(sid, []);
   currentOnProgress = onProgress ?? null;
   answerStarted = false;
+  thoughtStarted = false;
   seenTools.clear();
   const t0 = Date.now();
   const prompt: unknown[] = [];

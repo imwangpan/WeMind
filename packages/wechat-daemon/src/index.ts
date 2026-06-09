@@ -128,10 +128,15 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
   const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, ctx, msg); };
-  // 心跳：超过 15s 没有任何进度消息，就发一条带计时的"仍在处理"，让用户确信没卡死
+  // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
+  // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）
+  if (imageItems.length === 0) sendProgress("🤖 收到，正在处理…");
+  // 心跳：仅当 brain 真正静默(无任何帧)超过 15s 才提示——首条用友好措辞，后续才带计时
+  let hbCount = 0;
   const heartbeat = setInterval(() => {
     if (Date.now() - lastProgressAt >= 15000) {
-      sendProgress(`⏳ 仍在处理中…（已 ${Math.round((Date.now() - t0) / 1000)} 秒）`);
+      hbCount += 1;
+      sendProgress(hbCount === 1 ? "🤔 还在思考/检索中…" : `⏳ 仍在处理中…（已 ${Math.round((Date.now() - t0) / 1000)} 秒）`);
     }
   }, 15000);
 
@@ -155,8 +160,13 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
         step += 1;
         const desc = ev.purpose || (ev.title ? zhTool(ev.title) : "") || "调用工具";
         sendProgress(`${toolIcon(ev.kind)} 步骤 ${step}：${desc}`);
-      } else {
+      } else if (ev.type === "thinking") {
+        sendProgress("🧠 正在思考…");
+      } else if (ev.type === "answer") {
         sendProgress("✍️ 正在整理回复…");
+      } else {
+        // activity：brain 产出任意帧 → 静默刷新心跳基线，避免流式输出期间误报"仍在处理"
+        lastProgressAt = Date.now();
       }
     }, images);
   };
