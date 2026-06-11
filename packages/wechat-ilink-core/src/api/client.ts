@@ -130,7 +130,7 @@ export async function sendMessage(params: {
   body: SendMessageReq;
   timeoutMs?: number;
 }): Promise<void> {
-  await apiFetch({
+  const raw = await apiFetch({
     baseUrl: params.baseUrl,
     endpoint: "ilink/bot/sendmessage",
     body: JSON.stringify({ ...params.body, base_info: buildBaseInfo() }),
@@ -138,6 +138,18 @@ export async function sendMessage(params: {
     timeoutMs: params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
     label: "sendMessage",
   });
+  // iLink 即使 HTTP 200 也可能在响应体返回非 0 ret/errcode 表示失败（如 ret:-2：context 失效/会话不在活跃态）。
+  // 不校验会导致"假成功"——消息其实没送达。仅在明确拿到非 0 错误码时抛错；空/非 JSON 的成功响应不阻断。
+  let code: number | undefined;
+  let errmsg: string | undefined;
+  try {
+    const resp = raw ? (JSON.parse(raw) as { ret?: number; errcode?: number; errmsg?: string }) : null;
+    code = resp?.ret ?? resp?.errcode;
+    errmsg = resp?.errmsg;
+  } catch { /* 空/非 JSON 的成功响应，忽略 */ }
+  if (code !== undefined && code !== 0) {
+    throw new Error(`sendMessage rejected: ret=${code}${errmsg ? ` (${errmsg})` : ""}`);
+  }
 }
 
 export async function fetchQRCode(apiBaseUrl: string): Promise<QRCodeResponse> {
