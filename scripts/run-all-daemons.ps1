@@ -13,9 +13,7 @@ $keys = @($accounts.PSObject.Properties.Name)
 if (-not $keys.Count) { Write-Output "注册表为空"; exit 0 }
 
 foreach ($key in $keys) {
-  $env:WECHAT_ACCOUNT = $key
-  Start-Process -FilePath $pwsh -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',$wrapper) -WindowStyle Hidden
+  Start-Process -FilePath $pwsh -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',$wrapper) -WindowStyle Hidden -Environment @{ WECHAT_ACCOUNT = $key }
   Write-Output "started wrapper for account: $key"
   Start-Sleep -Milliseconds 500
 }
-Remove-Item Env:\WECHAT_ACCOUNT -ErrorAction SilentlyContinue

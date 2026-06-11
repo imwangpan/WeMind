@@ -55,6 +55,10 @@ async function cmdFinalize(label?: string): Promise<string> {
     throw new Error(`账号目录已存在: ${dest}（该微信号此前已登录过）。已清理 staging。`);
   }
   fs.renameSync(STAGING, dest);
+  // 清理登录过程的临时文件，账号目录只留运行时状态
+  for (const f of ["qrcode.png", "qrcode.txt", "qr_login.json", "poll.out", "poll.err"]) {
+    try { fs.unlinkSync(path.join(dest, f)); } catch { /* ignore */ }
+  }
   const meta = registerAccount({ key, botId: acc.botId, userId: acc.userId, baseUrl: acc.baseUrl, label: label || key });
   return `已登录并归档：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}\n启动：设 WECHAT_ACCOUNT=${key} 跑 daemon（或用 run-all-daemons.ps1）。`;
 }
