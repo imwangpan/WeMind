@@ -191,14 +191,20 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   await setTyping(account, to, ctx, 2);
   // 发图：从回复里提取图片引用（markdown ![](url/路径) 或裸图片 URL），逐个作为图片消息发出，再发剩余文本
   const { images: replyImages, text: cleaned } = extractImages(answer || "");
+  const failedImgs: string[] = [];
   for (const im of replyImages) {
     try {
       const buf = await resolveImageBytes(im.src);
       await sendImage({ baseUrl: account.baseUrl, token: account.botToken, to, image: buf, contextToken: ctx });
       log(`sent image: ${im.src.slice(0, 80)}`);
-    } catch (e) { log("send image failed:", im.src, String(e)); }
+    } catch (e) { log("send image failed:", im.src, String(e)); failedImgs.push(im.src); }
   }
-  const finalText = cleaned || (replyImages.length ? "" : "（没有内容）");
+  let finalText = cleaned;
+  if (failedImgs.length) {
+    const note = `（有 ${failedImgs.length} 张图片我没能下载下来，附原链接：\n${failedImgs.join("\n")}）`;
+    finalText = finalText ? `${finalText}\n\n${note}` : note;
+  }
+  if (!finalText && !replyImages.length) finalText = "（没有内容）";
   if (finalText) await sendOrdered(account, to, ctx, finalText);
   log(`replied to ${to}: ${(answer || "").slice(0, 60)}`);
 }

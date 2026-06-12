@@ -32,7 +32,7 @@ export function extractImages(text: string): { images: ExtractedImage[]; text: s
 /** 把图片引用解析成字节：http(s) 下载，或本地文件读取。带大小/类型校验。 */
 export async function resolveImageBytes(src: string): Promise<Buffer> {
   if (/^https?:\/\//i.test(src)) {
-    const res = await fetch(src);
+    const res = await fetch(src, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`下载图片失败 ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > MAX_BYTES) throw new Error(`图片过大 ${buf.length}`);
