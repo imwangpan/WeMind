@@ -121,7 +121,7 @@ function sniffMime(b: Buffer): string {
   return "image/jpeg";
 }
 
-async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string, imageItems: ImageItem[]): Promise<void> {
+async function handleMessage(account: AccountData, ctx: string | undefined, latestCtx: () => string | undefined, to: string, text: string, imageItems: ImageItem[]): Promise<void> {
   await setTyping(account, to, ctx, 1);
   // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
   const keepAlive = setInterval(() => { void setTyping(account, to, ctx, 1).catch(() => {}); }, 8000);
@@ -188,14 +188,16 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
     clearInterval(keepAlive);
     clearInterval(heartbeat);
   }
-  await setTyping(account, to, ctx, 2);
+  // 方案1：回合可能耗时较久，发送时取该用户「最新」context_token（用户期间又发消息会带新 token），避免用回合开始时已被顶替的旧 token 触发 ret=-2
+  const sendCtx = latestCtx() ?? ctx;
+  await setTyping(account, to, sendCtx, 2);
   // 发图：从回复里提取图片引用（markdown ![](url/路径) 或裸图片 URL），逐个作为图片消息发出，再发剩余文本
   const { images: replyImages, text: cleaned } = extractImages(answer || "");
   const failedImgs: string[] = [];
   for (const im of replyImages) {
     try {
       const buf = await resolveImageBytes(im.src);
-      await sendImage({ baseUrl: account.baseUrl, token: account.botToken, to, image: buf, contextToken: ctx });
+      await sendImage({ baseUrl: account.baseUrl, token: account.botToken, to, image: buf, contextToken: sendCtx });
       log(`sent image: ${im.src.slice(0, 80)}`);
     } catch (e) { log("send image failed:", im.src, String(e)); failedImgs.push(im.src); }
   }
@@ -205,7 +207,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
     finalText = finalText ? `${finalText}\n\n${note}` : note;
   }
   if (!finalText && !replyImages.length) finalText = "（没有内容）";
-  if (finalText) await sendOrdered(account, to, ctx, finalText);
+  if (finalText) await sendOrdered(account, to, sendCtx, finalText);
   log(`replied to ${to}: ${(answer || "").slice(0, 60)}`);
 }
 
@@ -267,6 +269,11 @@ async function main(): Promise<void> {
     const news = (resp.msgs ?? []).filter(
       (m) => m.message_type === MessageType.USER && m.message_id && m.message_id > state.lastMessageId,
     );
+    for (const m of news) {
+      const f = m.from_user_id ?? "";
+      if (m.context_token) state.contextTokens[`${account.botId}:${f}`] = m.context_token;
+    }
+    saveState(state);
     for (const msg of news) {
       state.lastMessageId = Math.max(state.lastMessageId, msg.message_id ?? 0);
       const from = msg.from_user_id ?? "";
@@ -289,7 +296,7 @@ async function main(): Promise<void> {
         continue;
       }
       try {
-        await handleMessage(account, ctx, from, text, imageItems);
+        await handleMessage(account, ctx, () => state.contextTokens[`${account.botId}:${from}`], from, text, imageItems);
       } catch (e) {
         log("handleMessage error:", e instanceof Error ? (e.stack || e.message) : String(e));
         await reply(account, from, ctx, "处理这条消息时出错了，请再发一次试试。").catch(() => {});
