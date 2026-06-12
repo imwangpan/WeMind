@@ -223,6 +223,14 @@ async function main(): Promise<void> {
   process.on("exit", cleanupPid);
   process.on("SIGINT", () => { cleanupPid(); process.exit(0); });
   process.on("SIGTERM", () => { cleanupPid(); process.exit(0); });
+  // 防御：任何未捕获的 promise 拒绝/异常（多为瞬时网络 fetch failed 或回合内 send 被拒）只记录、不退出，
+  // 避免 daemon 崩溃丢掉在途回合、用户卡在心跳。此前的 code=1 崩溃即源于此类未捕获拒绝。
+  process.on("unhandledRejection", (reason) => {
+    log("unhandledRejection:", reason instanceof Error ? (reason.stack || reason.message) : String(reason));
+  });
+  process.on("uncaughtException", (err) => {
+    log("uncaughtException:", err?.stack || String(err));
+  });
   ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
   log(`up. bot=${account.botId} owner=${owner}`);
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
@@ -280,7 +288,12 @@ async function main(): Promise<void> {
         await reply(account, from, ctx, r).catch((e) => log("send error:", String(e)));
         continue;
       }
-      await handleMessage(account, ctx, from, text, imageItems);
+      try {
+        await handleMessage(account, ctx, from, text, imageItems);
+      } catch (e) {
+        log("handleMessage error:", e instanceof Error ? (e.stack || e.message) : String(e));
+        await reply(account, from, ctx, "处理这条消息时出错了，请再发一次试试。").catch(() => {});
+      }
     }
     saveState(state);
   }
