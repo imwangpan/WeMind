@@ -211,6 +211,102 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
   log(`replied to ${to}: ${(answer || "").slice(0, 60)}`);
 }
 
+// ===== 解耦：拉取器(poller) 与 处理器(worker) 通过队列协作 =====
+// 大脑(ACP session)严格串行，但「拉取消息/抓 token」无需串行。把两者解耦：
+// poller 持续 getUpdates、实时更新 token、把消息入队，永不被大脑阻塞；
+// worker 串行从队列取消息喂大脑（尊重 kiro-cli 串行约束），发送时取最新 token，规避 ret=-2。
+type QueuedMsg = { from: string; text: string; imageItems: ImageItem[] };
+const msgQueue: QueuedMsg[] = [];
+let wakeWorker: (() => void) | null = null;
+function notifyWorker(): void { const w = wakeWorker; wakeWorker = null; if (w) w(); }
+
+async function pollerLoop(account: AccountData, owner: string, state: ServerState): Promise<void> {
+  while (true) {
+    if (isSessionPaused(account.botId)) {
+      await sleep(Math.min(getRemainingPauseMs(account.botId), 60_000) || 60_000);
+      continue;
+    }
+    let resp;
+    try {
+      resp = await getUpdates({ baseUrl: account.baseUrl, token: account.botToken, updatesBuf: state.updatesBuf, timeoutMs: 25_000 });
+    } catch (e) { log("getUpdates error:", String(e)); await sleep(2000); continue; }
+    try {
+      if (resp.errcode === SESSION_EXPIRED_ERRCODE) {
+        log("session expired (-14); pausing 1h. Send a WeChat message to revive after re-login.");
+        pauseSession(account.botId); continue;
+      }
+      if (resp.errcode) { log("server error:", resp.errcode, resp.errmsg); await sleep(2000); continue; }
+      if (resp.get_updates_buf) state.updatesBuf = resp.get_updates_buf;
+
+      const news = (resp.msgs ?? []).filter(
+        (m) => m.message_type === MessageType.USER && m.message_id && m.message_id > state.lastMessageId,
+      );
+      // 先登记本批所有最新 token（worker 发送时取最新）
+      for (const m of news) {
+        const f = m.from_user_id ?? "";
+        if (m.context_token) state.contextTokens[`${account.botId}:${f}`] = m.context_token;
+      }
+      let enq = false;
+      for (const msg of news) {
+        state.lastMessageId = Math.max(state.lastMessageId, msg.message_id ?? 0);
+        const from = msg.from_user_id ?? "";
+        if (from !== owner) { log("ignore non-owner sender:", from); continue; }
+        const text = extractText(msg);
+        const imageItems = (msg.item_list ?? [])
+          .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
+          .map((it) => it.image_item as ImageItem);
+        if (!text && imageItems.length === 0) { log("skip empty/unsupported message"); continue; }
+        msgQueue.push({ from, text, imageItems });
+        enq = true;
+      }
+      saveState(state);
+      if (enq) notifyWorker();
+    } catch (e) { log("poller error:", e instanceof Error ? (e.stack || e.message) : String(e)); }
+  }
+}
+
+async function workerLoop(account: AccountData, state: ServerState): Promise<void> {
+  while (true) {
+    if (isSessionPaused(account.botId)) {
+      await sleep(Math.min(getRemainingPauseMs(account.botId), 30_000) || 30_000);
+      continue;
+    }
+    if (msgQueue.length === 0) {
+      await new Promise<void>((r) => { wakeWorker = r; if (msgQueue.length > 0) { wakeWorker = null; r(); } });
+      continue;
+    }
+    const item = msgQueue.shift() as QueuedMsg;
+    const from = item.from;
+    const latestCtx = () => state.contextTokens[`${account.botId}:${from}`];
+
+    // 控制指令：单独处理
+    const ctrl = item.text ? parseControl(item.text) : null;
+    if (ctrl) {
+      let r: string;
+      try { r = await handleControl(ctrl, from); }
+      catch (e) { r = "处理指令出错：" + String(e); }
+      log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
+      await reply(account, from, latestCtx(), r).catch((e) => log("send error:", String(e)));
+      continue;
+    }
+
+    try {
+      // 合并：把队列中紧随其后、同一用户、非控制指令的消息并入本轮（连发更自然、更省）
+      let text = item.text;
+      const imageItems = [...item.imageItems];
+      while (msgQueue.length > 0 && msgQueue[0].from === from && !(msgQueue[0].text && parseControl(msgQueue[0].text))) {
+        const nxt = msgQueue.shift() as QueuedMsg;
+        if (nxt.text) text = text ? `${text}\n${nxt.text}` : nxt.text;
+        imageItems.push(...nxt.imageItems);
+      }
+      await handleMessage(account, latestCtx(), latestCtx, from, text, imageItems);
+    } catch (e) {
+      log("handleMessage error:", e instanceof Error ? (e.stack || e.message) : String(e));
+      await reply(account, from, latestCtx(), "处理这条消息时出错了，请再发一次试试。").catch(() => {});
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const account = loadAccount();
   if (!account?.botToken) {
@@ -238,72 +334,9 @@ async function main(): Promise<void> {
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
 
   const state: ServerState = loadState();
-  while (true) {
-    if (isSessionPaused(account.botId)) {
-      await sleep(Math.min(getRemainingPauseMs(account.botId), 60_000) || 60_000);
-      continue;
-    }
-    let resp;
-    try {
-      resp = await getUpdates({
-        baseUrl: account.baseUrl, token: account.botToken,
-        updatesBuf: state.updatesBuf, timeoutMs: 25_000,
-      });
-    } catch (e) {
-      log("getUpdates error:", String(e));
-      await sleep(2000);
-      continue;
-    }
-    if (resp.errcode === SESSION_EXPIRED_ERRCODE) {
-      log("session expired (-14); pausing 1h. Send a WeChat message to revive after re-login.");
-      pauseSession(account.botId);
-      continue;
-    }
-    if (resp.errcode) {
-      log("server error:", resp.errcode, resp.errmsg);
-      await sleep(2000);
-      continue;
-    }
-    if (resp.get_updates_buf) state.updatesBuf = resp.get_updates_buf;
-
-    const news = (resp.msgs ?? []).filter(
-      (m) => m.message_type === MessageType.USER && m.message_id && m.message_id > state.lastMessageId,
-    );
-    for (const m of news) {
-      const f = m.from_user_id ?? "";
-      if (m.context_token) state.contextTokens[`${account.botId}:${f}`] = m.context_token;
-    }
-    saveState(state);
-    for (const msg of news) {
-      state.lastMessageId = Math.max(state.lastMessageId, msg.message_id ?? 0);
-      const from = msg.from_user_id ?? "";
-      if (msg.context_token) state.contextTokens[`${account.botId}:${from}`] = msg.context_token;
-      saveState(state);
-      if (from !== owner) { log("ignore non-owner sender:", from); continue; }
-      const text = extractText(msg);
-      const imageItems = (msg.item_list ?? [])
-        .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
-        .map((it) => it.image_item as ImageItem);
-      if (!text && imageItems.length === 0) { log("skip empty/unsupported message"); continue; }
-      const ctx = state.contextTokens[`${account.botId}:${from}`];
-      const ctrl = text ? parseControl(text) : null;
-      if (ctrl) {
-        let r: string;
-        try { r = await handleControl(ctrl, from); }
-        catch (e) { r = "处理指令出错：" + String(e); }
-        log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
-        await reply(account, from, ctx, r).catch((e) => log("send error:", String(e)));
-        continue;
-      }
-      try {
-        await handleMessage(account, ctx, () => state.contextTokens[`${account.botId}:${from}`], from, text, imageItems);
-      } catch (e) {
-        log("handleMessage error:", e instanceof Error ? (e.stack || e.message) : String(e));
-        await reply(account, from, ctx, "处理这条消息时出错了，请再发一次试试。").catch(() => {});
-      }
-    }
-    saveState(state);
-  }
+  // 解耦运行：拉取器持续抓消息(永不被大脑阻塞)，处理器串行喂大脑
+  void pollerLoop(account, owner, state);
+  await workerLoop(account, state);
 }
 
 main().catch((err) => {
