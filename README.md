@@ -237,32 +237,28 @@ Register-ScheduledTask -TaskName "mcp-wechat-daemon" -Action $action -Trigger (N
 
 支持登录多个微信账号，每个账号一份独立目录 `~/.wemind/<key>/`，`key` 由微信 **botId** 派生（唯一、自动获取；当前 iLink 接口不返回昵称/微信号，故用 botId，另存可编辑的 `label` 别名）。账号清单记录在 `~/.wemind/accounts.json`。不同账号 = 不同 token = 各跑一个 daemon，互不冲突。
 
+> **key vs label**：`key`（botId 派生）是唯一标识、也是目录名，系统据它区分；`label` 是人类可读别名（可改、可重复）。下列命令多数 **可用 key 或 label 选择账号**（label 唯一匹配时）。
+
+**新增一个账号（推荐：一条命令）** —— 在终端跑：
+
+```powershell
+node packages/wechat-daemon/dist/manage.js login --label 工作号 --start
+```
+
+它会：自动生成二维码（**过期自动刷新**、终端直接显示 + 自动打开 PNG）→ 你用要登录的微信扫码确认 → 自动按 botId 归档登记 → `--start` 顺带启动该账号 daemon。整条命令在你终端里跑，二维码原生渲染、不怕过期。
+
 管理命令（`node packages/wechat-daemon/dist/manage.js <command>`）：
 
 | 命令 | 作用 |
 |------|------|
+| `login [--label 名] [--start]` | **一条命令完成扫码登录**：自刷新二维码 + 自动归档（`--start` 顺带启动） |
 | `list` | 列出账号、别名、botId、运行状态 |
-| `finalize [--label 名]` | 把暂存登录按 botId 归档为新账号 |
+| `start <key\|label>` | 启动某账号的 daemon |
+| `logout <key\|label>` | 停 daemon + 通知下线 + 清凭证（保留目录，可重登） |
+| `delete <key\|label>` | 停 daemon + 删除目录 + 移除注册 |
+| `label <key\|label> <新别名>` | 改别名 |
+| `set-default <key\|label>` | 设默认账号 |
 | `adopt <key> [--label 名]` | 把已存在的账号目录登记进注册表 |
-| `label <key> <文本>` | 设置人类可读别名 |
-| `set-default <key>` | 设默认账号 |
-| `logout <key>` | 停该账号 daemon + 通知下线 + 清凭证（保留目录，可重登） |
-| `delete <key>` | 停该账号 daemon + 删除目录 + 移除注册 |
-
-**新增一个账号（扫码登录）**：先用暂存目录跑 MCP server 扫码，再归档：
-
-```powershell
-# 1) 用暂存目录登录（Agent 调 login_qrcode 扫码、check_qrcode_status 确认）
-$env:WECHAT_DATA_DIR = "$env:USERPROFILE\.wemind\.staging"
-node packages/wechat-mcp/dist/index.js   # 接入 MCP 客户端走登录流程
-Remove-Item Env:\WECHAT_DATA_DIR
-
-# 2) 按 botId 归档 + 登记（可起别名）
-node packages/wechat-daemon/dist/manage.js finalize --label 工作号
-
-# 3) 启动该账号 daemon（或交给下面的自启脚本）
-$env:WECHAT_ACCOUNT = "<上一步输出的 key>"; node packages/wechat-daemon/dist/index.js
-```
 
 **自启全部账号**：`scripts/run-all-daemons.ps1` 读注册表为每个账号起一个 daemon（各账号单实例守卫，重复运行安全）。Windows 启动文件夹的 VBS 已指向它，开机自动拉起所有已登记账号。
 
