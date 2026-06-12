@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import { ILINK_APP_ID } from "../config.js";
-import type { GetUpdatesResp, SendMessageReq, QRCodeResponse, QRStatusResponse, SendTypingReq, GetConfigResp } from "./types.js";
+import type { GetUpdatesResp, SendMessageReq, QRCodeResponse, QRStatusResponse, SendTypingReq, GetConfigResp, GetUploadUrlReq, GetUploadUrlResp } from "./types.js";
 
 export type ApiOptions = {
   baseUrl: string;
@@ -150,6 +150,31 @@ export async function sendMessage(params: {
   if (code !== undefined && code !== 0) {
     throw new Error(`sendMessage rejected: ret=${code}${errmsg ? ` (${errmsg})` : ""}`);
   }
+}
+
+/** 取 CDN 上传地址（发图/发文件用）。返回 upload_full_url 或 upload_param。 */
+export async function getUploadUrl(
+  params: { baseUrl: string; token?: string; timeoutMs?: number } & GetUploadUrlReq,
+): Promise<GetUploadUrlResp> {
+  const raw = await apiFetch({
+    baseUrl: params.baseUrl,
+    endpoint: "ilink/bot/getuploadurl",
+    body: JSON.stringify({
+      filekey: params.filekey,
+      media_type: params.media_type,
+      to_user_id: params.to_user_id,
+      rawsize: params.rawsize,
+      rawfilemd5: params.rawfilemd5,
+      filesize: params.filesize,
+      no_need_thumb: params.no_need_thumb,
+      aeskey: params.aeskey,
+      base_info: buildBaseInfo(),
+    }),
+    token: params.token,
+    timeoutMs: params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
+    label: "getUploadUrl",
+  });
+  return JSON.parse(raw) as GetUploadUrlResp;
 }
 
 export async function fetchQRCode(apiBaseUrl: string): Promise<QRCodeResponse> {

@@ -52,6 +52,7 @@ let answerStarted = false; // 当前回合是否已通知"开始写回复"
 let thoughtStarted = false; // 当前回合是否已通知"正在思考"
 const seenUpdateTypes = new Set<string>(); // 诊断：本回合出现过的 sessionUpdate 类型
 const seenTools = new Set<string>(); // 当前回合已上报的工具标题，去重
+const hintedSessions = new Set<string>(); // 已注入「可发图」约定提示的 session（每会话首轮注入一次）
 
 function isAlive(): boolean {
   return !!child && child.exitCode === null && !child.killed;
@@ -230,6 +231,10 @@ export async function askKiroForUser(userId: string, message: string, onProgress
   const t0 = Date.now();
   const prompt: unknown[] = [];
   for (const im of images ?? []) prompt.push({ type: "image", mimeType: im.mimeType, data: im.data });
+  if (!hintedSessions.has(sid)) {
+    hintedSessions.add(sid);
+    prompt.push({ type: "text", text: "（系统提示：你正在通过微信和用户对话。需要给用户发图片时，在回复里用 Markdown 图片语法 ![](图片的 http 链接或本地文件绝对路径)，系统会自动把它作为图片消息发出（你本身不会文生图，可发联网搜到的图、本地已有的图、或自己用代码渲染保存的图表）。其余正常用文字/Markdown 回复。此提示只出现一次，无需理会本句。）" });
+  }
   prompt.push({ type: "text", text: message || "（用户发来一张图片，请查看并回应）" });
   try {
     await promptRequest({ sessionId: sid, prompt });

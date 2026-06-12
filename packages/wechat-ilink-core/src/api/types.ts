@@ -107,6 +107,29 @@ export interface SendMessageReq {
   msg?: WeixinMessage;
 }
 
+/** 上传媒体类型（proto: UploadMediaType）。 */
+export const UploadMediaType = { IMAGE: 1, VIDEO: 2, FILE: 3, VOICE: 4 } as const;
+
+export interface GetUploadUrlReq {
+  filekey?: string;
+  media_type?: number;
+  to_user_id?: string;
+  rawsize?: number;      // 明文大小
+  rawfilemd5?: string;   // 明文 MD5(hex)
+  filesize?: number;     // 密文大小(AES-128-ECB PKCS7)
+  no_need_thumb?: boolean;
+  aeskey?: string;       // hex
+}
+
+export interface GetUploadUrlResp {
+  ret?: number;
+  errcode?: number;
+  errmsg?: string;
+  upload_param?: string;
+  thumb_upload_param?: string;
+  upload_full_url?: string;
+}
+
 export interface QRCodeResponse {
   qrcode: string;
   qrcode_img_content: string;
