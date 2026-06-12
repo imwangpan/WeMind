@@ -15,6 +15,10 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@wemind/wechat-ilink-core": "*"
+    "@wemind/wechat-ilink-core": "*",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5"
   }
 }
