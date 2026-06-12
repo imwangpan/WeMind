@@ -233,7 +233,7 @@ export async function askKiroForUser(userId: string, message: string, onProgress
   for (const im of images ?? []) prompt.push({ type: "image", mimeType: im.mimeType, data: im.data });
   if (!hintedSessions.has(sid)) {
     hintedSessions.add(sid);
-    prompt.push({ type: "text", text: "（系统提示：你正在通过微信和用户对话。需要给用户发图片时，在回复里用 Markdown 图片语法 ![](图片的 http 链接或本地文件绝对路径)，系统会自动把它作为图片消息发出（你本身不会文生图，可发联网搜到的图、本地已有的图、或自己用代码渲染保存的图表）。图片直链请优先选国内可访问的源（如 GitHub raw、国内站点/CDN），避免 wikipedia/wikimedia 等国内常被墙的域名，否则下载会失败。其余正常用文字/Markdown 回复。此提示只出现一次，无需理会本句。）" });
+    prompt.push({ type: "text", text: "（系统提示：你正在通过微信和用户对话。需要给用户发图片时，在回复里用 Markdown 图片语法 ![](图片的 http 链接或本地文件绝对路径)，系统会自动把它作为图片消息发出（你本身不会文生图，可发联网搜到的图、本地已有的图、或自己用代码渲染保存的图表）。重要：服务器从中国大陆下载该图，请选「可直接下载的直链」——优先 raw.githubusercontent.com 等原始文件直链；避免 wikipedia/wikimedia（大陆被墙）以及 pixabay/unsplash 等带热链保护、直链常返回 403 的图床。拿不准时优先把图先下载到本地再用本地绝对路径引用，或直接发链接让用户自己点。其余正常用文字/Markdown 回复。此提示只出现一次，无需理会本句。）" });
   }
   prompt.push({ type: "text", text: message || "（用户发来一张图片，请查看并回应）" });
   try {

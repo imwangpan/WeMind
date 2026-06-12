@@ -32,7 +32,11 @@ export function extractImages(text: string): { images: ExtractedImage[]; text: s
 /** 把图片引用解析成字节：http(s) 下载，或本地文件读取。带大小/类型校验。 */
 export async function resolveImageBytes(src: string): Promise<Buffer> {
   if (/^https?:\/\//i.test(src)) {
-    const res = await fetch(src, { signal: AbortSignal.timeout(15000) });
+    const res = await fetch(src, {
+      signal: AbortSignal.timeout(15000),
+      // 不少图床（pixabay 等）对无 UA 的直链返回 403，带上浏览器 UA 规避热链拦截
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" },
+    });
     if (!res.ok) throw new Error(`下载图片失败 ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > MAX_BYTES) throw new Error(`图片过大 ${buf.length}`);
