@@ -232,6 +232,8 @@ daemon 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio
 
 `kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量即可。协议层（`session/new`/`prompt`/`update` 等）是标准 ACP，所有 ACP agent 共用。
 
+> 详细步骤、各 agent 需确认的 4 件事、MCP 沙箱差异、验证方法见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)。
+
 ### 收发图片
 
 - **收图**（用户发图 → 大脑看图）：daemon 下载并 AES-128-ECB 解密入站图片，作为 ACP image 块喂给大脑（`promptCapabilities.image:true`），大脑能"看"图回应。
