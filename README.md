@@ -218,6 +218,20 @@ brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认�
 
 加载/卸载 MCP 后 daemon 会**重启 ACP 进程**以按新沙箱 `mcp.json` 重载，下一条消息生效。激活的 MCP 等于对白名单发件人全权开放（brain 是 `--trust-all-tools`），按需加载、用完可卸载。
 
+### 切换大脑 Agent（通用化）
+
+daemon 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动，默认是 `kiro-cli`，但任何兼容 ACP 的 agent CLI 都能接入，**无需改代码，仅靠环境变量**（见 `packages/wechat-daemon/src/brain-agents.ts`）：
+
+| 环境变量 | 作用 | 默认 |
+|------|------|------|
+| `WEMIND_BRAIN` | 选预设（如 `kiro`、`gemini`） | `kiro` |
+| `WEMIND_BRAIN_BIN` | 覆盖二进制（绝对路径或 PATH 上的名字） | 预设自动解析 |
+| `WEMIND_BRAIN_ARGS` | 覆盖进入 ACP 模式的启动参数（空格分隔） | 预设值 |
+| `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（指向 brain 沙箱） | 预设值 |
+| `KIRO_CLI_BIN` | 旧的 kiro 专用二进制覆盖（仍兼容） | — |
+
+`kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量即可。协议层（`session/new`/`prompt`/`update` 等）是标准 ACP，所有 ACP agent 共用。
+
 ### 收发图片
 
 - **收图**（用户发图 → 大脑看图）：daemon 下载并 AES-128-ECB 解密入站图片，作为 ACP image 块喂给大脑（`promptCapabilities.image:true`），大脑能"看"图回应。

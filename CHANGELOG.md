@@ -12,6 +12,7 @@
   - 构建顺序 `core → daemon/mcp-server`，由 root 编排脚本保证；daemon 入口由 `dist/daemon/index.js` 变更为 `packages/wechat-daemon/dist/index.js`（`scripts/run-daemon.ps1` 已同步）。
 
 ### Added
+- **大脑接入通用化（第一档）**：daemon 大脑改为**配置驱动的 ACP agent**（`brain-agents.ts` 的 `AcpAgentPreset`/`resolveAgent`）。把 kiro 专属的二进制名、启动参数、配置目录环境变量抽成预设，通过 `WEMIND_BRAIN`/`WEMIND_BRAIN_BIN`/`WEMIND_BRAIN_ARGS`/`WEMIND_BRAIN_HOME_ENV` 零代码接入任意兼容 ACP 的 agent（默认 `kiro`，保留 `KIRO_CLI_BIN` 兼容）。协议层为标准 ACP，可直接复用。`askKiroForUser` → `askBrain`。
 - **发图（出站图片）**：core `getUploadUrl` + `sendImage`（AES-128-ECB 加密 → CDN 上传 → `image_item` 发送，`no_need_thumb` 免缩略图、无需 sharp/jimp）。daemon 从 brain 回复中提取图片引用（Markdown `![](url/本地路径)` 或裸图片 URL）→ 下载/读取 → 作为图片消息发出，再发清理后的文本；acp-brain 每会话首轮注入「可发图」约定提示。移植自官方 openclaw-weixin。实测真机收到。
 - **一条命令登录 + key/label 选择器**：`manage.js login [--label][--start]` 完成扫码登录全流程——自刷新二维码（过期自动换）、终端 ANSI 码 + 自动打开 PNG、扫码确认后自动按 botId 归档登记，`--start` 顺带启动 daemon。`logout`/`delete`/`label`/`set-default`/`start` 支持用 key 或 label 选择账号。daemon 包新增 `qrcode` 依赖。
 - **多账号登录/登出/删除**：账号注册表 `~/.wemind/accounts.json`，每账号独立目录 `~/.wemind/<key>/`（`key` 由微信 botId 派生，唯一；另存可编辑 `label` 别名）。新增管理 CLI `packages/wechat-daemon/dist/manage.js`：`list`/`finalize`(暂存登录→按 botId 归档)/`adopt`/`label`/`set-default`/`logout`(停 daemon+下线+清凭证)/`delete`(停 daemon+删目录+注销)。daemon 启动写 `daemon.pid`、wrapper 写 `wrapper.pid` 到账号目录，供管理命令精确停止整条链。多账号自启脚本 `scripts/run-all-daemons.ps1` 遍历注册表逐账号拉起（各账号 Mutex 独立、可共存）。
