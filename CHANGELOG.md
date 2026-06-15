@@ -5,6 +5,7 @@
 ## [Unreleased] — fork
 
 ### Changed
+- **更多硬编码改为可配置（env 覆盖）**：iLink 基础 URL（`WEMIND_ILINK_BASE`）、媒体 CDN 基础 URL（`WECHAT_CDN_BASE_URL`）、对外声明的客户端版本（`ILINK_CLIENT_VERSION`，免改代码跟官方升级）；MCP 目录源跟随可配置的 `realHome`（`WEMIND_MCP_CATALOG` 可覆盖）；`ecosystem.config.cjs` 数据根支持 `WEMIND_HOME`。记忆/规则继承的来源与子目录也下沉为按 agent 配置（`realHome`/`inheritDirs` + `WEMIND_BRAIN_REAL_HOME`/`_INHERIT_DIRS`）。
 - **daemon 拆分拉取器/处理器（解耦消息拉取与大脑处理）**：原单循环在大脑处理（可数十秒）期间不 `getUpdates`，导致期间新消息的 token 抓不到、连发可能丢。拆为 **poller**（持续长轮询 + 实时更新 token + 入队，永不被大脑阻塞）+ **worker**（串行从队列喂大脑，尊重 kiro-cli/ACP 单 session 串行约束），发送时取最新 token；并支持同一用户连发的多条**合并为一轮**。
 - **状态目录改为 `~/.wemind/<account>/` 并支持多账号**：默认目录由 `~/.mcp-wechat-server` 改为 `~/.wemind/default`；新增 `WECHAT_ACCOUNT` 选择子目录、`WECHAT_DATA_DIR` 指定完整路径覆盖。`DATA_DIR` 在 core 单点定义、daemon 从 core 导入。多账号即「不同 `WECHAT_ACCOUNT` → 不同目录 → 各自独立登录/状态/会话，各跑一个 daemon」。`run-daemon.ps1` 的单实例 Mutex 也按账号区分，多账号可共存。
 - **重构为 npm workspaces 三包布局**：原 `src/` 平铺结构拆为 `packages/wechat-ilink-core`（`@wemind/wechat-ilink-core`，iLink 协议内核，私有）、`packages/wechat-mcp`（`@wemind/wechat-mcp`，可发布的 MCP server，`bin: wemind-mcp`）、`packages/wechat-daemon`（`@wemind/wechat-daemon`，私有常驻进程）。三包共享同一内核，消费方只依赖 `core`，不再互相耦合。

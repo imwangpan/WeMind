@@ -8,7 +8,7 @@ import { MessageType, MessageState, MessageItemType, UploadMediaType, type Image
  * 机制借鉴官方 Tencent/openclaw-weixin（MIT）的 cdn/pic-decrypt + cdn-url。
  */
 
-const CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c";
+const CDN_BASE_URL = process.env.WECHAT_CDN_BASE_URL?.trim() || "https://novac2c.cdn.weixin.qq.com/c2c";
 
 function decryptAesEcb(ciphertext: Buffer, key: Buffer): Buffer {
   const d = createDecipheriv("aes-128-ecb", key, null); // PKCS7 默认

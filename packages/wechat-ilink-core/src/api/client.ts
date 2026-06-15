@@ -14,8 +14,8 @@ const DEFAULT_API_TIMEOUT_MS = 15_000;
 const QR_LONG_POLL_TIMEOUT_MS = 35_000;
 
 // 对外声明的 iLink 客户端版本：模仿官方 openclaw-weixin 的版本，
-// 避免后端因客户端版本过低而拒绝/快速过期二维码。需随官方更新。
-const ILINK_CLIENT_VERSION = "2.4.3";
+// 避免后端因客户端版本过低而拒绝/快速过期二维码。需随官方更新——故支持 env 覆盖，免改代码。
+const ILINK_CLIENT_VERSION = process.env.ILINK_CLIENT_VERSION?.trim() || "2.4.3";
 const CHANNEL_VERSION = ILINK_CLIENT_VERSION;
 
 /**

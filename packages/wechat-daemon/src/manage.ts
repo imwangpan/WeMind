@@ -18,7 +18,7 @@ import {
  * 推荐用 `login` 一条命令完成：自刷新二维码 → 扫码 → 自动归档（→ 可选自动启动）。
  */
 
-const BASE = "https://ilinkai.weixin.qq.com";
+const BASE = process.env.WEMIND_ILINK_BASE?.trim() || "https://ilinkai.weixin.qq.com";
 const STAGING = path.join(WEMIND_ROOT, ".staging");
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

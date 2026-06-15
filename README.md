@@ -194,10 +194,15 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 |------|------|
 | `WECHAT_OWNER_ID` | 发件人白名单（默认登录账号本人 user id） |
 | `WECHAT_ACCOUNT` | 账号标识，决定状态子目录 `~/.wemind/<account>/`（默认 `default`）。多账号用不同值隔离 |
-| `WECHAT_DATA_DIR` | 直接指定完整状态目录路径，覆盖上面的 `~/.wemind/<account>` 规则 |
-| `KIRO_CLI_BIN` | kiro-cli 可执行文件路径（默认走 PATH） |
-| `WECHAT_BRAIN_TIMEOUT_MS` | 单次 kiro-cli 调用超时（默认 120000） |
+| `WECHAT_DATA_DIR` | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则 |
+| `WEMIND_HOME` | 数据根目录（默认 `~/.wemind`） |
 | `WECHAT_BRAIN_HOME` | brain 沙箱目录（默认 `<数据目录>/brain-home`） |
+| `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` | 大脑单回合空闲/硬超时（默认 45000 / 300000） |
+| `WEMIND_ILINK_BASE` | iLink API / 登录基础 URL（默认 `https://ilinkai.weixin.qq.com`） |
+| `WECHAT_CDN_BASE_URL` | 媒体 CDN 基础 URL（默认 `https://novac2c.cdn.weixin.qq.com/c2c`） |
+| `ILINK_CLIENT_VERSION` | 对外声明的 iLink 客户端版本（默认 `2.4.3`，随官方升级可改，免动代码） |
+| `ILINK_APP_ID` | iLink App Id（默认 `bot`） |
+| 大脑 agent 选择 / 记忆继承 | 见下方「切换大脑 Agent」与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
 
 限制：
 
