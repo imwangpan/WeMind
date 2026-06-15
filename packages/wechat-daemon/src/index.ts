@@ -164,11 +164,11 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
     let lastToolProgressAt = 0;
     return askBrain(to, text, (ev) => {
       if (ev.type === "tool") {
-        step += 1;
-        lastProgressAt = Date.now(); // 工具活动也刷新心跳基线
+        lastProgressAt = Date.now(); // 工具活动刷新心跳基线
         // 首条立即发（让你知道开始干活了），之后每 15s 最多一条，避免刷屏 + 触发限流
         if (Date.now() - lastToolProgressAt >= 15000) {
           lastToolProgressAt = Date.now();
+          step += 1; // 只在真正发出时递增，保证步骤号连续（不因节流跳号）
           const desc = ev.purpose || (ev.title ? zhTool(ev.title) : "") || "调用工具";
           sendProgress(`${toolIcon(ev.kind)} 步骤 ${step}：${desc}`);
         }
