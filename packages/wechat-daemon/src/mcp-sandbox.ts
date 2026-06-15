@@ -102,10 +102,30 @@ export function applySandbox(): void {
   fs.writeFileSync(BRAIN_MCP_JSON, JSON.stringify({ mcpServers: servers }, null, 2), "utf-8");
 }
 
+/** 继承真实配置目录 settings/ 下除 mcp.json 外的文件（cli.json 含模型/免确认等），让大脑与日常使用同款配置；mcp.json 仍由沙箱 curated。 */
+function syncSettings(): void {
+  const ag = resolveAgent();
+  if (!ag.inherit || !ag.realHome) return;
+  const realSettings = path.join(ag.realHome, "settings");
+  const brainSettings = path.join(BRAIN_HOME, "settings");
+  if (!fs.existsSync(realSettings)) return;
+  try { fs.mkdirSync(brainSettings, { recursive: true }); } catch { /* ignore */ }
+  let names: string[] = [];
+  try { names = fs.readdirSync(realSettings); } catch { return; }
+  for (const f of names) {
+    if (f === "mcp.json") continue; // MCP 必须用沙箱 curated 版本（防 wechat 回环）
+    try {
+      const src = path.join(realSettings, f);
+      if (fs.statSync(src).isFile()) fs.copyFileSync(src, path.join(brainSettings, f));
+    } catch { /* best-effort */ }
+  }
+}
+
 /** 启动时确保沙箱存在并与激活集一致。 */
 export function ensureBrainHome(): void {
-  applySandbox();
-  mirrorRealKiro(); // 继承真实 ~/.kiro 的记忆/steering/skills（MCP 与 sessions 仍隔离）
+  syncSettings();   // 先同步「非 MCP」设置(模型/免确认等)，让大脑与日常使用同款配置
+  applySandbox();   // 再写 curated mcp.json（权威，保持 MCP 隔离防回环）
+  mirrorRealKiro(); // 继承真实配置目录的记忆/steering/skills（sessions 仍隔离）
 }
 
 export function addMcp(name: string): string {
