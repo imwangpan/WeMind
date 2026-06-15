@@ -170,7 +170,7 @@ async function ensureProcess(): Promise<void> {
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (AGENT.homeEnvVar) env[AGENT.homeEnvVar] = BRAIN_HOME; // 把 brain 沙箱目录传给 agent
   const proc = spawn(AGENT.bin, AGENT.args, {
-    shell: false,
+    shell: AGENT.shell,
     windowsHide: true,
     cwd: BRAIN_HOME,
     env,

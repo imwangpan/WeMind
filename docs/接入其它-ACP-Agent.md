@@ -48,6 +48,7 @@ daemon 只用到 ACP 的标准方法，与具体是哪个 agent 无关：
 | `WEMIND_BRAIN_BIN` | 覆盖二进制（绝对路径或 PATH 上的名字） | 预设自动在 PATH 解析 |
 | `WEMIND_BRAIN_ARGS` | 覆盖 ACP 启动参数（**空格分隔**） | 预设值 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「配置目录环境变量名」（指向 brain 沙箱） | 预设值 |
+| `WEMIND_BRAIN_SHELL` | 是否经 shell 启动（`1`/`true` 开）；npx/`.cmd`/`.bat` 类适配器在 Windows 需要 | 预设值（默认 false） |
 | `KIRO_CLI_BIN` | 旧的 kiro 专用二进制覆盖（仅 `kiro` 预设、且未设 `WEMIND_BRAIN_BIN` 时生效） | — |
 
 解析优先级（`resolveAgent()`）：
@@ -113,12 +114,24 @@ $env:WEMIND_BRAIN = "acme"   # 启动 daemon
 
 ## 5. 内置预设
 
-| 预设键 | agent | 状态 | 启动 |
-|--------|-------|------|------|
-| `kiro` | kiro-cli | ✅ 已实测（默认） | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
-| `gemini` | Gemini CLI | ⚠️ 示例，**未实测** | `gemini --experimental-acp`，`GEMINI_CLI_HOME`（参数与目录变量请以官方为准） |
+ACP agent 分两类，接入方式不同：
 
-> `gemini` 预设是占位示例，提醒你「这里可以加」。实际接入前请对照 Gemini CLI 官方文档核对它进入 ACP 的确切参数与配置目录机制，必要时改这条预设或用环境变量覆盖。
+- **原生 ACP**：CLI 自带 ACP 模式，加个参数直接起（如 kiro、Gemini）。
+- **需适配器**：CLI 本身不说 ACP，要起一个**第三方适配器进程**来桥接（如 Claude Code、Codex）。适配器一般有自己的认证（API key / 登录），且不读 WeMind 的 `KIRO_HOME` 沙箱（故无 `homeEnvVar`、动态 MCP 注入不适用，见 §6）。
+
+| 预设键 | agent | 类型 | 状态 | 启动（示意） |
+|--------|-------|------|------|------|
+| `kiro` | kiro-cli | 原生 | ✅ **已实测**（默认） | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
+| `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --experimental-acp`，`GEMINI_CLI_HOME`（flag 以官方为准） |
+| `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @zed-industries/claude-code-acp`（Zed 官方适配器；需 Claude Code 登录或 `ANTHROPIC_API_KEY`） |
+| `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，需自行安装其二进制；Codex 本身暂不原生支持 ACP） |
+
+> ⚠️ 除 `kiro` 外均为**示例预设**：包名、参数、二进制可能随上游变化，**接入前务必对照各自官方/仓库核对**，必要时改 `ACP_AGENT_PRESETS` 里的对应条目或用环境变量覆盖。
+
+**适配器类的准备工作（示例）**：
+
+- **Claude Code**：预设用 `npx -y @zed-industries/claude-code-acp`（`shell:true`，因 Windows 上是 `npx.cmd`）。需先装好 Claude Code 并完成认证（登录或设 `ANTHROPIC_API_KEY`）。该适配器把 Claude Code 暴露成 ACP server over stdio。
+- **Codex**：需先安装社区适配器 `codex-acp`（见其仓库说明，多为 Rust 构建出的二进制），把它放到 PATH（或用 `WEMIND_BRAIN_BIN` 指向）。Codex 官方原生 ACP 仍在推进中（openai/codex#2785）。
 
 ---
 
@@ -144,10 +157,11 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 ## 7. 平台注意（Windows）
 
-- daemon 以 `shell: false` 直接 spawn 二进制。对 `.exe`（如 `kiro-cli.exe`）没问题。
-- 若某 agent 在 Windows 上是 `.cmd` / `.bat`（如某些 npm 全局包的 shim，例如 `gemini.cmd`），`shell: false` 直接 spawn 会失败。两种解法：
-  1. `WEMIND_BRAIN_BIN` 指向真正的 `.exe` 或 node 入口（绕开 shim）；
-  2. 或后续给 `brain-agents` 加「该 agent 需要 shell」的标记（暂未实现，按需再加）。
+- 默认 `shell: false` 直接 spawn 二进制。对 `.exe`（如 `kiro-cli.exe`）没问题。
+- 若某 agent 在 Windows 上是 `.cmd` / `.bat` / 经 `npx` 启动（如 `npx.cmd`、`gemini.cmd`、Claude Code 适配器），`shell: false` 直接 spawn 会失败。本项目已支持经 shell 启动：
+  - 预设里设 `shell: true`（`claude-code`、`gemini` 预设已设）；或运行时设 `WEMIND_BRAIN_SHELL=1`。
+  - 经 shell 启动时，二进制用「裸名」让 shell 从 PATH 解析（避免带空格的全路径在 shell 下出问题）。
+- 仍可用 `WEMIND_BRAIN_BIN` 指向真正的 `.exe` / node 入口绕开 shim（则无需 shell）。
 
 ---
 
