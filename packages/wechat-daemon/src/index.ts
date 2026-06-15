@@ -9,7 +9,7 @@ import {
   downloadImage, sendImage,
 } from "@wemind/wechat-ilink-core";
 import type { AccountData, ServerState, WeixinMessage, SendMessageReq, ImageItem } from "@wemind/wechat-ilink-core";
-import { askKiroForUser, newSession, restart } from "./acp-brain.js";
+import { askBrain, newSession, restart } from "./acp-brain.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
 import { extractImages, resolveImageBytes } from "./image-reply.js";
 
@@ -156,7 +156,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
   // 一次尝试：带进度（步骤编号每次尝试重置）
   const attempt = (): Promise<string> => {
     let step = 0;
-    return askKiroForUser(to, text, (ev) => {
+    return askBrain(to, text, (ev) => {
       if (ev.type === "tool") {
         step += 1;
         const desc = ev.purpose || (ev.title ? zhTool(ev.title) : "") || "调用工具";

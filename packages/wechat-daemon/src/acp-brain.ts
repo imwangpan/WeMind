@@ -4,28 +4,20 @@ import fs from "node:fs";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME } from "./mcp-sandbox.js";
+import { resolveAgent } from "./brain-agents.js";
 
 /**
- * ACP 大脑：维护一个常驻的 `kiro-cli acp` 进程（JSON-RPC over stdio，换行分隔）。
+ * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。
+ * 通过标准 ACP 协议驱动，agent 可配置（默认 kiro-cli，见 brain-agents.ts），任意兼容 ACP 的 CLI 均可接入。
  * - 每用户一个 ACP session（原生多轮记忆）；session 映射持久化到磁盘。
  * - 自愈：session/prompt 超时/失败 → 杀进程重建；重建后用 session/load 恢复上下文。
  * - 诊断日志（[acp] 前缀，进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差。
- * 跑在 brain 沙箱 KIRO_HOME 下（默认空 MCP）。只用 node 标准库 + mcp-sandbox，便于独立拆出。
+ * 跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
  */
 
 function dlog(...a: unknown[]): void { console.error("[acp]", ...a); }
 
-function resolveKiroCli(): string {
-  const override = process.env.KIRO_CLI_BIN?.trim();
-  if (override) return override;
-  const exe = process.platform === "win32" ? "kiro-cli.exe" : "kiro-cli";
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
-    if (dir && fs.existsSync(path.join(dir, exe))) return path.join(dir, exe);
-  }
-  return "kiro-cli";
-}
-
-const KIRO_CLI = resolveKiroCli();
+const AGENT = resolveAgent(); // 当前 ACP agent（二进制/参数/配置目录环境变量）
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 45_000; // 多久没收到任何帧才算"卡死"
 const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 300_000; // 单回合硬上限
@@ -175,14 +167,16 @@ function promptRequest(params: unknown): Promise<any> {
 async function ensureProcess(): Promise<void> {
   if (isAlive() && initialized) return;
   reset();
-  const proc = spawn(KIRO_CLI, ["acp", "--trust-all-tools"], {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (AGENT.homeEnvVar) env[AGENT.homeEnvVar] = BRAIN_HOME; // 把 brain 沙箱目录传给 agent
+  const proc = spawn(AGENT.bin, AGENT.args, {
     shell: false,
     windowsHide: true,
     cwd: BRAIN_HOME,
-    env: { ...process.env, KIRO_HOME: BRAIN_HOME },
+    env,
   });
   child = proc;
-  dlog(`spawn acp pid=${proc.pid}`);
+  dlog(`spawn ${AGENT.name} acp pid=${proc.pid} bin=${AGENT.bin} args=[${AGENT.args.join(" ")}]`);
   try { fs.writeFileSync(BRAIN_PID_FILE, String(proc.pid), "utf-8"); } catch { /* best-effort */ }
   proc.stdout.on("data", onStdout);
   proc.stderr.on("data", () => { /* ignore */ });
@@ -218,8 +212,8 @@ async function ensureSession(userId: string): Promise<string> {
   return res.sessionId;
 }
 
-/** 向 Kiro 提问（常驻 + 原生多轮）。失败即重建进程（下条用 session/load 恢复上下文）。 */
-export async function askKiroForUser(userId: string, message: string, onProgress?: (ev: ProgressEvent) => void, images?: Array<{ data: string; mimeType: string }>): Promise<string> {
+/** 向大脑（配置的 ACP agent）提问（常驻 + 原生多轮）。失败即重建进程（下条用 session/load 恢复上下文）。 */
+export async function askBrain(userId: string, message: string, onProgress?: (ev: ProgressEvent) => void, images?: Array<{ data: string; mimeType: string }>): Promise<string> {
   await ensureProcess();
   const sid = await ensureSession(userId);
   assembling.set(sid, []);
