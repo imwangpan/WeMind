@@ -16,6 +16,22 @@ import { extractImages, resolveImageBytes } from "./image-reply.js";
 const log = (...a: unknown[]) => console.error("[daemon]", ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** 分类大脑错误：backend=模型后端瞬时错误(可多重试)；timeout=超时/卡死；other=其它。 */
+function classifyBrainError(e: unknown): "timeout" | "backend" | "other" {
+  const s = String(e instanceof Error ? e.message : e);
+  if (/-32603|internal error|please try again|response stream|overloaded|rate.?limit|\b(429|503)\b/i.test(s)) return "backend";
+  if (/idle timeout|no-first-frame|cap timeout|timeout/i.test(s)) return "timeout";
+  return "other";
+}
+/** 按错误类型给用户的失败提示。 */
+function brainErrorMessage(e: unknown): string {
+  switch (classifyBrainError(e)) {
+    case "backend": return "（模型后端临时出错了，自动重试多次仍失败，请稍后把消息再发一次）";
+    case "timeout": return "（这次处理超时/卡住被中断了，重试也没成功——可把任务拆小一点再发）";
+    default: return "（处理出错了，请把消息再发一次试试）";
+  }
+}
+
 function extractText(msg: WeixinMessage): string {
   return (msg.item_list ?? [])
     .filter((it) => it.type === MessageItemType.TEXT)
@@ -159,10 +175,10 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
   }
 
   // 一次尝试：带进度（步骤编号每次尝试重置）。进度消息节流：避免一回合刷十几条触发 iLink 发送限流（疑似 ret=-2 主因）
-  const attempt = (): Promise<string> => {
+  const attempt = (promptText: string, imgs: typeof images): Promise<string> => {
     let step = 0;
     let lastToolProgressAt = 0;
-    return askBrain(to, text, (ev) => {
+    return askBrain(to, promptText, (ev) => {
       if (ev.type === "tool") {
         lastProgressAt = Date.now(); // 工具活动刷新心跳基线
         // 首条立即发（让你知道开始干活了），之后每 15s 最多一条，避免刷屏 + 触发限流
@@ -180,21 +196,44 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
         // activity：brain 产出任意帧 → 静默刷新心跳基线，避免流式输出期间误报"仍在处理"
         lastProgressAt = Date.now();
       }
-    }, images);
+    }, imgs);
+  };
+
+  // 带分类的重试：backend(模型后端瞬时错误 -32603 等)最多 3 次；timeout/other 最多 2 次
+  const runWithRetry = async (promptText: string, imgs: typeof images): Promise<string> => {
+    let n = 0;
+    while (true) {
+      n++;
+      try { return await attempt(promptText, imgs); }
+      catch (e) {
+        const cat = classifyBrainError(e);
+        log(`brain error (try ${n}, ${cat}): ${String(e)}`);
+        const maxAttempts = cat === "backend" ? 3 : 2;
+        if (n < maxAttempts) {
+          sendProgress(cat === "backend" ? "⚠️ 模型后端临时出错，正在重试…" : "⏳ 响应中断了，正在自动重试…");
+          continue;
+        }
+        throw e;
+      }
+    }
   };
 
   let answer: string;
   try {
-    try {
-      answer = await attempt();
-    } catch (e1) {
-      log("brain error (try 1):", String(e1));
-      sendProgress("⏳ 这次响应超时了，正在自动重试…");
-      answer = await attempt();
+    answer = await runWithRetry(text, images);
+    // 把"等待期间追加的同用户消息"并进本轮：共用同一 context_token、只发一次 FINISH，规避抢答 ret=-2
+    let folded = 0;
+    while (folded < 3) {
+      const extra = drainFollowups(to);
+      if (!extra) break;
+      folded += 1;
+      log(`folding follow-up #${folded}`);
+      sendProgress("📥 把你刚追加的消息一起处理…");
+      try { const more = await runWithRetry(extra, []); if (more) answer += `\n\n${more}`; }
+      catch (e) { log("followup failed:", String(e)); break; }
     }
   } catch (e2) {
-    log("brain error (try 2):", String(e2));
-    answer = "（这次联网检索超时/卡住被中断了，自动重试也没成功，把刚才的消息再发一次试试）";
+    answer = brainErrorMessage(e2);
   } finally {
     clearInterval(keepAlive);
     clearInterval(heartbeat);
@@ -231,6 +270,18 @@ type QueuedMsg = { from: string; text: string; imageItems: ImageItem[]; createTi
 const msgQueue: QueuedMsg[] = [];
 let wakeWorker: (() => void) | null = null;
 function notifyWorker(): void { const w = wakeWorker; wakeWorker = null; if (w) w(); }
+
+/** 抽走队列头部「连续的、该用户、非控制指令」消息，合并文本返回（无则 null）。
+ *  用于把"等待期间追加的消息"并进当前回合：共用同一 context_token、只发一次 FINISH，规避抢答 ret=-2。 */
+function drainFollowups(from: string): string | null {
+  let text = "";
+  let found = false;
+  while (msgQueue.length > 0 && msgQueue[0].from === from && !(msgQueue[0].text && parseControl(msgQueue[0].text))) {
+    const m = msgQueue.shift() as QueuedMsg;
+    if (m.text) { text = text ? `${text}\n${m.text}` : m.text; found = true; }
+  }
+  return found ? text : null;
+}
 
 async function pollerLoop(account: AccountData, owner: string, state: ServerState): Promise<void> {
   while (true) {
