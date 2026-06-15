@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { resolveAgent } from "./brain-agents.js";
 
 /**
  * brain 的 MCP 沙箱：brain 跑在独立 KIRO_HOME 下，默认不加载任何 MCP。
@@ -24,29 +25,27 @@ const CATALOG = process.env.WECHAT_MCP_CATALOG?.trim() || path.join(os.homedir()
 const FORBIDDEN = new Set(["wechat"]);
 
 /**
- * 让 brain 继承真实 `~/.kiro` 的「知识/记忆」类目录（steering / memories / skills 等），
- * 使微信里的大脑和你日常的 kiro 读到同样的记忆、规则、技能。
- * 用目录 junction（Windows）/ symlink 指向真实目录；**唯独 settings 与 sessions 不镜像**：
- *   - settings：MCP 必须走沙箱（curated mcp.json，排除 wechat 防回环）；
- *   - sessions：brain 有自己的 ACP 会话，不能和你 IDE 的会话混。
- * 这些目录都不是 MCP，没有回环风险。可用 WECHAT_BRAIN_INHERIT=0 关闭。
+ * 让 brain 继承所用 agent 真实配置目录的「知识/记忆」类目录（如 kiro 的 steering/memories/skills），
+ * 使微信里的大脑和你日常使用读到同样的记忆、规则、技能。用目录 junction（Windows）/ symlink 指向真实目录；
+ * **MCP（settings）与 brain 自有会话（sessions）不镜像**：MCP 必须走沙箱（排除 wechat 防回环），会话不能混。
+ *
+ * 通用性：来源目录（realHome）与子目录清单（inheritDirs）按 agent 而异，下沉到 `brain-agents.ts` 的预设
+ * （kiro 已预置；其它 agent 记忆机制不同，需要时填预设或用 WEMIND_BRAIN_REAL_HOME/_INHERIT_DIRS 配置）。
+ * 仅适用于「以配置目录承载记忆且目录式」的 agent；记忆为单文件（如 CLAUDE.md/GEMINI.md）的需另行处理。
  */
-const REAL_KIRO = process.env.WECHAT_REAL_KIRO_HOME?.trim() || path.join(os.homedir(), ".kiro");
-const INHERIT_KIRO = (process.env.WECHAT_BRAIN_INHERIT ?? "1") !== "0";
-const MIRROR_DIRS = ["steering", "memories", "skills", "agents", "powers", "tasks", "extensions"];
-
 function mirrorRealKiro(): void {
-  if (!INHERIT_KIRO) return;
-  if (path.resolve(BRAIN_HOME) === path.resolve(REAL_KIRO)) return; // 安全：别把自己链给自己
+  const ag = resolveAgent();
+  if (!ag.inherit || !ag.realHome || ag.inheritDirs.length === 0) return;
+  if (path.resolve(BRAIN_HOME) === path.resolve(ag.realHome)) return; // 安全：别把自己链给自己
   try { fs.mkdirSync(BRAIN_HOME, { recursive: true }); } catch { /* ignore */ }
-  for (const d of MIRROR_DIRS) {
-    const target = path.join(REAL_KIRO, d);
+  for (const d of ag.inheritDirs) {
+    const target = path.join(ag.realHome, d);
     const link = path.join(BRAIN_HOME, d);
     if (!fs.existsSync(target)) continue;
     let present = false;
     try { fs.lstatSync(link); present = true; } catch { /* 不存在 */ }
     if (present) {
-      // 已是链接 → 不动；是 kiro 早期自建的「空」真实目录 → 删掉改建 junction；非空真实目录 → 保留不动（避免误删数据）
+      // 已是链接 → 不动；是早期自建的「空」真实目录 → 删掉改建 junction；非空真实目录 → 保留不动（避免误删数据）
       try {
         const st = fs.lstatSync(link);
         if (st.isSymbolicLink()) continue;
