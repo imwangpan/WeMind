@@ -29,6 +29,9 @@
 - 单元测试（vitest）覆盖 session-guard 与 package 元数据读取；GitHub Actions CI 跑 typecheck + build + test。
 
 ### Fixed
+- **微信发送 `ret=-2`（消息发不出/“收不到”）**：两个叠加根因。① 一回合刷十几条进度消息触发 iLink 对机器人发送的限流 → 改为**进度节流**（工具步骤首条即发、其后 ≥15s 一条）。② 所有发送都标 `message_state=FINISH` 提前“结束”会话 → 改为**进度/中间消息用 `GENERATING`、仅最终答案用 `FINISH`**。并让进度/心跳/出错通知也用最新 `context_token`。（排查纠正了“token 时间过期/用过即作废”等错误假设——全新 token 也会 -2，官方无 token TTL。）
+- **微信大脑“同样任务比直接用 kiro 问题多”= 模型不同**：brain 沙箱 `settings/cli.json` 缺 `chat.defaultModel`，大脑用 kiro 默认模型而非用户的 `claude-opus-4.8`，多步联网任务易卡。修复：`syncSettings` 继承真实 `settings/`（除 `mcp.json`，含模型与 `disableTrustAllConfirmation`）。换模型后旧会话需「新会话」重建。
+- **继承补全**：自定义 agent（`agents/daily-report.json`）因 kiro 预建脚手架（非空目录）被跳过未继承；`mirrorRealKiro` 改为对非空目录**补拷缺失文件**。
 - **daemon 静默崩溃（`code=1`）**：回合内未捕获的 promise 拒绝（瞬时 `getUpdates`/send 的 `fetch failed`，或主动 send 撞 `ret≠0`）会让 node 默认以 `code=1` 退出（无 `fatal` 日志、不走 `main().catch`），wrapper 虽重拉但丢在途回合、用户卡在心跳。已加全局 `unhandledRejection`/`uncaughtException` 处理器（记录不退出）+ `handleMessage` try/catch。
 - **`ret=-2`（context_token 被顶替）**：回合开始锁定的 token 若被用户后发消息顶替会被服务端作废。改为**发送时取该用户最新 token**，并在每批 `getUpdates` 内预登记所有最新 token。（注：官方无 context_token TTL 说明，`-2` 实为 superseded 而非时间过期。）
 - **发图下载健壮性**：外网图源受本机网络限制——wikimedia 等被墙、pixabay 等热链 403。已加 15s 超时、失败兜底把原链接附文本发给用户（不再静默丢图）、浏览器 UA、并提示 brain 优先可直链下载的源。
