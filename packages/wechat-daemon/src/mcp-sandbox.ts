@@ -51,9 +51,20 @@ function mirrorRealKiro(): void {
       // 已是链接 → 不动；是早期自建的「空」真实目录 → 删掉改建 junction；非空真实目录 → 保留不动（避免误删数据）
       try {
         const st = fs.lstatSync(link);
-        if (st.isSymbolicLink()) continue;
-        if (st.isDirectory() && fs.readdirSync(link).length === 0) fs.rmdirSync(link);
-        else continue;
+        if (st.isSymbolicLink()) continue; // 已是链接 → 不动
+        if (st.isDirectory()) {
+          if (fs.readdirSync(link).length === 0) {
+            fs.rmdirSync(link); // 空目录 → 删掉，下面改建 junction
+          } else {
+            // 非空真实目录（如 kiro 自建 agents 脚手架）：把真实目录里「缺失」的文件补拷进来，补全继承（不删已有）
+            for (const f of fs.readdirSync(target)) {
+              const dst = path.join(link, f);
+              const src = path.join(target, f);
+              try { if (!fs.existsSync(dst) && fs.statSync(src).isFile()) fs.copyFileSync(src, dst); } catch { /* ignore */ }
+            }
+            continue;
+          }
+        } else continue;
       } catch { continue; }
     }
     try {
