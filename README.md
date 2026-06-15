@@ -209,7 +209,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 
 brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认不加载任何 MCP**——既快又杜绝 `wechat` 自身回环（内置工具如 `web_search` 仍可用）。
 
-> **继承你的记忆与规则**：沙箱会用目录 junction 把真实 `~/.kiro` 的 `memories`/`steering`/`skills`/`agents`/`powers`/`tasks`/`extensions` 链进来，让微信里的大脑和你日常的 kiro 读到**同样的记忆、steering 规则、技能**。唯独 `settings`（MCP 必须隔离防回环）与 `sessions`（brain 自有会话）保持沙箱本地。这些目录都不是 MCP，无回环风险。可用 `WECHAT_BRAIN_INHERIT=0` 关闭、`WECHAT_REAL_KIRO_HOME` 指定来源。需要某个 MCP 时，直接**在微信里发指令**（daemon 拦截处理，不进 brain）：
+> **继承你的记忆与规则**：沙箱会用目录 junction 把所用 agent 真实配置目录里的「知识/记忆」类子目录链进来，让微信里的大脑和你日常使用读到**同样的记忆、规则、技能**。唯独 `settings`（MCP 必须隔离防回环）与 `sessions`（brain 自有会话）保持沙箱本地，这些目录都不是 MCP、无回环风险。**按 agent 配置驱动**（`brain-agents.ts` 预设的 `realHome`/`inheritDirs`）：kiro 已预置（继承 `~/.kiro` 的 `steering`/`memories`/`skills`/`agents`/`powers`/`tasks`/`extensions`）；其它 agent 记忆机制不同，默认不继承，需要时填预设或用 `WEMIND_BRAIN_REAL_HOME`/`WEMIND_BRAIN_INHERIT_DIRS` 配置。`WEMIND_BRAIN_INHERIT=0` 可关闭。需要某个 MCP 时，直接**在微信里发指令**（daemon 拦截处理，不进 brain）：
 
 | 指令 | 作用 |
 |------|------|

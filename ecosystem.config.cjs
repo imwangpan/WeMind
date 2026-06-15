@@ -10,7 +10,9 @@ const os = require("node:os");
 const path = require("node:path");
 
 const DAEMON = path.join(__dirname, "packages", "wechat-daemon", "dist", "index.js");
-const ROOT = path.join(os.homedir(), ".wemind");
+const ROOT = process.env.WEMIND_HOME && process.env.WEMIND_HOME.trim()
+  ? process.env.WEMIND_HOME.trim()
+  : path.join(os.homedir(), ".wemind");
 const REG = path.join(ROOT, "accounts.json");
 
 function accountKeys() {

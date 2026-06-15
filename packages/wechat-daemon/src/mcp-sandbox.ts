@@ -18,8 +18,11 @@ const BRAIN_MCP_JSON = path.join(BRAIN_HOME, "settings", "mcp.json");
 /** 激活集持久化文件。 */
 const ACTIVE_FILE = path.join(DATA_DIR, "brain-mcps.json");
 
-/** 「目录」：可选 MCP 的定义来源，即真实全局 mcp.json。 */
-const CATALOG = process.env.WECHAT_MCP_CATALOG?.trim() || path.join(os.homedir(), ".kiro", "settings", "mcp.json");
+/** 「目录」：可选 MCP 的定义来源。默认取所用 agent 真实配置目录（可配置的 realHome）下的 settings/mcp.json；
+ *  可用 `WEMIND_MCP_CATALOG` / `WECHAT_MCP_CATALOG` 覆盖为任意路径。 */
+const CATALOG = process.env.WEMIND_MCP_CATALOG?.trim()
+  || process.env.WECHAT_MCP_CATALOG?.trim()
+  || path.join(resolveAgent().realHome || path.join(os.homedir(), ".kiro"), "settings", "mcp.json");
 
 /** 永不允许 brain 加载（防回环）。 */
 const FORBIDDEN = new Set(["wechat"]);
