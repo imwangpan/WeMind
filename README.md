@@ -207,7 +207,9 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 
 ### MCP 沙箱与对话式加载
 
-brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认不加载任何 MCP**——既快又杜绝 `wechat` 自身回环（内置工具如 `web_search` 仍可用）。需要某个 MCP 时，直接**在微信里发指令**（daemon 拦截处理，不进 brain）：
+brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认不加载任何 MCP**——既快又杜绝 `wechat` 自身回环（内置工具如 `web_search` 仍可用）。
+
+> **继承你的记忆与规则**：沙箱会用目录 junction 把真实 `~/.kiro` 的 `memories`/`steering`/`skills`/`agents`/`powers`/`tasks`/`extensions` 链进来，让微信里的大脑和你日常的 kiro 读到**同样的记忆、steering 规则、技能**。唯独 `settings`（MCP 必须隔离防回环）与 `sessions`（brain 自有会话）保持沙箱本地。这些目录都不是 MCP，无回环风险。可用 `WECHAT_BRAIN_INHERIT=0` 关闭、`WECHAT_REAL_KIRO_HOME` 指定来源。需要某个 MCP 时，直接**在微信里发指令**（daemon 拦截处理，不进 brain）：
 
 | 指令 | 作用 |
 |------|------|
