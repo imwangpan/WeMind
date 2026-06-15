@@ -122,13 +122,16 @@ function sniffMime(b: Buffer): string {
 }
 
 async function handleMessage(account: AccountData, ctx: string | undefined, latestCtx: () => string | undefined, to: string, text: string, imageItems: ImageItem[]): Promise<void> {
-  await setTyping(account, to, ctx, 1);
+  // 始终用该用户「最新」context_token 发送：长回合中旧 token 会被顶替/失效，
+  // 若进度/心跳/出错通知仍用回合开始的旧 token，会全部 ret=-2 被拒，用户那头全程静默、像卡住。
+  const cx = () => latestCtx() ?? ctx;
+  await setTyping(account, to, cx(), 1);
   // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
-  const keepAlive = setInterval(() => { void setTyping(account, to, ctx, 1).catch(() => {}); }, 8000);
+  const keepAlive = setInterval(() => { void setTyping(account, to, cx(), 1).catch(() => {}); }, 8000);
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
-  const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, ctx, msg); };
+  const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, cx(), msg); };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
   // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）
   if (imageItems.length === 0) sendProgress("🤖 收到，正在处理…");
@@ -183,21 +186,19 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
     }
   } catch (e2) {
     log("brain error (try 2):", String(e2));
-    answer = "（处理出错了，可能联网卡住了，稍后再发一次试试）";
+    answer = "（这次联网检索超时/卡住被中断了，自动重试也没成功，把刚才的消息再发一次试试）";
   } finally {
     clearInterval(keepAlive);
     clearInterval(heartbeat);
   }
-  // 方案1：回合可能耗时较久，发送时取该用户「最新」context_token（用户期间又发消息会带新 token），避免用回合开始时已被顶替的旧 token 触发 ret=-2
-  const sendCtx = latestCtx() ?? ctx;
-  await setTyping(account, to, sendCtx, 2);
+  await setTyping(account, to, cx(), 2);
   // 发图：从回复里提取图片引用（markdown ![](url/路径) 或裸图片 URL），逐个作为图片消息发出，再发剩余文本
   const { images: replyImages, text: cleaned } = extractImages(answer || "");
   const failedImgs: string[] = [];
   for (const im of replyImages) {
     try {
       const buf = await resolveImageBytes(im.src);
-      await sendImage({ baseUrl: account.baseUrl, token: account.botToken, to, image: buf, contextToken: sendCtx });
+      await sendImage({ baseUrl: account.baseUrl, token: account.botToken, to, image: buf, contextToken: cx() });
       log(`sent image: ${im.src.slice(0, 80)}`);
     } catch (e) { log("send image failed:", im.src, String(e)); failedImgs.push(im.src); }
   }
@@ -207,7 +208,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
     finalText = finalText ? `${finalText}\n\n${note}` : note;
   }
   if (!finalText && !replyImages.length) finalText = "（没有内容）";
-  if (finalText) await sendOrdered(account, to, sendCtx, finalText);
+  if (finalText) await sendOrdered(account, to, cx(), finalText);
   log(`replied to ${to}: ${(answer || "").slice(0, 60)}`);
 }
 
