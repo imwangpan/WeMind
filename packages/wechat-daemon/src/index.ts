@@ -138,6 +138,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
   if (imageItems.length === 0) { const t = cx(); log(`turn start to=${to} msgAge=${msgAge()} usingCtx=${t ? t.slice(0, 10) : "NONE"}`); sendProgress("🤖 收到，正在处理…"); }
   // 心跳：仅当 brain 真正静默(无任何帧)超过 15s 才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
+  let answerNoticeSent = false; // "正在整理回复"只发一次
   const heartbeat = setInterval(() => {
     if (Date.now() - lastProgressAt >= 15000) {
       hbCount += 1;
@@ -157,18 +158,24 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
     }
   }
 
-  // 一次尝试：带进度（步骤编号每次尝试重置）
+  // 一次尝试：带进度（步骤编号每次尝试重置）。进度消息节流：避免一回合刷十几条触发 iLink 发送限流（疑似 ret=-2 主因）
   const attempt = (): Promise<string> => {
     let step = 0;
+    let lastToolProgressAt = 0;
     return askBrain(to, text, (ev) => {
       if (ev.type === "tool") {
         step += 1;
-        const desc = ev.purpose || (ev.title ? zhTool(ev.title) : "") || "调用工具";
-        sendProgress(`${toolIcon(ev.kind)} 步骤 ${step}：${desc}`);
+        lastProgressAt = Date.now(); // 工具活动也刷新心跳基线
+        // 首条立即发（让你知道开始干活了），之后每 15s 最多一条，避免刷屏 + 触发限流
+        if (Date.now() - lastToolProgressAt >= 15000) {
+          lastToolProgressAt = Date.now();
+          const desc = ev.purpose || (ev.title ? zhTool(ev.title) : "") || "调用工具";
+          sendProgress(`${toolIcon(ev.kind)} 步骤 ${step}：${desc}`);
+        }
       } else if (ev.type === "thinking") {
-        sendProgress("🧠 正在思考…");
+        lastProgressAt = Date.now();
       } else if (ev.type === "answer") {
-        sendProgress("✍️ 正在整理回复…");
+        if (!answerNoticeSent) { answerNoticeSent = true; sendProgress("✍️ 正在整理回复…"); }
       } else {
         // activity：brain 产出任意帧 → 静默刷新心跳基线，避免流式输出期间误报"仍在处理"
         lastProgressAt = Date.now();
