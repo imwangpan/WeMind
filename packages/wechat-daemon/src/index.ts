@@ -121,7 +121,8 @@ function sniffMime(b: Buffer): string {
   return "image/jpeg";
 }
 
-async function handleMessage(account: AccountData, ctx: string | undefined, latestCtx: () => string | undefined, to: string, text: string, imageItems: ImageItem[]): Promise<void> {
+async function handleMessage(account: AccountData, ctx: string | undefined, latestCtx: () => string | undefined, to: string, text: string, imageItems: ImageItem[], createTimeMs?: number): Promise<void> {
+  const msgAge = () => createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"; // 这条消息已存在多久（用于判断 ret=-2 是否与 token 年龄相关）
   // 始终用该用户「最新」context_token 发送：长回合中旧 token 会被顶替/失效，
   // 若进度/心跳/出错通知仍用回合开始的旧 token，会全部 ret=-2 被拒，用户那头全程静默、像卡住。
   const cx = () => latestCtx() ?? ctx;
@@ -134,7 +135,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
   const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, cx(), msg); };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
   // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）
-  if (imageItems.length === 0) sendProgress("🤖 收到，正在处理…");
+  if (imageItems.length === 0) { log(`turn start to=${to} msgAge=${msgAge()}`); sendProgress("🤖 收到，正在处理…"); }
   // 心跳：仅当 brain 真正静默(无任何帧)超过 15s 才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
   const heartbeat = setInterval(() => {
@@ -208,15 +209,18 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
     finalText = finalText ? `${finalText}\n\n${note}` : note;
   }
   if (!finalText && !replyImages.length) finalText = "（没有内容）";
-  if (finalText) await sendOrdered(account, to, cx(), finalText);
-  log(`replied to ${to}: ${(answer || "").slice(0, 60)}`);
+  if (finalText) {
+    log(`final send: msgAge=${msgAge()} (若紧接着出现 send error ret=-2，即该年龄下 token 已失效)`);
+    await sendOrdered(account, to, cx(), finalText);
+  }
+  log(`replied to ${to} (msgAge=${msgAge()}): ${(answer || "").slice(0, 60)}`);
 }
 
 // ===== 解耦：拉取器(poller) 与 处理器(worker) 通过队列协作 =====
 // 大脑(ACP session)严格串行，但「拉取消息/抓 token」无需串行。把两者解耦：
 // poller 持续 getUpdates、实时更新 token、把消息入队，永不被大脑阻塞；
 // worker 串行从队列取消息喂大脑（尊重 kiro-cli 串行约束），发送时取最新 token，规避 ret=-2。
-type QueuedMsg = { from: string; text: string; imageItems: ImageItem[] };
+type QueuedMsg = { from: string; text: string; imageItems: ImageItem[]; createTimeMs?: number };
 const msgQueue: QueuedMsg[] = [];
 let wakeWorker: (() => void) | null = null;
 function notifyWorker(): void { const w = wakeWorker; wakeWorker = null; if (w) w(); }
@@ -257,7 +261,7 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
           .map((it) => it.image_item as ImageItem);
         if (!text && imageItems.length === 0) { log("skip empty/unsupported message"); continue; }
-        msgQueue.push({ from, text, imageItems });
+        msgQueue.push({ from, text, imageItems, createTimeMs: msg.create_time_ms });
         enq = true;
       }
       saveState(state);
@@ -295,12 +299,14 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
       // 合并：把队列中紧随其后、同一用户、非控制指令的消息并入本轮（连发更自然、更省）
       let text = item.text;
       const imageItems = [...item.imageItems];
+      let createTimeMs = item.createTimeMs;
       while (msgQueue.length > 0 && msgQueue[0].from === from && !(msgQueue[0].text && parseControl(msgQueue[0].text))) {
         const nxt = msgQueue.shift() as QueuedMsg;
         if (nxt.text) text = text ? `${text}\n${nxt.text}` : nxt.text;
         imageItems.push(...nxt.imageItems);
+        if (nxt.createTimeMs) createTimeMs = nxt.createTimeMs; // 用最新一条的时间（发送用的也是最新 token）
       }
-      await handleMessage(account, latestCtx(), latestCtx, from, text, imageItems);
+      await handleMessage(account, latestCtx(), latestCtx, from, text, imageItems, createTimeMs);
     } catch (e) {
       log("handleMessage error:", e instanceof Error ? (e.stack || e.message) : String(e));
       await reply(account, from, latestCtx(), "处理这条消息时出错了，请再发一次试试。").catch(() => {});
