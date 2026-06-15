@@ -21,6 +21,7 @@ const AGENT = resolveAgent(); // 当前 ACP agent（二进制/参数/配置目�
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 45_000; // 多久没收到任何帧才算"卡死"
 const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 300_000; // 单回合硬上限
+const FIRST_FRAME_MS = Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || 25_000; // 从未出过帧多久判定"开局即卡死"——比 idle 更快砍掉，省下重试前的空等
 const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
 const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 标记当前账号的大脑 kiro-cli pid，便于与用户自己的会话区分/清理
 
@@ -34,6 +35,7 @@ const userSessions = new Map<string, string>(); // 本进程已建立的 session
 const assembling = new Map<string, string[]>(); // sessionId -> 当前回合文本块
 let stdoutBuf = "";
 let lastFrameAt = 0; // 最近一次收到任何 stdout 帧的时间
+let frameSeq = 0; // 收到帧的累计序号（用于判定本回合是否出过帧）
 type ProgressEvent =
   | { type: "tool"; kind?: string; purpose?: string; title?: string }
   | { type: "answer" }
@@ -83,6 +85,7 @@ function saveSessionMap(m: Record<string, string>): void {
 
 function handleFrame(f: Record<string, any>): void {
   lastFrameAt = Date.now();
+  frameSeq += 1;
   if (typeof f.id === "number" && (f.result !== undefined || f.error !== undefined)) {
     const p = pending.get(f.id);
     if (!p) return;
@@ -148,14 +151,18 @@ function promptRequest(params: unknown): Promise<any> {
     const id = ++idCounter;
     const startedAt = Date.now();
     lastFrameAt = Date.now(); // 重置空闲基线：从本次 prompt 发出算起，避免用上一回合的旧时间戳误判
-    dlog(`→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms)`);
+    const startSeq = frameSeq; // 记录起点，用于判定本回合是否出过帧
+    dlog(`→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms firstFrame=${FIRST_FRAME_MS}ms)`);
     const iv = setInterval(() => {
       const idle = Date.now() - lastFrameAt;
       const total = Date.now() - startedAt;
-      if (idle > PROMPT_IDLE_MS || total > PROMPT_CAP_MS) {
+      const noFrameYet = frameSeq === startSeq; // 本回合从未出过帧
+      const firstFrameTimeout = noFrameYet && total > FIRST_FRAME_MS;
+      if (firstFrameTimeout || idle > PROMPT_IDLE_MS || total > PROMPT_CAP_MS) {
         if (pending.delete(id)) {
           clearInterval(iv);
-          reject(new Error(`session/prompt ${idle > PROMPT_IDLE_MS ? "idle" : "cap"} timeout (idle=${idle}ms total=${total}ms)`));
+          const why = firstFrameTimeout ? "no-first-frame" : (idle > PROMPT_IDLE_MS ? "idle" : "cap");
+          reject(new Error(`session/prompt ${why} timeout (idle=${idle}ms total=${total}ms)`));
         }
       }
     }, 5000);
