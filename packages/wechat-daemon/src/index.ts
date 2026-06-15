@@ -135,7 +135,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
   const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, cx(), msg); };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
   // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）
-  if (imageItems.length === 0) { log(`turn start to=${to} msgAge=${msgAge()}`); sendProgress("🤖 收到，正在处理…"); }
+  if (imageItems.length === 0) { const t = cx(); log(`turn start to=${to} msgAge=${msgAge()} usingCtx=${t ? t.slice(0, 10) : "NONE"}`); sendProgress("🤖 收到，正在处理…"); }
   // 心跳：仅当 brain 真正静默(无任何帧)超过 15s 才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
   const heartbeat = setInterval(() => {
@@ -249,6 +249,7 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
       // 先登记本批所有最新 token（worker 发送时取最新）
       for (const m of news) {
         const f = m.from_user_id ?? "";
+        if (f === owner) log(`recv msg id=${m.message_id} ctxToken=${m.context_token ? m.context_token.slice(0, 10) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`);
         if (m.context_token) state.contextTokens[`${account.botId}:${f}`] = m.context_token;
       }
       let enq = false;
