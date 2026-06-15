@@ -49,6 +49,10 @@ daemon 只用到 ACP 的标准方法，与具体是哪个 agent 无关：
 | `WEMIND_BRAIN_ARGS` | 覆盖 ACP 启动参数（**空格分隔**） | 预设值 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「配置目录环境变量名」（指向 brain 沙箱） | 预设值 |
 | `WEMIND_BRAIN_SHELL` | 是否经 shell 启动（`1`/`true` 开）；npx/`.cmd`/`.bat` 类适配器在 Windows 需要 | 预设值（默认 false） |
+| `WEMIND_BRAIN_INHERIT` | 是否继承真实配置目录的记忆/规则/技能（见 §6.5） | `1`（开） |
+| `WEMIND_BRAIN_REAL_HOME` | 覆盖被继承的真实配置目录 | 预设 `realHome` |
+| `WEMIND_BRAIN_INHERIT_DIRS` | 覆盖继承的子目录清单（逗号/空格分隔） | 预设 `inheritDirs` |
+| `WEMIND_MCP_CATALOG` | 覆盖可选 MCP 的来源 mcp.json 路径 | `<realHome>/settings/mcp.json` |
 | `KIRO_CLI_BIN` | 旧的 kiro 专用二进制覆盖（仅 `kiro` 预设、且未设 `WEMIND_BRAIN_BIN` 时生效） | — |
 
 解析优先级（`resolveAgent()`）：
@@ -154,6 +158,22 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 > 简言之：**对话/工具是通用的；「动态 MCP 注入」依赖该 agent 的配置约定，跨 agent 不保证开箱即用。**
 
 ---
+
+## 6.5 继承记忆 / 规则 / 技能（按 agent 配置）
+
+为了让微信里的大脑和你日常使用同一 agent 时读到**同样的记忆、规则、技能**，沙箱会把该 agent 真实配置目录里的「知识/记忆」类子目录用 junction 链进 brain 沙箱（`settings`、`sessions` 除外——前者 MCP 必须隔离防回环，后者是 brain 自有会话）。
+
+这一项**按 agent 配置驱动**（不同 agent 目录布局/记忆机制不同）：
+
+| 预设字段 / 环境变量 | 含义 |
+|---|---|
+| 预设 `realHome` / `WEMIND_BRAIN_REAL_HOME` | 被继承的真实配置目录 |
+| 预设 `inheritDirs` / `WEMIND_BRAIN_INHERIT_DIRS`（逗号/空格分隔） | 从 `realHome` 继承的子目录清单 |
+| `WEMIND_BRAIN_INHERIT=0` | 关闭继承 |
+
+- **kiro 已预置**：`realHome=~/.kiro`，`inheritDirs=steering,memories,skills,agents,powers,tasks,extensions`。
+- **其它 agent 默认不继承**：因为记忆机制差异大——例如 Gemini CLI / Claude Code 的「记忆」是**单个文件**（`GEMINI.md` / `CLAUDE.md`）而非目录，本机制（按目录 junction）不适用；需要时给预设填 `realHome`/`inheritDirs`，或用上面的环境变量。**单文件式记忆需另行处理**（本机制只链目录）。
+- 仅当目标 agent 用「配置目录 + 目录式记忆」模型时此继承才直接可用。
 
 ## 7. 平台注意（Windows）
 
