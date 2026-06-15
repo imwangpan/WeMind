@@ -23,6 +23,43 @@ const CATALOG = process.env.WECHAT_MCP_CATALOG?.trim() || path.join(os.homedir()
 /** 永不允许 brain 加载（防回环）。 */
 const FORBIDDEN = new Set(["wechat"]);
 
+/**
+ * 让 brain 继承真实 `~/.kiro` 的「知识/记忆」类目录（steering / memories / skills 等），
+ * 使微信里的大脑和你日常的 kiro 读到同样的记忆、规则、技能。
+ * 用目录 junction（Windows）/ symlink 指向真实目录；**唯独 settings 与 sessions 不镜像**：
+ *   - settings：MCP 必须走沙箱（curated mcp.json，排除 wechat 防回环）；
+ *   - sessions：brain 有自己的 ACP 会话，不能和你 IDE 的会话混。
+ * 这些目录都不是 MCP，没有回环风险。可用 WECHAT_BRAIN_INHERIT=0 关闭。
+ */
+const REAL_KIRO = process.env.WECHAT_REAL_KIRO_HOME?.trim() || path.join(os.homedir(), ".kiro");
+const INHERIT_KIRO = (process.env.WECHAT_BRAIN_INHERIT ?? "1") !== "0";
+const MIRROR_DIRS = ["steering", "memories", "skills", "agents", "powers", "tasks", "extensions"];
+
+function mirrorRealKiro(): void {
+  if (!INHERIT_KIRO) return;
+  if (path.resolve(BRAIN_HOME) === path.resolve(REAL_KIRO)) return; // 安全：别把自己链给自己
+  try { fs.mkdirSync(BRAIN_HOME, { recursive: true }); } catch { /* ignore */ }
+  for (const d of MIRROR_DIRS) {
+    const target = path.join(REAL_KIRO, d);
+    const link = path.join(BRAIN_HOME, d);
+    if (!fs.existsSync(target)) continue;
+    let present = false;
+    try { fs.lstatSync(link); present = true; } catch { /* 不存在 */ }
+    if (present) {
+      // 已是链接 → 不动；是 kiro 早期自建的「空」真实目录 → 删掉改建 junction；非空真实目录 → 保留不动（避免误删数据）
+      try {
+        const st = fs.lstatSync(link);
+        if (st.isSymbolicLink()) continue;
+        if (st.isDirectory() && fs.readdirSync(link).length === 0) fs.rmdirSync(link);
+        else continue;
+      } catch { continue; }
+    }
+    try {
+      fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+    } catch { /* 权限不足等：best-effort 忽略 */ }
+  }
+}
+
 function readJson(file: string): Record<string, unknown> | null {
   try {
     return JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
@@ -66,6 +103,7 @@ export function applySandbox(): void {
 /** 启动时确保沙箱存在并与激活集一致。 */
 export function ensureBrainHome(): void {
   applySandbox();
+  mirrorRealKiro(); // 继承真实 ~/.kiro 的记忆/steering/skills（MCP 与 sessions 仍隔离）
 }
 
 export function addMcp(name: string): string {
