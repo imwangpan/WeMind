@@ -93,11 +93,11 @@ async function setTyping(
   } catch { /* best-effort */ }
 }
 
-async function reply(account: AccountData, to: string, ctx: string | undefined, text: string): Promise<void> {
+async function reply(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH): Promise<void> {
   const req: SendMessageReq = {
     msg: {
       from_user_id: "", to_user_id: to, client_id: generateId("daemon"),
-      message_type: MessageType.BOT, message_state: MessageState.FINISH,
+      message_type: MessageType.BOT, message_state: state,
       item_list: [{ type: MessageItemType.TEXT, text_item: { text } }],
       context_token: ctx,
     },
@@ -107,8 +107,8 @@ async function reply(account: AccountData, to: string, ctx: string | undefined, 
 
 // 串行发送队列：保证多条消息（进度/答案）按入队顺序送达，不并发乱序
 let replyChain: Promise<void> = Promise.resolve();
-function sendOrdered(account: AccountData, to: string, ctx: string | undefined, text: string): Promise<void> {
-  replyChain = replyChain.then(() => reply(account, to, ctx, text).catch((e) => log("send error:", String(e))));
+function sendOrdered(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH): Promise<void> {
+  replyChain = replyChain.then(() => reply(account, to, ctx, text, state).catch((e) => log("send error:", String(e))));
   return replyChain;
 }
 
@@ -132,7 +132,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
-  const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, cx(), msg); };
+  const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, cx(), msg, MessageState.GENERATING); };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
   // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）
   if (imageItems.length === 0) { const t = cx(); log(`turn start to=${to} msgAge=${msgAge()} usingCtx=${t ? t.slice(0, 10) : "NONE"}`); sendProgress("🤖 收到，正在处理…"); }

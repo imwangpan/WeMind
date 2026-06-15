@@ -20,7 +20,7 @@ function dlog(...a: unknown[]): void { console.error("[acp]", ...a); }
 const AGENT = resolveAgent(); // 当前 ACP agent（二进制/参数/配置目录环境变量）
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 45_000; // 多久没收到任何帧才算"卡死"
-const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 300_000; // 单回合硬上限
+const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 600_000; // 单回合硬上限（opus 做重任务可能数分钟，放宽到 10min；卡死由 idle/首帧超时兜底）
 const FIRST_FRAME_MS = Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || 25_000; // 从未出过帧多久判定"开局即卡死"——比 idle 更快砍掉，省下重试前的空等
 const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
 const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 标记当前账号的大脑 kiro-cli pid，便于与用户自己的会话区分/清理
