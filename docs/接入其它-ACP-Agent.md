@@ -233,3 +233,23 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 验证：
   看 daemon.log 的 [acp] spawn / prompt ok；或 node 跑 resolveAgent()
 ```
+
+
+---
+
+## 11. 附录：ACP 生态可接入 agent 清单（参考）
+
+> 来源：ACP 官方站 `agentclientprotocol.com/get-started/agents`（截至 2026 年；生态在扩大，以官方为准）。
+> ACP 通用介绍见知识库笔记《ACP（Agent Client Protocol）详解》。
+
+**原生支持 ACP（可直接配预设/环境变量接入，理论可当 WeMind 大脑/工作机）**：
+- Kiro CLI（✅ 已实测，默认）、Gemini CLI、Goose、OpenCode、OpenHands、Cline、Cursor、GitHub Copilot（公开预览）、Junie（JetBrains）、Kimi CLI、Hermes Agent、Docker cagent、fast-agent、Augment Code、Factory Droid、AgentPool、AutoDev、Blackbox AI、Code Assistant、crow-cli、Minion Code、Mistral Vibe、fount、OpenClaw…
+
+**需经适配器（CLI 本身不原生说 ACP，需先起桥接进程）**：
+- Claude Code → `@zed-industries/claude-code-acp`（npx）；
+- Codex CLI → `codex-acp`（社区适配器）；
+- Bub → `bub-acp-server`；Pi → `pi-acp`…
+
+> 接入任一 agent 的通用步骤见本文 §2–§5；带"适配器"的把 `WEMIND_BRAIN_BIN/ARGS` 指向适配器启动命令（如 `npx -y @zed-industries/claude-code-acp`）。除 kiro 外均建议先实测。
+>
+> 远程 ACP（HTTP/WebSocket）官方仍在完善——成熟后可把工作机部署到独立/更强机器（见《方案C-受控ACP工作机设计》）。
