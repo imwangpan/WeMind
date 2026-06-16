@@ -10,4 +10,5 @@ export * from "./api/error-codes.js";
 export * from "./api/session-guard.js";
 export * from "./store/account.js";
 export * from "./store/accounts.js";
+export * from "./store/allow-from.js";
 export * from "./cdn/image.js";

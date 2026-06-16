@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import {
   WEMIND_ROOT, accountDir, deriveAccountKey,
-  listAccounts, registerAccount, unregisterAccount, setLabel, getDefaultKey, setDefaultKey,
-  fetchQRCode, pollQRStatus, saveQrState, clearSessionPause, notifyStart, notifyStop,
+  listAccounts, registerAccount, unregisterAccount, setLabel, getDefaultKey, setDefaultKey,  fetchQRCode, pollQRStatus, saveQrState, clearSessionPause, notifyStart, notifyStop,
+  addAllowFrom, removeAllowFrom, readAllowFrom,
   type AccountData,
 } from "@wemind/wechat-ilink-core";
 
@@ -94,6 +94,7 @@ function finalizeStaging(label?: string): { key: string; msg: string } {
     try { fs.unlinkSync(path.join(dest, f)); } catch { /* ignore */ }
   }
   const meta = registerAccount({ key, botId: acc.botId, userId: acc.userId, baseUrl: acc.baseUrl, label: label || key });
+  if (acc.userId) addAllowFrom(acc.userId, dest); // 配对：扫码登录者自动授权
   return { key, msg: `已归档：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}` };
 }
 
@@ -164,6 +165,7 @@ function cmdAdopt(key: string, label?: string): string {
   const acc = readAccount(accountDir(key));
   if (!acc?.botId) throw new Error(`${accountDir(key)} 无有效 account.json`);
   const meta = registerAccount({ key, botId: acc.botId, userId: acc.userId, baseUrl: acc.baseUrl, label: label || key });
+  if (acc.userId) addAllowFrom(acc.userId, accountDir(key)); // 接管时把账号本人种入授权清单
   return `已登记：key=${key}  label=${meta.label}  botId=${acc.botId}`;
 }
 
@@ -215,6 +217,9 @@ async function main(): Promise<void> {
     case "logout": console.log(await cmdLogout(rest[0])); break;
     case "delete": console.log(cmdDelete(rest[0])); break;
     case "finalize": { const { msg } = finalizeStaging(label); console.log(msg); break; } // 兼容旧流程（staging 已有登录时归档）
+    case "allow": { const k = resolveKey(rest[0]); const uid = rest[1]; if (!uid) throw new Error("用法: allow <key|label> <userId>"); const list = addAllowFrom(uid, accountDir(k)); console.log(`已授权 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ")}`); break; }
+    case "revoke": { const k = resolveKey(rest[0]); const uid = rest[1]; if (!uid) throw new Error("用法: revoke <key|label> <userId>"); const list = removeAllowFrom(uid, accountDir(k)); console.log(`已撤销 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ") || "（空）"}`); break; }
+    case "allowlist": { const k = resolveKey(rest[0]); const list = readAllowFrom(accountDir(k)); console.log(`${k} 授权用户(${list.length})：\n${list.map((u) => "  - " + u).join("\n") || "  （空）"}`); break; }
     default:
       console.log(`WeMind 多账号管理
 用法: node packages/wechat-daemon/dist/manage.js <command>
@@ -227,6 +232,9 @@ async function main(): Promise<void> {
   label <key|label> <新别名>     改别名
   set-default <key|label>        设默认账号
   adopt <key> [--label 名]       把已存在的账号目录登记进注册表
+  allowlist <key|label>          查看该账号的授权用户清单(allowFrom)
+  allow <key|label> <userId>     授权某用户可驱动该账号 bot
+  revoke <key|label> <userId>    撤销某用户的授权
 
 说明：key = 由微信 botId 派生的唯一标识（目录名）；label = 人类可读别名。多数命令可用 key 或 label。`);
   }

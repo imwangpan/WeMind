@@ -7,6 +7,7 @@ import {
   loadAccount, loadState, saveState, DATA_DIR,
   MessageItemType, MessageState, MessageType,
   downloadImage, sendImage, ILinkError,
+  isAllowed, addAllowFrom, readAllowFrom,
 } from "@wemind/wechat-ilink-core";
 import type { AccountData, ServerState, WeixinMessage, SendMessageReq, ImageItem } from "@wemind/wechat-ilink-core";
 import { askBrain, newSession, restart } from "./acp-brain.js";
@@ -326,6 +327,11 @@ const msgQueue: QueuedMsg[] = [];
 let wakeWorker: (() => void) | null = null;
 function notifyWorker(): void { const w = wakeWorker; wakeWorker = null; if (w) w(); }
 
+/** 发件人鉴权：账号本人(owner，始终允许，作安全兜底) 或 在 allowFrom 授权清单中。 */
+function isAuthorized(from: string, owner: string): boolean {
+  return !!from && (from === owner || isAllowed(from));
+}
+
 async function pollerLoop(account: AccountData, owner: string, state: ServerState): Promise<void> {
   while (true) {
     if (isSessionPaused(account.botId)) {
@@ -350,14 +356,14 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
       // 先登记本批所有最新 token（worker 发送时取最新）
       for (const m of news) {
         const f = m.from_user_id ?? "";
-        if (f === owner) log(`recv msg id=${m.message_id} ctx=…${m.context_token ? m.context_token.slice(-12) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`);
+        if (isAuthorized(f, owner)) log(`recv msg id=${m.message_id} ctx=…${m.context_token ? m.context_token.slice(-12) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`);
         if (m.context_token) state.contextTokens[`${account.botId}:${f}`] = m.context_token;
       }
       let enq = false;
       for (const msg of news) {
         state.lastMessageId = Math.max(state.lastMessageId, msg.message_id ?? 0);
         const from = msg.from_user_id ?? "";
-        if (from !== owner) { log("ignore non-owner sender:", from); continue; }
+        if (!isAuthorized(from, owner)) { log("ignore unauthorized sender:", from); continue; }
         const text = extractText(msg);
         const imageItems = (msg.item_list ?? [])
           .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
@@ -424,7 +430,8 @@ async function main(): Promise<void> {
     log("not logged in; run the MCP login_qrcode flow first.");
     process.exit(1);
   }
-  const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId; // 发件人白名单：默认仅本人
+  const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId; // 账号本人：始终授权（安全兜底）
+  if (owner) addAllowFrom(owner, DATA_DIR); // 种入授权清单(自动迁移老账号)；新登录在 finalize 已配对
   // 写 PID 文件，供管理命令（logout/delete）精确定位并停止本账号的 daemon
   const pidFile = path.join(DATA_DIR, "daemon.pid");
   try { fs.writeFileSync(pidFile, String(process.pid), "utf-8"); } catch { /* best-effort */ }
@@ -441,7 +448,7 @@ async function main(): Promise<void> {
     log("uncaughtException:", err?.stack || String(err));
   });
   ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
-  log(`up. bot=${account.botId} owner=${owner}`);
+  log(`up. bot=${account.botId} owner=${owner} allowFrom=${readAllowFrom(DATA_DIR).length}`);
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
 
   const state: ServerState = loadState();
