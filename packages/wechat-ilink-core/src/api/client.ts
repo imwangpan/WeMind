@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { ILINK_APP_ID } from "../config.js";
+import { ILinkError } from "./error-codes.js";
 import type { GetUpdatesResp, SendMessageReq, QRCodeResponse, QRStatusResponse, SendTypingReq, GetConfigResp, GetUploadUrlReq, GetUploadUrlResp } from "./types.js";
 
 export type ApiOptions = {
@@ -138,8 +139,9 @@ export async function sendMessage(params: {
     timeoutMs: params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
     label: "sendMessage",
   });
-  // iLink 即使 HTTP 200 也可能在响应体返回非 0 ret/errcode 表示失败（如 ret:-2：context 失效/会话不在活跃态）。
-  // 不校验会导致"假成功"——消息其实没送达。仅在明确拿到非 0 错误码时抛错；空/非 JSON 的成功响应不阻断。
+  // iLink 即使 HTTP 200 也可能在响应体返回非 0 ret/errcode 表示失败。语义见 error-codes.ts：
+  //   ret=-2 参数错误（最常见 context_token 失效/不匹配）；errcode=-14 会话过期。
+  // 不校验会导致"假成功"——消息其实没送达。仅在明确拿到非 0 错误码时抛 ILinkError（携带码+分类，供上层按类型处理）。
   let code: number | undefined;
   let errmsg: string | undefined;
   try {
@@ -148,7 +150,7 @@ export async function sendMessage(params: {
     errmsg = resp?.errmsg;
   } catch { /* 空/非 JSON 的成功响应，忽略 */ }
   if (code !== undefined && code !== 0) {
-    throw new Error(`sendMessage rejected: ret=${code}${errmsg ? ` (${errmsg})` : ""}`);
+    throw new ILinkError("sendMessage", code, errmsg);
   }
 }
 

@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 import { getUploadUrl, sendMessage, generateId } from "../api/client.js";
+import { ILinkError } from "../api/error-codes.js";
 import { MessageType, MessageState, MessageItemType, UploadMediaType, type ImageItem, type SendMessageReq } from "../api/types.js";
 
 /**
@@ -116,7 +117,7 @@ export async function sendImage(params: {
     rawsize, rawfilemd5, filesize, no_need_thumb: true, aeskey: aeskey.toString("hex"),
   });
   const code = up.ret ?? up.errcode;
-  if (code !== undefined && code !== 0) throw new Error(`getUploadUrl rejected: ret=${code}${up.errmsg ? ` (${up.errmsg})` : ""}`);
+  if (code !== undefined && code !== 0) throw new ILinkError("getUploadUrl", code, up.errmsg);
 
   const downloadParam = await uploadBufferToCdn({
     buf: image, aeskey, filekey,

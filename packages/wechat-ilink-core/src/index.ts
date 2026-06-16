@@ -6,6 +6,7 @@
 export * from "./config.js";
 export * from "./api/types.js";
 export * from "./api/client.js";
+export * from "./api/error-codes.js";
 export * from "./api/session-guard.js";
 export * from "./store/account.js";
 export * from "./store/accounts.js";

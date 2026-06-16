@@ -6,7 +6,7 @@ import {
   SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs,
   loadAccount, loadState, saveState, DATA_DIR,
   MessageItemType, MessageState, MessageType,
-  downloadImage, sendImage,
+  downloadImage, sendImage, ILinkError,
 } from "@wemind/wechat-ilink-core";
 import type { AccountData, ServerState, WeixinMessage, SendMessageReq, ImageItem } from "@wemind/wechat-ilink-core";
 import { askBrain, newSession, restart } from "./acp-brain.js";
@@ -109,22 +109,45 @@ async function setTyping(
   } catch { /* best-effort */ }
 }
 
-async function reply(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH): Promise<void> {
-  const req: SendMessageReq = {
-    msg: {
-      from_user_id: "", to_user_id: to, client_id: generateId("daemon"),
-      message_type: MessageType.BOT, message_state: state,
-      item_list: [{ type: MessageItemType.TEXT, text_item: { text } }],
-      context_token: ctx,
-    },
+async function reply(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH, fallbackToken?: string): Promise<void> {
+  const send = (token: string | undefined) => {
+    const req: SendMessageReq = {
+      msg: {
+        from_user_id: "", to_user_id: to, client_id: generateId("daemon"),
+        message_type: MessageType.BOT, message_state: state,
+        item_list: [{ type: MessageItemType.TEXT, text_item: { text } }],
+        context_token: token,
+      },
+    };
+    return sendMessage({ baseUrl: account.baseUrl, token: account.botToken, body: req });
   };
-  await sendMessage({ baseUrl: account.baseUrl, token: account.botToken, body: req });
+  try {
+    await send(ctx);
+  } catch (e) {
+    // ret=-2 参数错误（最常见为 context_token 失效/不匹配）：用该用户「最新缓存 token」兜底重试一次
+    if (e instanceof ILinkError && e.kind === "param_error" && fallbackToken && fallbackToken !== ctx) {
+      log(`reply -2(参数错误) → 用最新缓存 token 兜底重试`);
+      await send(fallbackToken);
+      return;
+    }
+    throw e;
+  }
+}
+
+/** 统一的发送错误处理：按错误类型分类记录；会话过期则暂停账号。 */
+function handleSendError(e: unknown, account: AccountData): void {
+  if (e instanceof ILinkError) {
+    log("send error:", e.message);
+    if (e.kind === "session_expired") { pauseSession(account.botId); log("会话过期(-14) on send → 该账号暂停 1h，待重新登录"); }
+  } else {
+    log("send error:", String(e));
+  }
 }
 
 // 串行发送队列：保证多条消息（进度/答案）按入队顺序送达，不并发乱序
 let replyChain: Promise<void> = Promise.resolve();
-function sendOrdered(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH): Promise<void> {
-  replyChain = replyChain.then(() => reply(account, to, ctx, text, state).catch((e) => log("send error:", String(e))));
+function sendOrdered(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH, fallbackToken?: string): Promise<void> {
+  replyChain = replyChain.then(() => reply(account, to, ctx, text, state, fallbackToken).catch((e) => handleSendError(e, account)));
   return replyChain;
 }
 
@@ -137,9 +160,9 @@ function sniffMime(b: Buffer): string {
   return "image/jpeg";
 }
 
-async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string, imageItems: ImageItem[], createTimeMs?: number): Promise<void> {
+async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string, imageItems: ImageItem[], createTimeMs?: number, latestToken?: () => string | undefined): Promise<void> {
   const msgAge = () => createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"; // 这条消息已存在多久（诊断用）
-  // 本回合所有发送都用这条消息自己带的 context_token（每条消息各有各的 token；回复较早消息时不能用别人的 token，否则 ret=-2）
+  // 本回合所有发送主用这条消息自己带的 context_token；最终回复在遇到 -2(参数错误,多为 token 失效)时，用该用户最新缓存 token 兜底重试。
   const cx = () => ctx;
   await setTyping(account, to, cx(), 1);
   // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
@@ -244,8 +267,8 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   }
   if (!finalText && !replyImages.length) finalText = "（没有内容）";
   if (finalText) {
-    log(`final send: msgAge=${msgAge()} (若紧接着出现 send error ret=-2，即该年龄下 token 已失效)`);
-    await sendOrdered(account, to, cx(), finalText);
+    log(`final send: msgAge=${msgAge()}`);
+    await sendOrdered(account, to, cx(), finalText, MessageState.FINISH, latestToken ? latestToken() : undefined);
   }
   log(`replied to ${to} (msgAge=${msgAge()}): ${(answer || "").slice(0, 60)}`);
 }
@@ -318,6 +341,7 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
     const item = msgQueue.shift() as QueuedMsg;
     const from = item.from;
     const token = item.contextToken; // 用这条消息自己带的 context_token 回复（每条消息各有各的 token）
+    const latestToken = () => state.contextTokens[`${account.botId}:${from}`]; // 该用户最新缓存 token（仅作 -2 参数错误时的兜底）
 
     // 控制指令：单独处理
     const ctrl = item.text ? parseControl(item.text) : null;
@@ -326,15 +350,15 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
       try { r = await handleControl(ctrl, from); }
       catch (e) { r = "处理指令出错：" + String(e); }
       log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
-      await reply(account, from, token, r).catch((e) => log("send error:", String(e)));
+      await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) => handleSendError(e, account));
       continue;
     }
 
     try {
-      await handleMessage(account, token, from, item.text, item.imageItems, item.createTimeMs);
+      await handleMessage(account, token, from, item.text, item.imageItems, item.createTimeMs, latestToken);
     } catch (e) {
       log("handleMessage error:", e instanceof Error ? (e.stack || e.message) : String(e));
-      await reply(account, from, token, "处理这条消息时出错了，请再发一次试试。").catch(() => {});
+      await reply(account, from, token, "处理这条消息时出错了，请再发一次试试。", MessageState.FINISH, latestToken()).catch((e2) => handleSendError(e2, account));
     }
   }
 }
