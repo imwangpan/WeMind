@@ -356,14 +356,18 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
           .map((it) => it.image_item as ImageItem);
         if (!text && imageItems.length === 0) { log("skip empty/unsupported message"); continue; }
-        // 「继续」信号：仅当**有进行中的任务回合**（activeTurn 存在）时，重置其连续发送计数 + 采用本消息新 token（服务端配额随用户回复重置）+ 恢复进度，且不作为新任务入队。
-        // 无进行中任务时的「继续」、以及其它任何消息，一律照常进入消息队列。
-        if (text.trim() === "继续" && activeTurn && activeTurn.from === from) {
-          activeTurn.token = msg.context_token ?? activeTurn.token;
+        // 服务端按「距用户上一条消息」计连续发送数 → 任何来自 owner 的消息都会重置服务端配额，
+        // 故同步重置当前进行中任务的发送计数。
+        if (activeTurn && activeTurn.from === from) {
           activeTurn.sent = 0;
-          activeTurn.awaitingContinue = false;
-          log("收到「继续」(任务执行中) → 重置连续发送计数、采用新 token、恢复进度");
-          continue;
+          // 「继续」且当前正处于「等待继续」段：恢复进度 + 换用本消息新 token，且仅作恢复信号、不入队
+          if (text.trim() === "继续" && activeTurn.awaitingContinue) {
+            activeTurn.token = msg.context_token ?? activeTurn.token;
+            activeTurn.awaitingContinue = false;
+            log("收到「继续」(等待中) → 恢复进度、重置计数、换新 token");
+            continue;
+          }
+          log("用户新消息到达 → 重置当前任务连续发送计数(服务端配额随之重置)");
         }
         msgQueue.push({ from, text, imageItems, createTimeMs: msg.create_time_ms, contextToken: msg.context_token });
         enq = true;
