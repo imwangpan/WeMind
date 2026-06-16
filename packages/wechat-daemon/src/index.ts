@@ -6,13 +6,14 @@ import {
   SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs,
   loadAccount, loadState, saveState, DATA_DIR,
   MessageItemType, MessageState, MessageType,
-  downloadImage, sendImage, ILinkError,
+  downloadImage, sendImage, sendFile, ILinkError, classifyTransportError,
   isAllowed, addAllowFrom, readAllowFrom,
 } from "@wemind/wechat-ilink-core";
 import type { AccountData, ServerState, WeixinMessage, SendMessageReq, ImageItem } from "@wemind/wechat-ilink-core";
 import { askBrain, newSession, restart } from "./acp-brain.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
 import { extractImages, resolveImageBytes } from "./image-reply.js";
+import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
 
 const log = (...a: unknown[]) => console.error("[daemon]", ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -133,6 +134,16 @@ async function reply(account: AccountData, to: string, ctx: string | undefined, 
       await send(fallbackToken && fallbackToken !== ctx ? fallbackToken : ctx);
       return;
     }
+    // 传输层错误（网络抖动 fetch failed/ECONNRESET/超时等）：可重试类退避 1.5s 后重试一次
+    if (!(e instanceof ILinkError)) {
+      const t = classifyTransportError(e);
+      if (t.retryable) {
+        log(`send 传输错误(${t.kind}) → 退避 1.5s 后重试`);
+        await new Promise((r) => setTimeout(r, 1500));
+        await send(ctx);
+        return;
+      }
+    }
     throw e;
   }
 }
@@ -143,7 +154,8 @@ function handleSendError(e: unknown, account: AccountData): void {
     log("send error:", e.message);
     if (e.kind === "session_expired") { pauseSession(account.botId); log("会话过期(-14) on send → 该账号暂停 1h，待重新登录"); }
   } else {
-    log("send error:", String(e));
+    const t = classifyTransportError(e);
+    log(`send error(传输/${t.kind}${t.retryable ? ",可重试" : ""}):`, t.message);
   }
 }
 
@@ -173,6 +185,24 @@ function sendOrdered(account: AccountData, to: string, ctx: string | undefined, 
     const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
     if (wait > 0) await sleep(wait);
     await reply(account, to, ctx, text, state, fallbackToken).catch((e) => handleSendError(e, account));
+    lastSendAt = Date.now();
+  });
+  return replyChain;
+}
+
+/** 把长回复作为 .md 文件发送（走同一串行链+节流）；发文件失败则兜底回退为文本。 */
+function sendMdOrdered(account: AccountData, to: string, ctx: string | undefined, finalText: string, fallbackToken?: string): Promise<void> {
+  replyChain = replyChain.then(async () => {
+    const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
+    if (wait > 0) await sleep(wait);
+    const { fileName, data } = buildMdReply(finalText);
+    try {
+      await sendFile({ baseUrl: account.baseUrl, token: account.botToken, to, data, fileName, kind: "file", contextToken: ctx });
+      log(`final as md file: ${fileName} (${finalText.length} chars)`);
+    } catch (e) {
+      log("send md file failed, fallback to text:", String(e));
+      await reply(account, to, ctx, finalText, MessageState.FINISH, fallbackToken).catch((er) => handleSendError(er, account));
+    }
     lastSendAt = Date.now();
   });
   return replyChain;
@@ -311,8 +341,13 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   if (!finalText && !replyImages.length) finalText = "（没有内容）";
   if (finalText) {
     budgetOf(to).count += 1; // 最终答案占一条额度（等待段预留的最后一条）
-    log(`final send: msgAge=${msgAge()} sent=${budgetOf(to).count}`);
-    await sendOrdered(account, to, cx(), finalText, MessageState.FINISH, latestToken ? latestToken() : undefined);
+    log(`final send: msgAge=${msgAge()} sent=${budgetOf(to).count} len=${finalText.length}`);
+    const ft = latestToken ? latestToken() : undefined;
+    if (finalText.length > LONG_REPLY_THRESHOLD) {
+      await sendMdOrdered(account, to, cx(), finalText, ft); // 长回复 → .md 文件（一条消息）
+    } else {
+      await sendOrdered(account, to, cx(), finalText, MessageState.FINISH, ft);
+    }
   }
   log(`replied to ${to} (msgAge=${msgAge()}): ${(answer || "").slice(0, 60)}`);
   activeTurn = null; // 回合结束（计数 budgetOf 不清零，留待用户下条消息重置）

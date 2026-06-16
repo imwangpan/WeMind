@@ -97,6 +97,60 @@ async function uploadBufferToCdn(params: {
   throw lastErr instanceof Error ? lastErr : new Error("CDN 上传失败");
 }
 
+/** getUploadUrl + 加密上传，返回媒体引用所需信息。media_type 见 UploadMediaType。 */
+async function uploadMediaBytes(params: {
+  baseUrl: string;
+  token?: string;
+  to: string;
+  data: Buffer;
+  mediaType: number;
+}): Promise<{ downloadParam: string; aeskeyHex: string; filesize: number; rawsize: number }> {
+  const { baseUrl, token, to, data, mediaType } = params;
+  const rawsize = data.length;
+  const rawfilemd5 = createHash("md5").update(data).digest("hex");
+  const filesize = aesEcbPaddedSize(rawsize);
+  const filekey = randomBytes(16).toString("hex");
+  const aeskey = randomBytes(16);
+
+  const up = await getUploadUrl({
+    baseUrl, token, filekey, media_type: mediaType, to_user_id: to,
+    rawsize, rawfilemd5, filesize, no_need_thumb: true, aeskey: aeskey.toString("hex"),
+  });
+  const code = up.ret ?? up.errcode;
+  if (code !== undefined && code !== 0) throw new ILinkError("getUploadUrl", code, up.errmsg);
+
+  const downloadParam = await uploadBufferToCdn({
+    buf: data, aeskey, filekey,
+    uploadFullUrl: up.upload_full_url, uploadParam: up.upload_param,
+  });
+  return { downloadParam, aeskeyHex: aeskey.toString("hex"), filesize, rawsize };
+}
+
+/** 拼 CDN media 引用（消息里给接收方下载+解密用）。 */
+function buildMediaRef(downloadParam: string, aeskeyHex: string) {
+  return { encrypt_query_param: downloadParam, aes_key: Buffer.from(aeskeyHex).toString("base64"), encrypt_type: 1 };
+}
+
+export type MediaKind = "image" | "video" | "file";
+
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]);
+const VIDEO_EXTS = new Set([".mp4", ".mov", ".webm", ".mkv", ".avi"]);
+
+/** 按文件名扩展名判定媒体类别（借鉴 wxclawbot media.ts classifyMedia）。其余一律按文件发送。 */
+export function classifyMediaByName(name: string): MediaKind {
+  const i = name.lastIndexOf(".");
+  const ext = i >= 0 ? name.slice(i).toLowerCase() : "";
+  if (IMAGE_EXTS.has(ext)) return "image";
+  if (VIDEO_EXTS.has(ext)) return "video";
+  return "file";
+}
+
+const UPLOAD_TYPE_BY_KIND: Record<MediaKind, number> = {
+  image: UploadMediaType.IMAGE,
+  video: UploadMediaType.VIDEO,
+  file: UploadMediaType.FILE,
+};
+
 /** 主动发一张图片给用户（需 context_token，与发文本相同）。image 为图片明文 buffer。 */
 export async function sendImage(params: {
   baseUrl: string;
@@ -106,39 +160,58 @@ export async function sendImage(params: {
   contextToken?: string;
 }): Promise<void> {
   const { baseUrl, token, to, image, contextToken } = params;
-  const rawsize = image.length;
-  const rawfilemd5 = createHash("md5").update(image).digest("hex");
-  const filesize = aesEcbPaddedSize(rawsize);
-  const filekey = randomBytes(16).toString("hex");
-  const aeskey = randomBytes(16);
-
-  const up = await getUploadUrl({
-    baseUrl, token, filekey, media_type: UploadMediaType.IMAGE, to_user_id: to,
-    rawsize, rawfilemd5, filesize, no_need_thumb: true, aeskey: aeskey.toString("hex"),
+  const { downloadParam, aeskeyHex, filesize } = await uploadMediaBytes({
+    baseUrl, token, to, data: image, mediaType: UploadMediaType.IMAGE,
   });
-  const code = up.ret ?? up.errcode;
-  if (code !== undefined && code !== 0) throw new ILinkError("getUploadUrl", code, up.errmsg);
-
-  const downloadParam = await uploadBufferToCdn({
-    buf: image, aeskey, filekey,
-    uploadFullUrl: up.upload_full_url, uploadParam: up.upload_param,
-  });
-
   const req: SendMessageReq = {
     msg: {
       from_user_id: "", to_user_id: to, client_id: generateId("img"),
       message_type: MessageType.BOT, message_state: MessageState.FINISH,
       item_list: [{
         type: MessageItemType.IMAGE,
-        image_item: {
-          media: {
-            encrypt_query_param: downloadParam,
-            aes_key: Buffer.from(aeskey.toString("hex")).toString("base64"),
-            encrypt_type: 1,
-          },
-          mid_size: filesize,
-        },
+        image_item: { media: buildMediaRef(downloadParam, aeskeyHex), mid_size: filesize },
       }],
+      context_token: contextToken,
+    },
+  };
+  await sendMessage({ baseUrl, token, body: req });
+}
+
+/**
+ * 主动发一个文件/视频/图片给用户（需 context_token）。
+ * 类别按 fileName 扩展名自动判定（image/video/file），也可用 kind 显式指定。
+ * 借鉴 wxclawbot media.ts 的类型识别与 item 组装；上传链路复用 WeMind 自有实现。
+ */
+export async function sendFile(params: {
+  baseUrl: string;
+  token?: string;
+  to: string;
+  data: Buffer;
+  fileName: string;
+  kind?: MediaKind;
+  contextToken?: string;
+}): Promise<void> {
+  const { baseUrl, token, to, data, fileName, contextToken } = params;
+  const kind = params.kind ?? classifyMediaByName(fileName);
+  const { downloadParam, aeskeyHex, filesize, rawsize } = await uploadMediaBytes({
+    baseUrl, token, to, data, mediaType: UPLOAD_TYPE_BY_KIND[kind],
+  });
+  const media = buildMediaRef(downloadParam, aeskeyHex);
+
+  let item;
+  if (kind === "image") {
+    item = { type: MessageItemType.IMAGE, image_item: { media, mid_size: filesize } };
+  } else if (kind === "video") {
+    item = { type: MessageItemType.VIDEO, video_item: { media, video_size: filesize } };
+  } else {
+    item = { type: MessageItemType.FILE, file_item: { media, file_name: fileName, len: String(rawsize) } };
+  }
+
+  const req: SendMessageReq = {
+    msg: {
+      from_user_id: "", to_user_id: to, client_id: generateId("media"),
+      message_type: MessageType.BOT, message_state: MessageState.FINISH,
+      item_list: [item],
       context_token: contextToken,
     },
   };
