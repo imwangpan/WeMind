@@ -203,6 +203,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_BRAIN_FIRST_FRAME_MS` | 首帧超时：prompt 发出后多久仍无任何帧判「开局即卡死」并快速重试（默认 25000） |
 | `WECHAT_CONSEC_SEND_LIMIT` | bot 在用户回复前可连续发送的消息数上限（默认 10）。达「上限-2」后发提示并等待「继续」，留最后一条给答案 |
 | `WECHAT_MIN_SEND_GAP_MS` | 两条发送之间的最小间隔，规避发送限流（默认 1500） |
+| `WECHAT_REPLY_FILE_THRESHOLD` | 回复正文超过此字符数则转 .md 文件发送（默认 1500） |
 | `WEMIND_ILINK_BASE` | iLink API / 登录基础 URL（默认 `https://ilinkai.weixin.qq.com`） |
 | `WECHAT_CDN_BASE_URL` | 媒体 CDN 基础 URL（默认 `https://novac2c.cdn.weixin.qq.com/c2c`） |
 | `ILINK_CLIENT_VERSION` | 对外声明的 iLink 客户端版本（默认 `2.4.3`，随官方升级可改，免动代码） |
@@ -260,6 +261,12 @@ daemon 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio
 
 - **收图**（用户发图 → 大脑看图）：daemon 下载并 AES-128-ECB 解密入站图片，作为 ACP image 块喂给大脑（`promptCapabilities.image:true`），大脑能"看"图回应。
 - **发图**（大脑发图 → 用户）：大脑在回复里用 **Markdown 图片语法 `![](图片的 http 链接或本地文件绝对路径)`**，或直接给出**裸图片 URL**，daemon 会自动把它下载/读取后作为图片消息发出，并把剩余文字另发。大脑本身不会文生图，但能发：联网搜到的图、本地已有的图、自己用代码渲染保存的图表。底层走 `getUploadUrl` + AES-128-ECB 加密上传 CDN（`no_need_thumb`，免缩略图）。
+- **发文件 / 视频**：core `sendFile` 按扩展名自动判类型（图/视频/文件），组装 `image_item / video_item / file_item`，上传链路与发图同构。语音（`voice_item`）需 SILK 编码，暂未实现。
+
+### 长回复自动转 .md 文件
+
+- 当大脑最终回复正文**超过阈值**（默认 1500 字，`WECHAT_REPLY_FILE_THRESHOLD` 可覆盖）时，daemon 不再把长文拆成多条文本，而是作为**单个 `.md` 文件**发送：一条消息、规避连续发送上限、阅读完整。
+- 文件名由**内容生成合适标题**（取首个 Markdown 标题或首个非空行，清洗为合法文件名）；正文若无标题则在文件内前置一个 H1。发文件失败时**兜底回退为文本**。
 
 ### Windows 登录自启
 
