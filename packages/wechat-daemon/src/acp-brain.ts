@@ -19,8 +19,8 @@ function dlog(...a: unknown[]): void { console.error("[acp]", ...a); }
 
 const AGENT = resolveAgent(); // 当前 ACP agent（二进制/参数/配置目录环境变量）
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
-const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 30_000; // 多久没收到任何帧才算"卡死"（降到 30s 更快发现卡死）
-const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 240_000; // 单回合硬上限 4min（< context_token 约 5min 寿命，保证失败提示能在 token 有效期内送达；卡死由 idle/首帧超时更早兜底）
+const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 120_000; // 多久没收到任何帧才算"卡死"。重任务单次慢抓取可静默较久（直连 kiro-cli 无此限制），放宽到 2min 兜底真死
+const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 900_000; // 单回合硬上限 15min。实测重任务(联网核实)需 ~6.5min；context_token 无时间 TTL(官方)，长回合用本消息 token 仍可送达。卡死由 idle/首帧超时兜底
 const FIRST_FRAME_MS = Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || 25_000; // 从未出过帧多久判定"开局即卡死"——比 idle 更快砍掉，省下重试前的空等
 const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
 const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 标记当前账号的大脑 kiro-cli pid，便于与用户自己的会话区分/清理
