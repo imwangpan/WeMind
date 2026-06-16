@@ -261,7 +261,8 @@ daemon 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio
 
 - **收图**（用户发图 → 大脑看图）：daemon 下载并 AES-128-ECB 解密入站图片，作为 ACP image 块喂给大脑（`promptCapabilities.image:true`），大脑能"看"图回应。
 - **发图**（大脑发图 → 用户）：大脑在回复里用 **Markdown 图片语法 `![](图片的 http 链接或本地文件绝对路径)`**，或直接给出**裸图片 URL**，daemon 会自动把它下载/读取后作为图片消息发出，并把剩余文字另发。大脑本身不会文生图，但能发：联网搜到的图、本地已有的图、自己用代码渲染保存的图表。底层走 `getUploadUrl` + AES-128-ECB 加密上传 CDN（`no_need_thumb`，免缩略图）。
-- **发文件 / 视频**：core `sendFile` 按扩展名自动判类型（图/视频/文件），组装 `image_item / video_item / file_item`，上传链路与发图同构。语音（`voice_item`）需 SILK 编码，暂未实现。
+- **发文件 / 视频**：core `sendFile` 按扩展名自动判类型（图/视频/文件），组装 `image_item / video_item / file_item`，上传链路与发图同构。
+- **收语音**（语音输入）：用户发语音 → 直接取 `voice_item.text`（微信侧已做语音转文字）当文本喂大脑，**零依赖**（无需 SILK 解码/外接 ASR）。**发语音**（bot 语音回复）暂不做（需 TTS + SILK，且语音回复体验通常不如文本）。
 
 ### 长回复自动转 .md 文件
 

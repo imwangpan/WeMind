@@ -16,6 +16,7 @@
   - 构建顺序 `core → daemon/mcp-server`，由 root 编排脚本保证；daemon 入口由 `dist/daemon/index.js` 变更为 `packages/wechat-daemon/dist/index.js`（`scripts/run-daemon.ps1` 已同步）。
 
 ### Added
+- **收语音（语音输入）**：用户发来的语音消息，直接取 `voice_item.text`（**微信侧已做语音转文字**）当文本喂给大脑——零依赖、无需 SILK 解码或外接 ASR。真机实测：发语音 → `recv voice: text="测试语音消息"` → 大脑正常处理回复。**发语音（bot 语音回复）暂不做**：需 TTS + SILK 编码，且语音回复体验通常不如文本。
 - **发送文件 / 视频（富媒体泛化）**：发图泛化为 `sendFile`，按文件名扩展名自动判类型（图 `.png/.jpg/…`、视频 `.mp4/.mov/…`、其余按文件），组装对应 `image_item / video_item / file_item`。上传链路复用 WeMind 自有实现（含 `upload_full_url` 兜底）；类型识别与 item 组装借鉴 `lroolle/wxclawbot-cli` 与 `SpellingDragon/wechat-robot-go`（均 MIT）。真机实测发 `.md` 文件 `ret=0` 通过。（语音 `voice_item` 仍需 SILK 编码，未做。）
 - **长回复自动转 .md 文件**：daemon 最终回复正文超过阈值（默认 1500 字，`WECHAT_REPLY_FILE_THRESHOLD` 可覆盖）时，作为**单个 .md 文件**发送而非拆成多条文本——彻底规避「连续发送上限」、阅读体验完整。文件名由内容生成合适标题（取首个 Markdown 标题或首行清洗）；正文无标题则前置 H1；发文件失败兜底回退为文本。走同一串行发送链 + 节流。
 - **传输层错误分类**（`packages/wechat-ilink-core/src/api/transport-errors.ts`）：`classifyTransportError` 把网络层失败归类（timeout/dns/tls/connection/network → 是否可重试），与 iLink 业务错误码（`error-codes.ts`）正交。daemon 发送遇可重试传输错误退避重试一次；`handleSendError` 按类型记录。
