@@ -152,6 +152,12 @@ let lastSendAt = 0;
 // 两条发送之间的最小间隔：iLink 对 bot 发送有速率限流（rapid sends → ret=-2 "rate limited"，导致消息丢失，
 // 见 NousResearch/hermes-agent#21011）。全局节流主动规避。
 const MIN_SEND_GAP_MS = Number(process.env.WECHAT_MIN_SEND_GAP_MS) || 1500;
+
+// iLink 在用户回复前能连续发送的消息数上限（实测约 10，可调）。
+const CONSEC_SEND_LIMIT = Number(process.env.WECHAT_CONSEC_SEND_LIMIT) || 10;
+// 当前进行中回合的发送计数/token，供「继续」信号跨循环重置与换 token。
+type ActiveTurn = { from: string; token: string | undefined; sent: number; awaitingContinue: boolean };
+let activeTurn: ActiveTurn | null = null;
 function sendOrdered(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH, fallbackToken?: string): Promise<void> {
   replyChain = replyChain.then(async () => {
     const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
@@ -173,22 +179,31 @@ function sniffMime(b: Buffer): string {
 
 async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string, imageItems: ImageItem[], createTimeMs?: number, latestToken?: () => string | undefined): Promise<void> {
   const msgAge = () => createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"; // 这条消息已存在多久（诊断用）
-  // 本回合所有发送主用这条消息自己带的 context_token；最终回复在遇到 -2(参数错误,多为 token 失效)时，用该用户最新缓存 token 兜底重试。
-  const cx = () => ctx;
+  // 本回合发送计数 + token 放进 activeTurn（模块级），供「继续」信号跨线程重置/换 token。
+  // cx() 取当前轮 token（可被「继续」更新为新消息的 token，从而重置服务端连续发送配额）。
+  activeTurn = { from: to, token: ctx, sent: 0, awaitingContinue: false };
+  const cx = () => activeTurn?.token ?? ctx;
   await setTyping(account, to, cx(), 1);
-  // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
+  // 处理期间每 8s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了
   const keepAlive = setInterval(() => { void setTyping(account, to, cx(), 1).catch(() => {}); }, 8000);
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
-  // 每回合进度消息预算：iLink 限制 bot 在用户回复前连续发送的消息数（实测约 10 条，超出被 ret=-2 拒）。
-  // 进度/心跳消息封顶，用尽后只靠"正在输入"(sendtyping,不计入此上限)撑存活，把发送额度留给最终答案/图片。
-  let progressSent = 0;
-  const PROGRESS_BUDGET = Number(process.env.WECHAT_PROGRESS_BUDGET) || 4;
+  // iLink 限制 bot 在用户回复前连续发送的消息数（实测约 10 条，超出被 ret=-2 拒）。
+  // 策略：进度消息正常发；当已发到「上限-1」(第9条)仍非最终回复时，第9条改为「即将达上限」提示并进入等待，
+  // 之后停发进度（靠 sendtyping 撑存活），把最后一条额度留给最终答案；用户回复「继续」则重置计数+换新 token 恢复。
   const sendProgress = (msg: string) => {
     lastProgressAt = Date.now();
-    if (progressSent >= PROGRESS_BUDGET) return; // 额度用尽：不再发进度，保留额度给最终答案
-    progressSent += 1;
+    const t = activeTurn;
+    if (!t || t.awaitingContinue) return; // 等待「继续」期间不发任何进度
+    if (t.sent >= CONSEC_SEND_LIMIT - 2) {
+      // 已发 (上限-2) 条(默认 8)，本条(第9)改为「即将达上限」提示并进入等待，把最后一条(第10)留给最终答案
+      t.sent += 1;
+      t.awaitingContinue = true;
+      void sendOrdered(account, to, cx(), "⚠️ 接近微信连续消息上限，我先暂停进度提示、继续在后台处理；完成后会把结果直接发给你。想立刻恢复进度可回复「继续」。", MessageState.GENERATING);
+      return;
+    }
+    t.sent += 1;
     void sendOrdered(account, to, cx(), msg, MessageState.GENERATING);
   };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
@@ -287,10 +302,12 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   }
   if (!finalText && !replyImages.length) finalText = "（没有内容）";
   if (finalText) {
-    log(`final send: msgAge=${msgAge()}`);
+    if (activeTurn) activeTurn.sent += 1; // 最终答案占一条额度（等待「继续」时即预留的最后一条）
+    log(`final send: msgAge=${msgAge()} sent=${activeTurn?.sent}`);
     await sendOrdered(account, to, cx(), finalText, MessageState.FINISH, latestToken ? latestToken() : undefined);
   }
   log(`replied to ${to} (msgAge=${msgAge()}): ${(answer || "").slice(0, 60)}`);
+  activeTurn = null; // 回合结束
 }
 
 // ===== 解耦：拉取器(poller) 与 处理器(worker) 通过队列协作 =====
@@ -339,6 +356,14 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
           .map((it) => it.image_item as ImageItem);
         if (!text && imageItems.length === 0) { log("skip empty/unsupported message"); continue; }
+        // 「继续」信号：当前回合正等待用户继续 → 重置连续发送计数 + 采用本消息的新 token（服务端配额随用户回复重置）+ 恢复进度；不作为新任务入队
+        if (text.trim() === "继续" && activeTurn && activeTurn.from === from && activeTurn.awaitingContinue) {
+          activeTurn.token = msg.context_token ?? activeTurn.token;
+          activeTurn.sent = 0;
+          activeTurn.awaitingContinue = false;
+          log("收到「继续」→ 重置连续发送计数、采用新 token、恢复进度");
+          continue;
+        }
         msgQueue.push({ from, text, imageItems, createTimeMs: msg.create_time_ms, contextToken: msg.context_token });
         enq = true;
       }
