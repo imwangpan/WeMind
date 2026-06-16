@@ -124,10 +124,12 @@ async function reply(account: AccountData, to: string, ctx: string | undefined, 
   try {
     await send(ctx);
   } catch (e) {
-    // ret=-2 参数错误（最常见为 context_token 失效/不匹配）：用该用户「最新缓存 token」兜底重试一次
-    if (e instanceof ILinkError && e.kind === "param_error" && fallbackToken && fallbackToken !== ctx) {
-      log(`reply -2(参数错误) → 用最新缓存 token 兜底重试`);
-      await send(fallbackToken);
+    // ret=-2 既可能是「限流」(rapid sends)也可能是「context_token 失效/不匹配」(参数错误)。
+    // 两者都靠：退避 ~1.5s 后重试一次——限流靠等待恢复，失效 token 则换用该用户最新缓存 token。
+    if (e instanceof ILinkError && e.kind === "param_error") {
+      log("send -2(限流或token失效) → 退避 1.5s 后重试");
+      await new Promise((r) => setTimeout(r, 1500));
+      await send(fallbackToken && fallbackToken !== ctx ? fallbackToken : ctx);
       return;
     }
     throw e;
@@ -146,8 +148,17 @@ function handleSendError(e: unknown, account: AccountData): void {
 
 // 串行发送队列：保证多条消息（进度/答案）按入队顺序送达，不并发乱序
 let replyChain: Promise<void> = Promise.resolve();
+let lastSendAt = 0;
+// 两条发送之间的最小间隔：iLink 对 bot 发送有速率限流（rapid sends → ret=-2 "rate limited"，导致消息丢失，
+// 见 NousResearch/hermes-agent#21011）。全局节流主动规避。
+const MIN_SEND_GAP_MS = Number(process.env.WECHAT_MIN_SEND_GAP_MS) || 1500;
 function sendOrdered(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH, fallbackToken?: string): Promise<void> {
-  replyChain = replyChain.then(() => reply(account, to, ctx, text, state, fallbackToken).catch((e) => handleSendError(e, account)));
+  replyChain = replyChain.then(async () => {
+    const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
+    if (wait > 0) await sleep(wait);
+    await reply(account, to, ctx, text, state, fallbackToken).catch((e) => handleSendError(e, account));
+    lastSendAt = Date.now();
+  });
   return replyChain;
 }
 
