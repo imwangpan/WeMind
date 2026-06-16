@@ -356,12 +356,13 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
           .map((it) => it.image_item as ImageItem);
         if (!text && imageItems.length === 0) { log("skip empty/unsupported message"); continue; }
-        // 「继续」信号：当前回合正等待用户继续 → 重置连续发送计数 + 采用本消息的新 token（服务端配额随用户回复重置）+ 恢复进度；不作为新任务入队
-        if (text.trim() === "继续" && activeTurn && activeTurn.from === from && activeTurn.awaitingContinue) {
+        // 「继续」信号：仅当**有进行中的任务回合**（activeTurn 存在）时，重置其连续发送计数 + 采用本消息新 token（服务端配额随用户回复重置）+ 恢复进度，且不作为新任务入队。
+        // 无进行中任务时的「继续」、以及其它任何消息，一律照常进入消息队列。
+        if (text.trim() === "继续" && activeTurn && activeTurn.from === from) {
           activeTurn.token = msg.context_token ?? activeTurn.token;
           activeTurn.sent = 0;
           activeTurn.awaitingContinue = false;
-          log("收到「继续」→ 重置连续发送计数、采用新 token、恢复进度");
+          log("收到「继续」(任务执行中) → 重置连续发送计数、采用新 token、恢复进度");
           continue;
         }
         msgQueue.push({ from, text, imageItems, createTimeMs: msg.create_time_ms, contextToken: msg.context_token });
