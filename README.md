@@ -186,13 +186,15 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 ```
 
 > ⚠️ **安全（务必读）**：daemon 用 `--trust-all-tools`，意味着**任何能给这个微信 ClawBot 会话发消息的人，都能让 Kiro 在运行 daemon 的电脑上执行任意工具（含 shell / 写文件）**。
-> 唯一的安全闸是**发件人白名单**：daemon 默认只处理登录账号本人（`account.userId`）发来的消息，其余忽略。**不要关掉它。** 可用 `WECHAT_OWNER_ID` 覆盖白名单。
+> 唯一的安全闸是**发件人授权**：daemon 默认只处理**已授权用户**的消息，其余忽略。**不要关掉它。**
+>
+> **配对授权（allowFrom）**：授权用户存于每账号的 `~/.wemind/<account>/allowFrom.json`。**扫码登录者会被自动授权**（`finalize`/`adopt` 时加入；daemon 启动也会把账号本人种入，老账号自动迁移），通常**无需任何手动配置**。管理命令：`allowlist <key|label>` 查看、`allow <key|label> <userId>` 授权、`revoke <key|label> <userId>` 撤销（增删即时生效，无需重启 daemon）。鉴权 = 账号本人(始终允许) 或 在 allowFrom 中；`WECHAT_OWNER_ID` 仍可作覆盖。
 
 环境变量：
 
 | 变量 | 说明 |
 |------|------|
-| `WECHAT_OWNER_ID` | 发件人白名单（默认登录账号本人 user id） |
+| `WECHAT_OWNER_ID` | 发件人授权覆盖（默认登录账号本人 user id；常规用配对授权 allowFrom，见上） |
 | `WECHAT_ACCOUNT` | 账号标识，决定状态子目录 `~/.wemind/<account>/`（默认 `default`）。多账号用不同值隔离 |
 | `WECHAT_DATA_DIR` | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则 |
 | `WEMIND_HOME` | 数据根目录（默认 `~/.wemind`） |
@@ -304,6 +306,9 @@ node packages/wechat-daemon/dist/manage.js login --label 工作号 --start
 | `label <key\|label> <新别名>` | 改别名 |
 | `set-default <key\|label>` | 设默认账号 |
 | `adopt <key> [--label 名]` | 把已存在的账号目录登记进注册表 |
+| `allowlist <key\|label>` | 查看该账号的授权用户清单（allowFrom） |
+| `allow <key\|label> <userId>` | 授权某用户可驱动该账号 bot |
+| `revoke <key\|label> <userId>` | 撤销某用户的授权 |
 
 **自启全部账号**：`scripts/run-all-daemons.ps1` 读注册表为每个账号起一个 daemon（各账号单实例守卫，重复运行安全）。Windows 启动文件夹的 VBS 已指向它，开机自动拉起所有已登记账号。
 
