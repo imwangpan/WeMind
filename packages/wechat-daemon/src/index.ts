@@ -181,7 +181,16 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
-  const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, cx(), msg, MessageState.GENERATING); };
+  // 每回合进度消息预算：iLink 限制 bot 在用户回复前连续发送的消息数（实测约 10 条，超出被 ret=-2 拒）。
+  // 进度/心跳消息封顶，用尽后只靠"正在输入"(sendtyping,不计入此上限)撑存活，把发送额度留给最终答案/图片。
+  let progressSent = 0;
+  const PROGRESS_BUDGET = Number(process.env.WECHAT_PROGRESS_BUDGET) || 4;
+  const sendProgress = (msg: string) => {
+    lastProgressAt = Date.now();
+    if (progressSent >= PROGRESS_BUDGET) return; // 额度用尽：不再发进度，保留额度给最终答案
+    progressSent += 1;
+    void sendOrdered(account, to, cx(), msg, MessageState.GENERATING);
+  };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
   // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）
   if (imageItems.length === 0) { const t = cx(); log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`); sendProgress("🤖 收到，正在处理…"); }
