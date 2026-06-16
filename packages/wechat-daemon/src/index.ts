@@ -36,8 +36,12 @@ function brainErrorMessage(e: unknown): string {
 
 function extractText(msg: WeixinMessage): string {
   return (msg.item_list ?? [])
-    .filter((it) => it.type === MessageItemType.TEXT)
-    .map((it) => it.text_item?.text ?? "")
+    .map((it) => {
+      if (it.type === MessageItemType.TEXT) return it.text_item?.text ?? "";
+      if (it.type === MessageItemType.VOICE) return it.voice_item?.text ?? ""; // 微信侧语音转文字（省事路）
+      return "";
+    })
+    .filter((s) => s)
     .join("\n")
     .trim();
 }
@@ -400,6 +404,8 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
         const from = msg.from_user_id ?? "";
         if (!isAuthorized(from, owner)) { log("ignore unauthorized sender:", from); continue; }
         const text = extractText(msg);
+        const voiceItem = (msg.item_list ?? []).find((it) => it.type === MessageItemType.VOICE)?.voice_item;
+        if (voiceItem) log(`recv voice: text=${voiceItem.text ? `"${voiceItem.text.slice(0, 30)}"` : "(空,无微信转写)"} playtime=${voiceItem.playtime ?? "?"}`);
         const imageItems = (msg.item_list ?? [])
           .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
           .map((it) => it.image_item as ImageItem);
