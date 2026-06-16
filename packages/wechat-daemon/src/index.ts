@@ -137,11 +137,10 @@ function sniffMime(b: Buffer): string {
   return "image/jpeg";
 }
 
-async function handleMessage(account: AccountData, ctx: string | undefined, latestCtx: () => string | undefined, to: string, text: string, imageItems: ImageItem[], createTimeMs?: number): Promise<void> {
-  const msgAge = () => createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"; // 这条消息已存在多久（用于判断 ret=-2 是否与 token 年龄相关）
-  // 始终用该用户「最新」context_token 发送：长回合中旧 token 会被顶替/失效，
-  // 若进度/心跳/出错通知仍用回合开始的旧 token，会全部 ret=-2 被拒，用户那头全程静默、像卡住。
-  const cx = () => latestCtx() ?? ctx;
+async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string, imageItems: ImageItem[], createTimeMs?: number): Promise<void> {
+  const msgAge = () => createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"; // 这条消息已存在多久（诊断用）
+  // 本回合所有发送都用这条消息自己带的 context_token（每条消息各有各的 token；回复较早消息时不能用别人的 token，否则 ret=-2）
+  const cx = () => ctx;
   await setTyping(account, to, cx(), 1);
   // 处理期间每 8s 续发"正在输入"，避免长任务时指示消失、用户以为卡了
   const keepAlive = setInterval(() => { void setTyping(account, to, cx(), 1).catch(() => {}); }, 8000);
@@ -221,17 +220,6 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
   let answer: string;
   try {
     answer = await runWithRetry(text, images);
-    // 把"等待期间追加的同用户消息"并进本轮：共用同一 context_token、只发一次 FINISH，规避抢答 ret=-2
-    let folded = 0;
-    while (folded < 3) {
-      const extra = drainFollowups(to);
-      if (!extra) break;
-      folded += 1;
-      log(`folding follow-up #${folded}`);
-      sendProgress("📥 把你刚追加的消息一起处理…");
-      try { const more = await runWithRetry(extra, []); if (more) answer += `\n\n${more}`; }
-      catch (e) { log("followup failed:", String(e)); break; }
-    }
   } catch (e2) {
     answer = brainErrorMessage(e2);
   } finally {
@@ -266,22 +254,10 @@ async function handleMessage(account: AccountData, ctx: string | undefined, late
 // 大脑(ACP session)严格串行，但「拉取消息/抓 token」无需串行。把两者解耦：
 // poller 持续 getUpdates、实时更新 token、把消息入队，永不被大脑阻塞；
 // worker 串行从队列取消息喂大脑（尊重 kiro-cli 串行约束），发送时取最新 token，规避 ret=-2。
-type QueuedMsg = { from: string; text: string; imageItems: ImageItem[]; createTimeMs?: number };
+type QueuedMsg = { from: string; text: string; imageItems: ImageItem[]; createTimeMs?: number; contextToken?: string };
 const msgQueue: QueuedMsg[] = [];
 let wakeWorker: (() => void) | null = null;
 function notifyWorker(): void { const w = wakeWorker; wakeWorker = null; if (w) w(); }
-
-/** 抽走队列头部「连续的、该用户、非控制指令」消息，合并文本返回（无则 null）。
- *  用于把"等待期间追加的消息"并进当前回合：共用同一 context_token、只发一次 FINISH，规避抢答 ret=-2。 */
-function drainFollowups(from: string): string | null {
-  let text = "";
-  let found = false;
-  while (msgQueue.length > 0 && msgQueue[0].from === from && !(msgQueue[0].text && parseControl(msgQueue[0].text))) {
-    const m = msgQueue.shift() as QueuedMsg;
-    if (m.text) { text = text ? `${text}\n${m.text}` : m.text; found = true; }
-  }
-  return found ? text : null;
-}
 
 async function pollerLoop(account: AccountData, owner: string, state: ServerState): Promise<void> {
   while (true) {
@@ -307,7 +283,7 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
       // 先登记本批所有最新 token（worker 发送时取最新）
       for (const m of news) {
         const f = m.from_user_id ?? "";
-        if (f === owner) log(`recv msg id=${m.message_id} ctxToken=${m.context_token ? m.context_token.slice(0, 10) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`);
+        if (f === owner) log(`recv msg id=${m.message_id} ctx=…${m.context_token ? m.context_token.slice(-12) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`);
         if (m.context_token) state.contextTokens[`${account.botId}:${f}`] = m.context_token;
       }
       let enq = false;
@@ -320,7 +296,7 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
           .map((it) => it.image_item as ImageItem);
         if (!text && imageItems.length === 0) { log("skip empty/unsupported message"); continue; }
-        msgQueue.push({ from, text, imageItems, createTimeMs: msg.create_time_ms });
+        msgQueue.push({ from, text, imageItems, createTimeMs: msg.create_time_ms, contextToken: msg.context_token });
         enq = true;
       }
       saveState(state);
@@ -341,7 +317,7 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
     }
     const item = msgQueue.shift() as QueuedMsg;
     const from = item.from;
-    const latestCtx = () => state.contextTokens[`${account.botId}:${from}`];
+    const token = item.contextToken; // 用这条消息自己带的 context_token 回复（每条消息各有各的 token）
 
     // 控制指令：单独处理
     const ctrl = item.text ? parseControl(item.text) : null;
@@ -350,25 +326,15 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
       try { r = await handleControl(ctrl, from); }
       catch (e) { r = "处理指令出错：" + String(e); }
       log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
-      await reply(account, from, latestCtx(), r).catch((e) => log("send error:", String(e)));
+      await reply(account, from, token, r).catch((e) => log("send error:", String(e)));
       continue;
     }
 
     try {
-      // 合并：把队列中紧随其后、同一用户、非控制指令的消息并入本轮（连发更自然、更省）
-      let text = item.text;
-      const imageItems = [...item.imageItems];
-      let createTimeMs = item.createTimeMs;
-      while (msgQueue.length > 0 && msgQueue[0].from === from && !(msgQueue[0].text && parseControl(msgQueue[0].text))) {
-        const nxt = msgQueue.shift() as QueuedMsg;
-        if (nxt.text) text = text ? `${text}\n${nxt.text}` : nxt.text;
-        imageItems.push(...nxt.imageItems);
-        if (nxt.createTimeMs) createTimeMs = nxt.createTimeMs; // 用最新一条的时间（发送用的也是最新 token）
-      }
-      await handleMessage(account, latestCtx(), latestCtx, from, text, imageItems, createTimeMs);
+      await handleMessage(account, token, from, item.text, item.imageItems, item.createTimeMs);
     } catch (e) {
       log("handleMessage error:", e instanceof Error ? (e.stack || e.message) : String(e));
-      await reply(account, from, latestCtx(), "处理这条消息时出错了，请再发一次试试。").catch(() => {});
+      await reply(account, from, token, "处理这条消息时出错了，请再发一次试试。").catch(() => {});
     }
   }
 }
