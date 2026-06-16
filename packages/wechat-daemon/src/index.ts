@@ -150,7 +150,7 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   const sendProgress = (msg: string) => { lastProgressAt = Date.now(); void sendOrdered(account, to, cx(), msg, MessageState.GENERATING); };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
   // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）
-  if (imageItems.length === 0) { const t = cx(); log(`turn start to=${to} msgAge=${msgAge()} usingCtx=${t ? t.slice(0, 10) : "NONE"}`); sendProgress("🤖 收到，正在处理…"); }
+  if (imageItems.length === 0) { const t = cx(); log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`); sendProgress("🤖 收到，正在处理…"); }
   // 心跳：仅当 brain 真正静默(无任何帧)超过 15s 才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
   let answerNoticeSent = false; // "正在整理回复"只发一次
