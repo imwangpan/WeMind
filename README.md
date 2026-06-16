@@ -197,7 +197,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_DATA_DIR` | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则 |
 | `WEMIND_HOME` | 数据根目录（默认 `~/.wemind`） |
 | `WECHAT_BRAIN_HOME` | brain 沙箱目录（默认 `<数据目录>/brain-home`） |
-| `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` | 大脑单回合空闲/硬超时（默认 45000 / 300000） |
+| `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` | 大脑单回合空闲/硬超时（默认 30000 / 240000） |
 | `WECHAT_BRAIN_FIRST_FRAME_MS` | 首帧超时：prompt 发出后多久仍无任何帧判「开局即卡死」并快速重试（默认 25000） |
 | `WEMIND_ILINK_BASE` | iLink API / 登录基础 URL（默认 `https://ilinkai.weixin.qq.com`） |
 | `WECHAT_CDN_BASE_URL` | 媒体 CDN 基础 URL（默认 `https://novac2c.cdn.weixin.qq.com/c2c`） |

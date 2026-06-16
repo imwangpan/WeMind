@@ -5,6 +5,8 @@
 ## [Unreleased] — fork
 
 ### Changed
+- **回复 token 策略改为「每条消息用自己的 context_token」**：消息队列中每条消息携带自己的 `context_token`，串行处理、回复用该消息自己的 token（`-2` 时再用该用户最新缓存 token 兜底重试）。此前的 `latestCtx`（"总用最新 token"）会用后到消息的 token 去回复较早消息，反而触发 `-2`，已回退。**认知更正**：`ret=-2` 是「参数错误」而非「token 按时间过期」；context_token 按 (账号,用户) 缓存/重用、仅会话过期(-14)时失效，**无文档化时间 TTL**（此前「约 5 分钟过期」的说法作废）。
+- **大脑超时与进度调参**：空闲超时 `WECHAT_BRAIN_IDLE_MS` 默认 30s、硬上限 `WECHAT_BRAIN_CAP_MS` 默认 4min、新增首帧超时 `WECHAT_BRAIN_FIRST_FRAME_MS` 默认 25s（开局即卡更快放弃，让失败提示在 token 有效期内送达）；进度消息**节流**（工具步骤首条即发、其后 ≥15s 一条，步骤号只在实际发出时递增，避免刷屏/跳号/触发发送限流）；进度/中间消息用 `GENERATING`、仅最终答案 `FINISH`；失败**按类型重试**（后端瞬时错误如 `-32603` 最多 3 次、超时类 2 次）并给分类提示。
 - **更多硬编码改为可配置（env 覆盖）**：iLink 基础 URL（`WEMIND_ILINK_BASE`）、媒体 CDN 基础 URL（`WECHAT_CDN_BASE_URL`）、对外声明的客户端版本（`ILINK_CLIENT_VERSION`，免改代码跟官方升级）；MCP 目录源跟随可配置的 `realHome`（`WEMIND_MCP_CATALOG` 可覆盖）；`ecosystem.config.cjs` 数据根支持 `WEMIND_HOME`。记忆/规则继承的来源与子目录也下沉为按 agent 配置（`realHome`/`inheritDirs` + `WEMIND_BRAIN_REAL_HOME`/`_INHERIT_DIRS`）。
 - **daemon 拆分拉取器/处理器（解耦消息拉取与大脑处理）**：原单循环在大脑处理（可数十秒）期间不 `getUpdates`，导致期间新消息的 token 抓不到、连发可能丢。拆为 **poller**（持续长轮询 + 实时更新 token + 入队，永不被大脑阻塞）+ **worker**（串行从队列喂大脑，尊重 kiro-cli/ACP 单 session 串行约束），发送时取最新 token；并支持同一用户连发的多条**合并为一轮**。
 - **状态目录改为 `~/.wemind/<account>/` 并支持多账号**：默认目录由 `~/.mcp-wechat-server` 改为 `~/.wemind/default`；新增 `WECHAT_ACCOUNT` 选择子目录、`WECHAT_DATA_DIR` 指定完整路径覆盖。`DATA_DIR` 在 core 单点定义、daemon 从 core 导入。多账号即「不同 `WECHAT_ACCOUNT` → 不同目录 → 各自独立登录/状态/会话，各跑一个 daemon」。`run-daemon.ps1` 的单实例 Mutex 也按账号区分，多账号可共存。
@@ -14,6 +16,7 @@
   - 构建顺序 `core → daemon/mcp-server`，由 root 编排脚本保证；daemon 入口由 `dist/daemon/index.js` 变更为 `packages/wechat-daemon/dist/index.js`（`scripts/run-daemon.ps1` 已同步）。
 
 ### Added
+- **类型化 iLink 错误码体系**（`packages/wechat-ilink-core/src/api/error-codes.ts`）：依据逆向自官方 openclaw-weixin 的 iLink 协议参考，定义 `ILINK_RET`（`OK=0`/`PARAM_ERROR=-2`）、`ILINK_ERRCODE`（`SESSION_EXPIRED=-14`）+ `classifyILinkCode`/`describeILinkCode` + `ILinkError`（携带 `code`+`kind`，消息可读如「参数错误(-2) — 检查请求参数」）。`sendMessage`/`getUploadUrl` 改抛 `ILinkError`。daemon 按类型处理：`-2`（最常见 context_token 失效/不匹配）→ 用该用户最新缓存 token 兜底重试一次；`-14`（会话过期）→ 暂停账号 1h；未知码 → 分类记录。
 - **大脑接入通用化（第一档）**：daemon 大脑改为**配置驱动的 ACP agent**（`brain-agents.ts` 的 `AcpAgentPreset`/`resolveAgent`）。把 kiro 专属的二进制名、启动参数、配置目录环境变量抽成预设，通过 `WEMIND_BRAIN`/`WEMIND_BRAIN_BIN`/`WEMIND_BRAIN_ARGS`/`WEMIND_BRAIN_HOME_ENV` 零代码接入任意兼容 ACP 的 agent（默认 `kiro`，保留 `KIRO_CLI_BIN` 兼容）。协议层为标准 ACP，可直接复用。`askKiroForUser` → `askBrain`。含 `gemini`/`claude-code`/`codex` 示例预设（后三者未实测；Claude Code、Codex 不原生支持 ACP，需经适配器）；`AcpAgentPreset` 加 `shell` 字段 + `WEMIND_BRAIN_SHELL`，npx/`.cmd` 类适配器在 Windows 经 shell 启动。详见 `docs/接入其它-ACP-Agent.md`。
 - **跨平台常驻（pm2）**：新增根目录 `ecosystem.config.cjs`（读 `~/.wemind/accounts.json` 为每账号动态生成 app），用 pm2 在 Windows/Linux/macOS 通用地常驻（看门狗/自启/单实例/脱离均内置）；业务代码零改动。另提供原生 systemd/launchd 示例。详见 `docs/跨平台常驻-pm2.md`、`docs/daemon-常驻原理.md`。
 - **发图（出站图片）**：core `getUploadUrl` + `sendImage`（AES-128-ECB 加密 → CDN 上传 → `image_item` 发送，`no_need_thumb` 免缩略图、无需 sharp/jimp）。daemon 从 brain 回复中提取图片引用（Markdown `![](url/本地路径)` 或裸图片 URL）→ 下载/读取 → 作为图片消息发出，再发清理后的文本；acp-brain 每会话首轮注入「可发图」约定提示。移植自官方 openclaw-weixin。实测真机收到。
