@@ -32,7 +32,12 @@
 - 单元测试（vitest）覆盖 session-guard 与 package 元数据读取；GitHub Actions CI 跑 typecheck + build + test。
 
 ### Fixed
-- **微信发送 `ret=-2`（消息发不出/“收不到”）**：两个叠加根因。① 一回合刷十几条进度消息触发 iLink 对机器人发送的限流 → 改为**进度节流**（工具步骤首条即发、其后 ≥15s 一条）。② 所有发送都标 `message_state=FINISH` 提前“结束”会话 → 改为**进度/中间消息用 `GENERATING`、仅最终答案用 `FINISH`**。并让进度/心跳/出错通知也用最新 `context_token`。（排查纠正了“token 时间过期/用过即作废”等错误假设——全新 token 也会 -2，官方无 token TTL。）
+- **重任务"收不到结果"= 触发 iLink 连续发送上限**（关键）：iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 10；`ret=-2` 被复用为"限流/参数错误",见 NousResearch/hermes-agent#21011「sendmessage rate limited: ret=-2」+ 微信 `errcode 40258` 秒级限流）。重任务每 15s 发一条进度、6.5min 会发 20+ 条 → 第 ~10 条后被拒,而**最终答案恰排在最后被丢**。机制修复：
+  - **全局发送节流**（任意两条 ≥1.5s,`WECHAT_MIN_SEND_GAP_MS`）；
+  - **按用户、跨回合持续的发送计数**（`budgetOf`），**只在该用户发来任何消息时重置**（镜像服务端"距上一条用户消息计数"规则）——修正了"新任务从 0 计数撞上限"的 bug；
+  - 计数达「上限-2」(默认第 8 条)后,第 9 条改发**「即将达上限,回复『继续』」提示**并进入等待(停发进度、靠 sendtyping 撑存活),把最后一条额度**留给最终答案**(第 10 条)；
+  - **「继续」**(等待段)→ 换新 token 恢复进度、不入队；**任何其它消息**→ 重置计数后照常入队；
+  - `ret=-2` **退避 1.5s 重试**(限流靠等待恢复 / token 失效则换最新缓存 token)。`WECHAT_CONSEC_SEND_LIMIT` 默认 10 可调。：两个叠加根因。① 一回合刷十几条进度消息触发 iLink 对机器人发送的限流 → 改为**进度节流**（工具步骤首条即发、其后 ≥15s 一条）。② 所有发送都标 `message_state=FINISH` 提前“结束”会话 → 改为**进度/中间消息用 `GENERATING`、仅最终答案用 `FINISH`**。并让进度/心跳/出错通知也用最新 `context_token`。（排查纠正了“token 时间过期/用过即作废”等错误假设——全新 token 也会 -2，官方无 token TTL。）
 - **微信大脑“同样任务比直接用 kiro 问题多”= 模型不同**：brain 沙箱 `settings/cli.json` 缺 `chat.defaultModel`，大脑用 kiro 默认模型而非用户的 `claude-opus-4.8`，多步联网任务易卡。修复：`syncSettings` 继承真实 `settings/`（除 `mcp.json`，含模型与 `disableTrustAllConfirmation`）。换模型后旧会话需「新会话」重建。
 - **继承补全**：自定义 agent（`agents/daily-report.json`）因 kiro 预建脚手架（非空目录）被跳过未继承；`mirrorRealKiro` 改为对非空目录**补拷缺失文件**。
 - **daemon 静默崩溃（`code=1`）**：回合内未捕获的 promise 拒绝（瞬时 `getUpdates`/send 的 `fetch failed`，或主动 send 撞 `ret≠0`）会让 node 默认以 `code=1` 退出（无 `fatal` 日志、不走 `main().catch`），wrapper 虽重拉但丢在途回合、用户卡在心跳。已加全局 `unhandledRejection`/`uncaughtException` 处理器（记录不退出）+ `handleMessage` try/catch。

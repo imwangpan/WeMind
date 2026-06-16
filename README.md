@@ -197,8 +197,10 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_DATA_DIR` | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则 |
 | `WEMIND_HOME` | 数据根目录（默认 `~/.wemind`） |
 | `WECHAT_BRAIN_HOME` | brain 沙箱目录（默认 `<数据目录>/brain-home`） |
-| `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` | 大脑单回合空闲/硬超时（默认 30000 / 240000） |
+| `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` | 大脑单回合空闲/硬超时（默认 120000 / 900000；重任务实测需 ~6.5min） |
 | `WECHAT_BRAIN_FIRST_FRAME_MS` | 首帧超时：prompt 发出后多久仍无任何帧判「开局即卡死」并快速重试（默认 25000） |
+| `WECHAT_CONSEC_SEND_LIMIT` | bot 在用户回复前可连续发送的消息数上限（默认 10）。达「上限-2」后发提示并等待「继续」，留最后一条给答案 |
+| `WECHAT_MIN_SEND_GAP_MS` | 两条发送之间的最小间隔，规避发送限流（默认 1500） |
 | `WEMIND_ILINK_BASE` | iLink API / 登录基础 URL（默认 `https://ilinkai.weixin.qq.com`） |
 | `WECHAT_CDN_BASE_URL` | 媒体 CDN 基础 URL（默认 `https://novac2c.cdn.weixin.qq.com/c2c`） |
 | `ILINK_CLIENT_VERSION` | 对外声明的 iLink 客户端版本（默认 `2.4.3`，随官方升级可改，免动代码） |
