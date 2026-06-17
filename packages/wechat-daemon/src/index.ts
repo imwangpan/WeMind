@@ -14,6 +14,8 @@ import { askBrain, newSession, restart } from "./acp-brain.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
 import { extractImages, resolveImageBytes } from "./image-reply.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
+import { dispatchTask, injectTask, stopTask, hasActiveTask, isAwaiting, setTaskPush, setTaskTyping } from "./task-manager.js";
+import { ensureWorkerHome } from "./worker-sandbox.js";
 
 const log = (...a: unknown[]) => console.error("[daemon]", ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -82,6 +84,24 @@ function parseControl(text: string): Ctrl | null {
   m = t.match(/^(?:卸载|unload)\s+(\S+)$/i);
   if (m) return { kind: "remove", name: m[1] };
   return null;
+}
+
+type TaskCmd = { kind: "toWorker"; text: string } | { kind: "stop" };
+/** 解析「明确发给 worker」指令：任务：xxx / 任务 xxx / >xxx（toWorker：无任务则启动、有任务则注入）；结束任务/停止任务 → stop。 */
+function parseTaskControl(text: string): TaskCmd | null {
+  const t = text.trim();
+  if (/^(结束任务|停止任务|\/stop)$/i.test(t)) return { kind: "stop" };
+  let m = t.match(/^(?:任务|task)[:：]\s*([\s\S]+)$/i);
+  if (m) return { kind: "toWorker", text: m[1].trim() };
+  m = t.match(/^>\s*([\s\S]+)$/); // 快捷别名：> 开头即明确发给 worker
+  if (m) return { kind: "toWorker", text: m[1].trim() };
+  return null;
+}
+
+/** 解析「明确问大脑」逃逸前缀：问大脑 xxx / 问大脑：xxx。命中返回去前缀后的文本（强制走 brain，即使 worker 在等你）。 */
+function parseBrainEscape(text: string): string | null {
+  const m = text.trim().match(/^问大脑[:：]?\s*([\s\S]+)$/);
+  return m ? m[1].trim() : null;
 }
 
 async function handleControl(c: Ctrl, userId: string): Promise<string> {
@@ -456,8 +476,38 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
       continue;
     }
 
+    // ── 任务路由 ──
+    // 1) 结束任务 / 明确发给 worker（任务：、>）
+    const tcmd = item.text ? parseTaskControl(item.text) : null;
+    if (tcmd?.kind === "stop") {
+      const r = stopTask(from);
+      log("task: stop ->", r);
+      await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) => handleSendError(e, account));
+      continue;
+    }
+    if (tcmd?.kind === "toWorker") {
+      // 明确发给 worker：无活跃任务 → 启动；有 → 注入/追加（running 暂存、waiting 喂下一轮）
+      if (hasActiveTask(from)) {
+        log("task: inject(explicit):", tcmd.text.slice(0, 40));
+        injectTask(from, tcmd.text);
+      } else {
+        const r = dispatchTask(from, tcmd.text);
+        await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) => handleSendError(e, account));
+      }
+      continue;
+    }
+    // 2) 明确「问大脑」逃逸前缀 → 去前缀后强制走 brain（即使 worker 在等你）
+    const brainEscape = item.text ? parseBrainEscape(item.text) : null;
+    // 3) 无前缀 + worker 正等你回 + 非图片 → 默认注入 worker；其余（running / 无任务 / 逃逸 / 图片）→ brain
+    if (!brainEscape && item.imageItems.length === 0 && isAwaiting(from)) {
+      log("task: inject(awaiting):", item.text.slice(0, 40));
+      injectTask(from, item.text);
+      continue;
+    }
+
+    const brainText = brainEscape ?? item.text;
     try {
-      await handleMessage(account, token, from, item.text, item.imageItems, item.createTimeMs, latestToken);
+      await handleMessage(account, token, from, brainText, item.imageItems, item.createTimeMs, latestToken);
     } catch (e) {
       log("handleMessage error:", e instanceof Error ? (e.stack || e.message) : String(e));
       await reply(account, from, token, "处理这条消息时出错了，请再发一次试试。", MessageState.FINISH, latestToken()).catch((e2) => handleSendError(e2, account));
@@ -489,10 +539,18 @@ async function main(): Promise<void> {
     log("uncaughtException:", err?.stack || String(err));
   });
   ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
+  ensureWorkerHome(); // 准备 worker 沙箱（继承全量 MCP 除 wechat + 记忆/技能/settings）
   log(`up. bot=${account.botId} owner=${owner} allowFrom=${readAllowFrom(DATA_DIR).length}`);
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
 
   const state: ServerState = loadState();
+  // worker 任务推送：用该用户最新 token 经串行发送层发出（与 brain 共用 sendOrdered，保证不乱序）
+  setTaskPush((to, text) => {
+    const tok = state.contextTokens[`${account.botId}:${to}`];
+    void sendOrdered(account, to, tok, text, MessageState.FINISH, tok);
+  });
+  // worker 跑一轮期间持续「正在输入中」（typing 不占连续发送上限），避免长任务静默让用户以为卡了
+  setTaskTyping((to) => { void setTyping(account, to, state.contextTokens[`${account.botId}:${to}`], 1); });
   // 解耦运行：拉取器持续抓消息(永不被大脑阻塞)，处理器串行喂大脑
   void pollerLoop(account, owner, state);
   await workerLoop(account, state);
