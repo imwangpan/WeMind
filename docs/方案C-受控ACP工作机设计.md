@@ -1,7 +1,7 @@
 # 方案 C：受控 ACP 工作机（设计文档）
 
-> 状态：**设计草案**（未实现）。用于评估"从微信监控/控制电脑上的耗时任务"这一需求的实现方案。
-> 关联：README「进度提示与连续发送上限」、`packages/wechat-daemon/src/acp-brain.ts`、`brain-agents.ts`。
+> 状态：**MVP 已实现** ✅（2026-06-17，真机跑通，见 [方案C-MVP-远程human-in-the-loop.md](方案C-MVP-远程human-in-the-loop.md)）。本文为总设计与方案对比（A/B/C）；MVP 落地细节（worker-acp / task-manager / 消息路由 / typing）见 MVP 文档。
+> 关联：MVP 设计文档、README「远程任务（worker）」、`packages/wechat-daemon/src/{worker-acp,task-manager,worker-sandbox}.ts`、`acp-brain.ts`、`brain-agents.ts`。
 
 ---
 

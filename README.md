@@ -142,6 +142,9 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain-sessions.json` | `userId → ACP sessionId` 映射，daemon 重启后据此 `session/load` 恢复多轮上下文 |
 | `brain-mcps.json` | brain 当前激活的 MCP 集（默认空） |
 | `brain-home/` | brain 的沙箱 `KIRO_HOME`（独立于你本人的 `~/.kiro`），含 `settings/mcp.json`（默认空）与各 ACP 会话落盘记录 |
+| `worker-sessions.json` | worker（远程任务）单任务 `ACP sessionId` 映射，daemon 重启后据此 `session/load` 续传 |
+| `worker-home/` | worker 的沙箱 `KIRO_HOME`（`settings/mcp.json` 继承**全量 MCP 除 `wechat`** ＋ 记忆/技能/settings 含模型） |
+| `worker.pid` | worker 大脑进程 pid（与 brain/用户会话区分、便于精确清理） |
 
 **多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<名>` 切换（→ `~/.wemind/<名>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。
 
@@ -208,6 +211,11 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_CDN_BASE_URL` | 媒体 CDN 基础 URL（默认 `https://novac2c.cdn.weixin.qq.com/c2c`） |
 | `ILINK_CLIENT_VERSION` | 对外声明的 iLink 客户端版本（默认 `2.4.3`，随官方升级可改，免动代码） |
 | `ILINK_APP_ID` | iLink App Id（默认 `bot`） |
+| `WEMIND_WORKER_CWD` | worker（远程任务）工作目录（默认用户主目录；本地命令派发后可取命令所在目录） |
+| `WEMIND_WORKER_HOME` | worker 沙箱配置目录（默认 `<数据目录>/worker-home`） |
+| `WEMIND_WORKER_MCP_EXCLUDE` | worker 不继承的 MCP（逗号分隔；`wechat` 始终强制排除，防回环） |
+| `WEMIND_WORKER_IDLE_MS` / `_CAP_MS` / `_FIRST_FRAME_MS` | worker 单轮空闲/硬上限/首帧超时（默认 180000 / 1800000 / 30000，比对话大脑宽松） |
+| `WEMIND_WORKER_PROGRESS` | 是否推送 worker 全程文字进度（默认 `0` 安静；`1` 开启。「正在输入中」始终有） |
 | 大脑 agent 选择 / 记忆继承 | 见下方「切换大脑 Agent」与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
 
 限制：
@@ -215,6 +223,27 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 - **只在电脑开机且 daemon 运行时在线**（不是云端常驻）；
 - **不能主动发起对话**（iLink 限制），需你先发消息；
 - iLink 会话超时（errcode `-14`）会进入 1 小时冷却，重发消息恢复。
+
+### 远程任务（worker）：把漫长任务交给微信遥控
+
+除了「对话大脑」，daemon 还能把**漫长任务**交给一个**受控的 ACP worker 进程**跑——你在电脑上派发任务后离开，它在「需要你决策」（如列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑（远程 human-in-the-loop）。
+
+worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 跑在任务工作目录、继承你 `~/.kiro` 的**全量 MCP（除 `wechat`）＋ 记忆/技能/模型**，能力与你本地的 kiro 一致。
+
+**指令集**：
+
+| 你发的消息 | 去向 |
+|------|------|
+| `任务：xxx` / `>xxx` | 明确发给 worker：没任务时**启动**新任务，有任务时**追加/回复**给它 |
+| `问大脑 xxx` | 明确发给对话大脑（worker 正等你时也能临时插话问大脑） |
+| `结束任务` / `停止任务` | 终止当前 worker 任务 |
+| worker 刚问你后，直接回（无前缀） | 注入 worker（最自然的决策回复） |
+| worker 埋头跑时，直接发（无前缀） | 走对话大脑（任务不受影响） |
+
+- worker 只在 **waiting（刚停下问你）** 时才默认接管你的无前缀消息；它埋头跑时大脑照常可用。
+- worker 每轮输出带 `🤖【任务】` 标记；跑一轮期间持续「正在输入中」（typing 不占连续发送上限）。
+- 中断（崩溃/超时）靠 `session/load` 恢复——回「继续」即从中断处续跑。
+- 详见 [docs/方案C-MVP-远程human-in-the-loop.md](docs/方案C-MVP-远程human-in-the-loop.md)。
 
 ### 进度提示与连续发送上限
 
