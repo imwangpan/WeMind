@@ -196,6 +196,72 @@ function cmdStart(sel: string): string {
   return `已启动 daemon（账号 ${key}）。用 list 查看运行状态。`;
 }
 
+// ===== 本地任务命令（文件桥）：写 task-inbox/*.json，由 daemon 扫描执行；状态读 task-state.json =====
+function taskInboxDir(key: string): string { return path.join(accountDir(key), "task-inbox"); }
+/** 原子写一个命令文件到收件箱（临时文件 + rename，避免 daemon 读到半截）。 */
+function writeTaskCmd(key: string, obj: Record<string, unknown>): void {
+  const dir = taskInboxDir(key);
+  fs.mkdirSync(dir, { recursive: true });
+  const fp = path.join(dir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
+  const tmp = `${fp}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({ ...obj, ts: Date.now() }, null, 2), "utf-8");
+  fs.renameSync(tmp, fp);
+}
+/** 选账号：显式 key/label 优先，否则用默认账号。 */
+function pickKey(sel?: string): string {
+  if (sel) return resolveKey(sel);
+  const d = getDefaultKey();
+  if (!d) throw new Error("无默认账号，请指定 <key|label> 或先 login");
+  return d;
+}
+/** 预检 daemon 存活（本地命令需 daemon 在跑才有人消费收件箱）。 */
+function requireDaemonAlive(key: string): void {
+  const pid = readPid(accountDir(key), "daemon.pid");
+  if (!pid || !alive(pid)) throw new Error(`账号 ${key} 的 daemon 未运行。先启动：node packages/wechat-daemon/dist/manage.js start ${key}`);
+}
+
+async function cmdTask(text: string, cwd: string | undefined, sel?: string): Promise<string> {
+  if (!text) throw new Error('用法: task "<任务描述>" [--cwd 目录] [<key|label>]');
+  const key = pickKey(sel);
+  requireDaemonAlive(key);
+  const useCwd = cwd || process.cwd();
+  writeTaskCmd(key, { kind: "dispatch", text, cwd: useCwd });
+  // 短轮询 task-state.json 确认已派发（最多 ~3s）
+  const stateFile = path.join(accountDir(key), "task-state.json");
+  for (let i = 0; i < 15; i++) {
+    await sleep(200);
+    try { if (JSON.parse(fs.readFileSync(stateFile, "utf-8")).active) return `已派发任务（worker 运行中，cwd=${useCwd}）。\n用 task-status 看进展、task-reply 回复、task-stop 结束。`; } catch { /* ignore */ }
+  }
+  return `已投递任务（cwd=${useCwd}）。daemon 处理中，用 task-status 查看。`;
+}
+function cmdTaskReply(text: string, sel?: string): string {
+  if (!text) throw new Error('用法: task-reply "<内容>" [<key|label>]');
+  const key = pickKey(sel);
+  requireDaemonAlive(key);
+  writeTaskCmd(key, { kind: "reply", text });
+  return `已发送给任务：${text.slice(0, 40)}`;
+}
+function cmdTaskStop(sel?: string): string {
+  const key = pickKey(sel);
+  requireDaemonAlive(key);
+  writeTaskCmd(key, { kind: "stop" });
+  return "已发送「结束任务」指令。";
+}
+function cmdTaskStatus(sel?: string): string {
+  const key = pickKey(sel);
+  const stateFile = path.join(accountDir(key), "task-state.json");
+  let s: { active?: boolean; status?: string; turns?: number; startedAt?: number; lastOutput?: string };
+  try { s = JSON.parse(fs.readFileSync(stateFile, "utf-8")); }
+  catch { return `账号 ${key}：无任务状态（task-state.json 不存在，daemon 可能未跑过任务）。`; }
+  if (!s.active) return `账号 ${key}：当前无活跃任务（idle）。`;
+  const since = s.startedAt ? `${Math.round((Date.now() - s.startedAt) / 1000)}s` : "?";
+  return [
+    `账号 ${key} 任务状态：`,
+    `  状态：${s.status}  轮次：${s.turns ?? 0}  已运行：${since}`,
+    `  最近输出：${s.lastOutput ? s.lastOutput.slice(0, 300) : "（无）"}`,
+  ].join("\n");
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const cmd = argv.shift();
@@ -206,12 +272,19 @@ async function main(): Promise<void> {
   const si = rest.indexOf("--start");
   const autoStart = si >= 0;
   if (autoStart) rest.splice(si, 1);
+  const ci = rest.indexOf("--cwd");
+  let cwd: string | undefined;
+  if (ci >= 0) { cwd = rest[ci + 1]; rest.splice(ci, 2); }
 
   switch (cmd) {
     case "login": await cmdLogin(label, autoStart); break;
     case "list": console.log(cmdList()); break;
     case "adopt": console.log(cmdAdopt(rest[0], label)); break;
     case "start": console.log(cmdStart(rest[0])); break;
+    case "task": console.log(await cmdTask(rest[0], cwd, rest[1])); break;
+    case "task-reply": console.log(cmdTaskReply(rest[0], rest[1])); break;
+    case "task-status": console.log(cmdTaskStatus(rest[0])); break;
+    case "task-stop": console.log(cmdTaskStop(rest[0])); break;
     case "label": { const k = resolveKey(rest[0]); setLabel(k, rest.slice(1).join(" ")); console.log(`已设置 ${k} 的别名为「${rest.slice(1).join(" ")}」`); break; }
     case "set-default": { const k = resolveKey(rest[0]); setDefaultKey(k); console.log(`默认账号 = ${k}`); break; }
     case "logout": console.log(await cmdLogout(rest[0])); break;
@@ -227,6 +300,10 @@ async function main(): Promise<void> {
   login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动归档（--start 顺带启动 daemon）
   list                           列出账号、别名、运行状态
   start <key|label>              启动某账号的 daemon
+  task "<描述>" [--cwd 目录] [<key|label>]   本地派发任务给 worker（默认 cwd=当前终端目录）
+  task-reply "<内容>" [<key|label>]          回复/注入当前任务（「task-reply 继续」= 续跑）
+  task-status [<key|label>]                  查看当前任务状态与最近输出
+  task-stop [<key|label>]                    结束当前任务
   logout <key|label>             停 daemon + 通知下线 + 清凭证（保留目录，可重登）
   delete <key|label>             停 daemon + 删除目录 + 移除注册
   label <key|label> <新别名>     改别名

@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 // mock worker-acp（用 vi.hoisted 让 mock 工厂可引用）
-const { askWorker, stopWorker } = vi.hoisted(() => ({ askWorker: vi.fn(), stopWorker: vi.fn() }));
+const { askWorker, stopWorker, setWorkerCwd } = vi.hoisted(() => ({ askWorker: vi.fn(), stopWorker: vi.fn(), setWorkerCwd: vi.fn() }));
 vi.mock("./worker-acp.js", () => ({
   askWorker: (...a: unknown[]) => askWorker(...a),
   stopWorker: () => stopWorker(),
+  setWorkerCwd: (...a: unknown[]) => setWorkerCwd(...a),
   newWorkerSession: vi.fn(),
   isWorkerAlive: vi.fn(() => false),
 }));
 
-import { dispatchTask, injectTask, stopTask, hasActiveTask, isAwaiting, setTaskPush } from "./task-manager.js";
+import { dispatchTask, injectTask, stopTask, hasActiveTask, isAwaiting, setTaskPush, setTaskStateSink } from "./task-manager.js";
 
 function deferred<T = string>() {
   let resolve!: (v: T) => void;
@@ -21,8 +22,10 @@ const has = (arr: string[], sub: string) => arr.some((p) => p.includes(sub));
 
 afterEach(() => {
   stopTask("u1"); stopTask("u2"); // 清理可能残留的任务
+  setTaskStateSink(() => {});      // 清理 state sink，避免跨用例串扰
   askWorker.mockReset();
   stopWorker.mockReset();
+  setWorkerCwd.mockReset();
 });
 
 describe("task-manager 状态机", () => {
@@ -95,5 +98,20 @@ describe("task-manager 状态机", () => {
     expect(askWorker.mock.calls[1][0]).toBe("顺便也做Y"); // 消费暂存
     r2.resolve("done");
     await vi.waitFor(() => expect(has(pushed, "done")).toBe(true));
+  });
+
+  it("dispatch 透传 cwd 给 setWorkerCwd + 状态 sink running→waiting→idle", async () => {
+    const r1 = deferred();
+    askWorker.mockReturnValueOnce(r1.promise);
+    setTaskPush(() => {});
+    const states: string[] = [];
+    setTaskStateSink((s) => states.push(s.status));
+    dispatchTask("u1", "做X", "D:\\proj");
+    expect(setWorkerCwd).toHaveBeenCalledWith("D:\\proj"); // cwd 透传
+    await vi.waitFor(() => expect(states[0]).toBe("running"));
+    r1.resolve("问你选 A 还是 B");
+    await vi.waitFor(() => expect(states).toContain("waiting"));
+    expect(stopTask("u1")).toContain("已结束");
+    await vi.waitFor(() => expect(states).toContain("idle"));
   });
 });

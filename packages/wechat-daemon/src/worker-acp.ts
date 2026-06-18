@@ -30,6 +30,14 @@ const SESSION_MAP_FILE = path.join(DATA_DIR, "worker-sessions.json");
 const WORKER_PID_FILE = path.join(DATA_DIR, "worker.pid"); // 标记 worker kiro-cli pid，便于与 brain/用户会话区分、精确清理
 const TASK_KEY = "task"; // MVP 单任务的固定 session key
 
+// 本任务的工作目录：本地派发可指定（终端当前目录）；微信派发为 undefined → 用 WORKER_CWD 默认。
+// spawn 时生效（子进程 cwd 不可中途改），stopWorker 时清。
+let pendingCwd: string | undefined;
+/** 设置「下次（本任务首轮）spawn worker 用的 cwd」。本地命令派发传入终端当前目录；不传/空则用默认 WORKER_CWD。 */
+export function setWorkerCwd(cwd?: string): void { pendingCwd = cwd?.trim() || undefined; }
+/** 本任务有效 cwd（指定优先，否则默认）。 */
+function effectiveCwd(): string { return pendingCwd ?? WORKER_CWD; }
+
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; clear: () => void; method: string };
 
 let child: ChildProcessWithoutNullStreams | null = null;
@@ -175,14 +183,15 @@ async function ensureProcess(): Promise<void> {
   reset();
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (AGENT.homeEnvVar) env[AGENT.homeEnvVar] = WORKER_HOME; // 配置目录（MCP/记忆）走 WORKER_HOME 沙箱
+  const cwd = effectiveCwd();
   const proc = spawn(AGENT.bin, AGENT.args, {
     shell: AGENT.shell,
     windowsHide: true,
-    cwd: WORKER_CWD, // 任务工作目录（操作真实文件），区别于 KIRO_HOME 沙箱
+    cwd, // 任务工作目录（本地派发可指定，否则默认 WORKER_CWD），区别于 KIRO_HOME 沙箱
     env,
   });
   child = proc;
-  dlog(`spawn ${AGENT.name} worker pid=${proc.pid} cwd=${WORKER_CWD} home=${WORKER_HOME}`);
+  dlog(`spawn ${AGENT.name} worker pid=${proc.pid} cwd=${cwd} home=${WORKER_HOME}`);
   try { fs.writeFileSync(WORKER_PID_FILE, String(proc.pid), "utf-8"); } catch { /* best-effort */ }
   proc.stdout.on("data", onStdout);
   proc.stderr.on("data", () => { /* ignore */ });
@@ -200,7 +209,7 @@ async function ensureSession(key: string): Promise<string> {
   const saved = map[key];
   if (saved) {
     try {
-      await request("session/load", { sessionId: saved, cwd: WORKER_CWD, mcpServers: [] }, REQ_TIMEOUT);
+      await request("session/load", { sessionId: saved, cwd: effectiveCwd(), mcpServers: [] }, REQ_TIMEOUT);
       taskSessions.set(key, saved);
       dlog(`session/load ok ${saved}`);
       return saved;
@@ -208,7 +217,7 @@ async function ensureSession(key: string): Promise<string> {
       dlog(`session/load failed (${String(e)}), creating new`);
     }
   }
-  const res = (await request("session/new", { cwd: WORKER_CWD, mcpServers: [] }, REQ_TIMEOUT)) as { sessionId?: string };
+  const res = (await request("session/new", { cwd: effectiveCwd(), mcpServers: [] }, REQ_TIMEOUT)) as { sessionId?: string };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   taskSessions.set(key, res.sessionId);
   map[key] = res.sessionId;
@@ -261,4 +270,5 @@ export function newWorkerSession(): void {
 export function stopWorker(): void {
   reset();
   newWorkerSession();
+  pendingCwd = undefined; // 任务结束，清掉本任务 cwd（下个任务重新指定或用默认）
 }

@@ -14,7 +14,7 @@ import { askBrain, newSession, restart } from "./acp-brain.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
 import { extractImages, resolveImageBytes } from "./image-reply.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
-import { dispatchTask, injectTask, stopTask, hasActiveTask, isAwaiting, setTaskPush, setTaskTyping } from "./task-manager.js";
+import { dispatchTask, injectTask, stopTask, hasActiveTask, isAwaiting, setTaskPush, setTaskTyping, setTaskStateSink, type TaskStateSnapshot } from "./task-manager.js";
 import { ensureWorkerHome } from "./worker-sandbox.js";
 
 const log = (...a: unknown[]) => console.error("[daemon]", ...a);
@@ -515,6 +515,39 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
   }
 }
 
+// ===== 本地命令入口（文件桥）：CLI 写 task-inbox/*.json，daemon 扫描分发到 task-manager =====
+const TASK_INBOX_DIR = path.join(DATA_DIR, "task-inbox");
+const TASK_STATE_FILE = path.join(DATA_DIR, "task-state.json");
+const TASK_SCAN_MS = Number(process.env.WEMIND_TASK_SCAN_MS) || 1000;
+
+/** 扫描 task-inbox：按文件名(时间戳)升序逐个读、分发到 task-manager（dispatch/reply/stop）、删文件。本地命令默认作用于 owner。 */
+function scanTaskInbox(owner: string): void {
+  let files: string[];
+  try { files = fs.readdirSync(TASK_INBOX_DIR).filter((f) => f.endsWith(".json")); }
+  catch { return; } // 目录不存在/读失败：跳过
+  if (!files.length) return;
+  files.sort(); // 文件名带时间戳前缀，字典序即时间序
+  for (const f of files) {
+    const fp = path.join(TASK_INBOX_DIR, f);
+    let cmd: { kind?: string; text?: string; cwd?: string };
+    try { cmd = JSON.parse(fs.readFileSync(fp, "utf-8")); }
+    catch { try { fs.unlinkSync(fp); } catch { /* ignore */ } continue; } // 坏文件丢弃
+    try { fs.unlinkSync(fp); } catch { /* ignore */ } // 先删，避免重复处理
+    try {
+      if (cmd.kind === "dispatch") {
+        log("local task dispatch:", dispatchTask(owner, String(cmd.text ?? ""), cmd.cwd ? String(cmd.cwd) : undefined).slice(0, 50));
+      } else if (cmd.kind === "reply") {
+        injectTask(owner, String(cmd.text ?? ""));
+        log("local task reply:", String(cmd.text ?? "").slice(0, 40));
+      } else if (cmd.kind === "stop") {
+        log("local task stop:", stopTask(owner));
+      } else {
+        log("unknown task-inbox cmd:", cmd.kind);
+      }
+    } catch (e) { log("task-inbox dispatch error:", String(e)); }
+  }
+}
+
 async function main(): Promise<void> {
   const account = loadAccount();
   if (!account?.botToken) {
@@ -551,6 +584,18 @@ async function main(): Promise<void> {
   });
   // worker 跑一轮期间持续「正在输入中」（typing 不占连续发送上限），避免长任务静默让用户以为卡了
   setTaskTyping((to) => { void setTyping(account, to, state.contextTokens[`${account.botId}:${to}`], 1); });
+  // 任务状态落盘：worker 状态快照原子写 task-state.json，供本地 `manage.js task-status` 读
+  setTaskStateSink((snap: TaskStateSnapshot) => {
+    try {
+      const tmp = `${TASK_STATE_FILE}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, JSON.stringify(snap, null, 2), "utf-8");
+      fs.renameSync(tmp, TASK_STATE_FILE);
+    } catch { /* best-effort */ }
+  });
+  // 本地命令入口：启动清空收件箱（作废重启前残留命令、防重放），再起独立定时器扫描分发（不挂 poller，避免被 25s 长轮询阻塞）
+  try { fs.rmSync(TASK_INBOX_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { fs.mkdirSync(TASK_INBOX_DIR, { recursive: true }); } catch { /* ignore */ }
+  setInterval(() => scanTaskInbox(owner), TASK_SCAN_MS);
   // 解耦运行：拉取器持续抓消息(永不被大脑阻塞)，处理器串行喂大脑
   void pollerLoop(account, owner, state);
   await workerLoop(account, state);

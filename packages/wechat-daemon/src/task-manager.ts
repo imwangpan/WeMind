@@ -1,4 +1,4 @@
-import { askWorker, stopWorker, type WorkerProgressEvent } from "./worker-acp.js";
+import { askWorker, stopWorker, setWorkerCwd, type WorkerProgressEvent } from "./worker-acp.js";
 
 const log = (...a: unknown[]) => console.error("[task]", ...a);
 
@@ -8,6 +8,9 @@ type ActiveTask = {
   status: TaskStatus;
   injectResolver?: (text: string | null) => void; // waiting 态等待注入；stop 时 resolve(null) 退出
   pendingInject?: string;                          // running 期间暂存的注入（下次 waiting 消费）
+  startedAt: number;                               // 派发时间
+  turns: number;                                   // 已完成轮次
+  lastOutput?: string;                             // 最近一轮推送内容（供本地 task-status 查看）
 };
 
 let activeTask: ActiveTask | null = null;
@@ -20,6 +23,28 @@ export function setTaskPush(fn: PushFn): void { push = fn; }
 // 依赖注入：发「正在输入中」（typing 不占连续发送上限），让 worker 跑一轮期间用户知道在干活。
 let typing: (to: string) => void = () => {};
 export function setTaskTyping(fn: (to: string) => void): void { typing = fn; }
+
+/** 任务状态快照（落盘供本地 `task-status` 读）。 */
+export type TaskStateSnapshot = {
+  active: boolean;
+  status: TaskStatus | "idle";
+  to?: string;
+  startedAt?: number;
+  updatedAt: number;
+  turns: number;
+  lastOutput?: string;
+};
+// 依赖注入：把状态快照落盘交给 index（写 task-state.json），task-manager 不直接碰文件、保持可测。
+let stateSink: (s: TaskStateSnapshot) => void = () => {};
+export function setTaskStateSink(fn: (s: TaskStateSnapshot) => void): void { stateSink = fn; }
+/** 用当前 activeTask 构造快照并落盘（在派发/每轮/waiting/停止等关键节点调用）。 */
+function emitState(): void {
+  const t = activeTask;
+  const snap: TaskStateSnapshot = t
+    ? { active: true, status: t.status, to: t.to, startedAt: t.startedAt, updatedAt: Date.now(), turns: t.turns, lastOutput: t.lastOutput }
+    : { active: false, status: "idle", updatedAt: Date.now(), turns: 0 };
+  try { stateSink(snap); } catch { /* best-effort */ }
+}
 
 const PROGRESS = (process.env.WEMIND_WORKER_PROGRESS ?? "0") === "1"; // 默认安静：只在轮次结束/中断推送
 
@@ -34,8 +59,9 @@ export function isAwaiting(to: string): boolean {
 }
 
 /** 派发新任务（后台异步执行，立即返回回执文案，不阻塞调用方）。 */
-export function dispatchTask(to: string, instruction: string): string {
+export function dispatchTask(to: string, instruction: string, cwd?: string): string {
   if (activeTask) return "已有任务在跑，先回复「结束任务」再派发新任务。";
+  setWorkerCwd(cwd); // 本地派发可指定 cwd（终端当前目录）；微信派发 cwd=undefined → 用默认 WORKER_CWD
   void runTask(to, instruction);
   return "✅ 已派给工作机执行（任务运行中）。需要你决策或中断时我会主动找你；随时可回复「结束任务」终止。";
 }
@@ -60,6 +86,7 @@ export function stopTask(to: string): string {
   activeTask = null; // 先清，runTask 循环靠它感知被 stop
   if (task.injectResolver) { const r = task.injectResolver; task.injectResolver = undefined; r(null); }
   stopWorker();
+  emitState(); // → idle
   return "🛑 任务已结束。";
 }
 
@@ -81,7 +108,8 @@ function reason(e: unknown): string {
 
 /** 后台任务循环：每轮 askWorker → 推送本轮输出 → 等注入 → 续跑。绝不在 workerLoop 里 await 它。 */
 async function runTask(to: string, firstInstruction: string): Promise<void> {
-  activeTask = { to, status: "running" };
+  activeTask = { to, status: "running", startedAt: Date.now(), turns: 0 };
+  emitState();
   let instruction: string | null = firstInstruction;
   while (activeTask && instruction !== null) {
     typing(to);                                     // 立即一次「正在输入」
@@ -92,18 +120,25 @@ async function runTask(to: string, firstInstruction: string): Promise<void> {
         : undefined;
       const out = await askWorker(instruction, onProgress);
       if (!activeTask) break;                       // 期间被 stop
-      push(to, `🤖【任务】${out || "（本轮无输出，可回复「继续」推进或「结束任务」终止）"}`);
+      const text = `🤖【任务】${out || "（本轮无输出，可回复「继续」推进或「结束任务」终止）"}`;
+      activeTask.turns += 1;
+      activeTask.lastOutput = text;
+      push(to, text);
     } catch (e) {
       if (!activeTask) break;                       // 被 stop 导致的 reject，不算中断
       log("worker turn failed:", String(e));
-      push(to, `⚠️ 任务中断了（${reason(e)}）。回复「继续」我从中断处恢复，或「结束任务」终止。`);
+      const text = `⚠️ 任务中断了（${reason(e)}）。回复「继续」我从中断处恢复，或「结束任务」终止。`;
+      activeTask.lastOutput = text;
+      push(to, text);
     } finally {
       clearInterval(ti);                            // 本轮结束停 typing
     }
     if (!activeTask) break;
     activeTask.status = "waiting";
-    instruction = await waitForInject(activeTask); // null = stop
-    if (activeTask) activeTask.status = "running";
+    emitState();                                    // → waiting（task-status 可见「等你回复」）
+    instruction = await waitForInject(activeTask);  // null = stop
+    if (activeTask) { activeTask.status = "running"; emitState(); }
   }
+  emitState();                                      // 循环结束（多为 idle）
   log("runTask loop ended");
 }

@@ -216,6 +216,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WEMIND_WORKER_MCP_EXCLUDE` | worker 不继承的 MCP（逗号分隔；`wechat` 始终强制排除，防回环） |
 | `WEMIND_WORKER_IDLE_MS` / `_CAP_MS` / `_FIRST_FRAME_MS` | worker 单轮空闲/硬上限/首帧超时（默认 180000 / 1800000 / 30000，比对话大脑宽松） |
 | `WEMIND_WORKER_PROGRESS` | 是否推送 worker 全程文字进度（默认 `0` 安静；`1` 开启。「正在输入中」始终有） |
+| `WEMIND_TASK_SCAN_MS` | daemon 扫描本地命令收件箱 `task-inbox/` 的间隔毫秒（默认 1000） |
 | 大脑 agent 选择 / 记忆继承 | 见下方「切换大脑 Agent」与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
 
 限制：
@@ -244,6 +245,17 @@ worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 
 - worker 每轮输出带 `🤖【任务】` 标记；跑一轮期间持续「正在输入中」（typing 不占连续发送上限）。
 - 中断（崩溃/超时）靠 `session/load` 恢复——回「继续」即从中断处续跑。
 - 详见 [docs/方案C-MVP-远程human-in-the-loop.md](docs/方案C-MVP-远程human-in-the-loop.md)。
+
+**本地终端入口**（与微信并列、管同一任务，**不依赖微信**）：在电脑前用 `manage.js` 直接管 worker 任务，适合开任务时贴长描述 / 指定工作目录，或专注电脑工作不想掏手机时。
+
+| 命令（`node packages/wechat-daemon/dist/manage.js …`） | 作用 |
+|------|------|
+| `task "<描述>" [--cwd <目录>] [<key\|label>]` | 本地派发任务（默认 cwd=终端当前目录，可指定项目目录——微信入口做不到） |
+| `task-status [<key\|label>]` | 查看任务状态 + 轮次 + 最近输出（读本地 `task-state.json`） |
+| `task-reply "<内容>" [<key\|label>]` | 回复/注入当前任务（`task-reply 继续` = 续跑） |
+| `task-stop [<key\|label>]` | 结束当前任务 |
+
+机制为**文件桥**：CLI 原子写 `task-inbox/*.json`，daemon 独立定时器扫描分发到同一套 task-manager，状态写 `task-state.json` 供 `task-status` 读。详见 [docs/本地双入口-命令派发与看敲.md](docs/本地双入口-命令派发与看敲.md)。
 
 ### 进度提示与连续发送上限
 
