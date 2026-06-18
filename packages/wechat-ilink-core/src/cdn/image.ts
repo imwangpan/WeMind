@@ -40,7 +40,7 @@ export async function downloadImage(img: ImageItem): Promise<Buffer> {
   if (!url) throw new Error("image: 无 full_url/encrypt_query_param");
   const key = resolveKey(img);
   if (!key) throw new Error("image: 无法解析 aes key");
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`image: CDN 下载失败 ${res.status}`);
   const ciphertext = Buffer.from(await res.arrayBuffer());
   return decryptAesEcb(ciphertext, key);
@@ -82,6 +82,7 @@ async function uploadBufferToCdn(params: {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: new Uint8Array(ciphertext),
+        signal: AbortSignal.timeout(30000),
       });
       if (res.status >= 400 && res.status < 500) throw new Error(`CDN 上传客户端错误 ${res.status}`); // 不重试
       if (res.status !== 200) throw new Error(`CDN 上传服务端错误 ${res.status}`);

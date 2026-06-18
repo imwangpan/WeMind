@@ -21,18 +21,31 @@ function filePath(dir: string = DATA_DIR): string {
 }
 
 export function readAllowFrom(dir: string = DATA_DIR): string[] {
+  let raw: string;
   try {
-    const j = JSON.parse(fs.readFileSync(filePath(dir), "utf-8")) as AllowFromFile;
-    return Array.isArray(j.allowFrom) ? j.allowFrom.filter((x): x is string => typeof x === "string" && !!x) : [];
+    raw = fs.readFileSync(filePath(dir), "utf-8");
   } catch {
+    return []; // 不存在：正常（daemon 启动会种入本人）
+  }
+  try {
+    const j = JSON.parse(raw) as AllowFromFile;
+    return Array.isArray(j.allowFrom) ? j.allowFrom.filter((x): x is string => typeof x === "string" && !!x) : [];
+  } catch (e) {
+    // 存在但损坏：本清单是安全闸，损坏返回 [] 是 fail-closed（全员锁死），必须可见 → 记日志 + 备份坏文件
+    console.error(`[allow-from] ${filePath(dir)} parse failed, backing up: ${String(e)}`);
+    try { fs.renameSync(filePath(dir), `${filePath(dir)}.corrupt-${Date.now()}`); } catch { /* best-effort */ }
     return [];
   }
 }
 
+/** 原子写：临时文件 + rename，避免写途崩溃/并发损坏这个安全闸文件。 */
 function writeAllowFrom(list: string[], dir: string = DATA_DIR): void {
   fs.mkdirSync(dir, { recursive: true });
   const uniq = [...new Set(list.filter((x) => typeof x === "string" && !!x))];
-  fs.writeFileSync(filePath(dir), JSON.stringify({ version: 1, allowFrom: uniq }, null, 2), "utf-8");
+  const fp = filePath(dir);
+  const tmp = `${fp}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, JSON.stringify({ version: 1, allowFrom: uniq }, null, 2), "utf-8");
+  fs.renameSync(tmp, fp);
 }
 
 /** 加入授权用户（去重）。返回更新后的清单。 */

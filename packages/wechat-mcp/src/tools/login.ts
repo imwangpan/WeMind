@@ -9,7 +9,7 @@ import {
   clearSessionPause,
   loadAccount, saveAccount, clearAccount,
   loadQrState, saveQrState, clearQrState,
-  loadState, resetState, DATA_DIR,
+  resetState, DATA_DIR,
 } from "@wemind/wechat-ilink-core";
 
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";

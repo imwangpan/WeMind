@@ -81,8 +81,8 @@ async function apiFetch(params: {
       body: params.body,
       signal: controller.signal,
     });
+    const rawText = await res.text(); // 读完响应体后再 clearTimeout：否则慢 body 不受超时保护、可能无限阻塞（长轮询尤甚）
     clearTimeout(t);
-    const rawText = await res.text();
     if (!res.ok) {
       throw new Error(`${params.label} ${res.status}: ${rawText}`);
     }
@@ -90,6 +90,15 @@ async function apiFetch(params: {
   } catch (err) {
     clearTimeout(t);
     throw err;
+  }
+}
+
+/** 防御性解析 API JSON 响应：失败抛带 label 与响应片段的清晰错误，而非裸 SyntaxError（畸形/代理 HTML/截断响应不致以晦涩错误打断调用方）。 */
+function parseJsonResp<T>(raw: string, label: string): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error(`${label}: response not JSON (${raw.slice(0, 120)})`);
   }
 }
 
@@ -116,7 +125,7 @@ export async function getUpdates(params: {
       timeoutMs: timeout,
       label: "getUpdates",
     });
-    return JSON.parse(rawText) as GetUpdatesResp;
+    return parseJsonResp<GetUpdatesResp>(rawText, "getUpdates");
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       return { ret: 0, msgs: [], get_updates_buf: params.updatesBuf };
@@ -176,7 +185,7 @@ export async function getUploadUrl(
     timeoutMs: params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
     label: "getUploadUrl",
   });
-  return JSON.parse(raw) as GetUploadUrlResp;
+  return parseJsonResp<GetUploadUrlResp>(raw, "getUploadUrl");
 }
 
 export async function fetchQRCode(apiBaseUrl: string): Promise<QRCodeResponse> {
@@ -188,7 +197,7 @@ export async function fetchQRCode(apiBaseUrl: string): Promise<QRCodeResponse> {
     timeoutMs: DEFAULT_API_TIMEOUT_MS,
     label: "fetchQRCode",
   });
-  return JSON.parse(rawText) as QRCodeResponse;
+  return parseJsonResp<QRCodeResponse>(rawText, "fetchQRCode");
 }
 
 export async function pollQRStatus(
@@ -204,12 +213,14 @@ export async function pollQRStatus(
       headers: buildCommonHeaders(),
       signal: controller.signal,
     });
-    clearTimeout(timer);
     if (!response.ok) {
       const body = await response.text().catch(() => "(unreadable)");
+      clearTimeout(timer);
       throw new Error(`Failed to poll QR status: ${response.status} ${response.statusText} ${body}`);
     }
-    return response.json() as Promise<QRStatusResponse>;
+    const text = await response.text();
+    clearTimeout(timer);
+    return parseJsonResp<QRStatusResponse>(text, "pollQRStatus");
   } catch (err) {
     clearTimeout(timer);
     if (err instanceof Error && err.name === "AbortError") {
@@ -243,7 +254,7 @@ export async function getConfig(params: {
     timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
     label: "getConfig",
   });
-  return JSON.parse(rawText) as GetConfigResp;
+  return parseJsonResp<GetConfigResp>(rawText, "getConfig");
 }
 
 export async function sendTyping(params: {
@@ -263,24 +274,32 @@ export async function sendTyping(params: {
 
 /** 通知服务端该 bot 客户端上线（best-effort，失败不阻断）。 */
 export async function notifyStart(params: { baseUrl: string; token?: string }): Promise<void> {
-  await apiFetch({
-    baseUrl: params.baseUrl,
-    endpoint: "ilink/bot/msg/notifystart",
-    body: JSON.stringify({ base_info: buildBaseInfo() }),
-    token: params.token,
-    timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
-    label: "notifyStart",
-  });
+  try {
+    await apiFetch({
+      baseUrl: params.baseUrl,
+      endpoint: "ilink/bot/msg/notifystart",
+      body: JSON.stringify({ base_info: buildBaseInfo() }),
+      token: params.token,
+      timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
+      label: "notifyStart",
+    });
+  } catch (err) {
+    console.error(`[ilink] notifyStart failed (ignored, best-effort): ${String(err)}`);
+  }
 }
 
 /** 通知服务端该 bot 客户端下线（best-effort，失败不阻断）。 */
 export async function notifyStop(params: { baseUrl: string; token?: string }): Promise<void> {
-  await apiFetch({
-    baseUrl: params.baseUrl,
-    endpoint: "ilink/bot/msg/notifystop",
-    body: JSON.stringify({ base_info: buildBaseInfo() }),
-    token: params.token,
-    timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
-    label: "notifyStop",
-  });
+  try {
+    await apiFetch({
+      baseUrl: params.baseUrl,
+      endpoint: "ilink/bot/msg/notifystop",
+      body: JSON.stringify({ base_info: buildBaseInfo() }),
+      token: params.token,
+      timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
+      label: "notifyStop",
+    });
+  } catch (err) {
+    console.error(`[ilink] notifyStop failed (ignored, best-effort): ${String(err)}`);
+  }
 }

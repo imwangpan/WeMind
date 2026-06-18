@@ -3,7 +3,7 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
 import {
   sendTyping, getConfig,
-  loadAccount, loadState, saveState,
+  loadAccount, loadState,
 } from "@wemind/wechat-ilink-core";
 
 export const sendTypingSchema = z.object({
@@ -34,8 +34,8 @@ export async function sendTypingIndicator(input: { to: string; status?: "typing"
     contextToken,
   });
 
-  if (configResp.errmsg) {
-    throw new McpError(ErrorCode.InternalError, `getConfig error: ${configResp.errmsg}`);
+  if (configResp.errmsg || !configResp.typing_ticket) {
+    throw new McpError(ErrorCode.InternalError, `getConfig failed: ${configResp.errmsg ?? "no typing_ticket (likely ret!=0)"}`);
   }
 
   if (input.status === "cancel") {

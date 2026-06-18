@@ -41,18 +41,30 @@ export function accountDir(key: string): string {
 }
 
 export function loadRegistry(): AccountsRegistry {
+  let raw: string;
   try {
-    const j = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf-8")) as AccountsRegistry;
-    if (j && typeof j === "object" && j.accounts) return j;
+    raw = fs.readFileSync(REGISTRY_FILE, "utf-8");
   } catch {
-    /* 不存在或损坏 → 空注册表 */
+    return { accounts: {} }; // 不存在：正常（首个账号登记前）
   }
-  return { accounts: {} };
+  try {
+    const j = JSON.parse(raw) as AccountsRegistry;
+    if (j && typeof j === "object" && j.accounts) return j;
+    throw new Error("registry shape invalid");
+  } catch (e) {
+    // 存在但损坏：不要当空注册表直接覆盖（紧接的 save 会抹掉所有已登记账号）；备份坏文件 + 记日志
+    console.error(`[accounts] ${REGISTRY_FILE} parse failed, backing up: ${String(e)}`);
+    try { fs.renameSync(REGISTRY_FILE, `${REGISTRY_FILE}.corrupt-${Date.now()}`); } catch { /* best-effort */ }
+    return { accounts: {} };
+  }
 }
 
+/** 原子写注册表：临时文件 + rename，避免写途崩溃/并发损坏。 */
 export function saveRegistry(reg: AccountsRegistry): void {
   fs.mkdirSync(WEMIND_ROOT, { recursive: true });
-  fs.writeFileSync(REGISTRY_FILE, JSON.stringify(reg, null, 2), "utf-8");
+  const tmp = `${REGISTRY_FILE}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, JSON.stringify(reg, null, 2), "utf-8");
+  fs.renameSync(tmp, REGISTRY_FILE);
 }
 
 export function listAccounts(): AccountMeta[] {

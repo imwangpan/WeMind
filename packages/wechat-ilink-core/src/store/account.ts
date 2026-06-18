@@ -20,17 +20,28 @@ function ensureDir(dir: string): void {
 }
 
 function readJson<T>(filePath: string): T | null {
+  let raw: string;
   try {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(raw) as T;
+    raw = fs.readFileSync(filePath, "utf-8");
   } catch {
+    return null; // 文件不存在：正常（首次运行）
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (e) {
+    // 文件存在但解析失败（写途崩溃/外部破坏）：不静默清空，备份坏文件 + 记日志，便于排查与人工恢复
+    console.error(`[store] ${filePath} parse failed, backing up and treating as empty: ${String(e)}`);
+    try { fs.renameSync(filePath, `${filePath}.corrupt-${Date.now()}`); } catch { /* best-effort */ }
     return null;
   }
 }
 
+/** 原子写：先写临时文件再 rename 覆盖（同盘 rename 原子），避免写途崩溃/并发产生半截损坏文件。 */
 function writeJson(filePath: string, data: unknown): void {
   ensureDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
+  fs.renameSync(tmp, filePath);
 }
 
 export function loadAccount(): AccountData | null {

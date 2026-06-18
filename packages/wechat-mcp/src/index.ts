@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { loadAccount, notifyStart } from "@wemind/wechat-ilink-core";
+import { loadAccount, notifyStart, notifyStop } from "@wemind/wechat-ilink-core";
 import { VERSION } from "./version.js";
 import { loginQrcode, checkQrcodeStatus, loginQrcodeSchema, checkQrcodeStatusSchema, logoutSchema, logout } from "./tools/login.js";
 import { getMessages, getMessagesSchema } from "./tools/messages.js";
@@ -95,6 +95,16 @@ async function main() {
   } else {
     console.error("[mcp-wechat] Connected. Not logged in. Call login_qrcode to start.");
   }
+
+  // 优雅关停：通知服务端下线（best-effort，notifyStop 内部已吞异常）再退出
+  const shutdown = () => {
+    const acc = loadAccount();
+    const done = () => process.exit(0);
+    if (acc?.botToken) void notifyStop({ baseUrl: acc.baseUrl, token: acc.botToken }).finally(done);
+    else done();
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch((err) => {

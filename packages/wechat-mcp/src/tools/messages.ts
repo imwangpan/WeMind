@@ -4,11 +4,13 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import {
   getUpdates,
   SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs,
-  loadAccount, loadState, saveState,
+  loadAccount, loadState, saveState, classifyTransportError,
 } from "@wemind/wechat-ilink-core";
 import type { WeixinMessage } from "@wemind/wechat-ilink-core";
 
 const LONG_POLL_MS = 25_000;
+const POLL_FLOOR_MS = 1000; // wait 模式两次轮询最小间隔，防服务端快速返回空时零间隔请求风暴
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export const getMessagesSchema = z.object({
   wait: z
@@ -70,12 +72,23 @@ export async function getMessages(input: { wait?: boolean; timeout?: number }): 
       };
     }
 
-    const resp = await getUpdates({
-      baseUrl: account.baseUrl,
-      token: account.botToken,
-      updatesBuf: state.updatesBuf,
-      timeoutMs: pollMs,
-    });
+    const polledAt = Date.now();
+    let resp: Awaited<ReturnType<typeof getUpdates>>;
+    try {
+      resp = await getUpdates({
+        baseUrl: account.baseUrl,
+        token: account.botToken,
+        updatesBuf: state.updatesBuf,
+        timeoutMs: pollMs,
+      });
+    } catch (e) {
+      // wait 模式：瞬时网络错误退避重试，不让一次网络抖动终结整个长轮询
+      if (input.wait) {
+        const cls = classifyTransportError(e);
+        if (cls.retryable) { await sleep(2000); continue; }
+      }
+      throw e;
+    }
 
     if (resp.errcode === SESSION_EXPIRED_ERRCODE) {
       pauseSession(account.botId);
@@ -130,6 +143,9 @@ export async function getMessages(input: { wait?: boolean; timeout?: number }): 
         ],
       };
     }
+    // wait 模式继续前：若本轮服务端快速返回（未 hold 满），补足地板间隔，防零间隔请求风暴
+    const elapsed = Date.now() - polledAt;
+    if (elapsed < POLL_FLOOR_MS) await sleep(POLL_FLOOR_MS - elapsed);
   }
 }
 
