@@ -26,7 +26,7 @@
 /** 发送/上传 RPC 的 `ret` 码。 */
 export const ILINK_RET = {
   OK: 0,
-  /** 参数错误：检查请求（最常见为 context_token 失效/不匹配）。 */
+  /** 参数错误：检查请求（最常见为 context_token 失效/不匹配；也可能被复用为发送限流——短时连续发送过多，见 README「连续发送上限」）。 */
   PARAM_ERROR: -2,
 } as const;
 
@@ -51,7 +51,7 @@ export function describeILinkCode(code: number | undefined | null): { kind: ILin
   switch (classifyILinkCode(code)) {
     case "ok": return { kind: "ok", label: `ok(${code ?? 0})`, hint: "" };
     case "session_expired": return { kind: "session_expired", label: "会话过期(-14)", hint: "需重新登录" };
-    case "param_error": return { kind: "param_error", label: "参数错误(-2)", hint: "检查请求参数（最常见：context_token 失效/不匹配）" };
+    case "param_error": return { kind: "param_error", label: "参数错误(-2)", hint: "检查请求参数（最常见：context_token 失效/不匹配；或发送限流——短时连续发送过多）" };
     default: return { kind: "unknown", label: `未知错误码(${code})`, hint: "对照 iLink 协议文档排查" };
   }
 }
