@@ -11,6 +11,10 @@
     "build": "npm run build -w @wemind/wechat-ilink-core && npm run build -w @wemind/wechat-daemon -w @wemind/wechat-mcp",
     "typecheck": "npm run build -w @wemind/wechat-ilink-core && npm run typecheck -w @wemind/wechat-daemon -w @wemind/wechat-mcp",
     "test": "vitest run",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt \"packages/**/*.ts\"",
+    "format:check": "oxfmt --check \"packages/**/*.ts\"",
     "daemon": "node packages/wechat-daemon/dist/index.js",
     "start": "node packages/wechat-mcp/dist/index.js"
   },
@@ -29,8 +33,10 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "oxfmt": "^0.56.0",
+    "oxlint": "^1.71.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0",
+    "typescript": "^7.0.1-rc",
     "vitest": "^3.1.0"
   }
 }

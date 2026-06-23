@@ -3,7 +3,9 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "declaration": false
+    "declaration": false,
+    "typeRoots": ["../../node_modules/@types"],
+    "types": ["node", "qrcode"]
   },
   "include": ["src"]
 }
