@@ -1,12 +1,13 @@
 # WeMind
 
-> *Your AI mind, reachable on WeChat.*
+> _Your AI mind, reachable on WeChat._
 
 基于 MCP（Model Context Protocol）的微信 AI 机器人，让任何 AI Agent 都能收发微信消息。
 
 > **关于本 Fork**
 >
 > Fork 自 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server)，主要改动：
+>
 > - **支持 Node.js 运行**（原项目仅支持 Bun）：`tsc` 构建到 `dist/`，用 `node` 运行
 > - **补齐 iLink 协议请求头** `iLink-App-Id` / `iLink-App-ClientVersion`（连接所需）
 > - **处理会话超时**（errcode `-14`），补 `notifyStart` / `notifyStop` 上下线通知
@@ -15,6 +16,22 @@
 >
 > iLink 协议细节、session-guard 与上下线通知实现借鉴自微信官方插件
 > [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)（MIT）。
+
+## 📖 文档 / RepoWiki
+
+想深入理解架构、协议与运行机制，请看 **[docs/repowiki/](docs/repowiki/README.md)** —— 一份依据源码整理的完整技术 wiki（含 Mermaid 架构图）：
+
+| 入口                                                     | 内容                                                    |
+| -------------------------------------------------------- | ------------------------------------------------------- |
+| [RepoWiki 首页](docs/repowiki/README.md)                 | 按角色的阅读导航 + 章节目录                             |
+| [系统架构](docs/repowiki/02-系统架构.md)                 | 三包协作、两种接入形态、poller/worker 解耦、双 ACP 进程 |
+| [iLink 协议内核](docs/repowiki/03-iLink-协议内核.md)     | HTTP 客户端、协议类型、错误码、收发图加解密             |
+| [守护进程 Daemon](docs/repowiki/05-守护进程-Daemon.md)   | 消息路由、回合编排、连续发送上限管理                    |
+| [ACP 大脑与沙箱](docs/repowiki/06-ACP-大脑与沙箱.md)     | 常驻 ACP 进程、MCP 沙箱、记忆继承、换大脑               |
+| [远程任务 Worker](docs/repowiki/07-远程任务-Worker.md)   | 受控工作机、任务状态机、微信/本地双入口                 |
+| [配置项与环境变量](docs/repowiki/09-配置项与环境变量.md) | 全部 env 速查表                                         |
+
+> 本 README 是面向用户的使用说明；RepoWiki 是面向开发者的深度技术文档，两者互补。
 
 ## 功能
 
@@ -34,13 +51,13 @@
 
 本仓库是一个 monorepo，按职责拆为三个包，共享同一套 iLink 协议内核：
 
-| 包 | 路径 | 说明 | 发布 |
-|------|------|------|------|
-| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（内联进 mcp-server） |
-| `@wemind/wechat-mcp` | `packages/wechat-mcp` | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入 | **可发布**（bin: `wemind-mcp`） |
-| `@wemind/wechat-daemon` | `packages/wechat-daemon` | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发 | 私有（本机运行） |
+| 包                          | 路径                         | 说明                                                                                         | 发布                            |
+| --------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
+| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（内联进 mcp-server）       |
+| `@wemind/wechat-mcp`        | `packages/wechat-mcp`        | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入                                 | **可发布**（bin: `wemind-mcp`） |
+| `@wemind/wechat-daemon`     | `packages/wechat-daemon`     | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发                                             | 私有（本机运行）                |
 
-`mcp-server` 发布时用 [tsup](https://tsup.egoist.dev/) 把 `core` **内联**进单一产物，因此对外只需发布这一个自包含的包；`daemon` 在本仓库内通过 workspace 直接引用 `core` 源码，永不发布。
+`mcp-server` 发布时用 [tsdown](https://tsdown.dev/)（rolldown + oxc）把 `core` **内联**进单一产物，因此对外只需发布这一个自包含的包；`daemon` 在本仓库内通过 workspace 直接引用 `core` 源码，永不发布。
 
 ## 快速开始
 
@@ -55,7 +72,9 @@
   "mcpServers": {
     "wechat": {
       "command": "node",
-      "args": ["/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"]
+      "args": [
+        "/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"
+      ]
     }
   }
 }
@@ -70,7 +89,10 @@
   "mcp": {
     "wechat": {
       "type": "local",
-      "command": ["node", "/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"],
+      "command": [
+        "node",
+        "/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"
+      ],
       "enabled": true
     }
   }
@@ -121,30 +143,30 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 
 ## 工具列表
 
-| 工具 | 说明 |
-|------|------|
-| `login_qrcode` | 生成微信登录二维码 |
-| `check_qrcode_status` | 检查二维码是否已扫码确认 |
-| `logout` | 退出登录并清除凭证 |
-| `get_messages` | 拉取新消息（`wait=true` 阻塞等待直到收到消息） |
-| `send_text_message` | 发送文本消息 |
-| `send_typing` | 发送或取消"正在输入"状态 |
+| 工具                  | 说明                                           |
+| --------------------- | ---------------------------------------------- |
+| `login_qrcode`        | 生成微信登录二维码                             |
+| `check_qrcode_status` | 检查二维码是否已扫码确认                       |
+| `logout`              | 退出登录并清除凭证                             |
+| `get_messages`        | 拉取新消息（`wait=true` 阻塞等待直到收到消息） |
+| `send_text_message`   | 发送文本消息                                   |
+| `send_typing`         | 发送或取消"正在输入"状态                       |
 
 ## 数据存储
 
 运行时状态保存在 **`~/.wemind/<account>/`** 下(默认账号 `default`，即 `~/.wemind/default/`)。该目录**独立于代码仓库**——改名/重装/重新 clone 代码都不影响登录态。
 
-| 文件/目录 | 说明 |
-|------|------|
-| `account.json` | Bot Token、botId、userId、baseUrl（POSIX 下权限 600；**Windows 下为明文**，见「安全说明」） |
-| `state.json` | 长轮询游标（`updatesBuf`）、各会话 `context_token`、`lastMessageId`（去重） |
-| `qr_login.json` / `qrcode.png` / `qrcode.txt` | 扫码登录临时态与二维码（登录后即失效） |
-| `brain-sessions.json` | `userId → ACP sessionId` 映射，daemon 重启后据此 `session/load` 恢复多轮上下文 |
-| `brain-mcps.json` | brain 当前激活的 MCP 集（默认空） |
-| `brain-home/` | brain 的沙箱 `KIRO_HOME`（独立于你本人的 `~/.kiro`），含 `settings/mcp.json`（默认空）与各 ACP 会话落盘记录 |
-| `worker-sessions.json` | worker（远程任务）单任务 `ACP sessionId` 映射，daemon 重启后据此 `session/load` 续传 |
-| `worker-home/` | worker 的沙箱 `KIRO_HOME`（`settings/mcp.json` 继承**全量 MCP 除 `wechat`** ＋ 记忆/技能/settings 含模型） |
-| `worker.pid` | worker 大脑进程 pid（与 brain/用户会话区分、便于精确清理） |
+| 文件/目录                                     | 说明                                                                                                        |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `account.json`                                | Bot Token、botId、userId、baseUrl（POSIX 下权限 600；**Windows 下为明文**，见「安全说明」）                 |
+| `state.json`                                  | 长轮询游标（`updatesBuf`）、各会话 `context_token`、`lastMessageId`（去重）                                 |
+| `qr_login.json` / `qrcode.png` / `qrcode.txt` | 扫码登录临时态与二维码（登录后即失效）                                                                      |
+| `brain-sessions.json`                         | `userId → ACP sessionId` 映射，daemon 重启后据此 `session/load` 恢复多轮上下文                              |
+| `brain-mcps.json`                             | brain 当前激活的 MCP 集（默认空）                                                                           |
+| `brain-home/`                                 | brain 的沙箱 `KIRO_HOME`（独立于你本人的 `~/.kiro`），含 `settings/mcp.json`（默认空）与各 ACP 会话落盘记录 |
+| `worker-sessions.json`                        | worker（远程任务）单任务 `ACP sessionId` 映射，daemon 重启后据此 `session/load` 续传                        |
+| `worker-home/`                                | worker 的沙箱 `KIRO_HOME`（`settings/mcp.json` 继承**全量 MCP 除 `wechat`** ＋ 记忆/技能/settings 含模型）  |
+| `worker.pid`                                  | worker 大脑进程 pid（与 brain/用户会话区分、便于精确清理）                                                  |
 
 **多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<名>` 切换（→ `~/.wemind/<名>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。
 
@@ -195,29 +217,29 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 
 环境变量：
 
-| 变量 | 说明 |
-|------|------|
-| `WECHAT_OWNER_ID` | 发件人授权覆盖（默认登录账号本人 user id；常规用配对授权 allowFrom，见上） |
-| `WECHAT_ACCOUNT` | 账号标识，决定状态子目录 `~/.wemind/<account>/`（默认 `default`）。多账号用不同值隔离 |
-| `WECHAT_DATA_DIR` | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则 |
-| `WEMIND_HOME` | 数据根目录（默认 `~/.wemind`） |
-| `WECHAT_BRAIN_HOME` | brain 沙箱目录（默认 `<数据目录>/brain-home`） |
-| `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` | 大脑单回合空闲/硬超时（默认 120000 / 900000；重任务实测需 ~6.5min） |
-| `WECHAT_BRAIN_FIRST_FRAME_MS` | 首帧超时：prompt 发出后多久仍无任何帧判「开局即卡死」并快速重试（默认 25000） |
-| `WECHAT_CONSEC_SEND_LIMIT` | bot 在用户回复前可连续发送的消息数上限（默认 10）。达「上限-2」后发提示并等待「继续」，留最后一条给答案 |
-| `WECHAT_MIN_SEND_GAP_MS` | 两条发送之间的最小间隔，规避发送限流（默认 1500） |
-| `WECHAT_REPLY_FILE_THRESHOLD` | 回复正文超过此字符数则转 .md 文件发送（默认 1500） |
-| `WEMIND_ILINK_BASE` | iLink API / 登录基础 URL（默认 `https://ilinkai.weixin.qq.com`） |
-| `WECHAT_CDN_BASE_URL` | 媒体 CDN 基础 URL（默认 `https://novac2c.cdn.weixin.qq.com/c2c`） |
-| `ILINK_CLIENT_VERSION` | 对外声明的 iLink 客户端版本（默认 `2.4.3`，随官方升级可改，免动代码） |
-| `ILINK_APP_ID` | iLink App Id（默认 `bot`） |
-| `WEMIND_WORKER_CWD` | worker（远程任务）工作目录（默认用户主目录；本地命令派发后可取命令所在目录） |
-| `WEMIND_WORKER_HOME` | worker 沙箱配置目录（默认 `<数据目录>/worker-home`） |
-| `WEMIND_WORKER_MCP_EXCLUDE` | worker 不继承的 MCP（逗号分隔；`wechat` 始终强制排除，防回环） |
-| `WEMIND_WORKER_IDLE_MS` / `_CAP_MS` / `_FIRST_FRAME_MS` | worker 单轮空闲/硬上限/首帧超时（默认 180000 / 1800000 / 30000，比对话大脑宽松） |
-| `WEMIND_WORKER_PROGRESS` | 是否推送 worker 全程文字进度（默认 `0` 安静；`1` 开启。「正在输入中」始终有） |
-| `WEMIND_TASK_SCAN_MS` | daemon 扫描本地命令收件箱 `task-inbox/` 的间隔毫秒（默认 1000） |
-| 大脑 agent 选择 / 记忆继承 | 见下方「切换大脑 Agent」与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
+| 变量                                                    | 说明                                                                                                                                |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `WECHAT_OWNER_ID`                                       | 发件人授权覆盖（默认登录账号本人 user id；常规用配对授权 allowFrom，见上）                                                          |
+| `WECHAT_ACCOUNT`                                        | 账号标识，决定状态子目录 `~/.wemind/<account>/`（默认 `default`）。多账号用不同值隔离                                               |
+| `WECHAT_DATA_DIR`                                       | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则                                                                           |
+| `WEMIND_HOME`                                           | 数据根目录（默认 `~/.wemind`）                                                                                                      |
+| `WECHAT_BRAIN_HOME`                                     | brain 沙箱目录（默认 `<数据目录>/brain-home`）                                                                                      |
+| `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS`          | 大脑单回合空闲/硬超时（默认 120000 / 900000；重任务实测需 ~6.5min）                                                                 |
+| `WECHAT_BRAIN_FIRST_FRAME_MS`                           | 首帧超时：prompt 发出后多久仍无任何帧判「开局即卡死」并快速重试（默认 25000）                                                       |
+| `WECHAT_CONSEC_SEND_LIMIT`                              | bot 在用户回复前可连续发送的消息数上限（默认 10）。达「上限-2」后发提示并等待「继续」，留最后一条给答案                             |
+| `WECHAT_MIN_SEND_GAP_MS`                                | 两条发送之间的最小间隔，规避发送限流（默认 1500）                                                                                   |
+| `WECHAT_REPLY_FILE_THRESHOLD`                           | 回复正文超过此字符数则转 .md 文件发送（默认 1500）                                                                                  |
+| `WEMIND_ILINK_BASE`                                     | iLink API / 登录基础 URL（默认 `https://ilinkai.weixin.qq.com`）                                                                    |
+| `WECHAT_CDN_BASE_URL`                                   | 媒体 CDN 基础 URL（默认 `https://novac2c.cdn.weixin.qq.com/c2c`）                                                                   |
+| `ILINK_CLIENT_VERSION`                                  | 对外声明的 iLink 客户端版本（默认 `2.4.3`，随官方升级可改，免动代码）                                                               |
+| `ILINK_APP_ID`                                          | iLink App Id（默认 `bot`）                                                                                                          |
+| `WEMIND_WORKER_CWD`                                     | worker（远程任务）工作目录（默认用户主目录；本地命令派发后可取命令所在目录）                                                        |
+| `WEMIND_WORKER_HOME`                                    | worker 沙箱配置目录（默认 `<数据目录>/worker-home`）                                                                                |
+| `WEMIND_WORKER_MCP_EXCLUDE`                             | worker 不继承的 MCP（逗号分隔；`wechat` 始终强制排除，防回环）                                                                      |
+| `WEMIND_WORKER_IDLE_MS` / `_CAP_MS` / `_FIRST_FRAME_MS` | worker 单轮空闲/硬上限/首帧超时（默认 180000 / 1800000 / 30000，比对话大脑宽松）                                                    |
+| `WEMIND_WORKER_PROGRESS`                                | 是否推送 worker 全程文字进度（默认 `0` 安静；`1` 开启。「正在输入中」始终有）                                                       |
+| `WEMIND_TASK_SCAN_MS`                                   | daemon 扫描本地命令收件箱 `task-inbox/` 的间隔毫秒（默认 1000）                                                                     |
+| 大脑 agent 选择 / 记忆继承                              | 见下方「切换大脑 Agent」与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
 
 限制：
 
@@ -235,13 +257,13 @@ worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 
 
 **指令集**：
 
-| 你发的消息 | 去向 |
-|------|------|
-| `任务：xxx` / `>xxx` | 明确发给 worker：没任务时**启动**新任务，有任务时**追加/回复**给它 |
-| `问大脑 xxx` | 明确发给对话大脑（worker 正等你时也能临时插话问大脑） |
-| `结束任务` / `停止任务` | 终止当前 worker 任务 |
-| worker 刚问你后，直接回（无前缀） | 注入 worker（最自然的决策回复） |
-| worker 埋头跑时，直接发（无前缀） | 走对话大脑（任务不受影响） |
+| 你发的消息                        | 去向                                                               |
+| --------------------------------- | ------------------------------------------------------------------ |
+| `任务：xxx` / `>xxx`              | 明确发给 worker：没任务时**启动**新任务，有任务时**追加/回复**给它 |
+| `问大脑 xxx`                      | 明确发给对话大脑（worker 正等你时也能临时插话问大脑）              |
+| `结束任务` / `停止任务`           | 终止当前 worker 任务                                               |
+| worker 刚问你后，直接回（无前缀） | 注入 worker（最自然的决策回复）                                    |
+| worker 埋头跑时，直接发（无前缀） | 走对话大脑（任务不受影响）                                         |
 
 - worker 只在 **waiting（刚停下问你）** 时才默认接管你的无前缀消息；它埋头跑时大脑照常可用。
 - worker 每轮输出带 `🤖【任务】` 标记；跑一轮期间持续「正在输入中」（typing 不占连续发送上限）。
@@ -250,12 +272,12 @@ worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 
 
 **本地终端入口**（与微信并列、管同一任务，**不依赖微信**）：在电脑前用 `manage.js` 直接管 worker 任务，适合开任务时贴长描述 / 指定工作目录，或专注电脑工作不想掏手机时。
 
-| 命令（`node packages/wechat-daemon/dist/manage.js …`） | 作用 |
-|------|------|
-| `task "<描述>" [--cwd <目录>] [<key\|label>]` | 本地派发任务（默认 cwd=终端当前目录，可指定项目目录——微信入口做不到） |
-| `task-status [<key\|label>]` | 查看任务状态 + 轮次 + 最近输出（读本地 `task-state.json`） |
-| `task-reply "<内容>" [<key\|label>]` | 回复/注入当前任务（`task-reply 继续` = 续跑） |
-| `task-stop [<key\|label>]` | 结束当前任务 |
+| 命令（`node packages/wechat-daemon/dist/manage.js …`） | 作用                                                                  |
+| ------------------------------------------------------ | --------------------------------------------------------------------- |
+| `task "<描述>" [--cwd <目录>] [<key\|label>]`          | 本地派发任务（默认 cwd=终端当前目录，可指定项目目录——微信入口做不到） |
+| `task-status [<key\|label>]`                           | 查看任务状态 + 轮次 + 最近输出（读本地 `task-state.json`）            |
+| `task-reply "<内容>" [<key\|label>]`                   | 回复/注入当前任务（`task-reply 继续` = 续跑）                         |
+| `task-stop [<key\|label>]`                             | 结束当前任务                                                          |
 
 机制为**文件桥**：CLI 原子写 `task-inbox/*.json`，daemon 独立定时器扫描分发到同一套 task-manager，状态写 `task-state.json` 供 `task-status` 读。详见 [docs/本地双入口-命令派发与看敲.md](docs/本地双入口-命令派发与看敲.md)。
 
@@ -275,12 +297,12 @@ brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认�
 
 > **继承你的记忆与规则**：沙箱会用目录 junction 把所用 agent 真实配置目录里的「知识/记忆」类子目录链进来，让微信里的大脑和你日常使用读到**同样的记忆、规则、技能**。`settings/` 里**除 `mcp.json` 外**的文件（尤其 `cli.json`，含 `chat.defaultModel` 等——这决定大脑用哪个模型！）也会同步过来，**只有 `mcp.json` 隔离 curated**（防 `wechat` 回环）；`sessions`（brain 自有会话）保持沙箱本地。**按 agent 配置驱动**（`brain-agents.ts` 预设的 `realHome`/`inheritDirs`）：kiro 已预置（继承 `~/.kiro` 的 `steering`/`memories`/`skills`/`agents`/`powers`/`tasks`/`extensions` + `settings`(非 mcp)）；非空目录（如 kiro 自建 agents 脚手架）会补拷缺失文件。其它 agent 记忆机制不同，默认不继承，需要时填预设或用 `WEMIND_BRAIN_REAL_HOME`/`WEMIND_BRAIN_INHERIT_DIRS` 配置。`WEMIND_BRAIN_INHERIT=0` 可关闭。**注意：换模型后旧 ACP 会话可能仍绑旧模型，需在微信发「新会话」重建。** 需要某个 MCP 时，直接**在微信里发指令**（daemon 拦截处理，不进 brain）：
 
-| 指令 | 作用 |
-|------|------|
-| `MCP` / `列出 MCP` | 列出可选 MCP（来自全局 `mcp.json`）与当前已激活 |
-| `加载 <名>` / `load <名>` | 把指定 MCP 加入激活集（`wechat` 永久禁止） |
-| `卸载 <名>` / `unload <名>` | 移除 |
-| `新会话` / `重置` / `/new` | 开启新 ACP 会话（清空多轮上下文） |
+| 指令                        | 作用                                            |
+| --------------------------- | ----------------------------------------------- |
+| `MCP` / `列出 MCP`          | 列出可选 MCP（来自全局 `mcp.json`）与当前已激活 |
+| `加载 <名>` / `load <名>`   | 把指定 MCP 加入激活集（`wechat` 永久禁止）      |
+| `卸载 <名>` / `unload <名>` | 移除                                            |
+| `新会话` / `重置` / `/new`  | 开启新 ACP 会话（清空多轮上下文）               |
 
 加载/卸载 MCP 后 daemon 会**重启 ACP 进程**以按新沙箱 `mcp.json` 重载，下一条消息生效。激活的 MCP 等于对白名单发件人全权开放（brain 是 `--trust-all-tools`），按需加载、用完可卸载。
 
@@ -288,13 +310,13 @@ brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认�
 
 daemon 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动，默认是 `kiro-cli`，但任何兼容 ACP 的 agent CLI 都能接入，**无需改代码，仅靠环境变量**（见 `packages/wechat-daemon/src/brain-agents.ts`）：
 
-| 环境变量 | 作用 | 默认 |
-|------|------|------|
-| `WEMIND_BRAIN` | 选预设（如 `kiro`、`gemini`） | `kiro` |
-| `WEMIND_BRAIN_BIN` | 覆盖二进制（绝对路径或 PATH 上的名字） | 预设自动解析 |
-| `WEMIND_BRAIN_ARGS` | 覆盖进入 ACP 模式的启动参数（空格分隔） | 预设值 |
-| `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（指向 brain 沙箱） | 预设值 |
-| `KIRO_CLI_BIN` | 旧的 kiro 专用二进制覆盖（仍兼容） | — |
+| 环境变量                | 作用                                                | 默认         |
+| ----------------------- | --------------------------------------------------- | ------------ |
+| `WEMIND_BRAIN`          | 选预设（如 `kiro`、`gemini`）                       | `kiro`       |
+| `WEMIND_BRAIN_BIN`      | 覆盖二进制（绝对路径或 PATH 上的名字）              | 预设自动解析 |
+| `WEMIND_BRAIN_ARGS`     | 覆盖进入 ACP 模式的启动参数（空格分隔）             | 预设值       |
+| `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（指向 brain 沙箱） | 预设值       |
+| `KIRO_CLI_BIN`          | 旧的 kiro 专用二进制覆盖（仍兼容）                  | —            |
 
 `kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量即可。协议层（`session/new`/`prompt`/`update` 等）是标准 ACP，所有 ACP agent 共用。
 
@@ -347,19 +369,19 @@ node packages/wechat-daemon/dist/manage.js login --label 工作号 --start
 
 管理命令（`node packages/wechat-daemon/dist/manage.js <command>`）：
 
-| 命令 | 作用 |
-|------|------|
+| 命令                           | 作用                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------- |
 | `login [--label 名] [--start]` | **一条命令完成扫码登录**：自刷新二维码 + 自动归档（`--start` 顺带启动） |
-| `list` | 列出账号、别名、botId、运行状态 |
-| `start <key\|label>` | 启动某账号的 daemon |
-| `logout <key\|label>` | 停 daemon + 通知下线 + 清凭证（保留目录，可重登） |
-| `delete <key\|label>` | 停 daemon + 删除目录 + 移除注册 |
-| `label <key\|label> <新别名>` | 改别名 |
-| `set-default <key\|label>` | 设默认账号 |
-| `adopt <key> [--label 名]` | 把已存在的账号目录登记进注册表 |
-| `allowlist <key\|label>` | 查看该账号的授权用户清单（allowFrom） |
-| `allow <key\|label> <userId>` | 授权某用户可驱动该账号 bot |
-| `revoke <key\|label> <userId>` | 撤销某用户的授权 |
+| `list`                         | 列出账号、别名、botId、运行状态                                         |
+| `start <key\|label>`           | 启动某账号的 daemon                                                     |
+| `logout <key\|label>`          | 停 daemon + 通知下线 + 清凭证（保留目录，可重登）                       |
+| `delete <key\|label>`          | 停 daemon + 删除目录 + 移除注册                                         |
+| `label <key\|label> <新别名>`  | 改别名                                                                  |
+| `set-default <key\|label>`     | 设默认账号                                                              |
+| `adopt <key> [--label 名]`     | 把已存在的账号目录登记进注册表                                          |
+| `allowlist <key\|label>`       | 查看该账号的授权用户清单（allowFrom）                                   |
+| `allow <key\|label> <userId>`  | 授权某用户可驱动该账号 bot                                              |
+| `revoke <key\|label> <userId>` | 撤销某用户的授权                                                        |
 
 **自启全部账号**：`scripts/run-all-daemons.ps1` 读注册表为每个账号起一个 daemon（各账号单实例守卫，重复运行安全）。Windows 启动文件夹的 VBS 已指向它，开机自动拉起所有已登记账号。
 

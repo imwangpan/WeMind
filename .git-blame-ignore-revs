@@ -1,0 +1,11 @@
+# git blame 忽略名单：列出“纯格式化/机械式改动”的提交哈希，
+# 让 git blame 跳过它们，定位到真正改逻辑的提交。
+#
+# 启用（每个克隆执行一次）：
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# 用法：把“仅 oxfmt 全量格式化”的那个提交的完整 40 位哈希粘到下面（每行一个）。
+# 例：
+# 0000000000000000000000000000000000000000  # chore: oxfmt 首次全量格式化
+
+29e186064d202c06080af7c6158d69780896a04b  # style: oxfmt 全量格式化所有 .ts

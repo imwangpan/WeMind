@@ -5,6 +5,8 @@
 ## [Unreleased] — fork
 
 ### Changed
+
+- **升级 TypeScript 到 7.0（原生 Go 编译器）+ 接入 oxc 工具链**：`typescript@7.0`（原生编译器，类型检查约提速 10×）。原生编译器不再自动包含 `@types`，各包 `tsconfig` 显式补 `typeRoots`+`types`（core `["node"]`，daemon/mcp 含 `"qrcode"`）。`wechat-mcp` 打包器由 **tsup 换为 tsdown**（rolldown + oxc）——tsup 在 TS7 下因启动即 `require('typescript')`、而 7.0 不再暴露旧 JS API 而崩溃（`ERR_PACKAGE_PATH_NOT_EXPORTED`）；tsdown 配 `dts:false` + `outExtensions` 输出 `dist/index.js`，产物等价（单文件 ESM、保留 shebang、内联 core，`sdk`/`zod`/`qrcode` external）。新增 **oxlint**（`correctness:error`）与 **oxfmt**（`printWidth:120`）：`npm run lint`/`format`/`format:check`，CI 增 lint + format:check 步骤。
 - **回复 token 策略改为「每条消息用自己的 context_token」**：消息队列中每条消息携带自己的 `context_token`，串行处理、回复用该消息自己的 token（`-2` 时再用该用户最新缓存 token 兜底重试）。此前的 `latestCtx`（"总用最新 token"）会用后到消息的 token 去回复较早消息，反而触发 `-2`，已回退。**认知更正**：`ret=-2` 是「参数错误」而非「token 按时间过期」；context_token 按 (账号,用户) 缓存/重用、仅会话过期(-14)时失效，**无文档化时间 TTL**（此前「约 5 分钟过期」的说法作废）。
 - **大脑超时与进度调参**：空闲超时 `WECHAT_BRAIN_IDLE_MS` 默认 30s、硬上限 `WECHAT_BRAIN_CAP_MS` 默认 4min、新增首帧超时 `WECHAT_BRAIN_FIRST_FRAME_MS` 默认 25s（开局即卡更快放弃，让失败提示在 token 有效期内送达）；进度消息**节流**（工具步骤首条即发、其后 ≥15s 一条，步骤号只在实际发出时递增，避免刷屏/跳号/触发发送限流）；进度/中间消息用 `GENERATING`、仅最终答案 `FINISH`；失败**按类型重试**（后端瞬时错误如 `-32603` 最多 3 次、超时类 2 次）并给分类提示。
 - **更多硬编码改为可配置（env 覆盖）**：iLink 基础 URL（`WEMIND_ILINK_BASE`）、媒体 CDN 基础 URL（`WECHAT_CDN_BASE_URL`）、对外声明的客户端版本（`ILINK_CLIENT_VERSION`，免改代码跟官方升级）；MCP 目录源跟随可配置的 `realHome`（`WEMIND_MCP_CATALOG` 可覆盖）；`ecosystem.config.cjs` 数据根支持 `WEMIND_HOME`。记忆/规则继承的来源与子目录也下沉为按 agent 配置（`realHome`/`inheritDirs` + `WEMIND_BRAIN_REAL_HOME`/`_INHERIT_DIRS`）。
@@ -16,6 +18,7 @@
   - 构建顺序 `core → daemon/mcp-server`，由 root 编排脚本保证；daemon 入口由 `dist/daemon/index.js` 变更为 `packages/wechat-daemon/dist/index.js`（`scripts/run-daemon.ps1` 已同步）。
 
 ### Added
+
 - **本地双入口：命令派发 + 命令式看/敲（方案 C 迭代）**：给 worker 任务加**本地终端入口**，与微信入口并列管同一任务。新增 `manage.js` 命令 `task "<描述>" [--cwd <目录>]`（本地派发，默认 cwd=终端当前目录——微信入口做不到指定工作目录）、`task-reply`（注入/回复）、`task-status`（看状态 + 最近输出，**不依赖微信**）、`task-stop`（结束）。机制为**文件桥**：CLI 原子写 `~/.wemind/<account>/task-inbox/*.json`，daemon 独立定时器（`WEMIND_TASK_SCAN_MS` 默认 1s，不挂 poller）扫描分发到 task-manager（dispatch/reply/stop），并把任务状态快照写 `task-state.json` 供 `task-status` 读；启动清空 inbox 防重放、写命令前预检 daemon 存活。worker-acp 支持 per-task cwd（`setWorkerCwd`，spawn 时生效）。两入口复用同一 task-manager，微信侧行为不变。本地端到端实测通过。详见 `docs/本地双入口-命令派发与看敲.md`。
 - **方案 C MVP · 远程 human-in-the-loop（受控 ACP 工作机）**：让漫长任务跑在一个**受控的 ACP worker 进程**里，在它「列方案让你选」或「中断需继续」时把情况推到微信，你回一句即可让它续跑。新增 `packages/wechat-daemon/src/worker-sandbox.ts`（worker 沙箱：继承真实配置目录**全量 MCP 除 `wechat`**（防回环）＋ 记忆/技能/settings 含模型；独立 `WORKER_HOME`）、`worker-acp.ts`（独立 ACP 客户端，约 70% 复制 acp-brain：单任务 session、cwd=任务工作目录（`WEMIND_WORKER_CWD` 默认 homedir）、宽松超时 `WEMIND_WORKER_IDLE_MS`/`_CAP_MS`/`_FIRST_FRAME_MS`）、`task-manager.ts`（单任务状态机 ＋ 后台 runTask）。**消息路由**（daemon workerLoop）：状态分流 ＋ 三前缀——`任务：xxx`/`>xxx` 明确发 worker（无任务启动、有任务注入/追加）、`问大脑 xxx` 逃逸到大脑、无前缀按 worker 状态（waiting→worker、running/无任务→大脑）；worker 输出带 `🤖【任务】` 标记、跑一轮持续 typing（不占连续发送上限）、图片始终走大脑。中断靠 `session/load` 恢复（回「继续」续跑），brain 与 worker 双 ACP 进程并存。真机端到端实测通过。详见 `docs/方案C-MVP-远程human-in-the-loop.md`。
 - **收语音（语音输入）**：用户发来的语音消息，直接取 `voice_item.text`（**微信侧已做语音转文字**）当文本喂给大脑——零依赖、无需 SILK 解码或外接 ASR。真机实测：发语音 → `recv voice: text="测试语音消息"` → 大脑正常处理回复。**发语音（bot 语音回复）暂不做**：需 TTS + SILK 编码，且语音回复体验通常不如文本。
@@ -39,6 +42,7 @@
 - 单元测试（vitest）覆盖 session-guard 与 package 元数据读取；GitHub Actions CI 跑 typecheck + build + test。
 
 ### Fixed
+
 - **重任务"收不到结果"= 触发 iLink 连续发送上限**（关键）：iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 10；`ret=-2` 被复用为"限流/参数错误",见 NousResearch/hermes-agent#21011「sendmessage rate limited: ret=-2」+ 微信 `errcode 40258` 秒级限流）。重任务每 15s 发一条进度、6.5min 会发 20+ 条 → 第 ~10 条后被拒,而**最终答案恰排在最后被丢**。机制修复：
   - **全局发送节流**（任意两条 ≥1.5s,`WECHAT_MIN_SEND_GAP_MS`）；
   - **按用户、跨回合持续的发送计数**（`budgetOf`），**只在该用户发来任何消息时重置**（镜像服务端"距上一条用户消息计数"规则）——修正了"新任务从 0 计数撞上限"的 bug；
@@ -57,4 +61,5 @@
 - Windows 下 `chmod 600` 为 no-op 导致 token 明文且无提示：限定 chmod 仅在 POSIX 执行，Windows 下输出一次性明文告警。
 
 ### Borrowed
+
 - iLink 协议细节、`session-guard` 与 `notifyStart` / `notifyStop` 实现借鉴自微信官方插件 [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)（MIT）。

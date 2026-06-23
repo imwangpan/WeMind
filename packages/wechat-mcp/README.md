@@ -2,13 +2,14 @@
 
 > 基于 **MCP（Model Context Protocol）** 的微信 Bot server——让任何兼容 MCP 的 AI Agent 通过**个人微信**收发消息。底层走腾讯官方 **iLink / 微信 ClawBot** 通道。
 
-[WeMind](https://github.com/imwangpan/WeMind) monorepo 的可发布包；内核 `@wemind/wechat-ilink-core` 已用 tsup 内联进产物，对外只需这一个自包含的包。
+[WeMind](https://github.com/imwangpan/WeMind) monorepo 的可发布包；内核 `@wemind/wechat-ilink-core` 已用 tsdown 内联进产物，对外只需这一个自包含的包。
 
 ## 接入
 
 无需全局安装，在 MCP 客户端配置里用 `npx` 即可：
 
 **Claude Desktop / Cursor / 其它**
+
 ```json
 {
   "mcpServers": {
@@ -18,24 +19,29 @@
 ```
 
 **OpenCode** (`opencode.json`)
+
 ```json
 {
   "mcp": {
-    "wechat": { "type": "local", "command": ["npx", "-y", "@wemind/wechat-mcp"], "enabled": true }
+    "wechat": {
+      "type": "local",
+      "command": ["npx", "-y", "@wemind/wechat-mcp"],
+      "enabled": true
+    }
   }
 }
 ```
 
 ## 工具
 
-| 工具 | 说明 |
-|---|---|
-| `login_qrcode` | 生成微信登录二维码（终端文本 / PNG 图片 / 链接 三种形式） |
-| `check_qrcode_status` | 检查二维码是否已扫码确认 |
-| `logout` | 退出登录并清除凭证 |
-| `get_messages` | 拉取新消息（`wait=true` 长轮询阻塞直到收到，最长 7 天） |
-| `send_text_message` | 发送文本消息 |
-| `send_typing` | 显示 / 取消「正在输入」 |
+| 工具                  | 说明                                                      |
+| --------------------- | --------------------------------------------------------- |
+| `login_qrcode`        | 生成微信登录二维码（终端文本 / PNG 图片 / 链接 三种形式） |
+| `check_qrcode_status` | 检查二维码是否已扫码确认                                  |
+| `logout`              | 退出登录并清除凭证                                        |
+| `get_messages`        | 拉取新消息（`wait=true` 长轮询阻塞直到收到，最长 7 天）   |
+| `send_text_message`   | 发送文本消息                                              |
+| `send_typing`         | 显示 / 取消「正在输入」                                   |
 
 ## 使用流程
 
