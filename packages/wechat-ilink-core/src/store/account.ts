@@ -12,8 +12,7 @@ import type { AccountData, ServerState, QrLoginState } from "../api/types.js";
  * 多账号即「不同 WECHAT_ACCOUNT（或 WECHAT_DATA_DIR）→ 不同目录 → 互相隔离」。
  */
 export const ACCOUNT_KEY = process.env.WECHAT_ACCOUNT?.trim() || "default";
-export const DATA_DIR =
-  process.env.WECHAT_DATA_DIR?.trim() || path.join(WEMIND_ROOT, ACCOUNT_KEY);
+export const DATA_DIR = process.env.WECHAT_DATA_DIR?.trim() || path.join(WEMIND_ROOT, ACCOUNT_KEY);
 
 function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
@@ -30,8 +29,14 @@ function readJson<T>(filePath: string): T | null {
     return JSON.parse(raw) as T;
   } catch (e) {
     // 文件存在但解析失败（写途崩溃/外部破坏）：不静默清空，备份坏文件 + 记日志，便于排查与人工恢复
-    console.error(`[store] ${filePath} parse failed, backing up and treating as empty: ${String(e)}`);
-    try { fs.renameSync(filePath, `${filePath}.corrupt-${Date.now()}`); } catch { /* best-effort */ }
+    console.error(
+      `[store] ${filePath} parse failed, backing up and treating as empty: ${String(e)}`,
+    );
+    try {
+      fs.renameSync(filePath, `${filePath}.corrupt-${Date.now()}`);
+    } catch {
+      /* best-effort */
+    }
     return null;
   }
 }
@@ -64,12 +69,20 @@ export function saveAccount(account: AccountData): void {
       );
     }
   } else {
-    try { fs.chmodSync(file, 0o600); } catch { /* best-effort */ }
+    try {
+      fs.chmodSync(file, 0o600);
+    } catch {
+      /* best-effort */
+    }
   }
 }
 
 export function clearAccount(): void {
-  try { fs.unlinkSync(path.join(DATA_DIR, "account.json")); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(path.join(DATA_DIR, "account.json"));
+  } catch {
+    /* ignore */
+  }
 }
 
 export function loadState(): ServerState {
@@ -98,5 +111,9 @@ export function saveQrState(state: QrLoginState): void {
 }
 
 export function clearQrState(): void {
-  try { fs.unlinkSync(path.join(DATA_DIR, "qr_login.json")); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(path.join(DATA_DIR, "qr_login.json"));
+  } catch {
+    /* ignore */
+  }
 }

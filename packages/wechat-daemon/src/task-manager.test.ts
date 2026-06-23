@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 // mock worker-acp（用 vi.hoisted 让 mock 工厂可引用）
-const { askWorker, stopWorker, setWorkerCwd } = vi.hoisted(() => ({ askWorker: vi.fn(), stopWorker: vi.fn(), setWorkerCwd: vi.fn() }));
+const { askWorker, stopWorker, setWorkerCwd } = vi.hoisted(() => ({
+  askWorker: vi.fn(),
+  stopWorker: vi.fn(),
+  setWorkerCwd: vi.fn(),
+}));
 vi.mock("./worker-acp.js", () => ({
   askWorker: (...a: unknown[]) => askWorker(...a),
   stopWorker: () => stopWorker(),
@@ -10,19 +14,31 @@ vi.mock("./worker-acp.js", () => ({
   isWorkerAlive: vi.fn(() => false),
 }));
 
-import { dispatchTask, injectTask, stopTask, hasActiveTask, isAwaiting, setTaskPush, setTaskStateSink } from "./task-manager.js";
+import {
+  dispatchTask,
+  injectTask,
+  stopTask,
+  hasActiveTask,
+  isAwaiting,
+  setTaskPush,
+  setTaskStateSink,
+} from "./task-manager.js";
 
 function deferred<T = string>() {
   let resolve!: (v: T) => void;
   let reject!: (e: unknown) => void;
-  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
   return { promise, resolve, reject };
 }
 const has = (arr: string[], sub: string) => arr.some((p) => p.includes(sub));
 
 afterEach(() => {
-  stopTask("u1"); stopTask("u2"); // 清理可能残留的任务
-  setTaskStateSink(() => {});      // 清理 state sink，避免跨用例串扰
+  stopTask("u1");
+  stopTask("u2"); // 清理可能残留的任务
+  setTaskStateSink(() => {}); // 清理 state sink，避免跨用例串扰
   askWorker.mockReset();
   stopWorker.mockReset();
   setWorkerCwd.mockReset();
@@ -44,8 +60,8 @@ describe("task-manager 状态机", () => {
 
     r1.resolve("方案 A 还是 B？");
     await vi.waitFor(() => expect(has(pushed, "方案 A 还是 B？")).toBe(true));
-    expect(has(pushed, "🤖【任务】")).toBe(true);     // 来源标记
-    expect(isAwaiting("u1")).toBe(true);              // 推送后进入 waiting（等你回）
+    expect(has(pushed, "🤖【任务】")).toBe(true); // 来源标记
+    expect(isAwaiting("u1")).toBe(true); // 推送后进入 waiting（等你回）
 
     injectTask("u1", "选 A"); // waiting 态注入 → 第二轮
     await vi.waitFor(() => expect(askWorker).toHaveBeenCalledTimes(2));

@@ -14,7 +14,10 @@ export function generateTitle(text: string): string {
   let first = "";
   for (const ln of text.split(/\r?\n/)) {
     const t = ln.trim();
-    if (t) { first = t; break; }
+    if (t) {
+      first = t;
+      break;
+    }
   }
   // 去掉行首的 Markdown 标记（标题井号、列表符、有序号）
   first = first

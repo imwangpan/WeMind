@@ -1,17 +1,21 @@
 import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-import {
-  sendTyping, getConfig,
-  loadAccount, loadState,
-} from "@wemind/wechat-ilink-core";
+import { sendTyping, getConfig, loadAccount, loadState } from "@wemind/wechat-ilink-core";
 
 export const sendTypingSchema = z.object({
   to: z.string().min(1).describe("The WeChat user ID to send the typing indicator to."),
-  status: z.enum(["typing", "cancel"]).optional().default("typing").describe("'typing' to show typing indicator, 'cancel' to stop it."),
+  status: z
+    .enum(["typing", "cancel"])
+    .optional()
+    .default("typing")
+    .describe("'typing' to show typing indicator, 'cancel' to stop it."),
 });
 
-export async function sendTypingIndicator(input: { to: string; status?: "typing" | "cancel" }): Promise<{
+export async function sendTypingIndicator(input: {
+  to: string;
+  status?: "typing" | "cancel";
+}): Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> {
   const account = loadAccount();
@@ -24,7 +28,10 @@ export async function sendTypingIndicator(input: { to: string; status?: "typing"
   const contextToken = state.contextTokens[ctxKey];
 
   if (!contextToken) {
-    throw new McpError(ErrorCode.InvalidParams, `No conversation found with user ${input.to}. Send or receive a message first.`);
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `No conversation found with user ${input.to}. Send or receive a message first.`,
+    );
   }
 
   const configResp = await getConfig({
@@ -35,7 +42,10 @@ export async function sendTypingIndicator(input: { to: string; status?: "typing"
   });
 
   if (configResp.errmsg || !configResp.typing_ticket) {
-    throw new McpError(ErrorCode.InternalError, `getConfig failed: ${configResp.errmsg ?? "no typing_ticket (likely ret!=0)"}`);
+    throw new McpError(
+      ErrorCode.InternalError,
+      `getConfig failed: ${configResp.errmsg ?? "no typing_ticket (likely ret!=0)"}`,
+    );
   }
 
   if (input.status === "cancel") {
@@ -64,11 +74,16 @@ export async function sendTypingIndicator(input: { to: string; status?: "typing"
     content: [
       {
         type: "text",
-        text: JSON.stringify({
-          status: input.status === "cancel" ? "typing_cancelled" : "typing",
-          message: input.status === "cancel" ? "Typing indicator stopped." : "Typing indicator sent.",
-          to: input.to,
-        }, null, 2),
+        text: JSON.stringify(
+          {
+            status: input.status === "cancel" ? "typing_cancelled" : "typing",
+            message:
+              input.status === "cancel" ? "Typing indicator stopped." : "Typing indicator sent.",
+            to: input.to,
+          },
+          null,
+          2,
+        ),
       },
     ],
   };

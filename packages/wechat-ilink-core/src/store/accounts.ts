@@ -54,7 +54,11 @@ export function loadRegistry(): AccountsRegistry {
   } catch (e) {
     // 存在但损坏：不要当空注册表直接覆盖（紧接的 save 会抹掉所有已登记账号）；备份坏文件 + 记日志
     console.error(`[accounts] ${REGISTRY_FILE} parse failed, backing up: ${String(e)}`);
-    try { fs.renameSync(REGISTRY_FILE, `${REGISTRY_FILE}.corrupt-${Date.now()}`); } catch { /* best-effort */ }
+    try {
+      fs.renameSync(REGISTRY_FILE, `${REGISTRY_FILE}.corrupt-${Date.now()}`);
+    } catch {
+      /* best-effort */
+    }
     return { accounts: {} };
   }
 }
@@ -87,7 +91,9 @@ export function setDefaultKey(key: string): void {
 }
 
 /** 登记/更新一个账号；首个账号自动设为默认。 */
-export function registerAccount(meta: Omit<AccountMeta, "addedAt"> & { addedAt?: number }): AccountMeta {
+export function registerAccount(
+  meta: Omit<AccountMeta, "addedAt"> & { addedAt?: number },
+): AccountMeta {
   const reg = loadRegistry();
   const existing = reg.accounts[meta.key];
   const full: AccountMeta = {

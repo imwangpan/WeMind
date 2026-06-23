@@ -12,20 +12,40 @@ import { fileURLToPath } from "node:url";
 const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp)(\?[^\s)]*)?$/i;
 const MAX_BYTES = 10 * 1024 * 1024;
 
-export interface ExtractedImage { src: string; }
+export interface ExtractedImage {
+  src: string;
+}
 
 export function extractImages(text: string): { images: ExtractedImage[]; text: string } {
   const images: ExtractedImage[] = [];
   const seen = new Set<string>();
-  const push = (src: string) => { const s = src.trim(); if (s && !seen.has(s)) { seen.add(s); images.push({ src: s }); } };
+  const push = (src: string) => {
+    const s = src.trim();
+    if (s && !seen.has(s)) {
+      seen.add(s);
+      images.push({ src: s });
+    }
+  };
 
   let out = text ?? "";
   // A/B：Markdown 图片 ![alt](src "title"?)
-  out = out.replace(/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g, (_m, src: string) => { push(src); return ""; });
+  out = out.replace(/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g, (_m, src: string) => {
+    push(src);
+    return "";
+  });
   // C：裸图片 URL（排除 markdown 链接/图片里的，即前面不是 `(`）
-  out = out.replace(/(?<!\()(https?:\/\/[^\s)]+\.(?:png|jpe?g|gif|webp|bmp)(?:\?[^\s)]*)?)/gi, (m: string) => { push(m); return ""; });
+  out = out.replace(
+    /(?<!\()(https?:\/\/[^\s)]+\.(?:png|jpe?g|gif|webp|bmp)(?:\?[^\s)]*)?)/gi,
+    (m: string) => {
+      push(m);
+      return "";
+    },
+  );
 
-  out = out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  out = out
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   return { images, text: out };
 }
 
@@ -35,7 +55,10 @@ export async function resolveImageBytes(src: string): Promise<Buffer> {
     const res = await fetch(src, {
       signal: AbortSignal.timeout(15000),
       // 不少图床（pixabay 等）对无 UA 的直链返回 403，带上浏览器 UA 规避热链拦截
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" },
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      },
     });
     if (!res.ok) throw new Error(`下载图片失败 ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());

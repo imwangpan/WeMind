@@ -2,9 +2,13 @@ import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
 import {
-  sendMessage, generateId,
-  loadAccount, loadState,
-  MessageItemType, MessageState, MessageType,
+  sendMessage,
+  generateId,
+  loadAccount,
+  loadState,
+  MessageItemType,
+  MessageState,
+  MessageType,
 } from "@wemind/wechat-ilink-core";
 import type { SendMessageReq } from "@wemind/wechat-ilink-core";
 
@@ -24,7 +28,10 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
   const state = loadState();
   const contextToken = state.contextTokens[`${account.botId}:${input.to}`];
   if (!contextToken) {
-    throw new McpError(ErrorCode.InvalidParams, `No conversation found with user ${input.to}. iLink bots cannot initiate; receive a message from them first.`);
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `No conversation found with user ${input.to}. iLink bots cannot initiate; receive a message from them first.`,
+    );
   }
 
   const req: SendMessageReq = {
@@ -49,13 +56,17 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
     content: [
       {
         type: "text",
-        text: JSON.stringify({
-          status: "sent",
-          message: "Message sent successfully.",
-          to: input.to,
-          text: input.text,
-          client_id: req.msg?.client_id,
-        }, null, 2),
+        text: JSON.stringify(
+          {
+            status: "sent",
+            message: "Message sent successfully.",
+            to: input.to,
+            text: input.text,
+            client_id: req.msg?.client_id,
+          },
+          null,
+          2,
+        ),
       },
     ],
   };

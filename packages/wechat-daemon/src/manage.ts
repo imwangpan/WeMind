@@ -5,9 +5,24 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import {
-  WEMIND_ROOT, accountDir, deriveAccountKey,
-  listAccounts, registerAccount, unregisterAccount, setLabel, getDefaultKey, setDefaultKey,  fetchQRCode, pollQRStatus, saveQrState, clearSessionPause, notifyStart, notifyStop,
-  addAllowFrom, removeAllowFrom, readAllowFrom,
+  WEMIND_ROOT,
+  accountDir,
+  deriveAccountKey,
+  listAccounts,
+  registerAccount,
+  unregisterAccount,
+  setLabel,
+  getDefaultKey,
+  setDefaultKey,
+  fetchQRCode,
+  pollQRStatus,
+  saveQrState,
+  clearSessionPause,
+  notifyStart,
+  notifyStop,
+  addAllowFrom,
+  removeAllowFrom,
+  readAllowFrom,
   type AccountData,
 } from "@wemind/wechat-ilink-core";
 
@@ -24,23 +39,55 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function readAccount(dir: string): AccountData | null {
-  try { return JSON.parse(fs.readFileSync(path.join(dir, "account.json"), "utf-8")) as AccountData; }
-  catch { return null; }
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, "account.json"), "utf-8")) as AccountData;
+  } catch {
+    return null;
+  }
 }
 function readPid(dir: string, name: string): number | null {
-  try { const n = parseInt(fs.readFileSync(path.join(dir, name), "utf-8").trim(), 10); return Number.isFinite(n) ? n : null; }
-  catch { return null; }
+  try {
+    const n = parseInt(fs.readFileSync(path.join(dir, name), "utf-8").trim(), 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
 }
-function alive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function killPid(pid: number): void {
-  if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-  else { try { process.kill(pid); } catch { /* ignore */ } }
+  if (process.platform === "win32")
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+  else {
+    try {
+      process.kill(pid);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 function openFile(p: string): void {
   try {
-    if (process.platform === "win32") spawn("cmd", ["/c", "start", "", p], { detached: true, stdio: "ignore", windowsHide: true }).unref();
-    else spawn(process.platform === "darwin" ? "open" : "xdg-open", [p], { detached: true, stdio: "ignore" }).unref();
-  } catch { /* ignore */ }
+    if (process.platform === "win32")
+      spawn("cmd", ["/c", "start", "", p], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }).unref();
+    else
+      spawn(process.platform === "darwin" ? "open" : "xdg-open", [p], {
+        detached: true,
+        stdio: "ignore",
+      }).unref();
+  } catch {
+    /* ignore */
+  }
 }
 
 /** key 或 label → key（label 唯一匹配才行）。 */
@@ -50,7 +97,10 @@ function resolveKey(arg: string): string {
   if (accs.some((a) => a.key === arg)) return arg;
   const byLabel = accs.filter((a) => a.label === arg);
   if (byLabel.length === 1) return byLabel[0].key;
-  if (byLabel.length > 1) throw new Error(`label「${arg}」对应多个账号，请改用 key：${byLabel.map((a) => a.key).join(", ")}`);
+  if (byLabel.length > 1)
+    throw new Error(
+      `label「${arg}」对应多个账号，请改用 key：${byLabel.map((a) => a.key).join(", ")}`,
+    );
   throw new Error(`未找到账号：${arg}（既不是 key 也不是 label）`);
 }
 
@@ -59,10 +109,16 @@ function startDaemon(key: string): void {
   const wrapper = path.join(REPO_ROOT, "scripts", "run-daemon.ps1");
   const pwsh = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
   const exe = fs.existsSync(pwsh) ? pwsh : "pwsh";
-  spawn(exe, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", wrapper], {
-    detached: true, stdio: "ignore", windowsHide: true,
-    env: { ...process.env, WECHAT_ACCOUNT: key },
-  }).unref();
+  spawn(
+    exe,
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", wrapper],
+    {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env: { ...process.env, WECHAT_ACCOUNT: key },
+    },
+  ).unref();
 }
 
 /** 停止某账号的 wrapper(先，避免自重启)、daemon、brain。 */
@@ -72,10 +128,25 @@ function stopDaemon(key: string): string {
   const dpid = readPid(dir, "daemon.pid");
   const bpid = readPid(dir, "brain.pid");
   const stopped: string[] = [];
-  if (wpid && alive(wpid)) { killPid(wpid); stopped.push(`wrapper ${wpid}`); }
-  if (dpid && alive(dpid)) { killPid(dpid); stopped.push(`daemon ${dpid}`); }
-  if (bpid && alive(bpid)) { killPid(bpid); stopped.push(`brain ${bpid}`); }
-  for (const f of ["wrapper.pid", "daemon.pid", "brain.pid"]) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ } }
+  if (wpid && alive(wpid)) {
+    killPid(wpid);
+    stopped.push(`wrapper ${wpid}`);
+  }
+  if (dpid && alive(dpid)) {
+    killPid(dpid);
+    stopped.push(`daemon ${dpid}`);
+  }
+  if (bpid && alive(bpid)) {
+    killPid(bpid);
+    stopped.push(`brain ${bpid}`);
+  }
+  for (const f of ["wrapper.pid", "daemon.pid", "brain.pid"]) {
+    try {
+      fs.unlinkSync(path.join(dir, f));
+    } catch {
+      /* ignore */
+    }
+  }
   return stopped.length ? `已停止 ${stopped.join(" + ")}` : "无运行中的进程";
 }
 
@@ -90,10 +161,28 @@ function finalizeStaging(label?: string): { key: string; msg: string } {
     throw new Error(`账号目录已存在: ${dest}（该微信号此前已登录过；如需重登请先 delete ${key}）`);
   }
   fs.renameSync(STAGING, dest);
-  for (const f of ["qrcode.png", "qrcode.txt", "qr_login.json", "poll.out", "poll.err", "auto.out", "auto.err"]) {
-    try { fs.unlinkSync(path.join(dest, f)); } catch { /* ignore */ }
+  for (const f of [
+    "qrcode.png",
+    "qrcode.txt",
+    "qr_login.json",
+    "poll.out",
+    "poll.err",
+    "auto.out",
+    "auto.err",
+  ]) {
+    try {
+      fs.unlinkSync(path.join(dest, f));
+    } catch {
+      /* ignore */
+    }
   }
-  const meta = registerAccount({ key, botId: acc.botId, userId: acc.userId, baseUrl: acc.baseUrl, label: label || key });
+  const meta = registerAccount({
+    key,
+    botId: acc.botId,
+    userId: acc.userId,
+    baseUrl: acc.baseUrl,
+    label: label || key,
+  });
   if (acc.userId) addAllowFrom(acc.userId, dest); // 配对：扫码登录者自动授权
   return { key, msg: `已归档：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}` };
 }
@@ -117,31 +206,67 @@ async function cmdLogin(label: string | undefined, autoStart: boolean): Promise<
     console.log(term);
     console.log("图片(已自动打开): " + png);
     console.log("链接: " + qr.qrcode_img_content + "\n");
-    if (!opened) { openFile(png); opened = true; }
+    if (!opened) {
+      openFile(png);
+      opened = true;
+    }
   };
 
   await refresh();
   console.log("等待扫码确认…（最多 15 分钟，Ctrl+C 取消）");
   while (Date.now() < overall) {
     let s;
-    try { s = await pollQRStatus(BASE, code); } catch { await sleep(2000); continue; }
+    try {
+      s = await pollQRStatus(BASE, code);
+    } catch {
+      await sleep(2000);
+      continue;
+    }
     if (s.status === "confirmed") {
-      if (!s.bot_token || !s.ilink_bot_id || !s.ilink_user_id) throw new Error("confirmed 但数据不全");
-      fs.writeFileSync(path.join(STAGING, "account.json"), JSON.stringify({
-        botToken: s.bot_token, botId: s.ilink_bot_id, userId: s.ilink_user_id,
-        baseUrl: s.baseurl ?? BASE, savedAt: Date.now(),
-      }, null, 2), "utf-8");
+      if (!s.bot_token || !s.ilink_bot_id || !s.ilink_user_id)
+        throw new Error("confirmed 但数据不全");
+      fs.writeFileSync(
+        path.join(STAGING, "account.json"),
+        JSON.stringify(
+          {
+            botToken: s.bot_token,
+            botId: s.ilink_bot_id,
+            userId: s.ilink_user_id,
+            baseUrl: s.baseurl ?? BASE,
+            savedAt: Date.now(),
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
       clearSessionPause(s.ilink_bot_id);
       await notifyStart({ baseUrl: s.baseurl ?? BASE, token: s.bot_token }).catch(() => {});
-      for (const f of ["qrcode.png", "qr_login.json"]) { try { fs.unlinkSync(path.join(STAGING, f)); } catch { /* ignore */ } }
+      for (const f of ["qrcode.png", "qr_login.json"]) {
+        try {
+          fs.unlinkSync(path.join(STAGING, f));
+        } catch {
+          /* ignore */
+        }
+      }
       console.log("\n登录成功，归档中…");
       const { key, msg } = finalizeStaging(label);
       console.log(msg);
-      if (autoStart) { startDaemon(key); console.log(`已启动 daemon（账号 ${key}）。`); }
-      else { console.log(`启动：node packages/wechat-daemon/dist/manage.js start ${key}   或 scripts/run-all-daemons.ps1`); }
+      if (autoStart) {
+        startDaemon(key);
+        console.log(`已启动 daemon（账号 ${key}）。`);
+      } else {
+        console.log(
+          `启动：node packages/wechat-daemon/dist/manage.js start ${key}   或 scripts/run-all-daemons.ps1`,
+        );
+      }
       return;
     }
-    if (s.status === "expired") { console.log("二维码过期，自动刷新…"); await refresh(); continue; }
+    if (s.status === "expired") {
+      console.log("二维码过期，自动刷新…");
+      await refresh();
+      continue;
+    }
     await sleep(1500);
   }
   throw new Error("超时（15 分钟）未完成登录");
@@ -151,20 +276,28 @@ function cmdList(): string {
   const def = getDefaultKey();
   const accs = listAccounts();
   if (!accs.length) return "（无已登记账号）。用 `login` 添加。";
-  return accs.map((a) => {
-    const dpid = readPid(accountDir(a.key), "daemon.pid");
-    const bpid = readPid(accountDir(a.key), "brain.pid");
-    const running = dpid && alive(dpid) ? `运行中(pid ${dpid})` : "已停止";
-    const brain = bpid && alive(bpid) ? `  brain(pid ${bpid})` : "";
-    return `- ${a.key}${a.key === def ? " [默认]" : ""}  label=${a.label}  botId=${a.botId}  ${running}${brain}`;
-  }).join("\n");
+  return accs
+    .map((a) => {
+      const dpid = readPid(accountDir(a.key), "daemon.pid");
+      const bpid = readPid(accountDir(a.key), "brain.pid");
+      const running = dpid && alive(dpid) ? `运行中(pid ${dpid})` : "已停止";
+      const brain = bpid && alive(bpid) ? `  brain(pid ${bpid})` : "";
+      return `- ${a.key}${a.key === def ? " [默认]" : ""}  label=${a.label}  botId=${a.botId}  ${running}${brain}`;
+    })
+    .join("\n");
 }
 
 function cmdAdopt(key: string, label?: string): string {
   if (!key) throw new Error("用法: adopt <key> [--label 名]");
   const acc = readAccount(accountDir(key));
   if (!acc?.botId) throw new Error(`${accountDir(key)} 无有效 account.json`);
-  const meta = registerAccount({ key, botId: acc.botId, userId: acc.userId, baseUrl: acc.baseUrl, label: label || key });
+  const meta = registerAccount({
+    key,
+    botId: acc.botId,
+    userId: acc.userId,
+    baseUrl: acc.baseUrl,
+    label: label || key,
+  });
   if (acc.userId) addAllowFrom(acc.userId, accountDir(key)); // 接管时把账号本人种入授权清单
   return `已登记：key=${key}  label=${meta.label}  botId=${acc.botId}`;
 }
@@ -174,9 +307,19 @@ async function cmdLogout(sel: string): Promise<string> {
   const dir = accountDir(key);
   const acc = readAccount(dir);
   const stopMsg = stopDaemon(key);
-  if (acc?.botToken) { try { await notifyStop({ baseUrl: acc.baseUrl, token: acc.botToken }); } catch { /* ignore */ } }
+  if (acc?.botToken) {
+    try {
+      await notifyStop({ baseUrl: acc.baseUrl, token: acc.botToken });
+    } catch {
+      /* ignore */
+    }
+  }
   for (const f of ["account.json", "state.json", "qr_login.json", "qrcode.png", "qrcode.txt"]) {
-    try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(path.join(dir, f));
+    } catch {
+      /* ignore */
+    }
   }
   return `账号 ${key} 已登出（${stopMsg}）。目录与会话保留，可重新登录。`;
 }
@@ -184,8 +327,11 @@ async function cmdLogout(sel: string): Promise<string> {
 function cmdDelete(sel: string): string {
   const key = resolveKey(sel);
   const stopMsg = stopDaemon(key);
-  try { fs.rmSync(accountDir(key), { recursive: true, force: true }); }
-  catch (e) { throw new Error(`删除目录失败: ${String(e)}`); }
+  try {
+    fs.rmSync(accountDir(key), { recursive: true, force: true });
+  } catch (e) {
+    throw new Error(`删除目录失败: ${String(e)}`);
+  }
   unregisterAccount(key);
   return `账号 ${key} 已删除（${stopMsg}，已移除目录与注册）。`;
 }
@@ -197,7 +343,9 @@ function cmdStart(sel: string): string {
 }
 
 // ===== 本地任务命令（文件桥）：写 task-inbox/*.json，由 daemon 扫描执行；状态读 task-state.json =====
-function taskInboxDir(key: string): string { return path.join(accountDir(key), "task-inbox"); }
+function taskInboxDir(key: string): string {
+  return path.join(accountDir(key), "task-inbox");
+}
 /** 原子写一个命令文件到收件箱（临时文件 + rename，避免 daemon 读到半截）。 */
 function writeTaskCmd(key: string, obj: Record<string, unknown>): void {
   const dir = taskInboxDir(key);
@@ -217,7 +365,10 @@ function pickKey(sel?: string): string {
 /** 预检 daemon 存活（本地命令需 daemon 在跑才有人消费收件箱）。 */
 function requireDaemonAlive(key: string): void {
   const pid = readPid(accountDir(key), "daemon.pid");
-  if (!pid || !alive(pid)) throw new Error(`账号 ${key} 的 daemon 未运行。先启动：node packages/wechat-daemon/dist/manage.js start ${key}`);
+  if (!pid || !alive(pid))
+    throw new Error(
+      `账号 ${key} 的 daemon 未运行。先启动：node packages/wechat-daemon/dist/manage.js start ${key}`,
+    );
 }
 
 async function cmdTask(text: string, cwd: string | undefined, sel?: string): Promise<string> {
@@ -230,7 +381,12 @@ async function cmdTask(text: string, cwd: string | undefined, sel?: string): Pro
   const stateFile = path.join(accountDir(key), "task-state.json");
   for (let i = 0; i < 15; i++) {
     await sleep(200);
-    try { if (JSON.parse(fs.readFileSync(stateFile, "utf-8")).active) return `已派发任务（worker 运行中，cwd=${useCwd}）。\n用 task-status 看进展、task-reply 回复、task-stop 结束。`; } catch { /* ignore */ }
+    try {
+      if (JSON.parse(fs.readFileSync(stateFile, "utf-8")).active)
+        return `已派发任务（worker 运行中，cwd=${useCwd}）。\n用 task-status 看进展、task-reply 回复、task-stop 结束。`;
+    } catch {
+      /* ignore */
+    }
   }
   return `已投递任务（cwd=${useCwd}）。daemon 处理中，用 task-status 查看。`;
 }
@@ -250,9 +406,18 @@ function cmdTaskStop(sel?: string): string {
 function cmdTaskStatus(sel?: string): string {
   const key = pickKey(sel);
   const stateFile = path.join(accountDir(key), "task-state.json");
-  let s: { active?: boolean; status?: string; turns?: number; startedAt?: number; lastOutput?: string };
-  try { s = JSON.parse(fs.readFileSync(stateFile, "utf-8")); }
-  catch { return `账号 ${key}：无任务状态（task-state.json 不存在，daemon 可能未跑过任务）。`; }
+  let s: {
+    active?: boolean;
+    status?: string;
+    turns?: number;
+    startedAt?: number;
+    lastOutput?: string;
+  };
+  try {
+    s = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+  } catch {
+    return `账号 ${key}：无任务状态（task-state.json 不存在，daemon 可能未跑过任务）。`;
+  }
   if (!s.active) return `账号 ${key}：当前无活跃任务（idle）。`;
   const since = s.startedAt ? `${Math.round((Date.now() - s.startedAt) / 1000)}s` : "?";
   return [
@@ -268,31 +433,92 @@ async function main(): Promise<void> {
   const rest = [...argv];
   const li = rest.indexOf("--label");
   let label: string | undefined;
-  if (li >= 0) { label = rest[li + 1]; rest.splice(li, 2); }
+  if (li >= 0) {
+    label = rest[li + 1];
+    rest.splice(li, 2);
+  }
   const si = rest.indexOf("--start");
   const autoStart = si >= 0;
   if (autoStart) rest.splice(si, 1);
   const ci = rest.indexOf("--cwd");
   let cwd: string | undefined;
-  if (ci >= 0) { cwd = rest[ci + 1]; rest.splice(ci, 2); }
+  if (ci >= 0) {
+    cwd = rest[ci + 1];
+    rest.splice(ci, 2);
+  }
 
   switch (cmd) {
-    case "login": await cmdLogin(label, autoStart); break;
-    case "list": console.log(cmdList()); break;
-    case "adopt": console.log(cmdAdopt(rest[0], label)); break;
-    case "start": console.log(cmdStart(rest[0])); break;
-    case "task": console.log(await cmdTask(rest[0], cwd, rest[1])); break;
-    case "task-reply": console.log(cmdTaskReply(rest[0], rest[1])); break;
-    case "task-status": console.log(cmdTaskStatus(rest[0])); break;
-    case "task-stop": console.log(cmdTaskStop(rest[0])); break;
-    case "label": { const k = resolveKey(rest[0]); setLabel(k, rest.slice(1).join(" ")); console.log(`已设置 ${k} 的别名为「${rest.slice(1).join(" ")}」`); break; }
-    case "set-default": { const k = resolveKey(rest[0]); setDefaultKey(k); console.log(`默认账号 = ${k}`); break; }
-    case "logout": console.log(await cmdLogout(rest[0])); break;
-    case "delete": console.log(cmdDelete(rest[0])); break;
-    case "finalize": { const { msg } = finalizeStaging(label); console.log(msg); break; } // 兼容旧流程（staging 已有登录时归档）
-    case "allow": { const k = resolveKey(rest[0]); const uid = rest[1]; if (!uid) throw new Error("用法: allow <key|label> <userId>"); const list = addAllowFrom(uid, accountDir(k)); console.log(`已授权 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ")}`); break; }
-    case "revoke": { const k = resolveKey(rest[0]); const uid = rest[1]; if (!uid) throw new Error("用法: revoke <key|label> <userId>"); const list = removeAllowFrom(uid, accountDir(k)); console.log(`已撤销 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ") || "（空）"}`); break; }
-    case "allowlist": { const k = resolveKey(rest[0]); const list = readAllowFrom(accountDir(k)); console.log(`${k} 授权用户(${list.length})：\n${list.map((u) => "  - " + u).join("\n") || "  （空）"}`); break; }
+    case "login":
+      await cmdLogin(label, autoStart);
+      break;
+    case "list":
+      console.log(cmdList());
+      break;
+    case "adopt":
+      console.log(cmdAdopt(rest[0], label));
+      break;
+    case "start":
+      console.log(cmdStart(rest[0]));
+      break;
+    case "task":
+      console.log(await cmdTask(rest[0], cwd, rest[1]));
+      break;
+    case "task-reply":
+      console.log(cmdTaskReply(rest[0], rest[1]));
+      break;
+    case "task-status":
+      console.log(cmdTaskStatus(rest[0]));
+      break;
+    case "task-stop":
+      console.log(cmdTaskStop(rest[0]));
+      break;
+    case "label": {
+      const k = resolveKey(rest[0]);
+      setLabel(k, rest.slice(1).join(" "));
+      console.log(`已设置 ${k} 的别名为「${rest.slice(1).join(" ")}」`);
+      break;
+    }
+    case "set-default": {
+      const k = resolveKey(rest[0]);
+      setDefaultKey(k);
+      console.log(`默认账号 = ${k}`);
+      break;
+    }
+    case "logout":
+      console.log(await cmdLogout(rest[0]));
+      break;
+    case "delete":
+      console.log(cmdDelete(rest[0]));
+      break;
+    case "finalize": {
+      const { msg } = finalizeStaging(label);
+      console.log(msg);
+      break;
+    } // 兼容旧流程（staging 已有登录时归档）
+    case "allow": {
+      const k = resolveKey(rest[0]);
+      const uid = rest[1];
+      if (!uid) throw new Error("用法: allow <key|label> <userId>");
+      const list = addAllowFrom(uid, accountDir(k));
+      console.log(`已授权 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ")}`);
+      break;
+    }
+    case "revoke": {
+      const k = resolveKey(rest[0]);
+      const uid = rest[1];
+      if (!uid) throw new Error("用法: revoke <key|label> <userId>");
+      const list = removeAllowFrom(uid, accountDir(k));
+      console.log(`已撤销 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ") || "（空）"}`);
+      break;
+    }
+    case "allowlist": {
+      const k = resolveKey(rest[0]);
+      const list = readAllowFrom(accountDir(k));
+      console.log(
+        `${k} 授权用户(${list.length})：\n${list.map((u) => "  - " + u).join("\n") || "  （空）"}`,
+      );
+      break;
+    }
     default:
       console.log(`WeMind 多账号管理
 用法: node packages/wechat-daemon/dist/manage.js <command>
@@ -316,4 +542,7 @@ async function main(): Promise<void> {
 说明：key = 由微信 botId 派生的唯一标识（目录名）；label = 人类可读别名。多数命令可用 key 或 label。`);
   }
 }
-main().catch((e) => { console.error("error:", e?.message ?? e); process.exit(1); });
+main().catch((e) => {
+  console.error("error:", e?.message ?? e);
+  process.exit(1);
+});

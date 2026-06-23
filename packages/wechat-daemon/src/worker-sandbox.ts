@@ -17,25 +17,35 @@ import { resolveAgent } from "./brain-agents.js";
  */
 
 /** worker 专用 KIRO_HOME（auth 在平台数据目录、不随 KIRO_HOME 移动，故 worker 仍登录态）。 */
-export const WORKER_HOME = process.env.WEMIND_WORKER_HOME?.trim() || path.join(DATA_DIR, "worker-home");
+export const WORKER_HOME =
+  process.env.WEMIND_WORKER_HOME?.trim() || path.join(DATA_DIR, "worker-home");
 const WORKER_MCP_JSON = path.join(WORKER_HOME, "settings", "mcp.json");
 
 /** MCP「目录」：可继承的 MCP 定义来源（同 brain，默认取 agent 真实配置目录的 settings/mcp.json）。 */
-const CATALOG = process.env.WEMIND_MCP_CATALOG?.trim()
-  || process.env.WECHAT_MCP_CATALOG?.trim()
-  || path.join(resolveAgent().realHome || path.join(os.homedir(), ".kiro"), "settings", "mcp.json");
+const CATALOG =
+  process.env.WEMIND_MCP_CATALOG?.trim() ||
+  process.env.WECHAT_MCP_CATALOG?.trim() ||
+  path.join(resolveAgent().realHome || path.join(os.homedir(), ".kiro"), "settings", "mcp.json");
 
 /** worker 不继承的 MCP：wechat 始终强制排除（防回环），外加 WEMIND_WORKER_MCP_EXCLUDE 指定的。 */
 function excludeSet(): Set<string> {
   const raw = process.env.WEMIND_WORKER_MCP_EXCLUDE ?? "wechat";
-  const s = new Set(raw.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean));
+  const s = new Set(
+    raw
+      .split(/[,\s]+/)
+      .map((x) => x.trim())
+      .filter(Boolean),
+  );
   s.add("wechat"); // 强制：worker 加载 wechat 会用同一 bot token 长轮询、与 daemon 抢消息（坑①回环）
   return s;
 }
 
 function readJson(file: string): Record<string, unknown> | null {
-  try { return JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>; }
-  catch { return null; }
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 function loadCatalog(): Record<string, unknown> {
@@ -51,7 +61,8 @@ export function applyWorkerSandbox(): void {
   const servers: Record<string, unknown> = {};
   for (const [name, def] of Object.entries(cat)) {
     if (ex.has(name)) continue;
-    if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true) continue; // 跳过用户已禁用的
+    if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true)
+      continue; // 跳过用户已禁用的
     servers[name] = def;
   }
   fs.mkdirSync(path.dirname(WORKER_MCP_JSON), { recursive: true });
@@ -65,15 +76,25 @@ function syncSettings(): void {
   const realSettings = path.join(ag.realHome, "settings");
   const workerSettings = path.join(WORKER_HOME, "settings");
   if (!fs.existsSync(realSettings)) return;
-  try { fs.mkdirSync(workerSettings, { recursive: true }); } catch { /* ignore */ }
+  try {
+    fs.mkdirSync(workerSettings, { recursive: true });
+  } catch {
+    /* ignore */
+  }
   let names: string[] = [];
-  try { names = fs.readdirSync(realSettings); } catch { return; }
+  try {
+    names = fs.readdirSync(realSettings);
+  } catch {
+    return;
+  }
   for (const f of names) {
     if (f === "mcp.json") continue; // MCP 用 worker curated 版本（applyWorkerSandbox 全量除排除集）
     try {
       const src = path.join(realSettings, f);
       if (fs.statSync(src).isFile()) fs.copyFileSync(src, path.join(workerSettings, f));
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   }
 }
 
@@ -82,13 +103,22 @@ function mirrorRealKiro(): void {
   const ag = resolveAgent();
   if (!ag.inherit || !ag.realHome || ag.inheritDirs.length === 0) return;
   if (path.resolve(WORKER_HOME) === path.resolve(ag.realHome)) return; // 安全：别把自己链给自己
-  try { fs.mkdirSync(WORKER_HOME, { recursive: true }); } catch { /* ignore */ }
+  try {
+    fs.mkdirSync(WORKER_HOME, { recursive: true });
+  } catch {
+    /* ignore */
+  }
   for (const d of ag.inheritDirs) {
     const target = path.join(ag.realHome, d);
     const link = path.join(WORKER_HOME, d);
     if (!fs.existsSync(target)) continue;
     let present = false;
-    try { fs.lstatSync(link); present = true; } catch { /* 不存在 */ }
+    try {
+      fs.lstatSync(link);
+      present = true;
+    } catch {
+      /* 不存在 */
+    }
     if (present) {
       try {
         const st = fs.lstatSync(link);
@@ -101,22 +131,30 @@ function mirrorRealKiro(): void {
             for (const f of fs.readdirSync(target)) {
               const dst = path.join(link, f);
               const src = path.join(target, f);
-              try { if (!fs.existsSync(dst) && fs.statSync(src).isFile()) fs.copyFileSync(src, dst); } catch { /* ignore */ }
+              try {
+                if (!fs.existsSync(dst) && fs.statSync(src).isFile()) fs.copyFileSync(src, dst);
+              } catch {
+                /* ignore */
+              }
             }
             continue;
           }
         } else continue;
-      } catch { continue; }
+      } catch {
+        continue;
+      }
     }
     try {
       fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
-    } catch { /* 权限不足等：best-effort 忽略 */ }
+    } catch {
+      /* 权限不足等：best-effort 忽略 */
+    }
   }
 }
 
 /** 启动时确保 worker 沙箱就绪：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 链入记忆/技能。 */
 export function ensureWorkerHome(): void {
-  syncSettings();        // 先同步「非 MCP」设置（模型/免确认等）
-  applyWorkerSandbox();  // 再写全量 MCP（除 wechat 等排除集）
-  mirrorRealKiro();      // 链入记忆/steering/skills（sessions 仍隔离）
+  syncSettings(); // 先同步「非 MCP」设置（模型/免确认等）
+  applyWorkerSandbox(); // 再写全量 MCP（除 wechat 等排除集）
+  mirrorRealKiro(); // 链入记忆/steering/skills（sessions 仍隔离）
 }

@@ -2,19 +2,54 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  getUpdates, sendMessage, sendTyping, getConfig, notifyStart, generateId,
-  SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs,
-  loadAccount, loadState, saveState, DATA_DIR,
-  MessageItemType, MessageState, MessageType,
-  downloadImage, sendImage, sendFile, ILinkError, classifyTransportError,
-  isAllowed, addAllowFrom, readAllowFrom,
+  getUpdates,
+  sendMessage,
+  sendTyping,
+  getConfig,
+  notifyStart,
+  generateId,
+  SESSION_EXPIRED_ERRCODE,
+  isSessionPaused,
+  pauseSession,
+  getRemainingPauseMs,
+  loadAccount,
+  loadState,
+  saveState,
+  DATA_DIR,
+  MessageItemType,
+  MessageState,
+  MessageType,
+  downloadImage,
+  sendImage,
+  sendFile,
+  ILinkError,
+  classifyTransportError,
+  isAllowed,
+  addAllowFrom,
+  readAllowFrom,
 } from "@wemind/wechat-ilink-core";
-import type { AccountData, ServerState, WeixinMessage, SendMessageReq, ImageItem } from "@wemind/wechat-ilink-core";
+import type {
+  AccountData,
+  ServerState,
+  WeixinMessage,
+  SendMessageReq,
+  ImageItem,
+} from "@wemind/wechat-ilink-core";
 import { askBrain, newSession, restart } from "./acp-brain.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
 import { extractImages, resolveImageBytes } from "./image-reply.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
-import { dispatchTask, injectTask, stopTask, hasActiveTask, isAwaiting, setTaskPush, setTaskTyping, setTaskStateSink, type TaskStateSnapshot } from "./task-manager.js";
+import {
+  dispatchTask,
+  injectTask,
+  stopTask,
+  hasActiveTask,
+  isAwaiting,
+  setTaskPush,
+  setTaskTyping,
+  setTaskStateSink,
+  type TaskStateSnapshot,
+} from "./task-manager.js";
 import { ensureWorkerHome } from "./worker-sandbox.js";
 
 const log = (...a: unknown[]) => console.error("[daemon]", ...a);
@@ -23,16 +58,24 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** 分类大脑错误：backend=模型后端瞬时错误(可多重试)；timeout=超时/卡死；other=其它。 */
 function classifyBrainError(e: unknown): "timeout" | "backend" | "other" {
   const s = String(e instanceof Error ? e.message : e);
-  if (/-32603|internal error|please try again|response stream|overloaded|rate.?limit|\b(429|503)\b/i.test(s)) return "backend";
+  if (
+    /-32603|internal error|please try again|response stream|overloaded|rate.?limit|\b(429|503)\b/i.test(
+      s,
+    )
+  )
+    return "backend";
   if (/idle timeout|no-first-frame|cap timeout|timeout/i.test(s)) return "timeout";
   return "other";
 }
 /** 按错误类型给用户的失败提示。 */
 function brainErrorMessage(e: unknown): string {
   switch (classifyBrainError(e)) {
-    case "backend": return "（模型后端临时出错了，自动重试多次仍失败，请稍后把消息再发一次）";
-    case "timeout": return "（这次处理超时/卡住被中断了，重试也没成功——可把任务拆小一点再发）";
-    default: return "（处理出错了，请把消息再发一次试试）";
+    case "backend":
+      return "（模型后端临时出错了，自动重试多次仍失败，请稍后把消息再发一次）";
+    case "timeout":
+      return "（这次处理超时/卡住被中断了，重试也没成功——可把任务拆小一点再发）";
+    default:
+      return "（处理出错了，请把消息再发一次试试）";
   }
 }
 
@@ -61,18 +104,29 @@ function zhTool(t: string): string {
 /** 按工具类型给图标。 */
 function toolIcon(kind?: string): string {
   switch (kind) {
-    case "read": return "📄";
-    case "search": return "🔍";
-    case "execute": return "⌨️";
-    case "fetch": return "🌐";
+    case "read":
+      return "📄";
+    case "search":
+      return "🔍";
+    case "execute":
+      return "⌨️";
+    case "fetch":
+      return "🌐";
     case "edit":
-    case "write": return "✏️";
-    case "delete": return "🗑️";
-    default: return "🔧";
+    case "write":
+      return "✏️";
+    case "delete":
+      return "🗑️";
+    default:
+      return "🔧";
   }
 }
 
-type Ctrl = { kind: "list" } | { kind: "new" } | { kind: "add"; name: string } | { kind: "remove"; name: string };
+type Ctrl =
+  | { kind: "list" }
+  | { kind: "new" }
+  | { kind: "add"; name: string }
+  | { kind: "remove"; name: string };
 
 /** 解析控制指令（命中则由 daemon 直接处理，不转发给 brain）。 */
 function parseControl(text: string): Ctrl | null {
@@ -121,26 +175,45 @@ async function handleControl(c: Ctrl, userId: string): Promise<string> {
 }
 
 async function setTyping(
-  account: AccountData, to: string, ctx: string | undefined, status: 1 | 2,
+  account: AccountData,
+  to: string,
+  ctx: string | undefined,
+  status: 1 | 2,
 ): Promise<void> {
   if (!ctx) return;
   try {
     const cfg = await getConfig({
-      baseUrl: account.baseUrl, token: account.botToken, ilinkUserId: to, contextToken: ctx,
+      baseUrl: account.baseUrl,
+      token: account.botToken,
+      ilinkUserId: to,
+      contextToken: ctx,
     });
     await sendTyping({
-      baseUrl: account.baseUrl, token: account.botToken,
+      baseUrl: account.baseUrl,
+      token: account.botToken,
       body: { ilink_user_id: to, typing_ticket: cfg.typing_ticket, status },
     });
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 }
 
-async function reply(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH, fallbackToken?: string): Promise<void> {
+async function reply(
+  account: AccountData,
+  to: string,
+  ctx: string | undefined,
+  text: string,
+  state: number = MessageState.FINISH,
+  fallbackToken?: string,
+): Promise<void> {
   const send = (token: string | undefined) => {
     const req: SendMessageReq = {
       msg: {
-        from_user_id: "", to_user_id: to, client_id: generateId("daemon"),
-        message_type: MessageType.BOT, message_state: state,
+        from_user_id: "",
+        to_user_id: to,
+        client_id: generateId("daemon"),
+        message_type: MessageType.BOT,
+        message_state: state,
         item_list: [{ type: MessageItemType.TEXT, text_item: { text } }],
         context_token: token,
       },
@@ -176,7 +249,10 @@ async function reply(account: AccountData, to: string, ctx: string | undefined, 
 function handleSendError(e: unknown, account: AccountData): void {
   if (e instanceof ILinkError) {
     log("send error:", e.message);
-    if (e.kind === "session_expired") { pauseSession(account.botId); log("会话过期(-14) on send → 该账号暂停 1h，待重新登录"); }
+    if (e.kind === "session_expired") {
+      pauseSession(account.botId);
+      log("会话过期(-14) on send → 该账号暂停 1h，待重新登录");
+    }
   } else {
     const t = classifyTransportError(e);
     log(`send error(传输/${t.kind}${t.retryable ? ",可重试" : ""}):`, t.message);
@@ -199,33 +275,61 @@ type SendBudget = { count: number; awaiting: boolean };
 const sendBudget = new Map<string, SendBudget>();
 function budgetOf(to: string): SendBudget {
   let b = sendBudget.get(to);
-  if (!b) { b = { count: 0, awaiting: false }; sendBudget.set(to, b); }
+  if (!b) {
+    b = { count: 0, awaiting: false };
+    sendBudget.set(to, b);
+  }
   return b;
 }
 // 当前进行中回合（worker 串行，只有一个）：记录发往用户与所用 token（token 可被「继续」更新）。
 let activeTurn: { from: string; token: string | undefined } | null = null;
-function sendOrdered(account: AccountData, to: string, ctx: string | undefined, text: string, state: number = MessageState.FINISH, fallbackToken?: string): Promise<void> {
+function sendOrdered(
+  account: AccountData,
+  to: string,
+  ctx: string | undefined,
+  text: string,
+  state: number = MessageState.FINISH,
+  fallbackToken?: string,
+): Promise<void> {
   replyChain = replyChain.then(async () => {
     const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
     if (wait > 0) await sleep(wait);
-    await reply(account, to, ctx, text, state, fallbackToken).catch((e) => handleSendError(e, account));
+    await reply(account, to, ctx, text, state, fallbackToken).catch((e) =>
+      handleSendError(e, account),
+    );
     lastSendAt = Date.now();
   });
   return replyChain;
 }
 
 /** 把长回复作为 .md 文件发送（走同一串行链+节流）；发文件失败则兜底回退为文本。 */
-function sendMdOrdered(account: AccountData, to: string, ctx: string | undefined, finalText: string, fallbackToken?: string): Promise<void> {
+function sendMdOrdered(
+  account: AccountData,
+  to: string,
+  ctx: string | undefined,
+  finalText: string,
+  fallbackToken?: string,
+): Promise<void> {
   replyChain = replyChain.then(async () => {
     const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
     if (wait > 0) await sleep(wait);
     const { fileName, data } = buildMdReply(finalText);
     try {
-      await sendFile({ baseUrl: account.baseUrl, token: account.botToken, to, data, fileName, kind: "file", contextToken: ctx });
+      await sendFile({
+        baseUrl: account.baseUrl,
+        token: account.botToken,
+        to,
+        data,
+        fileName,
+        kind: "file",
+        contextToken: ctx,
+      });
       log(`final as md file: ${fileName} (${finalText.length} chars)`);
     } catch (e) {
       log("send md file failed, fallback to text:", String(e));
-      await reply(account, to, ctx, finalText, MessageState.FINISH, fallbackToken).catch((er) => handleSendError(er, account));
+      await reply(account, to, ctx, finalText, MessageState.FINISH, fallbackToken).catch((er) =>
+        handleSendError(er, account),
+      );
     }
     lastSendAt = Date.now();
   });
@@ -241,14 +345,24 @@ function sniffMime(b: Buffer): string {
   return "image/jpeg";
 }
 
-async function handleMessage(account: AccountData, ctx: string | undefined, to: string, text: string, imageItems: ImageItem[], createTimeMs?: number, latestToken?: () => string | undefined): Promise<void> {
-  const msgAge = () => createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"; // 这条消息已存在多久（诊断用）
+async function handleMessage(
+  account: AccountData,
+  ctx: string | undefined,
+  to: string,
+  text: string,
+  imageItems: ImageItem[],
+  createTimeMs?: number,
+  latestToken?: () => string | undefined,
+): Promise<void> {
+  const msgAge = () => (createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"); // 这条消息已存在多久（诊断用）
   // activeTurn 只存当前回合的 from/token；连续发送计数用按用户、跨回合的 budgetOf(to)（不在回合开始清零）。
   activeTurn = { from: to, token: ctx };
   const cx = () => activeTurn?.token ?? ctx;
   await setTyping(account, to, cx(), 1);
   // 处理期间每 8s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了
-  const keepAlive = setInterval(() => { void setTyping(account, to, cx(), 1).catch(() => {}); }, 8000);
+  const keepAlive = setInterval(() => {
+    void setTyping(account, to, cx(), 1).catch(() => {});
+  }, 8000);
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
@@ -262,7 +376,13 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
     if (b.count >= CONSEC_SEND_LIMIT - 2) {
       b.count += 1;
       b.awaiting = true;
-      void sendOrdered(account, to, cx(), "⚠️ 接近微信连续消息上限，我先暂停进度提示、继续在后台处理；完成后会把结果直接发给你。想立刻恢复进度可回复「继续」。", MessageState.GENERATING);
+      void sendOrdered(
+        account,
+        to,
+        cx(),
+        "⚠️ 接近微信连续消息上限，我先暂停进度提示、继续在后台处理；完成后会把结果直接发给你。想立刻恢复进度可回复「继续」。",
+        MessageState.GENERATING,
+      );
       return;
     }
     b.count += 1;
@@ -270,14 +390,22 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
   // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）
-  if (imageItems.length === 0) { const t = cx(); log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`); sendProgress("🤖 收到，正在处理…"); }
+  if (imageItems.length === 0) {
+    const t = cx();
+    log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
+    sendProgress("🤖 收到，正在处理…");
+  }
   // 心跳：仅当 brain 真正静默(无任何帧)超过 15s 才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
   let answerNoticeSent = false; // "正在整理回复"只发一次
   const heartbeat = setInterval(() => {
     if (Date.now() - lastProgressAt >= 15000) {
       hbCount += 1;
-      sendProgress(hbCount === 1 ? "🤔 还在思考/检索中…" : `⏳ 仍在处理中…（已 ${Math.round((Date.now() - t0) / 1000)} 秒）`);
+      sendProgress(
+        hbCount === 1
+          ? "🤔 还在思考/检索中…"
+          : `⏳ 仍在处理中…（已 ${Math.round((Date.now() - t0) / 1000)} 秒）`,
+      );
     }
   }, 15000);
 
@@ -289,7 +417,9 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
       try {
         const buf = await downloadImage(im);
         images.push({ data: buf.toString("base64"), mimeType: sniffMime(buf) });
-      } catch (e) { log("image download failed:", String(e)); }
+      } catch (e) {
+        log("image download failed:", String(e));
+      }
     }
   }
 
@@ -297,25 +427,33 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   const attempt = (promptText: string, imgs: typeof images): Promise<string> => {
     let step = 0;
     let lastToolProgressAt = 0;
-    return askBrain(to, promptText, (ev) => {
-      if (ev.type === "tool") {
-        lastProgressAt = Date.now(); // 工具活动刷新心跳基线
-        // 首条立即发（让你知道开始干活了），之后每 15s 最多一条，避免刷屏 + 触发限流
-        if (Date.now() - lastToolProgressAt >= 15000) {
-          lastToolProgressAt = Date.now();
-          step += 1; // 只在真正发出时递增，保证步骤号连续（不因节流跳号）
-          const desc = ev.purpose || (ev.title ? zhTool(ev.title) : "") || "调用工具";
-          sendProgress(`${toolIcon(ev.kind)} 步骤 ${step}：${desc}`);
+    return askBrain(
+      to,
+      promptText,
+      (ev) => {
+        if (ev.type === "tool") {
+          lastProgressAt = Date.now(); // 工具活动刷新心跳基线
+          // 首条立即发（让你知道开始干活了），之后每 15s 最多一条，避免刷屏 + 触发限流
+          if (Date.now() - lastToolProgressAt >= 15000) {
+            lastToolProgressAt = Date.now();
+            step += 1; // 只在真正发出时递增，保证步骤号连续（不因节流跳号）
+            const desc = ev.purpose || (ev.title ? zhTool(ev.title) : "") || "调用工具";
+            sendProgress(`${toolIcon(ev.kind)} 步骤 ${step}：${desc}`);
+          }
+        } else if (ev.type === "thinking") {
+          lastProgressAt = Date.now();
+        } else if (ev.type === "answer") {
+          if (!answerNoticeSent) {
+            answerNoticeSent = true;
+            sendProgress("✍️ 正在整理回复…");
+          }
+        } else {
+          // activity：brain 产出任意帧 → 静默刷新心跳基线，避免流式输出期间误报"仍在处理"
+          lastProgressAt = Date.now();
         }
-      } else if (ev.type === "thinking") {
-        lastProgressAt = Date.now();
-      } else if (ev.type === "answer") {
-        if (!answerNoticeSent) { answerNoticeSent = true; sendProgress("✍️ 正在整理回复…"); }
-      } else {
-        // activity：brain 产出任意帧 → 静默刷新心跳基线，避免流式输出期间误报"仍在处理"
-        lastProgressAt = Date.now();
-      }
-    }, imgs);
+      },
+      imgs,
+    );
   };
 
   // 带分类的重试：backend(模型后端瞬时错误 -32603 等)最多 3 次；timeout/other 最多 2 次
@@ -323,13 +461,16 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
     let n = 0;
     while (true) {
       n++;
-      try { return await attempt(promptText, imgs); }
-      catch (e) {
+      try {
+        return await attempt(promptText, imgs);
+      } catch (e) {
         const cat = classifyBrainError(e);
         log(`brain error (try ${n}, ${cat}): ${String(e)}`);
         const maxAttempts = cat === "backend" ? 3 : 2;
         if (n < maxAttempts) {
-          sendProgress(cat === "backend" ? "⚠️ 模型后端临时出错，正在重试…" : "⏳ 响应中断了，正在自动重试…");
+          sendProgress(
+            cat === "backend" ? "⚠️ 模型后端临时出错，正在重试…" : "⏳ 响应中断了，正在自动重试…",
+          );
           continue;
         }
         throw e;
@@ -353,9 +494,18 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
   for (const im of replyImages) {
     try {
       const buf = await resolveImageBytes(im.src);
-      await sendImage({ baseUrl: account.baseUrl, token: account.botToken, to, image: buf, contextToken: cx() });
+      await sendImage({
+        baseUrl: account.baseUrl,
+        token: account.botToken,
+        to,
+        image: buf,
+        contextToken: cx(),
+      });
       log(`sent image: ${im.src.slice(0, 80)}`);
-    } catch (e) { log("send image failed:", im.src, String(e)); failedImgs.push(im.src); }
+    } catch (e) {
+      log("send image failed:", im.src, String(e));
+      failedImgs.push(im.src);
+    }
   }
   let finalText = cleaned;
   if (failedImgs.length) {
@@ -381,10 +531,20 @@ async function handleMessage(account: AccountData, ctx: string | undefined, to: 
 // 大脑(ACP session)严格串行，但「拉取消息/抓 token」无需串行。把两者解耦：
 // poller 持续 getUpdates、实时更新 token、把消息入队，永不被大脑阻塞；
 // worker 串行从队列取消息喂大脑（尊重 kiro-cli 串行约束），发送时取最新 token，规避 ret=-2。
-type QueuedMsg = { from: string; text: string; imageItems: ImageItem[]; createTimeMs?: number; contextToken?: string };
+type QueuedMsg = {
+  from: string;
+  text: string;
+  imageItems: ImageItem[];
+  createTimeMs?: number;
+  contextToken?: string;
+};
 const msgQueue: QueuedMsg[] = [];
 let wakeWorker: (() => void) | null = null;
-function notifyWorker(): void { const w = wakeWorker; wakeWorker = null; if (w) w(); }
+function notifyWorker(): void {
+  const w = wakeWorker;
+  wakeWorker = null;
+  if (w) w();
+}
 
 /** 发件人鉴权：账号本人(owner，始终允许，作安全兜底) 或 在 allowFrom 授权清单中。 */
 function isAuthorized(from: string, owner: string): boolean {
@@ -399,37 +559,66 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
     }
     let resp;
     try {
-      resp = await getUpdates({ baseUrl: account.baseUrl, token: account.botToken, updatesBuf: state.updatesBuf, timeoutMs: 25_000 });
-    } catch (e) { log("getUpdates error:", String(e)); await sleep(2000); continue; }
+      resp = await getUpdates({
+        baseUrl: account.baseUrl,
+        token: account.botToken,
+        updatesBuf: state.updatesBuf,
+        timeoutMs: 25_000,
+      });
+    } catch (e) {
+      log("getUpdates error:", String(e));
+      await sleep(2000);
+      continue;
+    }
     try {
       if (resp.errcode === SESSION_EXPIRED_ERRCODE) {
         log("session expired (-14); pausing 1h. Send a WeChat message to revive after re-login.");
-        pauseSession(account.botId); continue;
+        pauseSession(account.botId);
+        continue;
       }
-      if (resp.errcode) { log("server error:", resp.errcode, resp.errmsg); await sleep(2000); continue; }
+      if (resp.errcode) {
+        log("server error:", resp.errcode, resp.errmsg);
+        await sleep(2000);
+        continue;
+      }
       if (resp.get_updates_buf) state.updatesBuf = resp.get_updates_buf;
 
       const news = (resp.msgs ?? []).filter(
-        (m) => m.message_type === MessageType.USER && m.message_id && m.message_id > state.lastMessageId,
+        (m) =>
+          m.message_type === MessageType.USER && m.message_id && m.message_id > state.lastMessageId,
       );
       // 先登记本批所有最新 token（worker 发送时取最新）
       for (const m of news) {
         const f = m.from_user_id ?? "";
-        if (isAuthorized(f, owner)) log(`recv msg id=${m.message_id} ctx=…${m.context_token ? m.context_token.slice(-12) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`);
+        if (isAuthorized(f, owner))
+          log(
+            `recv msg id=${m.message_id} ctx=…${m.context_token ? m.context_token.slice(-12) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`,
+          );
         if (m.context_token) state.contextTokens[`${account.botId}:${f}`] = m.context_token;
       }
       let enq = false;
       for (const msg of news) {
         state.lastMessageId = Math.max(state.lastMessageId, msg.message_id ?? 0);
         const from = msg.from_user_id ?? "";
-        if (!isAuthorized(from, owner)) { log("ignore unauthorized sender:", from); continue; }
+        if (!isAuthorized(from, owner)) {
+          log("ignore unauthorized sender:", from);
+          continue;
+        }
         const text = extractText(msg);
-        const voiceItem = (msg.item_list ?? []).find((it) => it.type === MessageItemType.VOICE)?.voice_item;
-        if (voiceItem) log(`recv voice: text=${voiceItem.text ? `"${voiceItem.text.slice(0, 30)}"` : "(空,无微信转写)"} playtime=${voiceItem.playtime ?? "?"}`);
+        const voiceItem = (msg.item_list ?? []).find(
+          (it) => it.type === MessageItemType.VOICE,
+        )?.voice_item;
+        if (voiceItem)
+          log(
+            `recv voice: text=${voiceItem.text ? `"${voiceItem.text.slice(0, 30)}"` : "(空,无微信转写)"} playtime=${voiceItem.playtime ?? "?"}`,
+          );
         const imageItems = (msg.item_list ?? [])
           .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
           .map((it) => it.image_item as ImageItem);
-        if (!text && imageItems.length === 0) { log("skip empty/unsupported message"); continue; }
+        if (!text && imageItems.length === 0) {
+          log("skip empty/unsupported message");
+          continue;
+        }
         // 服务端按「距用户上一条消息」计连续发送数 → 任何来自 owner 的消息都重置服务端配额，故同步重置该用户计数 + 退出等待段。
         const b = budgetOf(from);
         const wasAwaiting = b.awaiting;
@@ -441,12 +630,20 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           log("收到「继续」(等待中) → 恢复进度、重置计数、换新 token");
           continue;
         }
-        msgQueue.push({ from, text, imageItems, createTimeMs: msg.create_time_ms, contextToken: msg.context_token });
+        msgQueue.push({
+          from,
+          text,
+          imageItems,
+          createTimeMs: msg.create_time_ms,
+          contextToken: msg.context_token,
+        });
         enq = true;
       }
       saveState(state);
       if (enq) notifyWorker();
-    } catch (e) { log("poller error:", e instanceof Error ? (e.stack || e.message) : String(e)); }
+    } catch (e) {
+      log("poller error:", e instanceof Error ? e.stack || e.message : String(e));
+    }
   }
 }
 
@@ -457,7 +654,13 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
       continue;
     }
     if (msgQueue.length === 0) {
-      await new Promise<void>((r) => { wakeWorker = r; if (msgQueue.length > 0) { wakeWorker = null; r(); } });
+      await new Promise<void>((r) => {
+        wakeWorker = r;
+        if (msgQueue.length > 0) {
+          wakeWorker = null;
+          r();
+        }
+      });
       continue;
     }
     const item = msgQueue.shift() as QueuedMsg;
@@ -469,10 +672,15 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
     const ctrl = item.text ? parseControl(item.text) : null;
     if (ctrl) {
       let r: string;
-      try { r = await handleControl(ctrl, from); }
-      catch (e) { r = "处理指令出错：" + String(e); }
+      try {
+        r = await handleControl(ctrl, from);
+      } catch (e) {
+        r = "处理指令出错：" + String(e);
+      }
       log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
-      await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) => handleSendError(e, account));
+      await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) =>
+        handleSendError(e, account),
+      );
       continue;
     }
 
@@ -482,7 +690,9 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
     if (tcmd?.kind === "stop") {
       const r = stopTask(from);
       log("task: stop ->", r);
-      await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) => handleSendError(e, account));
+      await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) =>
+        handleSendError(e, account),
+      );
       continue;
     }
     if (tcmd?.kind === "toWorker") {
@@ -492,7 +702,9 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
         injectTask(from, tcmd.text);
       } else {
         const r = dispatchTask(from, tcmd.text);
-        await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) => handleSendError(e, account));
+        await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) =>
+          handleSendError(e, account),
+        );
       }
       continue;
     }
@@ -507,10 +719,25 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
 
     const brainText = brainEscape ?? item.text;
     try {
-      await handleMessage(account, token, from, brainText, item.imageItems, item.createTimeMs, latestToken);
+      await handleMessage(
+        account,
+        token,
+        from,
+        brainText,
+        item.imageItems,
+        item.createTimeMs,
+        latestToken,
+      );
     } catch (e) {
-      log("handleMessage error:", e instanceof Error ? (e.stack || e.message) : String(e));
-      await reply(account, from, token, "处理这条消息时出错了，请再发一次试试。", MessageState.FINISH, latestToken()).catch((e2) => handleSendError(e2, account));
+      log("handleMessage error:", e instanceof Error ? e.stack || e.message : String(e));
+      await reply(
+        account,
+        from,
+        token,
+        "处理这条消息时出错了，请再发一次试试。",
+        MessageState.FINISH,
+        latestToken(),
+      ).catch((e2) => handleSendError(e2, account));
     }
   }
 }
@@ -523,19 +750,40 @@ const TASK_SCAN_MS = Number(process.env.WEMIND_TASK_SCAN_MS) || 1000;
 /** 扫描 task-inbox：按文件名(时间戳)升序逐个读、分发到 task-manager（dispatch/reply/stop）、删文件。本地命令默认作用于 owner。 */
 function scanTaskInbox(owner: string): void {
   let files: string[];
-  try { files = fs.readdirSync(TASK_INBOX_DIR).filter((f) => f.endsWith(".json")); }
-  catch { return; } // 目录不存在/读失败：跳过
+  try {
+    files = fs.readdirSync(TASK_INBOX_DIR).filter((f) => f.endsWith(".json"));
+  } catch {
+    return;
+  } // 目录不存在/读失败：跳过
   if (!files.length) return;
   files.sort(); // 文件名带时间戳前缀，字典序即时间序
   for (const f of files) {
     const fp = path.join(TASK_INBOX_DIR, f);
     let cmd: { kind?: string; text?: string; cwd?: string };
-    try { cmd = JSON.parse(fs.readFileSync(fp, "utf-8")); }
-    catch { try { fs.unlinkSync(fp); } catch { /* ignore */ } continue; } // 坏文件丢弃
-    try { fs.unlinkSync(fp); } catch { /* ignore */ } // 先删，避免重复处理
+    try {
+      cmd = JSON.parse(fs.readFileSync(fp, "utf-8"));
+    } catch {
+      try {
+        fs.unlinkSync(fp);
+      } catch {
+        /* ignore */
+      }
+      continue;
+    } // 坏文件丢弃
+    try {
+      fs.unlinkSync(fp);
+    } catch {
+      /* ignore */
+    } // 先删，避免重复处理
     try {
       if (cmd.kind === "dispatch") {
-        log("local task dispatch:", dispatchTask(owner, String(cmd.text ?? ""), cmd.cwd ? String(cmd.cwd) : undefined).slice(0, 50));
+        log(
+          "local task dispatch:",
+          dispatchTask(owner, String(cmd.text ?? ""), cmd.cwd ? String(cmd.cwd) : undefined).slice(
+            0,
+            50,
+          ),
+        );
       } else if (cmd.kind === "reply") {
         injectTask(owner, String(cmd.text ?? ""));
         log("local task reply:", String(cmd.text ?? "").slice(0, 40));
@@ -544,7 +792,9 @@ function scanTaskInbox(owner: string): void {
       } else {
         log("unknown task-inbox cmd:", cmd.kind);
       }
-    } catch (e) { log("task-inbox dispatch error:", String(e)); }
+    } catch (e) {
+      log("task-inbox dispatch error:", String(e));
+    }
   }
 }
 
@@ -558,15 +808,34 @@ async function main(): Promise<void> {
   if (owner) addAllowFrom(owner, DATA_DIR); // 种入授权清单(自动迁移老账号)；新登录在 finalize 已配对
   // 写 PID 文件，供管理命令（logout/delete）精确定位并停止本账号的 daemon
   const pidFile = path.join(DATA_DIR, "daemon.pid");
-  try { fs.writeFileSync(pidFile, String(process.pid), "utf-8"); } catch { /* best-effort */ }
-  const cleanupPid = () => { try { fs.unlinkSync(pidFile); } catch { /* ignore */ } };
+  try {
+    fs.writeFileSync(pidFile, String(process.pid), "utf-8");
+  } catch {
+    /* best-effort */
+  }
+  const cleanupPid = () => {
+    try {
+      fs.unlinkSync(pidFile);
+    } catch {
+      /* ignore */
+    }
+  };
   process.on("exit", cleanupPid);
-  process.on("SIGINT", () => { cleanupPid(); process.exit(0); });
-  process.on("SIGTERM", () => { cleanupPid(); process.exit(0); });
+  process.on("SIGINT", () => {
+    cleanupPid();
+    process.exit(0);
+  });
+  process.on("SIGTERM", () => {
+    cleanupPid();
+    process.exit(0);
+  });
   // 防御：任何未捕获的 promise 拒绝/异常（多为瞬时网络 fetch failed 或回合内 send 被拒）只记录、不退出，
   // 避免 daemon 崩溃丢掉在途回合、用户卡在心跳。此前的 code=1 崩溃即源于此类未捕获拒绝。
   process.on("unhandledRejection", (reason) => {
-    log("unhandledRejection:", reason instanceof Error ? (reason.stack || reason.message) : String(reason));
+    log(
+      "unhandledRejection:",
+      reason instanceof Error ? reason.stack || reason.message : String(reason),
+    );
   });
   process.on("uncaughtException", (err) => {
     log("uncaughtException:", err?.stack || String(err));
@@ -583,18 +852,30 @@ async function main(): Promise<void> {
     void sendOrdered(account, to, tok, text, MessageState.FINISH, tok);
   });
   // worker 跑一轮期间持续「正在输入中」（typing 不占连续发送上限），避免长任务静默让用户以为卡了
-  setTaskTyping((to) => { void setTyping(account, to, state.contextTokens[`${account.botId}:${to}`], 1); });
+  setTaskTyping((to) => {
+    void setTyping(account, to, state.contextTokens[`${account.botId}:${to}`], 1);
+  });
   // 任务状态落盘：worker 状态快照原子写 task-state.json，供本地 `manage.js task-status` 读
   setTaskStateSink((snap: TaskStateSnapshot) => {
     try {
       const tmp = `${TASK_STATE_FILE}.tmp-${process.pid}`;
       fs.writeFileSync(tmp, JSON.stringify(snap, null, 2), "utf-8");
       fs.renameSync(tmp, TASK_STATE_FILE);
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   });
   // 本地命令入口：启动清空收件箱（作废重启前残留命令、防重放），再起独立定时器扫描分发（不挂 poller，避免被 25s 长轮询阻塞）
-  try { fs.rmSync(TASK_INBOX_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
-  try { fs.mkdirSync(TASK_INBOX_DIR, { recursive: true }); } catch { /* ignore */ }
+  try {
+    fs.rmSync(TASK_INBOX_DIR, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.mkdirSync(TASK_INBOX_DIR, { recursive: true });
+  } catch {
+    /* ignore */
+  }
   setInterval(() => scanTaskInbox(owner), TASK_SCAN_MS);
   // 解耦运行：拉取器持续抓消息(永不被大脑阻塞)，处理器串行喂大脑
   void pollerLoop(account, owner, state);

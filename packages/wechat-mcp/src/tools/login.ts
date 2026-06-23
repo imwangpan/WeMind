@@ -5,11 +5,19 @@ import QRCode from "qrcode";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
 import {
-  fetchQRCode, pollQRStatus, notifyStart, notifyStop,
+  fetchQRCode,
+  pollQRStatus,
+  notifyStart,
+  notifyStop,
   clearSessionPause,
-  loadAccount, saveAccount, clearAccount,
-  loadQrState, saveQrState, clearQrState,
-  resetState, DATA_DIR,
+  loadAccount,
+  saveAccount,
+  clearAccount,
+  loadQrState,
+  saveQrState,
+  clearQrState,
+  resetState,
+  DATA_DIR,
 } from "@wemind/wechat-ilink-core";
 
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
@@ -58,12 +66,16 @@ export async function loginQrcode(): Promise<{
       content: [
         {
           type: "text",
-          text: JSON.stringify({
-            status: "already_logged_in",
-            message: "Already logged in. Use logout first if you want to re-login.",
-            botId: account.botId,
-            userId: account.userId,
-          }, null, 2),
+          text: JSON.stringify(
+            {
+              status: "already_logged_in",
+              message: "Already logged in. Use logout first if you want to re-login.",
+              botId: account.botId,
+              userId: account.userId,
+            },
+            null,
+            2,
+          ),
         },
       ],
     };
@@ -118,12 +130,16 @@ export async function checkQrcodeStatus(): Promise<{
       content: [
         {
           type: "text",
-          text: JSON.stringify({
-            status: "confirmed",
-            message: "Already logged in.",
-            botId: account.botId,
-            userId: account.userId,
-          }, null, 2),
+          text: JSON.stringify(
+            {
+              status: "confirmed",
+              message: "Already logged in.",
+              botId: account.botId,
+              userId: account.userId,
+            },
+            null,
+            2,
+          ),
         },
       ],
     };
@@ -140,10 +156,14 @@ export async function checkQrcodeStatus(): Promise<{
       content: [
         {
           type: "text",
-          text: JSON.stringify({
-            status: "expired",
-            message: "QR code expired. Call login_qrcode to generate a new one.",
-          }, null, 2),
+          text: JSON.stringify(
+            {
+              status: "expired",
+              message: "QR code expired. Call login_qrcode to generate a new one.",
+            },
+            null,
+            2,
+          ),
         },
       ],
     };
@@ -152,8 +172,15 @@ export async function checkQrcodeStatus(): Promise<{
   const statusResponse = await pollQRStatus(DEFAULT_BASE_URL, qrState.qrcode);
 
   if (statusResponse.status === "confirmed") {
-    if (!statusResponse.bot_token || !statusResponse.ilink_bot_id || !statusResponse.ilink_user_id) {
-      throw new McpError(ErrorCode.InternalError, "Login confirmed but server returned incomplete data.");
+    if (
+      !statusResponse.bot_token ||
+      !statusResponse.ilink_bot_id ||
+      !statusResponse.ilink_user_id
+    ) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        "Login confirmed but server returned incomplete data.",
+      );
     }
 
     saveAccount({
@@ -176,12 +203,16 @@ export async function checkQrcodeStatus(): Promise<{
       content: [
         {
           type: "text",
-          text: JSON.stringify({
-            status: "confirmed",
-            message: "Login successful! Bot is now connected to WeChat.",
-            botId: statusResponse.ilink_bot_id,
-            userId: statusResponse.ilink_user_id,
-          }, null, 2),
+          text: JSON.stringify(
+            {
+              status: "confirmed",
+              message: "Login successful! Bot is now connected to WeChat.",
+              botId: statusResponse.ilink_bot_id,
+              userId: statusResponse.ilink_user_id,
+            },
+            null,
+            2,
+          ),
         },
       ],
     };
@@ -193,10 +224,14 @@ export async function checkQrcodeStatus(): Promise<{
       content: [
         {
           type: "text",
-          text: JSON.stringify({
-            status: "expired",
-            message: "QR code expired. Call login_qrcode to generate a new one.",
-          }, null, 2),
+          text: JSON.stringify(
+            {
+              status: "expired",
+              message: "QR code expired. Call login_qrcode to generate a new one.",
+            },
+            null,
+            2,
+          ),
         },
       ],
     };
@@ -206,13 +241,17 @@ export async function checkQrcodeStatus(): Promise<{
     content: [
       {
         type: "text",
-        text: JSON.stringify({
-          status: statusResponse.status,
-          message:
-            statusResponse.status === "wait"
-              ? "Waiting for QR code scan. Call check_qrcode_status again after scanning."
-              : "QR code scanned, waiting for confirmation in WeChat. Call check_qrcode_status again.",
-        }, null, 2),
+        text: JSON.stringify(
+          {
+            status: statusResponse.status,
+            message:
+              statusResponse.status === "wait"
+                ? "Waiting for QR code scan. Call check_qrcode_status again after scanning."
+                : "QR code scanned, waiting for confirmation in WeChat. Call check_qrcode_status again.",
+          },
+          null,
+          2,
+        ),
       },
     ],
   };
@@ -236,7 +275,11 @@ export async function logout(): Promise<{
     content: [
       {
         type: "text",
-        text: JSON.stringify({ status: "logged_out", message: "Logged out successfully." }, null, 2),
+        text: JSON.stringify(
+          { status: "logged_out", message: "Logged out successfully." },
+          null,
+          2,
+        ),
       },
     ],
   };

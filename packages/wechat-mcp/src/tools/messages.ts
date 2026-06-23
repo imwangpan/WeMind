@@ -3,8 +3,14 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
 import {
   getUpdates,
-  SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs,
-  loadAccount, loadState, saveState, classifyTransportError,
+  SESSION_EXPIRED_ERRCODE,
+  isSessionPaused,
+  pauseSession,
+  getRemainingPauseMs,
+  loadAccount,
+  loadState,
+  saveState,
+  classifyTransportError,
 } from "@wemind/wechat-ilink-core";
 import type { WeixinMessage } from "@wemind/wechat-ilink-core";
 
@@ -16,7 +22,9 @@ export const getMessagesSchema = z.object({
   wait: z
     .boolean()
     .optional()
-    .describe("If true, block until at least one new message arrives. May block for a very long time (7 days max). Requires the MCP client to have no tool timeout limit."),
+    .describe(
+      "If true, block until at least one new message arrives. May block for a very long time (7 days max). Requires the MCP client to have no tool timeout limit.",
+    ),
   timeout: z
     .number()
     .min(1000)
@@ -85,7 +93,10 @@ export async function getMessages(input: { wait?: boolean; timeout?: number }): 
       // wait 模式：瞬时网络错误退避重试，不让一次网络抖动终结整个长轮询
       if (input.wait) {
         const cls = classifyTransportError(e);
-        if (cls.retryable) { await sleep(2000); continue; }
+        if (cls.retryable) {
+          await sleep(2000);
+          continue;
+        }
       }
       throw e;
     }
@@ -106,9 +117,10 @@ export async function getMessages(input: { wait?: boolean; timeout?: number }): 
       state.updatesBuf = resp.get_updates_buf;
     }
 
-    const newMessages = resp.msgs?.filter(
-      (m) => m.message_type === 1 && m.message_id && m.message_id > state.lastMessageId,
-    ) ?? [];
+    const newMessages =
+      resp.msgs?.filter(
+        (m) => m.message_type === 1 && m.message_id && m.message_id > state.lastMessageId,
+      ) ?? [];
 
     if (newMessages.length > 0) {
       const maxId = Math.max(...newMessages.map((m) => m.message_id ?? 0));
@@ -126,10 +138,14 @@ export async function getMessages(input: { wait?: boolean; timeout?: number }): 
         content: [
           {
             type: "text",
-            text: JSON.stringify({
-              message_count: newMessages.length,
-              messages: newMessages.map(formatMessage),
-            }, null, 2),
+            text: JSON.stringify(
+              {
+                message_count: newMessages.length,
+                messages: newMessages.map(formatMessage),
+              },
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -165,7 +181,9 @@ function formatMessage(msg: WeixinMessage) {
         textParts.push(item.voice_item?.text ? `[Voice: ${item.voice_item.text}]` : "[Voice]");
         break;
       case 4:
-        textParts.push(item.file_item?.file_name ? `[File: ${item.file_item.file_name}]` : "[File]");
+        textParts.push(
+          item.file_item?.file_name ? `[File: ${item.file_item.file_name}]` : "[File]",
+        );
         break;
       case 5:
         textParts.push("[Video]");

@@ -24,14 +24,14 @@ import os from "node:os";
 
 export type AcpAgentPreset = {
   name: string;
-  bin: string;          // PATH 上的二进制名（非 Windows）
-  binWin?: string;      // Windows 下可执行名（默认在 bin 后加 .exe）
-  args: string[];       // 进入 ACP 模式的启动参数
-  homeEnvVar?: string;  // agent 读取其配置/数据目录的环境变量名；指向 brain 沙箱。留空=不设置
-  shell?: boolean;      // 是否经 shell 启动（npx/.cmd/.bat 类适配器在 Windows 需要 true）
+  bin: string; // PATH 上的二进制名（非 Windows）
+  binWin?: string; // Windows 下可执行名（默认在 bin 后加 .exe）
+  args: string[]; // 进入 ACP 模式的启动参数
+  homeEnvVar?: string; // agent 读取其配置/数据目录的环境变量名；指向 brain 沙箱。留空=不设置
+  shell?: boolean; // 是否经 shell 启动（npx/.cmd/.bat 类适配器在 Windows 需要 true）
   // —— 继承「记忆/规则/技能」配置（让微信大脑与日常使用读到同样内容）——
-  realHome?: string;        // 该 agent 真实配置目录（被继承的来源）。不同 agent 布局不同，故下沉到预设
-  inheritDirs?: string[];   // 从 realHome junction 进沙箱的「知识/记忆」类子目录（不含 MCP/会话目录）
+  realHome?: string; // 该 agent 真实配置目录（被继承的来源）。不同 agent 布局不同，故下沉到预设
+  inheritDirs?: string[]; // 从 realHome junction 进沙箱的「知识/记忆」类子目录（不含 MCP/会话目录）
 };
 
 /**
@@ -44,17 +44,34 @@ export type AcpAgentPreset = {
 export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // —— 原生 ACP ——
   kiro: {
-    name: "kiro", bin: "kiro-cli", binWin: "kiro-cli.exe", args: ["acp", "--trust-all-tools"], homeEnvVar: "KIRO_HOME",
+    name: "kiro",
+    bin: "kiro-cli",
+    binWin: "kiro-cli.exe",
+    args: ["acp", "--trust-all-tools"],
+    homeEnvVar: "KIRO_HOME",
     realHome: path.join(os.homedir(), ".kiro"),
     inheritDirs: ["steering", "memories", "skills", "agents", "powers", "tasks", "extensions"],
   },
   // Gemini CLI 实验性 ACP（未实测，flag 以官方为准）。注：Gemini 的「记忆」是 ~/.gemini/GEMINI.md 等文件而非目录，
   // 与 kiro 的目录式不同，故未预置 inheritDirs；需要时按其布局用 WEMIND_BRAIN_REAL_HOME/_INHERIT_DIRS 配置或填此处。
-  gemini: { name: "gemini", bin: "gemini", binWin: "gemini.cmd", args: ["--experimental-acp"], homeEnvVar: "GEMINI_CLI_HOME", shell: true },
+  gemini: {
+    name: "gemini",
+    bin: "gemini",
+    binWin: "gemini.cmd",
+    args: ["--experimental-acp"],
+    homeEnvVar: "GEMINI_CLI_HOME",
+    shell: true,
+  },
 
   // —— 需适配器（CLI 不原生支持 ACP，经第三方适配器桥接；未实测）——
   // Claude Code：Zed 官方适配器 @zed-industries/claude-code-acp（npx 运行；需 Claude Code 登录/ANTHROPIC_API_KEY）
-  "claude-code": { name: "claude-code", bin: "npx", binWin: "npx.cmd", args: ["-y", "@zed-industries/claude-code-acp"], shell: true },
+  "claude-code": {
+    name: "claude-code",
+    bin: "npx",
+    binWin: "npx.cmd",
+    args: ["-y", "@zed-industries/claude-code-acp"],
+    shell: true,
+  },
   // Codex：社区适配器 codex-acp（agentclientprotocol/codex-acp，需自行安装其二进制；Codex 本身暂不原生支持 ACP）
   codex: { name: "codex", bin: "codex-acp", binWin: "codex-acp.exe", args: [] },
 };
@@ -66,7 +83,16 @@ function onPath(exe: string): string | null {
   return null;
 }
 
-export type ResolvedAgent = { name: string; bin: string; args: string[]; homeEnvVar?: string; shell: boolean; inherit: boolean; realHome?: string; inheritDirs: string[] };
+export type ResolvedAgent = {
+  name: string;
+  bin: string;
+  args: string[];
+  homeEnvVar?: string;
+  shell: boolean;
+  inherit: boolean;
+  realHome?: string;
+  inheritDirs: string[];
+};
 
 /** 解析当前要用的 ACP agent（预设 + 环境变量覆盖）。 */
 export function resolveAgent(): ResolvedAgent {
@@ -74,15 +100,17 @@ export function resolveAgent(): ResolvedAgent {
   const preset = ACP_AGENT_PRESETS[key] ?? ACP_AGENT_PRESETS.kiro;
 
   const shellEnv = process.env.WEMIND_BRAIN_SHELL?.trim();
-  const shell = shellEnv !== undefined && shellEnv !== ""
-    ? (shellEnv === "1" || shellEnv.toLowerCase() === "true")
-    : (preset.shell ?? false);
+  const shell =
+    shellEnv !== undefined && shellEnv !== ""
+      ? shellEnv === "1" || shellEnv.toLowerCase() === "true"
+      : (preset.shell ?? false);
 
   const exe = process.platform === "win32" ? (preset.binWin ?? `${preset.bin}.exe`) : preset.bin;
   // 经 shell 启动时用裸名（让 shell 从 PATH 解析，避免带空格的全路径在 shell 下出问题）；否则在 PATH 上找全路径
-  const bin = process.env.WEMIND_BRAIN_BIN?.trim()
-    || (preset.name === "kiro" ? process.env.KIRO_CLI_BIN?.trim() : undefined)
-    || (shell ? (process.platform === "win32" ? exe : preset.bin) : (onPath(exe) || preset.bin));
+  const bin =
+    process.env.WEMIND_BRAIN_BIN?.trim() ||
+    (preset.name === "kiro" ? process.env.KIRO_CLI_BIN?.trim() : undefined) ||
+    (shell ? (process.platform === "win32" ? exe : preset.bin) : onPath(exe) || preset.bin);
 
   const argsOverride = process.env.WEMIND_BRAIN_ARGS?.trim();
   const args = argsOverride ? argsOverride.split(/\s+/) : preset.args;
@@ -90,10 +118,16 @@ export function resolveAgent(): ResolvedAgent {
   const homeEnvVar = process.env.WEMIND_BRAIN_HOME_ENV?.trim() || preset.homeEnvVar;
 
   // 继承「记忆/规则/技能」：来源目录与子目录清单按 agent 而异（下沉到预设），env 可覆盖
-  const inherit = (process.env.WEMIND_BRAIN_INHERIT ?? process.env.WECHAT_BRAIN_INHERIT ?? "1") !== "0";
-  const realHome = process.env.WEMIND_BRAIN_REAL_HOME?.trim() || process.env.WECHAT_REAL_KIRO_HOME?.trim() || preset.realHome;
+  const inherit =
+    (process.env.WEMIND_BRAIN_INHERIT ?? process.env.WECHAT_BRAIN_INHERIT ?? "1") !== "0";
+  const realHome =
+    process.env.WEMIND_BRAIN_REAL_HOME?.trim() ||
+    process.env.WECHAT_REAL_KIRO_HOME?.trim() ||
+    preset.realHome;
   const dirsEnv = process.env.WEMIND_BRAIN_INHERIT_DIRS?.trim();
-  const inheritDirs = dirsEnv ? dirsEnv.split(/[,\s]+/).filter(Boolean) : (preset.inheritDirs ?? []);
+  const inheritDirs = dirsEnv
+    ? dirsEnv.split(/[,\s]+/).filter(Boolean)
+    : (preset.inheritDirs ?? []);
 
   return { name: preset.name, bin, args, homeEnvVar, shell, inherit, realHome, inheritDirs };
 }

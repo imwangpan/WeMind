@@ -2,7 +2,16 @@ import crypto from "node:crypto";
 
 import { ILINK_APP_ID } from "../config.js";
 import { ILinkError } from "./error-codes.js";
-import type { GetUpdatesResp, SendMessageReq, QRCodeResponse, QRStatusResponse, SendTypingReq, GetConfigResp, GetUploadUrlReq, GetUploadUrlResp } from "./types.js";
+import type {
+  GetUpdatesResp,
+  SendMessageReq,
+  QRCodeResponse,
+  QRStatusResponse,
+  SendTypingReq,
+  GetConfigResp,
+  GetUploadUrlReq,
+  GetUploadUrlResp,
+} from "./types.js";
 
 export type ApiOptions = {
   baseUrl: string;
@@ -154,10 +163,14 @@ export async function sendMessage(params: {
   let code: number | undefined;
   let errmsg: string | undefined;
   try {
-    const resp = raw ? (JSON.parse(raw) as { ret?: number; errcode?: number; errmsg?: string }) : null;
+    const resp = raw
+      ? (JSON.parse(raw) as { ret?: number; errcode?: number; errmsg?: string })
+      : null;
     code = resp?.ret ?? resp?.errcode;
     errmsg = resp?.errmsg;
-  } catch { /* 空/非 JSON 的成功响应，忽略 */ }
+  } catch {
+    /* 空/非 JSON 的成功响应，忽略 */
+  }
   if (code !== undefined && code !== 0) {
     throw new ILinkError("sendMessage", code, errmsg);
   }
@@ -200,10 +213,7 @@ export async function fetchQRCode(apiBaseUrl: string): Promise<QRCodeResponse> {
   return parseJsonResp<QRCodeResponse>(rawText, "fetchQRCode");
 }
 
-export async function pollQRStatus(
-  apiBaseUrl: string,
-  qrcode: string,
-): Promise<QRStatusResponse> {
+export async function pollQRStatus(apiBaseUrl: string, qrcode: string): Promise<QRStatusResponse> {
   const base = ensureTrailingSlash(apiBaseUrl);
   const url = new URL(`ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`, base);
   const controller = new AbortController();
@@ -216,7 +226,9 @@ export async function pollQRStatus(
     if (!response.ok) {
       const body = await response.text().catch(() => "(unreadable)");
       clearTimeout(timer);
-      throw new Error(`Failed to poll QR status: ${response.status} ${response.statusText} ${body}`);
+      throw new Error(
+        `Failed to poll QR status: ${response.status} ${response.statusText} ${body}`,
+      );
     }
     const text = await response.text();
     clearTimeout(timer);

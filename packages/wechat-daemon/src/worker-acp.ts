@@ -18,7 +18,9 @@ import { resolveAgent } from "./brain-agents.js";
  * 自愈：session/prompt 超时/失败 → 杀进程；下次 askWorker 重建并 session/load 恢复（→ 用户回「继续」即可续跑）。
  */
 
-function dlog(...a: unknown[]): void { console.error("[worker]", ...a); }
+function dlog(...a: unknown[]): void {
+  console.error("[worker]", ...a);
+}
 
 const AGENT = resolveAgent(); // 复用同一 ACP agent 解析（kiro acp --trust-all-tools + KIRO_HOME 沙箱）
 const WORKER_CWD = process.env.WEMIND_WORKER_CWD?.trim() || os.homedir(); // 任务工作目录（按 kiro 约定，MVP 默认主目录）
@@ -34,11 +36,20 @@ const TASK_KEY = "task"; // MVP 单任务的固定 session key
 // spawn 时生效（子进程 cwd 不可中途改），stopWorker 时清。
 let pendingCwd: string | undefined;
 /** 设置「下次（本任务首轮）spawn worker 用的 cwd」。本地命令派发传入终端当前目录；不传/空则用默认 WORKER_CWD。 */
-export function setWorkerCwd(cwd?: string): void { pendingCwd = cwd?.trim() || undefined; }
+export function setWorkerCwd(cwd?: string): void {
+  pendingCwd = cwd?.trim() || undefined;
+}
 /** 本任务有效 cwd（指定优先，否则默认）。 */
-function effectiveCwd(): string { return pendingCwd ?? WORKER_CWD; }
+function effectiveCwd(): string {
+  return pendingCwd ?? WORKER_CWD;
+}
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; clear: () => void; method: string };
+type Pending = {
+  resolve: (v: unknown) => void;
+  reject: (e: Error) => void;
+  clear: () => void;
+  method: string;
+};
 
 let child: ChildProcessWithoutNullStreams | null = null;
 let initialized = false;
@@ -71,12 +82,22 @@ function reset(): void {
   initialized = false;
   if (c?.pid) {
     try {
-      if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
+      if (process.platform === "win32")
+        spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
       else c.kill();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
-  try { fs.unlinkSync(WORKER_PID_FILE); } catch { /* ignore */ }
-  for (const p of pending.values()) { p.clear(); p.reject(new Error("worker process reset")); }
+  try {
+    fs.unlinkSync(WORKER_PID_FILE);
+  } catch {
+    /* ignore */
+  }
+  for (const p of pending.values()) {
+    p.clear();
+    p.reject(new Error("worker process reset"));
+  }
   pending.clear();
   taskSessions.clear();
   assembling.clear();
@@ -87,7 +108,9 @@ function loadSessionMap(): Record<string, string> {
   try {
     const j = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, "utf-8"));
     return j && typeof j === "object" ? j : {};
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
 }
 function saveSessionMap(m: Record<string, string>): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -102,26 +125,58 @@ function handleFrame(f: Record<string, any>): void {
     if (!p) return;
     p.clear();
     pending.delete(f.id);
-    if (f.error) { dlog(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`); p.reject(new Error(JSON.stringify(f.error))); }
-    else p.resolve(f.result);
+    if (f.error) {
+      dlog(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`);
+      p.reject(new Error(JSON.stringify(f.error)));
+    } else p.resolve(f.result);
     return;
   }
   if (f.method === "session/update") {
     const u = f.params?.update;
     if (u?.sessionUpdate) seenUpdateTypes.add(String(u.sessionUpdate));
-    if (currentOnProgress) { try { currentOnProgress({ type: "activity" }); } catch { /* ignore */ } }
+    if (currentOnProgress) {
+      try {
+        currentOnProgress({ type: "activity" });
+      } catch {
+        /* ignore */
+      }
+    }
     if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
       const arr = assembling.get(f.params.sessionId);
       if (arr) arr.push(String(u.content.text ?? ""));
-      if (!answerStarted && currentOnProgress) { answerStarted = true; try { currentOnProgress({ type: "answer" }); } catch { /* ignore */ } }
+      if (!answerStarted && currentOnProgress) {
+        answerStarted = true;
+        try {
+          currentOnProgress({ type: "answer" });
+        } catch {
+          /* ignore */
+        }
+      }
     } else if (u?.sessionUpdate === "agent_thought_chunk") {
-      if (!thoughtStarted && currentOnProgress) { thoughtStarted = true; try { currentOnProgress({ type: "thinking" }); } catch { /* ignore */ } }
-    } else if ((u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") && currentOnProgress) {
+      if (!thoughtStarted && currentOnProgress) {
+        thoughtStarted = true;
+        try {
+          currentOnProgress({ type: "thinking" });
+        } catch {
+          /* ignore */
+        }
+      }
+    } else if (
+      (u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") &&
+      currentOnProgress
+    ) {
       const tid = String(u.toolCallId ?? u.title ?? "");
       if (tid && !seenTools.has(tid)) {
         seenTools.add(tid);
-        const purpose = typeof u.rawInput?.__tool_use_purpose === "string" ? u.rawInput.__tool_use_purpose : undefined;
-        try { currentOnProgress({ type: "tool", kind: u.kind, purpose, title: u.title }); } catch { /* ignore */ }
+        const purpose =
+          typeof u.rawInput?.__tool_use_purpose === "string"
+            ? u.rawInput.__tool_use_purpose
+            : undefined;
+        try {
+          currentOnProgress({ type: "tool", kind: u.kind, purpose, title: u.title });
+        } catch {
+          /* ignore */
+        }
       }
     }
   }
@@ -135,17 +190,27 @@ function onStdout(d: Buffer): void {
     stdoutBuf = stdoutBuf.slice(i + 1);
     if (!line) continue;
     let f: Record<string, any>;
-    try { f = JSON.parse(line); } catch { continue; }
+    try {
+      f = JSON.parse(line);
+    } catch {
+      continue;
+    }
     handleFrame(f);
   }
 }
 
 function request(method: string, params: unknown, timeoutMs: number): Promise<any> {
   return new Promise((resolve, reject) => {
-    if (!child) { reject(new Error("no worker process")); return; }
+    if (!child) {
+      reject(new Error("no worker process"));
+      return;
+    }
     const id = ++idCounter;
     dlog(`→ ${method}#${id}`);
-    const t = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timeout after ${timeoutMs}ms`)); }, timeoutMs);
+    const t = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`${method} timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
     pending.set(id, { resolve, reject, clear: () => clearTimeout(t), method });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
@@ -154,12 +219,17 @@ function request(method: string, params: unknown, timeoutMs: number): Promise<an
 /** session/prompt 专用：空闲超时 + 首帧超时 + 硬上限（漫长任务，比 brain 宽松）。 */
 function promptRequest(params: unknown): Promise<any> {
   return new Promise((resolve, reject) => {
-    if (!child) { reject(new Error("no worker process")); return; }
+    if (!child) {
+      reject(new Error("no worker process"));
+      return;
+    }
     const id = ++idCounter;
     const startedAt = Date.now();
     lastFrameAt = Date.now();
     const startSeq = frameSeq;
-    dlog(`→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms firstFrame=${FIRST_FRAME_MS}ms)`);
+    dlog(
+      `→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms firstFrame=${FIRST_FRAME_MS}ms)`,
+    );
     const iv = setInterval(() => {
       const idle = Date.now() - lastFrameAt;
       const total = Date.now() - startedAt;
@@ -168,13 +238,15 @@ function promptRequest(params: unknown): Promise<any> {
       if (firstFrameTimeout || idle > PROMPT_IDLE_MS || total > PROMPT_CAP_MS) {
         if (pending.delete(id)) {
           clearInterval(iv);
-          const why = firstFrameTimeout ? "no-first-frame" : (idle > PROMPT_IDLE_MS ? "idle" : "cap");
+          const why = firstFrameTimeout ? "no-first-frame" : idle > PROMPT_IDLE_MS ? "idle" : "cap";
           reject(new Error(`session/prompt ${why} timeout (idle=${idle}ms total=${total}ms)`));
         }
       }
     }, 5000);
     pending.set(id, { resolve, reject, clear: () => clearInterval(iv), method: "session/prompt" });
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "session/prompt", params }) + "\n");
+    child.stdin.write(
+      JSON.stringify({ jsonrpc: "2.0", id, method: "session/prompt", params }) + "\n",
+    );
   });
 }
 
@@ -192,11 +264,23 @@ async function ensureProcess(): Promise<void> {
   });
   child = proc;
   dlog(`spawn ${AGENT.name} worker pid=${proc.pid} cwd=${cwd} home=${WORKER_HOME}`);
-  try { fs.writeFileSync(WORKER_PID_FILE, String(proc.pid), "utf-8"); } catch { /* best-effort */ }
+  try {
+    fs.writeFileSync(WORKER_PID_FILE, String(proc.pid), "utf-8");
+  } catch {
+    /* best-effort */
+  }
   proc.stdout.on("data", onStdout);
-  proc.stderr.on("data", () => { /* ignore */ });
-  proc.on("exit", (code) => { dlog(`worker exited code=${code}`); if (child === proc) reset(); });
-  proc.on("error", (e) => { dlog(`worker error ${String(e)}`); if (child === proc) reset(); });
+  proc.stderr.on("data", () => {
+    /* ignore */
+  });
+  proc.on("exit", (code) => {
+    dlog(`worker exited code=${code}`);
+    if (child === proc) reset();
+  });
+  proc.on("error", (e) => {
+    dlog(`worker error ${String(e)}`);
+    if (child === proc) reset();
+  });
   await request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
   initialized = true;
   dlog("initialized");
@@ -209,7 +293,11 @@ async function ensureSession(key: string): Promise<string> {
   const saved = map[key];
   if (saved) {
     try {
-      await request("session/load", { sessionId: saved, cwd: effectiveCwd(), mcpServers: [] }, REQ_TIMEOUT);
+      await request(
+        "session/load",
+        { sessionId: saved, cwd: effectiveCwd(), mcpServers: [] },
+        REQ_TIMEOUT,
+      );
       taskSessions.set(key, saved);
       dlog(`session/load ok ${saved}`);
       return saved;
@@ -217,7 +305,11 @@ async function ensureSession(key: string): Promise<string> {
       dlog(`session/load failed (${String(e)}), creating new`);
     }
   }
-  const res = (await request("session/new", { cwd: effectiveCwd(), mcpServers: [] }, REQ_TIMEOUT)) as { sessionId?: string };
+  const res = (await request(
+    "session/new",
+    { cwd: effectiveCwd(), mcpServers: [] },
+    REQ_TIMEOUT,
+  )) as { sessionId?: string };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   taskSessions.set(key, res.sessionId);
   map[key] = res.sessionId;
@@ -230,7 +322,10 @@ async function ensureSession(key: string): Promise<string> {
  * 向 worker 发一轮 prompt（任务派发或注入续跑），等这一轮 ACP 响应结束，返回拼接文本。
  * 失败即重建进程（下一轮 session/load 恢复上下文）→ 配合「继续」实现中断恢复。
  */
-export async function askWorker(instruction: string, onProgress?: (ev: WorkerProgressEvent) => void): Promise<string> {
+export async function askWorker(
+  instruction: string,
+  onProgress?: (ev: WorkerProgressEvent) => void,
+): Promise<string> {
   await ensureProcess();
   const sid = await ensureSession(TASK_KEY);
   assembling.set(sid, []);
@@ -244,12 +339,16 @@ export async function askWorker(instruction: string, onProgress?: (ev: WorkerPro
   try {
     await promptRequest({ sessionId: sid, prompt });
     const txt = (assembling.get(sid) ?? []).join("").trim();
-    dlog(`prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length} updateTypes=[${[...seenUpdateTypes].join(",")}]`);
+    dlog(
+      `prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length} updateTypes=[${[...seenUpdateTypes].join(",")}]`,
+    );
     return txt;
   } catch (e) {
     const chunks = (assembling.get(sid) ?? []).length;
     const sinceFrame = lastFrameAt ? Date.now() - lastFrameAt : -1;
-    dlog(`prompt FAIL ${Date.now() - t0}ms chunks=${chunks} lastFrameAgo=${sinceFrame}ms err=${String(e)} -> rebuild`);
+    dlog(
+      `prompt FAIL ${Date.now() - t0}ms chunks=${chunks} lastFrameAgo=${sinceFrame}ms err=${String(e)} -> rebuild`,
+    );
     reset();
     throw e;
   } finally {

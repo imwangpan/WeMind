@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
 
 import { loadAccount, notifyStart, notifyStop } from "@wemind/wechat-ilink-core";
 import { VERSION } from "./version.js";
-import { loginQrcode, checkQrcodeStatus, loginQrcodeSchema, checkQrcodeStatusSchema, logoutSchema, logout } from "./tools/login.js";
+import {
+  loginQrcode,
+  checkQrcodeStatus,
+  loginQrcodeSchema,
+  checkQrcodeStatusSchema,
+  logoutSchema,
+  logout,
+} from "./tools/login.js";
 import { getMessages, getMessagesSchema } from "./tools/messages.js";
 import { sendTextMessage, sendTextMessageSchema } from "./tools/send.js";
 import { sendTypingIndicator, sendTypingSchema } from "./tools/typing.js";
@@ -90,8 +96,13 @@ async function main() {
 
   const account = loadAccount();
   if (account?.botToken) {
-    console.error(`[mcp-wechat] Connected. Logged in as bot ${account.botId}, user ${account.userId}`);
-    void notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
+    console.error(
+      `[mcp-wechat] Connected. Logged in as bot ${account.botId}, user ${account.userId}`,
+    );
+    void notifyStart({
+      baseUrl: account.baseUrl,
+      token: account.botToken,
+    }).catch(() => {});
   } else {
     console.error("[mcp-wechat] Connected. Not logged in. Call login_qrcode to start.");
   }

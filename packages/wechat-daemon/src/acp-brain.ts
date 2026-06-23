@@ -15,7 +15,9 @@ import { resolveAgent } from "./brain-agents.js";
  * 跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
  */
 
-function dlog(...a: unknown[]): void { console.error("[acp]", ...a); }
+function dlog(...a: unknown[]): void {
+  console.error("[acp]", ...a);
+}
 
 const AGENT = resolveAgent(); // 当前 ACP agent（二进制/参数/配置目录环境变量）
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
@@ -25,7 +27,12 @@ const FIRST_FRAME_MS = Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || 25_000
 const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
 const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 标记当前账号的大脑 kiro-cli pid，便于与用户自己的会话区分/清理
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; clear: () => void; method: string };
+type Pending = {
+  resolve: (v: unknown) => void;
+  reject: (e: Error) => void;
+  clear: () => void;
+  method: string;
+};
 
 let child: ChildProcessWithoutNullStreams | null = null;
 let initialized = false;
@@ -59,12 +66,22 @@ function reset(): void {
   initialized = false;
   if (c?.pid) {
     try {
-      if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
+      if (process.platform === "win32")
+        spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
       else c.kill();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
-  try { fs.unlinkSync(BRAIN_PID_FILE); } catch { /* ignore */ }
-  for (const p of pending.values()) { p.clear(); p.reject(new Error("acp process reset")); }
+  try {
+    fs.unlinkSync(BRAIN_PID_FILE);
+  } catch {
+    /* ignore */
+  }
+  for (const p of pending.values()) {
+    p.clear();
+    p.reject(new Error("acp process reset"));
+  }
   pending.clear();
   userSessions.clear();
   assembling.clear();
@@ -76,7 +93,9 @@ function loadSessionMap(): Record<string, string> {
   try {
     const j = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, "utf-8"));
     return j && typeof j === "object" ? j : {};
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
 }
 function saveSessionMap(m: Record<string, string>): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -91,27 +110,59 @@ function handleFrame(f: Record<string, any>): void {
     if (!p) return;
     p.clear();
     pending.delete(f.id);
-    if (f.error) { dlog(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`); p.reject(new Error(JSON.stringify(f.error))); }
-    else p.resolve(f.result);
+    if (f.error) {
+      dlog(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`);
+      p.reject(new Error(JSON.stringify(f.error)));
+    } else p.resolve(f.result);
     return;
   }
   if (f.method === "session/update") {
     const u = f.params?.update;
     if (u?.sessionUpdate) seenUpdateTypes.add(String(u.sessionUpdate)); // 诊断
     // 任意 session/update 帧都视为"活动" → 让 daemon 静默刷新心跳基线（流式期间不误报"仍在处理"）
-    if (currentOnProgress) { try { currentOnProgress({ type: "activity" }); } catch { /* ignore */ } }
+    if (currentOnProgress) {
+      try {
+        currentOnProgress({ type: "activity" });
+      } catch {
+        /* ignore */
+      }
+    }
     if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
       const arr = assembling.get(f.params.sessionId);
       if (arr) arr.push(String(u.content.text ?? ""));
-      if (!answerStarted && currentOnProgress) { answerStarted = true; try { currentOnProgress({ type: "answer" }); } catch { /* ignore */ } }
+      if (!answerStarted && currentOnProgress) {
+        answerStarted = true;
+        try {
+          currentOnProgress({ type: "answer" });
+        } catch {
+          /* ignore */
+        }
+      }
     } else if (u?.sessionUpdate === "agent_thought_chunk") {
-      if (!thoughtStarted && currentOnProgress) { thoughtStarted = true; try { currentOnProgress({ type: "thinking" }); } catch { /* ignore */ } }
-    } else if ((u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") && currentOnProgress) {
+      if (!thoughtStarted && currentOnProgress) {
+        thoughtStarted = true;
+        try {
+          currentOnProgress({ type: "thinking" });
+        } catch {
+          /* ignore */
+        }
+      }
+    } else if (
+      (u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") &&
+      currentOnProgress
+    ) {
       const tid = String(u.toolCallId ?? u.title ?? ""); // 每个工具调用只上报一次
       if (tid && !seenTools.has(tid)) {
         seenTools.add(tid);
-        const purpose = typeof u.rawInput?.__tool_use_purpose === "string" ? u.rawInput.__tool_use_purpose : undefined;
-        try { currentOnProgress({ type: "tool", kind: u.kind, purpose, title: u.title }); } catch { /* ignore */ }
+        const purpose =
+          typeof u.rawInput?.__tool_use_purpose === "string"
+            ? u.rawInput.__tool_use_purpose
+            : undefined;
+        try {
+          currentOnProgress({ type: "tool", kind: u.kind, purpose, title: u.title });
+        } catch {
+          /* ignore */
+        }
       }
     }
   }
@@ -125,17 +176,27 @@ function onStdout(d: Buffer): void {
     stdoutBuf = stdoutBuf.slice(i + 1);
     if (!line) continue;
     let f: Record<string, any>;
-    try { f = JSON.parse(line); } catch { continue; }
+    try {
+      f = JSON.parse(line);
+    } catch {
+      continue;
+    }
     handleFrame(f);
   }
 }
 
 function request(method: string, params: unknown, timeoutMs: number): Promise<any> {
   return new Promise((resolve, reject) => {
-    if (!child) { reject(new Error("no acp process")); return; }
+    if (!child) {
+      reject(new Error("no acp process"));
+      return;
+    }
     const id = ++idCounter;
     dlog(`→ ${method}#${id}`);
-    const t = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timeout after ${timeoutMs}ms`)); }, timeoutMs);
+    const t = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`${method} timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
     pending.set(id, { resolve, reject, clear: () => clearTimeout(t), method });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
@@ -147,12 +208,17 @@ function request(method: string, params: unknown, timeoutMs: number): Promise<an
  */
 function promptRequest(params: unknown): Promise<any> {
   return new Promise((resolve, reject) => {
-    if (!child) { reject(new Error("no acp process")); return; }
+    if (!child) {
+      reject(new Error("no acp process"));
+      return;
+    }
     const id = ++idCounter;
     const startedAt = Date.now();
     lastFrameAt = Date.now(); // 重置空闲基线：从本次 prompt 发出算起，避免用上一回合的旧时间戳误判
     const startSeq = frameSeq; // 记录起点，用于判定本回合是否出过帧
-    dlog(`→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms firstFrame=${FIRST_FRAME_MS}ms)`);
+    dlog(
+      `→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms firstFrame=${FIRST_FRAME_MS}ms)`,
+    );
     const iv = setInterval(() => {
       const idle = Date.now() - lastFrameAt;
       const total = Date.now() - startedAt;
@@ -161,13 +227,15 @@ function promptRequest(params: unknown): Promise<any> {
       if (firstFrameTimeout || idle > PROMPT_IDLE_MS || total > PROMPT_CAP_MS) {
         if (pending.delete(id)) {
           clearInterval(iv);
-          const why = firstFrameTimeout ? "no-first-frame" : (idle > PROMPT_IDLE_MS ? "idle" : "cap");
+          const why = firstFrameTimeout ? "no-first-frame" : idle > PROMPT_IDLE_MS ? "idle" : "cap";
           reject(new Error(`session/prompt ${why} timeout (idle=${idle}ms total=${total}ms)`));
         }
       }
     }, 5000);
     pending.set(id, { resolve, reject, clear: () => clearInterval(iv), method: "session/prompt" });
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "session/prompt", params }) + "\n");
+    child.stdin.write(
+      JSON.stringify({ jsonrpc: "2.0", id, method: "session/prompt", params }) + "\n",
+    );
   });
 }
 
@@ -184,12 +252,24 @@ async function ensureProcess(): Promise<void> {
   });
   child = proc;
   dlog(`spawn ${AGENT.name} acp pid=${proc.pid} bin=${AGENT.bin} args=[${AGENT.args.join(" ")}]`);
-  try { fs.writeFileSync(BRAIN_PID_FILE, String(proc.pid), "utf-8"); } catch { /* best-effort */ }
+  try {
+    fs.writeFileSync(BRAIN_PID_FILE, String(proc.pid), "utf-8");
+  } catch {
+    /* best-effort */
+  }
   proc.stdout.on("data", onStdout);
-  proc.stderr.on("data", () => { /* ignore */ });
+  proc.stderr.on("data", () => {
+    /* ignore */
+  });
   // 只在"退出的就是当前 child"时才重置，避免旧进程迟到的 exit 误杀新进程
-  proc.on("exit", (code) => { dlog(`acp exited code=${code}`); if (child === proc) reset(); });
-  proc.on("error", (e) => { dlog(`acp error ${String(e)}`); if (child === proc) reset(); });
+  proc.on("exit", (code) => {
+    dlog(`acp exited code=${code}`);
+    if (child === proc) reset();
+  });
+  proc.on("error", (e) => {
+    dlog(`acp error ${String(e)}`);
+    if (child === proc) reset();
+  });
   await request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
   initialized = true;
   dlog("initialized");
@@ -202,7 +282,11 @@ async function ensureSession(userId: string): Promise<string> {
   const saved = map[userId];
   if (saved) {
     try {
-      await request("session/load", { sessionId: saved, cwd: BRAIN_HOME, mcpServers: [] }, REQ_TIMEOUT);
+      await request(
+        "session/load",
+        { sessionId: saved, cwd: BRAIN_HOME, mcpServers: [] },
+        REQ_TIMEOUT,
+      );
       userSessions.set(userId, saved);
       dlog(`session/load ok ${saved}`);
       return saved;
@@ -210,7 +294,9 @@ async function ensureSession(userId: string): Promise<string> {
       dlog(`session/load failed (${String(e)}), creating new`);
     }
   }
-  const res = (await request("session/new", { cwd: BRAIN_HOME, mcpServers: [] }, REQ_TIMEOUT)) as { sessionId?: string };
+  const res = (await request("session/new", { cwd: BRAIN_HOME, mcpServers: [] }, REQ_TIMEOUT)) as {
+    sessionId?: string;
+  };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   userSessions.set(userId, res.sessionId);
   map[userId] = res.sessionId;
@@ -220,7 +306,12 @@ async function ensureSession(userId: string): Promise<string> {
 }
 
 /** 向大脑（配置的 ACP agent）提问（常驻 + 原生多轮）。失败即重建进程（下条用 session/load 恢复上下文）。 */
-export async function askBrain(userId: string, message: string, onProgress?: (ev: ProgressEvent) => void, images?: Array<{ data: string; mimeType: string }>): Promise<string> {
+export async function askBrain(
+  userId: string,
+  message: string,
+  onProgress?: (ev: ProgressEvent) => void,
+  images?: Array<{ data: string; mimeType: string }>,
+): Promise<string> {
   await ensureProcess();
   const sid = await ensureSession(userId);
   assembling.set(sid, []);
@@ -231,21 +322,29 @@ export async function askBrain(userId: string, message: string, onProgress?: (ev
   seenTools.clear();
   const t0 = Date.now();
   const prompt: unknown[] = [];
-  for (const im of images ?? []) prompt.push({ type: "image", mimeType: im.mimeType, data: im.data });
+  for (const im of images ?? [])
+    prompt.push({ type: "image", mimeType: im.mimeType, data: im.data });
   if (!hintedSessions.has(sid)) {
     hintedSessions.add(sid);
-    prompt.push({ type: "text", text: "（系统提示：你正在通过微信和用户对话。需要给用户发图片时，在回复里用 Markdown 图片语法 ![](图片的 http 链接或本地文件绝对路径)，系统会自动把它作为图片消息发出（你本身不会文生图，可发联网搜到的图、本地已有的图、或自己用代码渲染保存的图表）。重要：服务器从中国大陆下载该图，请选「可直接下载的直链」——优先 raw.githubusercontent.com 等原始文件直链；避免 wikipedia/wikimedia（大陆被墙）以及 pixabay/unsplash 等带热链保护、直链常返回 403 的图床。拿不准时优先把图先下载到本地再用本地绝对路径引用，或直接发链接让用户自己点。其余正常用文字/Markdown 回复。此提示只出现一次，无需理会本句。）" });
+    prompt.push({
+      type: "text",
+      text: "（系统提示：你正在通过微信和用户对话。需要给用户发图片时，在回复里用 Markdown 图片语法 ![](图片的 http 链接或本地文件绝对路径)，系统会自动把它作为图片消息发出（你本身不会文生图，可发联网搜到的图、本地已有的图、或自己用代码渲染保存的图表）。重要：服务器从中国大陆下载该图，请选「可直接下载的直链」——优先 raw.githubusercontent.com 等原始文件直链；避免 wikipedia/wikimedia（大陆被墙）以及 pixabay/unsplash 等带热链保护、直链常返回 403 的图床。拿不准时优先把图先下载到本地再用本地绝对路径引用，或直接发链接让用户自己点。其余正常用文字/Markdown 回复。此提示只出现一次，无需理会本句。）",
+    });
   }
   prompt.push({ type: "text", text: message || "（用户发来一张图片，请查看并回应）" });
   try {
     await promptRequest({ sessionId: sid, prompt });
     const txt = (assembling.get(sid) ?? []).join("").trim();
-    dlog(`prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length} updateTypes=[${[...seenUpdateTypes].join(",")}]`);
+    dlog(
+      `prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length} updateTypes=[${[...seenUpdateTypes].join(",")}]`,
+    );
     return txt;
   } catch (e) {
     const chunks = (assembling.get(sid) ?? []).length;
     const sinceFrame = lastFrameAt ? Date.now() - lastFrameAt : -1;
-    dlog(`prompt FAIL ${Date.now() - t0}ms chunks=${chunks} lastFrameAgo=${sinceFrame}ms err=${String(e)} -> rebuild`);
+    dlog(
+      `prompt FAIL ${Date.now() - t0}ms chunks=${chunks} lastFrameAgo=${sinceFrame}ms err=${String(e)} -> rebuild`,
+    );
     reset(); // 自愈：杀掉可能假死的进程，下条消息重建并 session/load 恢复
     throw e;
   } finally {

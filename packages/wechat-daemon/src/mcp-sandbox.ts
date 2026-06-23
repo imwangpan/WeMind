@@ -12,7 +12,8 @@ import { resolveAgent } from "./brain-agents.js";
  */
 
 /** brain 专用 KIRO_HOME（auth 在平台数据目录、不随 KIRO_HOME 移动，故 brain 仍登录态）。 */
-export const BRAIN_HOME = process.env.WECHAT_BRAIN_HOME?.trim() || path.join(DATA_DIR, "brain-home");
+export const BRAIN_HOME =
+  process.env.WECHAT_BRAIN_HOME?.trim() || path.join(DATA_DIR, "brain-home");
 const BRAIN_MCP_JSON = path.join(BRAIN_HOME, "settings", "mcp.json");
 
 /** 激活集持久化文件。 */
@@ -20,9 +21,10 @@ const ACTIVE_FILE = path.join(DATA_DIR, "brain-mcps.json");
 
 /** 「目录」：可选 MCP 的定义来源。默认取所用 agent 真实配置目录（可配置的 realHome）下的 settings/mcp.json；
  *  可用 `WEMIND_MCP_CATALOG` / `WECHAT_MCP_CATALOG` 覆盖为任意路径。 */
-const CATALOG = process.env.WEMIND_MCP_CATALOG?.trim()
-  || process.env.WECHAT_MCP_CATALOG?.trim()
-  || path.join(resolveAgent().realHome || path.join(os.homedir(), ".kiro"), "settings", "mcp.json");
+const CATALOG =
+  process.env.WEMIND_MCP_CATALOG?.trim() ||
+  process.env.WECHAT_MCP_CATALOG?.trim() ||
+  path.join(resolveAgent().realHome || path.join(os.homedir(), ".kiro"), "settings", "mcp.json");
 
 /** 永不允许 brain 加载（防回环）。 */
 const FORBIDDEN = new Set(["wechat"]);
@@ -40,13 +42,22 @@ function mirrorRealKiro(): void {
   const ag = resolveAgent();
   if (!ag.inherit || !ag.realHome || ag.inheritDirs.length === 0) return;
   if (path.resolve(BRAIN_HOME) === path.resolve(ag.realHome)) return; // 安全：别把自己链给自己
-  try { fs.mkdirSync(BRAIN_HOME, { recursive: true }); } catch { /* ignore */ }
+  try {
+    fs.mkdirSync(BRAIN_HOME, { recursive: true });
+  } catch {
+    /* ignore */
+  }
   for (const d of ag.inheritDirs) {
     const target = path.join(ag.realHome, d);
     const link = path.join(BRAIN_HOME, d);
     if (!fs.existsSync(target)) continue;
     let present = false;
-    try { fs.lstatSync(link); present = true; } catch { /* 不存在 */ }
+    try {
+      fs.lstatSync(link);
+      present = true;
+    } catch {
+      /* 不存在 */
+    }
     if (present) {
       // 已是链接 → 不动；是早期自建的「空」真实目录 → 删掉改建 junction；非空真实目录 → 保留不动（避免误删数据）
       try {
@@ -60,16 +71,24 @@ function mirrorRealKiro(): void {
             for (const f of fs.readdirSync(target)) {
               const dst = path.join(link, f);
               const src = path.join(target, f);
-              try { if (!fs.existsSync(dst) && fs.statSync(src).isFile()) fs.copyFileSync(src, dst); } catch { /* ignore */ }
+              try {
+                if (!fs.existsSync(dst) && fs.statSync(src).isFile()) fs.copyFileSync(src, dst);
+              } catch {
+                /* ignore */
+              }
             }
             continue;
           }
         } else continue;
-      } catch { continue; }
+      } catch {
+        continue;
+      }
     }
     try {
       fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
-    } catch { /* 权限不足等：best-effort 忽略 */ }
+    } catch {
+      /* 权限不足等：best-effort 忽略 */
+    }
   }
 }
 
@@ -120,22 +139,32 @@ function syncSettings(): void {
   const realSettings = path.join(ag.realHome, "settings");
   const brainSettings = path.join(BRAIN_HOME, "settings");
   if (!fs.existsSync(realSettings)) return;
-  try { fs.mkdirSync(brainSettings, { recursive: true }); } catch { /* ignore */ }
+  try {
+    fs.mkdirSync(brainSettings, { recursive: true });
+  } catch {
+    /* ignore */
+  }
   let names: string[] = [];
-  try { names = fs.readdirSync(realSettings); } catch { return; }
+  try {
+    names = fs.readdirSync(realSettings);
+  } catch {
+    return;
+  }
   for (const f of names) {
     if (f === "mcp.json") continue; // MCP 必须用沙箱 curated 版本（防 wechat 回环）
     try {
       const src = path.join(realSettings, f);
       if (fs.statSync(src).isFile()) fs.copyFileSync(src, path.join(brainSettings, f));
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   }
 }
 
 /** 启动时确保沙箱存在并与激活集一致。 */
 export function ensureBrainHome(): void {
-  syncSettings();   // 先同步「非 MCP」设置(模型/免确认等)，让大脑与日常使用同款配置
-  applySandbox();   // 再写 curated mcp.json（权威，保持 MCP 隔离防回环）
+  syncSettings(); // 先同步「非 MCP」设置(模型/免确认等)，让大脑与日常使用同款配置
+  applySandbox(); // 再写 curated mcp.json（权威，保持 MCP 隔离防回环）
   mirrorRealKiro(); // 继承真实配置目录的记忆/steering/skills（sessions 仍隔离）
 }
 

@@ -2,14 +2,22 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 
 import { getUploadUrl, sendMessage, generateId } from "../api/client.js";
 import { ILinkError } from "../api/error-codes.js";
-import { MessageType, MessageState, MessageItemType, UploadMediaType, type ImageItem, type SendMessageReq } from "../api/types.js";
+import {
+  MessageType,
+  MessageState,
+  MessageItemType,
+  UploadMediaType,
+  type ImageItem,
+  type SendMessageReq,
+} from "../api/types.js";
 
 /**
  * 收图：从 iLink CDN 下载并 AES-128-ECB 解密图片。
  * 机制借鉴官方 Tencent/openclaw-weixin（MIT）的 cdn/pic-decrypt + cdn-url。
  */
 
-const CDN_BASE_URL = process.env.WECHAT_CDN_BASE_URL?.trim() || "https://novac2c.cdn.weixin.qq.com/c2c";
+const CDN_BASE_URL =
+  process.env.WECHAT_CDN_BASE_URL?.trim() || "https://novac2c.cdn.weixin.qq.com/c2c";
 
 function decryptAesEcb(ciphertext: Buffer, key: Buffer): Buffer {
   const d = createDecipheriv("aes-128-ecb", key, null); // PKCS7 默认
@@ -70,8 +78,9 @@ async function uploadBufferToCdn(params: {
 }): Promise<string> {
   const { buf, aeskey, filekey, uploadFullUrl, uploadParam } = params;
   const ciphertext = encryptAesEcb(buf, aeskey);
-  const url = uploadFullUrl?.trim()
-    || (uploadParam
+  const url =
+    uploadFullUrl?.trim() ||
+    (uploadParam
       ? `${CDN_BASE_URL}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`
       : "");
   if (!url) throw new Error("upload: 无 upload_full_url/upload_param");
@@ -84,7 +93,8 @@ async function uploadBufferToCdn(params: {
         body: new Uint8Array(ciphertext),
         signal: AbortSignal.timeout(30000),
       });
-      if (res.status >= 400 && res.status < 500) throw new Error(`CDN 上传客户端错误 ${res.status}`); // 不重试
+      if (res.status >= 400 && res.status < 500)
+        throw new Error(`CDN 上传客户端错误 ${res.status}`); // 不重试
       if (res.status !== 200) throw new Error(`CDN 上传服务端错误 ${res.status}`);
       const dp = res.headers.get("x-encrypted-param");
       if (!dp) throw new Error("CDN 上传响应缺 x-encrypted-param");
@@ -114,22 +124,37 @@ async function uploadMediaBytes(params: {
   const aeskey = randomBytes(16);
 
   const up = await getUploadUrl({
-    baseUrl, token, filekey, media_type: mediaType, to_user_id: to,
-    rawsize, rawfilemd5, filesize, no_need_thumb: true, aeskey: aeskey.toString("hex"),
+    baseUrl,
+    token,
+    filekey,
+    media_type: mediaType,
+    to_user_id: to,
+    rawsize,
+    rawfilemd5,
+    filesize,
+    no_need_thumb: true,
+    aeskey: aeskey.toString("hex"),
   });
   const code = up.ret ?? up.errcode;
   if (code !== undefined && code !== 0) throw new ILinkError("getUploadUrl", code, up.errmsg);
 
   const downloadParam = await uploadBufferToCdn({
-    buf: data, aeskey, filekey,
-    uploadFullUrl: up.upload_full_url, uploadParam: up.upload_param,
+    buf: data,
+    aeskey,
+    filekey,
+    uploadFullUrl: up.upload_full_url,
+    uploadParam: up.upload_param,
   });
   return { downloadParam, aeskeyHex: aeskey.toString("hex"), filesize, rawsize };
 }
 
 /** 拼 CDN media 引用（消息里给接收方下载+解密用）。 */
 function buildMediaRef(downloadParam: string, aeskeyHex: string) {
-  return { encrypt_query_param: downloadParam, aes_key: Buffer.from(aeskeyHex).toString("base64"), encrypt_type: 1 };
+  return {
+    encrypt_query_param: downloadParam,
+    aes_key: Buffer.from(aeskeyHex).toString("base64"),
+    encrypt_type: 1,
+  };
 }
 
 export type MediaKind = "image" | "video" | "file";
@@ -162,16 +187,25 @@ export async function sendImage(params: {
 }): Promise<void> {
   const { baseUrl, token, to, image, contextToken } = params;
   const { downloadParam, aeskeyHex, filesize } = await uploadMediaBytes({
-    baseUrl, token, to, data: image, mediaType: UploadMediaType.IMAGE,
+    baseUrl,
+    token,
+    to,
+    data: image,
+    mediaType: UploadMediaType.IMAGE,
   });
   const req: SendMessageReq = {
     msg: {
-      from_user_id: "", to_user_id: to, client_id: generateId("img"),
-      message_type: MessageType.BOT, message_state: MessageState.FINISH,
-      item_list: [{
-        type: MessageItemType.IMAGE,
-        image_item: { media: buildMediaRef(downloadParam, aeskeyHex), mid_size: filesize },
-      }],
+      from_user_id: "",
+      to_user_id: to,
+      client_id: generateId("img"),
+      message_type: MessageType.BOT,
+      message_state: MessageState.FINISH,
+      item_list: [
+        {
+          type: MessageItemType.IMAGE,
+          image_item: { media: buildMediaRef(downloadParam, aeskeyHex), mid_size: filesize },
+        },
+      ],
       context_token: contextToken,
     },
   };
@@ -195,7 +229,11 @@ export async function sendFile(params: {
   const { baseUrl, token, to, data, fileName, contextToken } = params;
   const kind = params.kind ?? classifyMediaByName(fileName);
   const { downloadParam, aeskeyHex, filesize, rawsize } = await uploadMediaBytes({
-    baseUrl, token, to, data, mediaType: UPLOAD_TYPE_BY_KIND[kind],
+    baseUrl,
+    token,
+    to,
+    data,
+    mediaType: UPLOAD_TYPE_BY_KIND[kind],
   });
   const media = buildMediaRef(downloadParam, aeskeyHex);
 
@@ -205,13 +243,19 @@ export async function sendFile(params: {
   } else if (kind === "video") {
     item = { type: MessageItemType.VIDEO, video_item: { media, video_size: filesize } };
   } else {
-    item = { type: MessageItemType.FILE, file_item: { media, file_name: fileName, len: String(rawsize) } };
+    item = {
+      type: MessageItemType.FILE,
+      file_item: { media, file_name: fileName, len: String(rawsize) },
+    };
   }
 
   const req: SendMessageReq = {
     msg: {
-      from_user_id: "", to_user_id: to, client_id: generateId("media"),
-      message_type: MessageType.BOT, message_state: MessageState.FINISH,
+      from_user_id: "",
+      to_user_id: to,
+      client_id: generateId("media"),
+      message_type: MessageType.BOT,
+      message_state: MessageState.FINISH,
       item_list: [item],
       context_token: contextToken,
     },

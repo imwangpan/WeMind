@@ -1,3 +1,5 @@
+// 本文件多处正则需匹配 ANSI/控制字符（清洗 kiro-cli 终端输出），故在文件级关闭该规则
+/* oxlint-disable no-control-regex */
 import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
@@ -40,33 +42,39 @@ function cleanOutput(s: string): string {
   let m: RegExpExecArray | null;
   while ((m = markerRe.exec(s)) !== null) lastEnd = m.index + m[0].length;
   const answer = lastEnd >= 0 ? s.slice(lastEnd) : s;
-  return answer.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").replace(/^\s*>\s?/, "").trim();
+  return answer
+    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/^\s*>\s?/, "")
+    .trim();
 }
 
 /** 以 argv 传入 prompt（shell:false），避免命令注入。 */
 function askKiro(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      KIRO_CLI,
-      ["chat", "--no-interactive", "--trust-all-tools", prompt],
-      {
-        shell: false,
-        windowsHide: true,
-        cwd: BRAIN_HOME,
-        // 用沙箱 KIRO_HOME 隔离全局 mcp.json（默认空 MCP，杜绝 wechat 回环）。
-        // auth 在平台数据目录、不随 KIRO_HOME 移动，故 brain 仍是登录态。
-        env: { ...process.env, KIRO_HOME: BRAIN_HOME },
-      },
-    );
+    const child = spawn(KIRO_CLI, ["chat", "--no-interactive", "--trust-all-tools", prompt], {
+      shell: false,
+      windowsHide: true,
+      cwd: BRAIN_HOME,
+      // 用沙箱 KIRO_HOME 隔离全局 mcp.json（默认空 MCP，杜绝 wechat 回环）。
+      // auth 在平台数据目录、不随 KIRO_HOME 移动，故 brain 仍是登录态。
+      env: { ...process.env, KIRO_HOME: BRAIN_HOME },
+    });
     let out = "";
     let err = "";
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error("kiro-cli timeout"));
     }, TIMEOUT_MS);
-    child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
-    child.stderr.on("data", (d: Buffer) => { err += d.toString(); });
-    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    child.stdout.on("data", (d: Buffer) => {
+      out += d.toString();
+    });
+    child.stderr.on("data", (d: Buffer) => {
+      err += d.toString();
+    });
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code === 0) resolve(cleanOutput(out));
@@ -79,9 +87,7 @@ function askKiro(prompt: string): Promise<string> {
 /** 带滚动上下文地向 Kiro 提问，返回纯文本回复。 */
 export async function askKiroForUser(userId: string, message: string): Promise<string> {
   const h = histories.get(userId) ?? [];
-  const prompt = [PREAMBLE, h.join("\n"), `用户: ${message}`, "助手:"]
-    .filter(Boolean)
-    .join("\n");
+  const prompt = [PREAMBLE, h.join("\n"), `用户: ${message}`, "助手:"].filter(Boolean).join("\n");
   const reply = await askKiro(prompt);
   h.push(`用户: ${message}`, `助手: ${reply}`);
   while (h.length > HISTORY_MAX) h.shift();

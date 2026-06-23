@@ -47,12 +47,24 @@ export function classifyILinkCode(code: number | undefined | null): ILinkErrorKi
 }
 
 /** 返回可读标签 + 处理建议，用于日志与提示。 */
-export function describeILinkCode(code: number | undefined | null): { kind: ILinkErrorKind; label: string; hint: string } {
+export function describeILinkCode(code: number | undefined | null): {
+  kind: ILinkErrorKind;
+  label: string;
+  hint: string;
+} {
   switch (classifyILinkCode(code)) {
-    case "ok": return { kind: "ok", label: `ok(${code ?? 0})`, hint: "" };
-    case "session_expired": return { kind: "session_expired", label: "会话过期(-14)", hint: "需重新登录" };
-    case "param_error": return { kind: "param_error", label: "参数错误(-2)", hint: "检查请求参数（最常见：context_token 失效/不匹配；或发送限流——短时连续发送过多）" };
-    default: return { kind: "unknown", label: `未知错误码(${code})`, hint: "对照 iLink 协议文档排查" };
+    case "ok":
+      return { kind: "ok", label: `ok(${code ?? 0})`, hint: "" };
+    case "session_expired":
+      return { kind: "session_expired", label: "会话过期(-14)", hint: "需重新登录" };
+    case "param_error":
+      return {
+        kind: "param_error",
+        label: "参数错误(-2)",
+        hint: "检查请求参数（最常见：context_token 失效/不匹配；或发送限流——短时连续发送过多）",
+      };
+    default:
+      return { kind: "unknown", label: `未知错误码(${code})`, hint: "对照 iLink 协议文档排查" };
   }
 }
 
