@@ -4,6 +4,8 @@
 
 基于 MCP（Model Context Protocol）的微信 AI 机器人，让任何 AI Agent 都能收发微信消息。
 
+> 🚀 **第一次用？** 看 **[新手教程](docs/新手教程.md)** —— 从零一步步搭起你的微信 AI（两种用法：接入现有 AI 客户端 / 常驻自动助手）。
+
 > **关于本 Fork**
 >
 > Fork 自 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server)，主要改动：
@@ -197,6 +199,8 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 - 需要较新的微信客户端并启用 ClawBot 插件。
 
 ## 守护进程（daemon）：脱离 kiro-cli 常驻自动收发
+
+> 📦 **作为 `wemind` CLI 使用**：本守护进程已可打包为可发布的 **`wemind`** 命令（`npm i -g wemind` 后用 `wemind login` / `start` / `list` / `task`，常驻委托 pm2）。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**；下文是从源码运行与原理说明。
 
 `packages/wechat-daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
 调 **常驻 `kiro-cli acp` 进程**（JSON-RPC over stdio）当大脑生成回复 → 自动回发。
