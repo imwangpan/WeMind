@@ -22,7 +22,7 @@ daemon 只用到 ACP 的几个标准方法，与具体是哪个 agent 无关：
 
 ## 6.2 常驻 ACP 客户端（acp-brain.ts）
 
-`acp-brain.ts` 维护一个常驻的 ACP agent 进程，是默认大脑。相比每条消息 spawn 一次（`brain.ts`），它的优势：原生多轮记忆、暖进程（约 3s vs 冷启动约 6s）、回复从 `agent_message_chunk` 流式拼接（天然无 ANSI、无工具旁白）。
+`acp-brain.ts` 维护一个常驻的 ACP agent 进程，是默认大脑。相比每条消息 spawn 一次，它的优势：原生多轮记忆、暖进程（约 3s vs 冷启动约 6s）、回复从 `agent_message_chunk` 流式拼接（天然无 ANSI、无工具旁白）。
 
 ### 进程生命周期
 

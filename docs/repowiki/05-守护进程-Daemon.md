@@ -12,7 +12,6 @@ packages/wechat-daemon/src/
 ├── acp-brain.ts        # 默认大脑：常驻 ACP 进程（→ 第 6 章）
 ├── brain-agents.ts     # ACP agent 预设与解析（→ 第 6 章）
 ├── mcp-sandbox.ts      # brain 沙箱：MCP 隔离 + 记忆继承（→ 第 6 章）
-├── brain.ts            # 回退版大脑：每条消息 spawn 一次（无状态）
 ├── worker-acp.ts       # 任务 worker 的 ACP 客户端（→ 第 7 章）
 ├── worker-sandbox.ts   # worker 沙箱（→ 第 7 章）
 ├── task-manager.ts     # 任务状态机（→ 第 7 章）
@@ -194,10 +193,6 @@ graph TD
 daemon 通过一个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s，**不挂在 poller 上**避免被 25s 长轮询阻塞）扫描 `task-inbox/*.json`，把本地 CLI 写入的命令分发到任务管理器（`dispatch`/`reply`/`stop`）。这是「本地终端入口」的服务端半边，详见 [7. 远程任务 Worker](07-远程任务-Worker.md#本地双入口文件桥)。
 
 启动时清空 `task-inbox/` 作废重启前残留命令（防重放）。
-
-## 5.10 回退版大脑（brain.ts）
-
-`brain.ts` 是默认 ACP 大脑（`acp-brain.ts`）之前的实现，保留作可回退方案：每条消息 spawn 一次 `kiro-cli chat --no-interactive --trust-all-tools`，无状态（靠 `histories` Map 维护每用户最多 10 条滚动历史），`cleanOutput` 去 ANSI 与 `> ` 标记。相比常驻 ACP 版，它更慢（冷启动）、记忆是手工拼接而非原生。当前默认不用它。
 
 ---
 

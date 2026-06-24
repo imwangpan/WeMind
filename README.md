@@ -122,8 +122,6 @@ AI Agent 调用 `login_qrcode` 生成二维码，你可以通过以下方式扫�
 
 > **提示**：如果手机扫码后页面一直加载，请切换到**移动数据网络**（关闭 WiFi）。
 
-<img src="assets/opencode_screenshot1.png" alt="OpenCode 登录二维码" width="600">
-
 ### 2. 确认登录
 
 Agent 调用 `check_qrcode_status` 确认登录状态。
@@ -136,12 +134,6 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 2. 收到消息后调用 `send_typing` 显示"正在输入..."
 3. 处理完成后调用 `send_text_message` 回复
 4. 回复完毕后调用 `send_typing` 取消打字状态
-
-<img src="assets/wechat_screenshot1.jpg" alt="微信收发消息" width="400">
-
-<img src="assets/opencode_screenshot2.png" alt="OpenCode Agent 交互" width="600">
-
-<img src="assets/wechat_screenshot2.jpg" alt="微信收到回复" width="400">
 
 ## 工具列表
 
@@ -206,8 +198,6 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 调 **常驻 `kiro-cli acp` 进程**（JSON-RPC over stdio）当大脑生成回复 → 自动回发。
 进程常驻、原生多轮记忆，回复从 `agent_message_chunk` 流式拼接（天然无 ANSI/工具旁白）；
 带**存活检测**（进程不在自动重启）。它**只依赖内核包 `@wemind/wechat-ilink-core`**，不碰 MCP 那层，是一个完全独立、可单独运行的包。
-
-> 备注：`acp-brain.ts` 是默认大脑；`brain.ts`（每条消息 spawn `kiro-cli chat` 的无状态版）保留作为可回退实现。
 
 ```bash
 npm run build
