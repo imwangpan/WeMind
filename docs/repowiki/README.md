@@ -61,4 +61,4 @@ WeMind 把「个人微信」变成一个 AI Agent 的输入输出通道。它基
 | 数据目录 | `~/.wemind/<account>/`（独立于代码仓库） |
 | 许可证 | MIT |
 
-> 注：本 wiki 中数据目录统一以源码实际值 `~/.wemind/` 为准（README 个别历史段落残留旧路径 `~/.mcp-wechat-server`，以代码为准）。
+> 注：本 wiki 中数据目录统一以源码实际值 `~/.wemind/` 为准。

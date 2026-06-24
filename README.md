@@ -75,7 +75,7 @@
     "wechat": {
       "command": "node",
       "args": [
-        "/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"
+        "/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"
       ]
     }
   }
@@ -93,7 +93,7 @@
       "type": "local",
       "command": [
         "node",
-        "/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"
+        "/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"
       ],
       "enabled": true
     }
@@ -106,7 +106,7 @@
 ```json
 {
   "command": "node",
-  "args": ["/abs/path/to/mcp-wechat-server/packages/wechat-mcp/dist/index.js"]
+  "args": ["/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"]
 }
 ```
 
@@ -116,8 +116,8 @@
 
 AI Agent 调用 `login_qrcode` 生成二维码，你可以通过以下方式扫码：
 
-- 在终端运行 `cat ~/.mcp-wechat-server/qrcode.txt` 查看二维码
-- 打开图片文件 `~/.mcp-wechat-server/qrcode.png`
+- 在终端运行 `cat ~/.wemind/default/qrcode.txt` 查看二维码
+- 打开图片文件 `~/.wemind/default/qrcode.png`
 - 将链接复制到微信中打开
 
 > **提示**：如果手机扫码后页面一直加载，请切换到**移动数据网络**（关闭 WiFi）。
@@ -169,8 +169,8 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 ## 本地开发
 
 ```bash
-git clone https://github.com/imwangpan/mcp-wechat-server.git
-cd mcp-wechat-server
+git clone https://github.com/imwangpan/WeMind.git
+cd WeMind
 npm install
 npm run build      # 按 core → daemon/mcp-server 顺序构建各包
 npm start          # 运行 node packages/wechat-mcp/dist/index.js
@@ -180,7 +180,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 
 ## 安全说明
 
-- **凭证存储**：`account.json` 含 Bot Token。POSIX 系统会设为权限 `600`；**Windows 上 `chmod` 无效，文件以明文存放且不受权限限制**——启动保存时会有一次性告警。请用文件夹权限或磁盘加密保护 `~/.mcp-wechat-server/` 目录。
+- **凭证存储**：`account.json` 含 Bot Token。POSIX 系统会设为权限 `600`；**Windows 上 `chmod` 无效，文件以明文存放且不受权限限制**——启动保存时会有一次性告警。请用文件夹权限或磁盘加密保护 `~/.wemind/default/` 目录。
 - **隐私**：消息经由腾讯 iLink 渠道与本地 Agent 流转，涉及对话内容外发，请自行评估。
 
 ## 关于 iLink 渠道与限制
