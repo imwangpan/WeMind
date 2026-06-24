@@ -88,6 +88,16 @@
 5. `npm run build` / `typecheck` / `test` 全过。
 6. 真机冒烟：`npm i -g pm2` → 本地 `node dist/cli.js login` → `start` → `list` 见 pm2 进程 → 微信收发验证 → `stop`。
 
-## 10. 后续迭代（方案 b）
+## 10. 方案 b（自带看门狗）— 阶段 1 已实现 ✅
 
-去掉 pm2 依赖：`wemind start` 自带跨平台轻量看门狗（detach spawn + pid + 重拉，移植现 `run-daemon.ps1` 逻辑）+ `wemind service install`（封装计划任务 / systemd / launchd 做开机自启）。
+去掉 pm2 依赖：`wemind start` 默认用自带的跨平台 Node 看门狗常驻；与 pm2（方案 a）**共存**，靠 runner 选择——`wemind start [--runner builtin|pm2]`（或环境变量 `WEMIND_RUNNER`，默认 `builtin`）。
+
+**阶段 1（已实现，Windows 真机验证通过）**——核心看门狗：
+
+- `watchdog-runner.ts`：`runWatchdog()`（看门狗循环本体，由 `cli.js _watchdog` 调用——单实例守卫 → `for(;;)` 拉起 `cli.js daemon`、退出 5s 重拉、stdout/err 并入 `daemon.log`）；`watchdogStart()`（detached spawn + unref 脱离启动）。移植自 `run-daemon.ps1` 的 while 逻辑。
+- `cli.ts`：新增 `_watchdog` 子命令分发。
+- `manage.ts`：`--runner` 解析；`startDaemon(key, runner)` 按 runner 分发，**start 前先 `stopDaemon` 清现有任何 runner**（防同账号双跑抢 token）；`cmdStart`/`cmdLogin` 透传 runner。
+- **单实例**：`wrapper.pid` + 存活检查（`process.kill(pid,0)`），零依赖、复用现有停止句柄；竞态由「start 前先 stop」压低（选型对比 pid 文件 vs proper-lockfile：前者零依赖且一份文件兼作停止句柄，后者原子但加依赖且仍需额外 pid，本场景竞态罕见，故选 pid 文件）。
+- `stop`/`list` 无需改：现有 `stopDaemon`（pm2 delete + 杀 wrapper/daemon/brain pid）与 `daemon.pid` 存活检查同时覆盖两种 runner。
+
+**阶段 2（待）**——跨平台开机自启 `wemind service install`（封装 Windows 计划任务 / Linux systemd / macOS launchd）。建议优先用文档教用户分平台配置，自动化按需排期 + 对应系统实测。

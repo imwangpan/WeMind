@@ -6,12 +6,18 @@
  */
 import { runDaemon } from "./index.js";
 import { runManage } from "./manage.js";
+import { runWatchdog } from "./watchdog-runner.js";
 
 const argv = process.argv.slice(2);
 
 if (argv[0] === "daemon") {
   runDaemon().catch((err: unknown) => {
     console.error("[daemon] fatal:", err);
+    process.exit(1);
+  });
+} else if (argv[0] === "_watchdog") {
+  runWatchdog().catch((err: unknown) => {
+    console.error("[watchdog] fatal:", err);
     process.exit(1);
   });
 } else {

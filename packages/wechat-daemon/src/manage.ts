@@ -26,6 +26,7 @@ import {
   type AccountData,
 } from "@wemind/wechat-ilink-core";
 import { pm2Start, pm2Stop } from "./pm2-runner.js";
+import { watchdogStart } from "./watchdog-runner.js";
 
 /**
  * WeMind 多账号管理 CLI。
@@ -105,9 +106,12 @@ function resolveKey(arg: string): string {
 }
 
 /** 启动某账号的 daemon（方案 a：委托 pm2 常驻，跑 `wemind daemon`，注入 WECHAT_ACCOUNT）。 */
-function startDaemon(key: string): void {
+function startDaemon(key: string, runner?: string): void {
   const cliPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
-  console.log(pm2Start(key, cliPath).msg);
+  // start 前先停现有任何 runner（pm2 app / builtin 看门狗），避免同账号双跑抢 token
+  stopDaemon(key);
+  const useRunner = (runner || process.env.WEMIND_RUNNER || "builtin").toLowerCase();
+  console.log((useRunner === "pm2" ? pm2Start(key, cliPath) : watchdogStart(key, cliPath)).msg);
 }
 
 /** 停止某账号的常驻：先 pm2 delete（方案 a），再按 pid 兜底杀 wrapper/daemon/brain（兼容直接启动的）。 */
@@ -178,7 +182,11 @@ function finalizeStaging(label?: string): { key: string; msg: string } {
 }
 
 /** 一条命令完成扫码登录：自刷新二维码 + 终端码 + 自动开图 + 自动归档（→ 可选自动启动）。 */
-async function cmdLogin(label: string | undefined, autoStart: boolean): Promise<void> {
+async function cmdLogin(
+  label: string | undefined,
+  autoStart: boolean,
+  runner?: string,
+): Promise<void> {
   fs.rmSync(STAGING, { recursive: true, force: true });
   fs.mkdirSync(STAGING, { recursive: true });
   const png = path.join(STAGING, "qrcode.png");
@@ -243,11 +251,11 @@ async function cmdLogin(label: string | undefined, autoStart: boolean): Promise<
       const { key, msg } = finalizeStaging(label);
       console.log(msg);
       if (autoStart) {
-        startDaemon(key);
+        startDaemon(key, runner);
         console.log(`已启动 daemon（账号 ${key}）。`);
       } else {
         console.log(
-          `启动：node packages/wechat-daemon/dist/manage.js start ${key}   或 scripts/run-all-daemons.ps1`,
+          `启动：wemind start ${key}`,
         );
       }
       return;
@@ -326,9 +334,9 @@ function cmdDelete(sel: string): string {
   return `账号 ${key} 已删除（${stopMsg}，已移除目录与注册）。`;
 }
 
-function cmdStart(sel: string): string {
+function cmdStart(sel: string, runner?: string): string {
   const key = resolveKey(sel);
-  startDaemon(key);
+  startDaemon(key, runner);
   return `已启动 daemon（账号 ${key}）。用 list 查看运行状态。`;
 }
 
@@ -435,10 +443,16 @@ export async function runManage(argv: string[]): Promise<void> {
     cwd = rest[ci + 1];
     rest.splice(ci, 2);
   }
+  const ri = rest.indexOf("--runner");
+  let runner: string | undefined;
+  if (ri >= 0) {
+    runner = rest[ri + 1];
+    rest.splice(ri, 2);
+  }
 
   switch (cmd) {
     case "login":
-      await cmdLogin(label, autoStart);
+      await cmdLogin(label, autoStart, runner);
       break;
     case "list":
       console.log(cmdList());
@@ -447,7 +461,7 @@ export async function runManage(argv: string[]): Promise<void> {
       console.log(cmdAdopt(rest[0], label));
       break;
     case "start":
-      console.log(cmdStart(rest[0]));
+      console.log(cmdStart(rest[0], runner));
       break;
     case "stop": {
       const k = resolveKey(rest[0]);
