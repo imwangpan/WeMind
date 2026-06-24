@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const DAEMON = path.join(__dirname, "packages", "wechat-daemon", "dist", "index.js");
+const DAEMON = path.join(__dirname, "packages", "wechat-daemon", "dist", "cli.js");
 const ROOT = process.env.WEMIND_HOME && process.env.WEMIND_HOME.trim()
   ? process.env.WEMIND_HOME.trim()
   : path.join(os.homedir(), ".wemind");
@@ -30,6 +30,7 @@ function appFor(key) {
   return {
     name: `wemind-${key}`,
     script: DAEMON,
+    args: "daemon",
     cwd: __dirname,
     env: { WECHAT_ACCOUNT: key },
     // 看门狗：崩溃自动重启，延迟 5s（与原 PowerShell wrapper 一致），限重启次数防风暴

@@ -43,7 +43,7 @@ if (-not (Get-Command kiro-cli -ErrorAction SilentlyContinue)) {
 
 while ($true) {
   "[wrapper] start daemon $(Get-Date -Format o)" | Add-Content $log
-  & $node "packages/wechat-daemon/dist/index.js" *>> $log
+  & $node "packages/wechat-daemon/dist/cli.js" daemon *>> $log
   "[wrapper] daemon exited (code=$LASTEXITCODE), restart in 5s $(Get-Date -Format o)" | Add-Content $log
   Start-Sleep -Seconds 5
 }

@@ -798,7 +798,7 @@ function scanTaskInbox(owner: string): void {
   }
 }
 
-async function main(): Promise<void> {
+export async function runDaemon(): Promise<void> {
   const account = loadAccount();
   if (!account?.botToken) {
     log("not logged in; run the MCP login_qrcode flow first.");
@@ -882,7 +882,4 @@ async function main(): Promise<void> {
   await workerLoop(account, state);
 }
 
-main().catch((err) => {
-  console.error("[daemon] fatal:", err);
-  process.exit(1);
-});
+// daemon 本体由 cli.ts 的 `wemind daemon` 调用 runDaemon() 启动，此处不再顶层自启。

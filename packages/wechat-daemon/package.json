@@ -1,24 +1,41 @@
 {
-  "name": "@wemind/wechat-daemon",
+  "name": "wemind",
   "version": "1.0.1",
-  "private": true,
-  "description": "Always-on WeChat bot daemon driven by a resident kiro-cli ACP brain (private, not published).",
+  "description": "WeMind — your AI mind, reachable on WeChat. 常驻微信 AI 助手：自动收发 + 远程任务 + 多账号，自带 AI 大脑（默认 kiro-cli，任意 ACP agent 可接）。",
   "type": "module",
-  "main": "dist/index.js",
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "start": "node dist/index.js"
+  "bin": {
+    "wemind": "dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/cli.js"
+  },
+  "keywords": [
+    "wechat",
+    "weixin",
+    "ai",
+    "agent",
+    "bot",
+    "acp",
+    "assistant"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=20"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@wemind/wechat-ilink-core": "*",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@types/qrcode": "^1.5.5"
+    "@wemind/wechat-ilink-core": "*",
+    "@types/qrcode": "^1.5.5",
+    "tsdown": "^0.22.3"
   }
 }

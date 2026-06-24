@@ -25,6 +25,7 @@ import {
   readAllowFrom,
   type AccountData,
 } from "@wemind/wechat-ilink-core";
+import { pm2Start, pm2Stop } from "./pm2-runner.js";
 
 /**
  * WeMind 多账号管理 CLI。
@@ -35,7 +36,6 @@ import {
 
 const BASE = process.env.WEMIND_ILINK_BASE?.trim() || "https://ilinkai.weixin.qq.com";
 const STAGING = path.join(WEMIND_ROOT, ".staging");
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function readAccount(dir: string): AccountData | null {
@@ -104,25 +104,15 @@ function resolveKey(arg: string): string {
   throw new Error(`未找到账号：${arg}（既不是 key 也不是 label）`);
 }
 
-/** 脱离式启动某账号的 daemon wrapper（带自动重启）。 */
+/** 启动某账号的 daemon（方案 a：委托 pm2 常驻，跑 `wemind daemon`，注入 WECHAT_ACCOUNT）。 */
 function startDaemon(key: string): void {
-  const wrapper = path.join(REPO_ROOT, "scripts", "run-daemon.ps1");
-  const pwsh = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
-  const exe = fs.existsSync(pwsh) ? pwsh : "pwsh";
-  spawn(
-    exe,
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", wrapper],
-    {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-      env: { ...process.env, WECHAT_ACCOUNT: key },
-    },
-  ).unref();
+  const cliPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
+  console.log(pm2Start(key, cliPath).msg);
 }
 
-/** 停止某账号的 wrapper(先，避免自重启)、daemon、brain。 */
+/** 停止某账号的常驻：先 pm2 delete（方案 a），再按 pid 兜底杀 wrapper/daemon/brain（兼容直接启动的）。 */
 function stopDaemon(key: string): string {
+  pm2Stop(key); // best-effort：停掉 pm2 托管的 app（若有）
   const dir = accountDir(key);
   const wpid = readPid(dir, "wrapper.pid");
   const dpid = readPid(dir, "daemon.pid");
@@ -427,8 +417,7 @@ function cmdTaskStatus(sel?: string): string {
   ].join("\n");
 }
 
-async function main(): Promise<void> {
-  const argv = process.argv.slice(2);
+export async function runManage(argv: string[]): Promise<void> {
   const cmd = argv.shift();
   const rest = [...argv];
   const li = rest.indexOf("--label");
@@ -460,6 +449,11 @@ async function main(): Promise<void> {
     case "start":
       console.log(cmdStart(rest[0]));
       break;
+    case "stop": {
+      const k = resolveKey(rest[0]);
+      console.log(stopDaemon(k));
+      break;
+    }
     case "task":
       console.log(await cmdTask(rest[0], cwd, rest[1]));
       break;
@@ -542,7 +536,4 @@ async function main(): Promise<void> {
 说明：key = 由微信 botId 派生的唯一标识（目录名）；label = 人类可读别名。多数命令可用 key 或 label。`);
   }
 }
-main().catch((e) => {
-  console.error("error:", e?.message ?? e);
-  process.exit(1);
-});
+// 入口由 cli.ts 调用 runManage(argv)；此处不再顶层自启。
