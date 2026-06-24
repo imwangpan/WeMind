@@ -100,4 +100,4 @@
 - **单实例**：`wrapper.pid` + 存活检查（`process.kill(pid,0)`），零依赖、复用现有停止句柄；竞态由「start 前先 stop」压低（选型对比 pid 文件 vs proper-lockfile：前者零依赖且一份文件兼作停止句柄，后者原子但加依赖且仍需额外 pid，本场景竞态罕见，故选 pid 文件）。
 - `stop`/`list` 无需改：现有 `stopDaemon`（pm2 delete + 杀 wrapper/daemon/brain pid）与 `daemon.pid` 存活检查同时覆盖两种 runner。
 
-**阶段 2（待）**——跨平台开机自启 `wemind service install`（封装 Windows 计划任务 / Linux systemd / macOS launchd）。建议优先用文档教用户分平台配置，自动化按需排期 + 对应系统实测。
+**阶段 2（开机自启 — 文档化方案已落实）**——跨平台开机自启**采用文档方案**而非自研：新手教程给出 Windows 启动文件夹 / 计划任务、Linux systemd user service、macOS launchd 三平台调 `wemind start` 的具体配置（`wemind start` 内部 builtin 看门狗负责崩溃重拉，自启层只需开机拉起一次）。自研 `wemind service install` 自动化留按需排期 + 对应系统实测。
