@@ -20,7 +20,7 @@ Windows 计划任务（登录触发）  或  启动文件夹里的 .vbs
    pwsh  run-daemon.ps1                 ← ① wrapper（看门狗，常驻）
         │  while($true){ 跑 node; node 退出后睡 5s 再跑 }
         ▼
-   node  packages/wechat-daemon/dist/index.js   ← ② daemon 本体（业务，常驻）
+   node  packages/wechat-daemon/dist/cli.js daemon   ← ② daemon 本体（业务，常驻）
         │  poller + worker 两个 while(true) 循环，永不自然退出
         ▼
    kiro-cli acp（或其它 ACP agent）       ← ③ 大脑（ACP 子进程，懒启动、可自愈重建）
@@ -45,7 +45,7 @@ Windows 计划任务（登录触发）  或  启动文件夹里的 .vbs
 ```powershell
 while ($true) {
   "[wrapper] start daemon $(Get-Date -Format o)" | Add-Content $log
-  & $node "packages/wechat-daemon/dist/index.js" *>> $log   # 阻塞，直到 node 退出
+  & $node "packages/wechat-daemon/dist/cli.js" daemon *>> $log   # 阻塞，直到 node 退出
   "[wrapper] daemon exited (code=$LASTEXITCODE), restart in 5s ..." | Add-Content $log
   Start-Sleep -Seconds 5
 }

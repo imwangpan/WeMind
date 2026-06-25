@@ -141,7 +141,7 @@ After=network-online.target
 
 [Service]
 Environment=WECHAT_ACCOUNT=%i
-ExecStart=/usr/bin/node /abs/path/WeMind/packages/wechat-daemon/dist/index.js
+ExecStart=/usr/bin/node /abs/path/WeMind/packages/wechat-daemon/dist/cli.js daemon
 Restart=always
 RestartSec=5
 
