@@ -68,6 +68,7 @@ export async function resolveImageBytes(src: string): Promise<Buffer> {
     return buf;
   }
   const p = src.startsWith("file://") ? fileURLToPath(src) : src;
+  if (!IMG_EXT.test(p)) throw new Error(`非图片文件（仅按图片扩展名发送）: ${p}`);
   const stat = fs.statSync(p);
   if (!stat.isFile()) throw new Error("不是文件");
   if (stat.size > MAX_BYTES) throw new Error(`图片过大 ${stat.size}`);

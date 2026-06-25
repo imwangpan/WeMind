@@ -254,9 +254,7 @@ async function cmdLogin(
         startDaemon(key, runner);
         console.log(`已启动 daemon（账号 ${key}）。`);
       } else {
-        console.log(
-          `启动：wemind start ${key}`,
-        );
+        console.log(`启动：wemind start ${key}`);
       }
       return;
     }

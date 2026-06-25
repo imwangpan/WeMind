@@ -7,7 +7,7 @@ type ActiveTask = {
   to: string;
   status: TaskStatus;
   injectResolver?: (text: string | null) => void; // waiting 态等待注入；stop 时 resolve(null) 退出
-  pendingInject?: string; // running 期间暂存的注入（下次 waiting 消费）
+  pendingInjects?: string[]; // running 期间暂存的注入（下次 waiting 一并消费，按序累积不覆盖）
   startedAt: number; // 派发时间
   turns: number; // 已完成轮次
   lastOutput?: string; // 最近一轮推送内容（供本地 task-status 查看）
@@ -92,7 +92,7 @@ export function injectTask(to: string, text: string): void {
     activeTask.injectResolver = undefined;
     r(text);
   } else {
-    activeTask.pendingInject = text; // running 期间：暂存，等这一步跑完再处理
+    (activeTask.pendingInjects ??= []).push(text); // running 期间：按序累积，等这一步跑完一并处理（不覆盖前一条）
     push(to, "📝 已记下，等当前这步跑完就处理。");
   }
 }
@@ -114,9 +114,9 @@ export function stopTask(to: string): string {
 
 /** 等待用户注入（waiting 态）；若有暂存的 pendingInject 直接消费。 */
 function waitForInject(task: ActiveTask): Promise<string | null> {
-  if (task.pendingInject !== undefined) {
-    const t = task.pendingInject;
-    task.pendingInject = undefined;
+  if (task.pendingInjects?.length) {
+    const t = task.pendingInjects.join("\n"); // 多条暂存按序合并喂下一轮，一条不丢
+    task.pendingInjects = undefined;
     return Promise.resolve(t);
   }
   return new Promise((resolve) => {

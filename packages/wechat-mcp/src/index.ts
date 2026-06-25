@@ -67,8 +67,8 @@ IMPORTANT BEHAVIOR — you MUST follow this workflow:
 
 This ensures the WeChat user sees a "typing..." indicator while you are working on their request.`,
   getMessagesSchema.shape,
-  async (input) => {
-    return await getMessages(input);
+  async (input, extra) => {
+    return await getMessages(input, extra?.signal);
   },
 );
 

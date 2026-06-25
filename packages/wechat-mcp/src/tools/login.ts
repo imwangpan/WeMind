@@ -237,6 +237,50 @@ export async function checkQrcodeStatus(): Promise<{
     };
   }
 
+  // 高级态（验证码 / IDC 重定向 / 已绑定）当前 MCP 登录流程未实现自动处理；
+  // 返回明确提示而非静默「等待确认」，避免 Agent 无限轮询却永不 confirmed。
+  if (
+    statusResponse.status === "need_verifycode" ||
+    statusResponse.status === "verify_code_blocked"
+  ) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              status: statusResponse.status,
+              message:
+                "Login requires a verification code, which the MCP login flow does not support. Use the `wemind login` CLI instead, or try again later.",
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+    };
+  }
+  if (
+    statusResponse.status === "scaned_but_redirect" ||
+    statusResponse.status === "binded_redirect"
+  ) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              status: statusResponse.status,
+              message: `Login requires an IDC redirect${statusResponse.redirect_host ? ` (to ${statusResponse.redirect_host})` : ""}, which the MCP login flow does not support. Use the \`wemind login\` CLI instead.`,
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+    };
+  }
+
   return {
     content: [
       {

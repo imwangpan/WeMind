@@ -9,8 +9,11 @@ import {
   MessageItemType,
   MessageState,
   MessageType,
+  isSessionPaused,
 } from "@wemind/wechat-ilink-core";
 import type { SendMessageReq } from "@wemind/wechat-ilink-core";
+
+import { sessionExpiredResult } from "./session-result.js";
 
 export const sendTextMessageSchema = z.object({
   to: z.string().min(1).describe("The WeChat user ID to send the message to."),
@@ -23,6 +26,9 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
   const account = loadAccount();
   if (!account?.botToken) {
     throw new McpError(ErrorCode.InvalidParams, "Not logged in. Call login_qrcode first.");
+  }
+  if (isSessionPaused(account.botId)) {
+    return sessionExpiredResult(account.botId);
   }
 
   const state = loadState();

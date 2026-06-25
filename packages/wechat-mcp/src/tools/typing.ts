@@ -1,7 +1,16 @@
 import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-import { sendTyping, getConfig, loadAccount, loadState } from "@wemind/wechat-ilink-core";
+import {
+  sendTyping,
+  getConfig,
+  loadAccount,
+  loadState,
+  isSessionPaused,
+  TypingStatus,
+} from "@wemind/wechat-ilink-core";
+
+import { sessionExpiredResult } from "./session-result.js";
 
 export const sendTypingSchema = z.object({
   to: z.string().min(1).describe("The WeChat user ID to send the typing indicator to."),
@@ -21,6 +30,9 @@ export async function sendTypingIndicator(input: {
   const account = loadAccount();
   if (!account?.botToken) {
     throw new McpError(ErrorCode.InvalidParams, "Not logged in. Call login_qrcode first.");
+  }
+  if (isSessionPaused(account.botId)) {
+    return sessionExpiredResult(account.botId);
   }
 
   const state = loadState();
@@ -55,7 +67,7 @@ export async function sendTypingIndicator(input: {
       body: {
         ilink_user_id: input.to,
         typing_ticket: configResp.typing_ticket,
-        status: 2,
+        status: TypingStatus.CANCEL,
       },
     });
   } else {
@@ -65,7 +77,7 @@ export async function sendTypingIndicator(input: {
       body: {
         ilink_user_id: input.to,
         typing_ticket: configResp.typing_ticket,
-        status: 1,
+        status: TypingStatus.TYPING,
       },
     });
   }
