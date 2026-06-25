@@ -32,7 +32,7 @@ const CHANNEL_VERSION = ILINK_CLIENT_VERSION;
  * iLink-App-ClientVersion: uint32 编码 0x00MMNNPP（major<<16 | minor<<8 | patch）。
  * 编码方式借鉴自官方 Tencent/openclaw-weixin（MIT）。
  */
-function buildClientVersion(version: string): number {
+export function buildClientVersion(version: string): number {
   const [major = 0, minor = 0, patch = 0] = version.split(".").map((p) => parseInt(p, 10) || 0);
   return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff);
 }

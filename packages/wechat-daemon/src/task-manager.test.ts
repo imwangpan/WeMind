@@ -116,6 +116,25 @@ describe("task-manager 状态机", () => {
     await vi.waitFor(() => expect(has(pushed, "done")).toBe(true));
   });
 
+  it("running 期间多次注入全部保留（队列累积，不覆盖丢第一条）", async () => {
+    const r1 = deferred();
+    const r2 = deferred();
+    askWorker.mockReturnValueOnce(r1.promise).mockReturnValueOnce(r2.promise);
+    const pushed: string[] = [];
+    setTaskPush((_to, t) => pushed.push(t));
+
+    dispatchTask("u2", "任务");
+    injectTask("u2", "顺便做Y"); // running 中 → 暂存第一条
+    injectTask("u2", "还有Z"); // running 中 → 再暂存（修复前会覆盖掉「顺便做Y」）
+
+    r1.resolve("第一轮完成");
+    await vi.waitFor(() => expect(askWorker).toHaveBeenCalledTimes(2));
+    // 修复后：两条按序合并喂下一轮，一条不丢
+    expect(askWorker.mock.calls[1][0]).toBe("顺便做Y\n还有Z");
+    r2.resolve("done");
+    await vi.waitFor(() => expect(has(pushed, "done")).toBe(true));
+  });
+
   it("dispatch 透传 cwd 给 setWorkerCwd + 状态 sink running→waiting→idle", async () => {
     const r1 = deferred();
     askWorker.mockReturnValueOnce(r1.promise);

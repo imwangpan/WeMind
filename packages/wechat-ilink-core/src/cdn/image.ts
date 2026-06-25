@@ -19,13 +19,13 @@ import {
 const CDN_BASE_URL =
   process.env.WECHAT_CDN_BASE_URL?.trim() || "https://novac2c.cdn.weixin.qq.com/c2c";
 
-function decryptAesEcb(ciphertext: Buffer, key: Buffer): Buffer {
+export function decryptAesEcb(ciphertext: Buffer, key: Buffer): Buffer {
   const d = createDecipheriv("aes-128-ecb", key, null); // PKCS7 默认
   return Buffer.concat([d.update(ciphertext), d.final()]);
 }
 
 /** 解析图片 AES key → 16 字节。aeskey 为 hex；media.aes_key 为 base64（可能是 base64(hex 字符串)）。 */
-function resolveKey(img: ImageItem): Buffer | null {
+export function resolveKey(img: ImageItem): Buffer | null {
   if (img.aeskey && /^[0-9a-fA-F]{32}$/.test(img.aeskey)) return Buffer.from(img.aeskey, "hex");
   const b64 = img.media?.aes_key;
   if (b64) {
@@ -58,13 +58,13 @@ export async function downloadImage(img: ImageItem): Promise<Buffer> {
 // 机制借鉴官方 Tencent/openclaw-weixin（MIT）的 cdn/aes-ecb + cdn/upload + cdn/cdn-upload + messaging/send。
 
 /** AES-128-ECB 加密（PKCS7 默认）。 */
-function encryptAesEcb(plaintext: Buffer, key: Buffer): Buffer {
+export function encryptAesEcb(plaintext: Buffer, key: Buffer): Buffer {
   const c = createCipheriv("aes-128-ecb", key, null);
   return Buffer.concat([c.update(plaintext), c.final()]);
 }
 
 /** AES-128-ECB 密文大小（PKCS7 补齐到 16 字节边界）。 */
-function aesEcbPaddedSize(plaintextSize: number): number {
+export function aesEcbPaddedSize(plaintextSize: number): number {
   return Math.ceil((plaintextSize + 1) / 16) * 16;
 }
 

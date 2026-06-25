@@ -129,7 +129,7 @@ type Ctrl =
   | { kind: "remove"; name: string };
 
 /** 解析控制指令（命中则由 daemon 直接处理，不转发给 brain）。 */
-function parseControl(text: string): Ctrl | null {
+export function parseControl(text: string): Ctrl | null {
   const t = text.trim();
   if (/^(\/?mcp|列出\s*mcp|mcp\s*list)$/i.test(t)) return { kind: "list" };
   if (/^(新会话|重置|清空上下文|\/new|new\s*session)$/i.test(t)) return { kind: "new" };
@@ -142,7 +142,7 @@ function parseControl(text: string): Ctrl | null {
 
 type TaskCmd = { kind: "toWorker"; text: string } | { kind: "stop" };
 /** 解析「明确发给 worker」指令：任务：xxx / 任务 xxx / >xxx（toWorker：无任务则启动、有任务则注入）；结束任务/停止任务 → stop。 */
-function parseTaskControl(text: string): TaskCmd | null {
+export function parseTaskControl(text: string): TaskCmd | null {
   const t = text.trim();
   if (/^(结束任务|停止任务|\/stop)$/i.test(t)) return { kind: "stop" };
   let m = t.match(/^(?:任务|task)[:：]\s*([\s\S]+)$/i);
@@ -153,7 +153,7 @@ function parseTaskControl(text: string): TaskCmd | null {
 }
 
 /** 解析「明确问大脑」逃逸前缀：问大脑 xxx / 问大脑：xxx。命中返回去前缀后的文本（强制走 brain，即使 worker 在等你）。 */
-function parseBrainEscape(text: string): string | null {
+export function parseBrainEscape(text: string): string | null {
   const m = text.trim().match(/^问大脑[:：]?\s*([\s\S]+)$/);
   return m ? m[1].trim() : null;
 }
