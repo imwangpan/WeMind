@@ -849,6 +849,10 @@ export async function runDaemon(): Promise<void> {
   // worker 任务推送：用该用户最新 token 经串行发送层发出（与 brain 共用 sendOrdered，保证不乱序）
   setTaskPush((to, text) => {
     const tok = state.contextTokens[`${account.botId}:${to}`];
+    // task 推送也占用连续发送额度（与 brain 回合共用 budgetOf）：task 在后台运行，可能与 brain 回合并发，
+    // 若不计数，本地 budget 会低估服务端真实连续发送数 → brain 的 sendProgress 误判「还能发」→ 撞 ret=-2 限流、结果丢失。
+    // 注：task 推送是「本轮结果」（必须送达），故只累加计数、不被 awaiting 暂停（暂停只作用于可丢弃的 brain 进度提示）。
+    budgetOf(to).count += 1;
     void sendOrdered(account, to, tok, text, MessageState.FINISH, tok);
   });
   // worker 跑一轮期间持续「正在输入中」（typing 不占连续发送上限），避免长任务静默让用户以为卡了
