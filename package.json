@@ -2,7 +2,7 @@
   "name": "wemind",
   "version": "1.0.1",
   "private": true,
-  "description": "WeMind — your AI mind, reachable on WeChat. Monorepo: reusable iLink protocol core, a publishable MCP server, and a private always-on daemon.",
+  "description": "WeMind — your AI mind, reachable on WeChat. Monorepo: reusable iLink protocol core, a publishable MCP server, and a publishable always-on daemon CLI (wemind).",
   "type": "module",
   "workspaces": [
     "packages/*"
