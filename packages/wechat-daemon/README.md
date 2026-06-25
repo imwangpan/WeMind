@@ -1,4 +1,4 @@
-# @wemind/wechat-daemon
+# wemind
 
 > 脱离 kiro-cli 会话的**常驻微信 Bot 守护进程**：自己长轮询 iLink 收消息 → 调常驻 ACP 大脑生成回复 → 自动回发。支持**远程任务（worker）**与**多账号**。
 

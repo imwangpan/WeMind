@@ -14,7 +14,7 @@ WeMind 把「个人微信」变成一个 AI Agent 的输入输出通道。它基
 
 1. **MCP Server**（`@wemind/wechat-mcp`）—— 把「收发微信」封装成 6 个 MCP 工具，任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro 等）都能驱动微信收发消息。这是**请求驱动**的：由 MCP 客户端自己编排长轮询和回复节奏。
 
-2. **常驻守护进程**（`@wemind/wechat-daemon`）—— 一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。这是**事件驱动 + 全自动**的，还支持远程任务（worker）、多账号、收发图片等。
+2. **常驻守护进程**（`wemind`）—— 一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。这是**事件驱动 + 全自动**的，还支持远程任务（worker）、多账号、收发图片等。
 
 两者共享同一套 iLink 协议内核（`@wemind/wechat-ilink-core`）。
 

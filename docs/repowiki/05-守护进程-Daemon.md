@@ -1,4 +1,4 @@
-# 5. 守护进程 Daemon（@wemind/wechat-daemon）
+# 5. 守护进程 Daemon（wemind）
 
 > 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md)
 

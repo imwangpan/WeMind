@@ -2,7 +2,7 @@
 
 > 微信 **iLink / ClawBot** Bot 协议的 TypeScript 内核——HTTP 客户端、协议类型、会话守卫、账号/状态持久化、CDN 媒体加解密、错误码。**不含任何「消费方」逻辑**（MCP / daemon），可独立用于自建 iLink bot。
 
-[WeMind](https://github.com/imwangpan/WeMind) monorepo 的内核包；`@wemind/wechat-mcp`（MCP server）与 `@wemind/wechat-daemon`（常驻守护）都依赖它，自身不依赖任何上层。
+[WeMind](https://github.com/imwangpan/WeMind) monorepo 的内核包；`@wemind/wechat-mcp`（MCP server）与 `wemind`（常驻守护）都依赖它，自身不依赖任何上层。
 
 ## 能力
 
