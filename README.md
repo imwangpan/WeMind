@@ -264,9 +264,9 @@ worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 
 - 中断（崩溃/超时）靠 `session/load` 恢复——回「继续」即从中断处续跑。
 - 详见 [docs/方案C-MVP-远程human-in-the-loop.md](docs/方案C-MVP-远程human-in-the-loop.md)。
 
-**本地终端入口**（与微信并列、管同一任务，**不依赖微信**）：在电脑前用 `manage.js` 直接管 worker 任务，适合开任务时贴长描述 / 指定工作目录，或专注电脑工作不想掏手机时。
+**本地终端入口**（与微信并列、管同一任务，**不依赖微信**）：在电脑前用 `wemind` 直接管 worker 任务，适合开任务时贴长描述 / 指定工作目录，或专注电脑工作不想掏手机时。
 
-| 命令（`node packages/wechat-daemon/dist/manage.js …`） | 作用                                                                  |
+| 命令（`wemind …`） | 作用                                                                  |
 | ------------------------------------------------------ | --------------------------------------------------------------------- |
 | `task "<描述>" [--cwd <目录>] [<key\|label>]`          | 本地派发任务（默认 cwd=终端当前目录，可指定项目目录——微信入口做不到） |
 | `task-status [<key\|label>]`                           | 查看任务状态 + 轮次 + 最近输出（读本地 `task-state.json`）            |
@@ -356,12 +356,12 @@ Register-ScheduledTask -TaskName "mcp-wechat-daemon" -Action $action -Trigger (N
 **新增一个账号（推荐：一条命令）** —— 在终端跑：
 
 ```powershell
-node packages/wechat-daemon/dist/manage.js login --label 工作号 --start
+wemind login --label 工作号 --start
 ```
 
 它会：自动生成二维码（**过期自动刷新**、终端直接显示 + 自动打开 PNG）→ 你用要登录的微信扫码确认 → 自动按 botId 归档登记 → `--start` 顺带启动该账号 daemon。整条命令在你终端里跑，二维码原生渲染、不怕过期。
 
-管理命令（`node packages/wechat-daemon/dist/manage.js <command>`）：
+管理命令（`wemind <command>`）：
 
 | 命令                           | 作用                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------- |

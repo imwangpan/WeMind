@@ -8,11 +8,13 @@
 
 ## 0. 前提
 
+> `wemind` 为发布后的命令；当前未发布到 npm 时，把下文所有 `wemind` 替换为 `node packages/wechat-daemon/dist/cli.js`（如 `node packages/wechat-daemon/dist/cli.js list`）。
+
 - daemon 正在运行（且已扫码登录某账号）。检查：
   ```bash
-  node packages/wechat-daemon/dist/manage.js list   # 看到「运行中(pid …)」即可
+  wemind list   # 看到「运行中(pid …)」即可
   ```
-- 没在跑就启动：`node packages/wechat-daemon/dist/manage.js start <key|label>`（或 `scripts/run-all-daemons.ps1` 全部账号）。
+- 没在跑就启动：`wemind start <key|label>`（或 `scripts/run-all-daemons.ps1` 全部账号）。
 
 ---
 
@@ -22,15 +24,15 @@
 
 ```bash
 # 派发任务：在哪个项目目录就让它在哪跑（--cwd 默认取当前终端目录）
-node packages/wechat-daemon/dist/manage.js task "核实这篇文章每个论断的真假，先列出你打算查证的点让我确认" --cwd D:\Product\xxx
+wemind task "核实这篇文章每个论断的真假，先列出你打算查证的点让我确认" --cwd D:\Product\xxx
 
 # 看进展（状态 + 轮次 + 最近输出，不依赖微信）
-node packages/wechat-daemon/dist/manage.js task-status
+wemind task-status
 
 # 回复它的提问 / 让它继续 / 结束
-node packages/wechat-daemon/dist/manage.js task-reply "第 2 点不用查，其它都查"
-node packages/wechat-daemon/dist/manage.js task-reply 继续
-node packages/wechat-daemon/dist/manage.js task-stop
+wemind task-reply "第 2 点不用查，其它都查"
+wemind task-reply 继续
+wemind task-stop
 ```
 
 ### 在微信
@@ -46,7 +48,7 @@ node packages/wechat-daemon/dist/manage.js task-stop
 
 ## 2. 两个入口对照
 
-| 操作 | 微信 | 本地终端（`manage.js`） |
+| 操作 | 微信 | 本地终端（`wemind`） |
 |---|---|---|
 | **派发** | `任务：<描述>` 或 `>「描述」` | `task "<描述>" [--cwd 目录] [<key\|label>]` |
 | **回复 / 续跑** | worker 等你时**直接回**；或回 `继续` | `task-reply "<内容>"` / `task-reply 继续` |

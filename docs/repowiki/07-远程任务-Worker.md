@@ -124,11 +124,11 @@ worker 的微信侧路由在 `workerLoop` 内（详见 [5. 守护进程 Daemon](
 
 ### 文件桥机制
 
-CLI（`manage.js`）与 daemon 是两个独立进程，用轻量文件桥通信（不引入 socket/端口）：
+CLI（`wemind`）与 daemon 是两个独立进程，用轻量文件桥通信（不引入 socket/端口）：
 
 ```mermaid
 graph LR
-    CLI["manage.js（本地终端）"]
+    CLI["wemind（本地终端）"]
     INBOX["task-inbox/*.json<br/>（命令收件箱）"]
     STATE["task-state.json<br/>（状态文件）"]
     DM["daemon<br/>（独立定时器 1s 扫描）"]

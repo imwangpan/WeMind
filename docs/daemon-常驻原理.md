@@ -165,7 +165,7 @@ foreach ($key in $accounts) {
 
 ## 8. 生命周期与管理命令
 
-`manage.js`（`packages/wechat-daemon`）按 pid 文件链精确操作：
+`wemind`（`packages/wechat-daemon`）按 pid 文件链精确操作：
 
 | 命令 | 做什么 |
 |------|--------|
