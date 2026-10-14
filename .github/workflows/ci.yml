@@ -15,7 +15,10 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci
-      - run: npm rebuild --build-from-source
+      - name: Install Rolldown Linux binding
+        run: |
+          binding_version="$(node -p "require('./node_modules/rolldown/package.json').optionalDependencies['@rolldown/binding-linux-x64-gnu']")"
+          npm install --no-save --ignore-scripts "@rolldown/binding-linux-x64-gnu@$binding_version"
       - run: npm run lint
       - run: npm run format:check
       - run: npm run typecheck
