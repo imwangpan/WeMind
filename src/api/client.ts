@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+import { PKG } from "../pkg.js";
 import type { GetUpdatesResp, SendMessageReq, QRCodeResponse, QRStatusResponse, SendTypingReq, GetConfigResp } from "./types.js";
 
 export type ApiOptions = {
@@ -11,7 +12,30 @@ export type ApiOptions = {
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const DEFAULT_API_TIMEOUT_MS = 15_000;
 const QR_LONG_POLL_TIMEOUT_MS = 35_000;
-const CHANNEL_VERSION = "1.0.0";
+
+// 对外声明的 iLink 客户端版本：模仿官方 openclaw-weixin 的版本，
+// 避免后端因客户端版本过低而拒绝/快速过期二维码。需随官方更新。
+const ILINK_CLIENT_VERSION = "2.4.3";
+const CHANNEL_VERSION = ILINK_CLIENT_VERSION;
+const ILINK_APP_ID = PKG.ilinkAppId;
+
+/**
+ * iLink-App-ClientVersion: uint32 编码 0x00MMNNPP（major<<16 | minor<<8 | patch）。
+ * 编码方式借鉴自官方 Tencent/openclaw-weixin（MIT）。
+ */
+function buildClientVersion(version: string): number {
+  const [major = 0, minor = 0, patch = 0] = version.split(".").map((p) => parseInt(p, 10) || 0);
+  return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff);
+}
+const ILINK_APP_CLIENT_VERSION = String(buildClientVersion(ILINK_CLIENT_VERSION));
+
+/** iLink 公共请求头：所有 GET/POST 都需携带，缺失会导致服务端拒绝连接。 */
+function buildCommonHeaders(): Record<string, string> {
+  return {
+    "iLink-App-Id": ILINK_APP_ID,
+    "iLink-App-ClientVersion": ILINK_APP_CLIENT_VERSION,
+  };
+}
 
 function ensureTrailingSlash(url: string): string {
   return url.endsWith("/") ? url : `${url}/`;
@@ -28,6 +52,7 @@ function buildHeaders(opts: { token?: string; body: string }): Record<string, st
     AuthorizationType: "ilink_bot_token",
     "Content-Length": String(Buffer.byteLength(opts.body, "utf-8")),
     "X-WECHAT-UIN": randomWechatUin(),
+    ...buildCommonHeaders(),
   };
   if (opts.token?.trim()) {
     headers.Authorization = `Bearer ${opts.token.trim()}`;
@@ -117,14 +142,15 @@ export async function sendMessage(params: {
 }
 
 export async function fetchQRCode(apiBaseUrl: string): Promise<QRCodeResponse> {
-  const base = ensureTrailingSlash(apiBaseUrl);
-  const url = new URL("ilink/bot/get_bot_qrcode?bot_type=3", base);
-  const response = await fetch(url.toString(), {});
-  if (!response.ok) {
-    const body = await response.text().catch(() => "(unreadable)");
-    throw new Error(`Failed to fetch QR code: ${response.status} ${response.statusText} ${body}`);
-  }
-  return response.json() as Promise<QRCodeResponse>;
+  // 对齐官方：get_bot_qrcode 为 POST，body 带 local_token_list，并走全套请求头。
+  const rawText = await apiFetch({
+    baseUrl: apiBaseUrl,
+    endpoint: "ilink/bot/get_bot_qrcode?bot_type=3",
+    body: JSON.stringify({ local_token_list: [] }),
+    timeoutMs: DEFAULT_API_TIMEOUT_MS,
+    label: "fetchQRCode",
+  });
+  return JSON.parse(rawText) as QRCodeResponse;
 }
 
 export async function pollQRStatus(
@@ -137,7 +163,7 @@ export async function pollQRStatus(
   const timer = setTimeout(() => controller.abort(), QR_LONG_POLL_TIMEOUT_MS);
   try {
     const response = await fetch(url.toString(), {
-      headers: { "iLink-App-ClientVersion": "1" },
+      headers: buildCommonHeaders(),
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -194,5 +220,29 @@ export async function sendTyping(params: {
     token: params.token,
     timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
     label: "sendTyping",
+  });
+}
+
+/** 通知服务端该 bot 客户端上线（best-effort，失败不阻断）。 */
+export async function notifyStart(params: { baseUrl: string; token?: string }): Promise<void> {
+  await apiFetch({
+    baseUrl: params.baseUrl,
+    endpoint: "ilink/bot/msg/notifystart",
+    body: JSON.stringify({ base_info: buildBaseInfo() }),
+    token: params.token,
+    timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
+    label: "notifyStart",
+  });
+}
+
+/** 通知服务端该 bot 客户端下线（best-effort，失败不阻断）。 */
+export async function notifyStop(params: { baseUrl: string; token?: string }): Promise<void> {
+  await apiFetch({
+    baseUrl: params.baseUrl,
+    endpoint: "ilink/bot/msg/notifystop",
+    body: JSON.stringify({ base_info: buildBaseInfo() }),
+    token: params.token,
+    timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
+    label: "notifyStop",
   });
 }

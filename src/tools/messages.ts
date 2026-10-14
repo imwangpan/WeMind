@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
 import { getUpdates } from "../api/client.js";
+import { SESSION_EXPIRED_ERRCODE, isSessionPaused, pauseSession, getRemainingPauseMs } from "../api/session-guard.js";
 import { loadAccount, loadState, saveState } from "../store/account.js";
 import type { WeixinMessage } from "../api/types.js";
 
@@ -20,12 +21,37 @@ export const getMessagesSchema = z.object({
     .describe("Long-poll timeout in ms (default: 10000). Ignored when wait=true."),
 });
 
+function sessionExpiredResult(botId: string): {
+  content: Array<{ type: "text"; text: string }>;
+} {
+  const mins = Math.ceil(getRemainingPauseMs(botId) / 60_000);
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(
+          {
+            status: "session_expired",
+            message: `WeChat bot session expired (errcode ${SESSION_EXPIRED_ERRCODE}). Call login_qrcode to re-authenticate. Polling paused for ~${mins} min.`,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  };
+}
+
 export async function getMessages(input: { wait?: boolean; timeout?: number }): Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> {
   const account = loadAccount();
   if (!account?.botToken) {
     throw new McpError(ErrorCode.InvalidParams, "Not logged in. Call login_qrcode first.");
+  }
+
+  if (isSessionPaused(account.botId)) {
+    return sessionExpiredResult(account.botId);
   }
 
   const pollMs = input.wait ? LONG_POLL_MS : (input.timeout ?? 10000);
@@ -49,6 +75,11 @@ export async function getMessages(input: { wait?: boolean; timeout?: number }): 
       timeoutMs: pollMs,
     });
 
+    if (resp.errcode === SESSION_EXPIRED_ERRCODE) {
+      pauseSession(account.botId);
+      saveState(state);
+      return sessionExpiredResult(account.botId);
+    }
     if (resp.errcode) {
       throw new McpError(
         ErrorCode.InternalError,
@@ -126,9 +157,12 @@ function formatMessage(msg: WeixinMessage) {
 
   let text = textParts.join("\n");
 
-  if (msg.ref_msg) {
-    const refItem = msg.ref_msg.message_item;
-    const refText = refItem?.text_item?.text ?? msg.ref_msg.title ?? "";
+  // ref_msg（引用/回复的原消息）挂在 MessageItem 上，不在 WeixinMessage 上。
+  // 原实现读 msg.ref_msg 恒为 undefined，是死代码；这里从消息项中取。
+  const refMsg = items.find((item) => item.ref_msg)?.ref_msg;
+  if (refMsg) {
+    const refItem = refMsg.message_item;
+    const refText = refItem?.text_item?.text ?? refMsg.title ?? "";
     text = `[Reply to: ${refText}]\n${text}`;
   }
 

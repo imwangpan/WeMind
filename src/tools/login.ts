@@ -4,7 +4,8 @@ import { z } from "zod";
 import QRCode from "qrcode";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
-import { fetchQRCode, pollQRStatus } from "../api/client.js";
+import { fetchQRCode, pollQRStatus, notifyStart, notifyStop } from "../api/client.js";
+import { clearSessionPause } from "../api/session-guard.js";
 import {
   loadAccount, saveAccount, clearAccount,
   loadQrState, saveQrState, clearQrState,
@@ -165,6 +166,12 @@ export async function checkQrcodeStatus(): Promise<{
 
     clearQrState();
 
+    clearSessionPause(statusResponse.ilink_bot_id);
+    await notifyStart({
+      baseUrl: statusResponse.baseurl ?? DEFAULT_BASE_URL,
+      token: statusResponse.bot_token,
+    }).catch(() => {});
+
     return {
       content: [
         {
@@ -216,6 +223,11 @@ export const logoutSchema = z.object({});
 export async function logout(): Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> {
+  const account = loadAccount();
+  if (account?.botToken) {
+    await notifyStop({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
+  }
+
   clearQrState();
   resetState();
   clearAccount();
