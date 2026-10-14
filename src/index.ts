@@ -1,9 +1,11 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
 import { loadAccount } from "./store/account.js";
+import { notifyStart } from "./api/client.js";
+import { PKG } from "./pkg.js";
 import { loginQrcode, checkQrcodeStatus, loginQrcodeSchema, checkQrcodeStatusSchema, logoutSchema, logout } from "./tools/login.js";
 import { getMessages, getMessagesSchema } from "./tools/messages.js";
 import { sendTextMessage, sendTextMessageSchema } from "./tools/send.js";
@@ -12,7 +14,7 @@ import { sendTypingIndicator, sendTypingSchema } from "./tools/typing.js";
 const server = new McpServer(
   {
     name: "mcp-wechat-server",
-    version: "1.0.0",
+    version: PKG.version,
   },
   {
     capabilities: {
@@ -90,6 +92,7 @@ async function main() {
   const account = loadAccount();
   if (account?.botToken) {
     console.error(`[mcp-wechat] Connected. Logged in as bot ${account.botId}, user ${account.userId}`);
+    void notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
   } else {
     console.error("[mcp-wechat] Connected. Not logged in. Call login_qrcode to start.");
   }

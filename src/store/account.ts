@@ -28,9 +28,24 @@ export function loadAccount(): AccountData | null {
   return readJson<AccountData>(path.join(DATA_DIR, "account.json"));
 }
 
+let warnedWinPerms = false;
+
 export function saveAccount(account: AccountData): void {
-  writeJson(path.join(DATA_DIR, "account.json"), account);
-  try { fs.chmodSync(path.join(DATA_DIR, "account.json"), 0o600); } catch { /* best-effort */ }
+  const file = path.join(DATA_DIR, "account.json");
+  writeJson(file, account);
+  if (process.platform === "win32") {
+    // Windows 上 fs.chmod 实际是 no-op，无法用 0o600 限制访问。
+    // 不做无效操作，改为一次性提醒（详见 README 的安全说明）。
+    if (!warnedWinPerms) {
+      warnedWinPerms = true;
+      console.error(
+        `[mcp-wechat] warning: ${file} stores the bot token in plaintext; ` +
+          `Windows cannot restrict it via chmod. Protect ${DATA_DIR} with folder permissions or disk encryption.`,
+      );
+    }
+  } else {
+    try { fs.chmodSync(file, 0o600); } catch { /* best-effort */ }
+  }
 }
 
 export function clearAccount(): void {
