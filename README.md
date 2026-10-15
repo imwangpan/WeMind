@@ -1,23 +1,10 @@
 # WeMind
 
-> _Your AI mind, reachable on WeChat._
+> _Your AI mind, reachable on WeChat. —— 你的 AI 大脑，在微信上随时可达。_
 
-基于 MCP（Model Context Protocol）的微信 AI 机器人，让任何 AI Agent 都能收发微信消息。
+WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态：一个**可发布的 MCP Server**，和一个**常驻自动收发的守护进程**。
 
 > 🚀 **第一次用？** 看 **[新手教程](docs/新手教程.md)** —— 从零一步步搭起你的微信 AI（两种用法：接入现有 AI 客户端 / 常驻自动助手）。
-
-> **关于本 Fork**
->
-> Fork 自 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server)，主要改动：
->
-> - **支持 Node.js 运行**（原项目仅支持 Bun）：`tsc` 构建到 `dist/`，用 `node` 运行
-> - **补齐 iLink 协议请求头** `iLink-App-Id` / `iLink-App-ClientVersion`（连接所需）
-> - **处理会话超时**（errcode `-14`），补 `notifyStart` / `notifyStop` 上下线通知
-> - 修复回复引用（`ref_msg`）死代码、修复 server 版本号硬编码
-> - Windows 凭证权限处理与安全提示、补单元测试与 CI
->
-> iLink 协议细节、session-guard 与上下线通知实现借鉴自微信官方插件
-> [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)（MIT）。
 
 ## 📖 文档 / RepoWiki
 
@@ -57,7 +44,7 @@
 | --------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
 | `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（内联进 mcp-server）       |
 | `@wemind/wechat-mcp`        | `packages/wechat-mcp`        | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入                                 | **可发布**（bin: `wemind-mcp`） |
-| `wemind`     | `packages/wechat-daemon`     | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发                                             | 可发布（bin: `wemind`）                |
+| `wemind`                    | `packages/wechat-daemon`     | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发                                             | 可发布（bin: `wemind`）         |
 
 `mcp-server` 发布时用 [tsdown](https://tsdown.dev/)（rolldown + oxc）把 `core` **内联**进单一产物，因此对外只需发布这一个自包含的包；`daemon` 在本仓库内通过 workspace 直接引用 `core` 源码，永不发布。
 
@@ -74,9 +61,7 @@
   "mcpServers": {
     "wechat": {
       "command": "node",
-      "args": [
-        "/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"
-      ]
+      "args": ["/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"]
     }
   }
 }
@@ -266,12 +251,12 @@ worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 
 
 **本地终端入口**（与微信并列、管同一任务，**不依赖微信**）：在电脑前用 `wemind` 直接管 worker 任务，适合开任务时贴长描述 / 指定工作目录，或专注电脑工作不想掏手机时。
 
-| 命令（`wemind …`） | 作用                                                                  |
-| ------------------------------------------------------ | --------------------------------------------------------------------- |
-| `task "<描述>" [--cwd <目录>] [<key\|label>]`          | 本地派发任务（默认 cwd=终端当前目录，可指定项目目录——微信入口做不到） |
-| `task-status [<key\|label>]`                           | 查看任务状态 + 轮次 + 最近输出（读本地 `task-state.json`）            |
-| `task-reply "<内容>" [<key\|label>]`                   | 回复/注入当前任务（`task-reply 继续` = 续跑）                         |
-| `task-stop [<key\|label>]`                             | 结束当前任务                                                          |
+| 命令（`wemind …`）                            | 作用                                                                  |
+| --------------------------------------------- | --------------------------------------------------------------------- |
+| `task "<描述>" [--cwd <目录>] [<key\|label>]` | 本地派发任务（默认 cwd=终端当前目录，可指定项目目录——微信入口做不到） |
+| `task-status [<key\|label>]`                  | 查看任务状态 + 轮次 + 最近输出（读本地 `task-state.json`）            |
+| `task-reply "<内容>" [<key\|label>]`          | 回复/注入当前任务（`task-reply 继续` = 续跑）                         |
+| `task-stop [<key\|label>]`                    | 结束当前任务                                                          |
 
 机制为**文件桥**：CLI 原子写 `task-inbox/*.json`，daemon 独立定时器扫描分发到同一套 task-manager，状态写 `task-state.json` 供 `task-status` 读。详见 [docs/本地双入口-命令派发与看敲.md](docs/本地双入口-命令派发与看敲.md)。
 
