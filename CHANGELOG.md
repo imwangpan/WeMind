@@ -46,6 +46,7 @@
 
 ### Fixed
 
+- **常驻/子进程控制台窗口（Windows）**：`watchdog-runner` 拉起 daemon 时漏了 `windowsHide`，导致后台常驻一个**无用且可见**的控制台窗口（它只是 node 进程的控制台，日志其实早已重定向到 `daemon.log`；手动关掉会杀死 daemon、被看门狗重拉→反复弹窗）。补齐 `windowsHide: true`：daemon 启动（`watchdog-runner`）、杀进程的 `taskkill`（`acp-brain`/`worker-acp`/`manage`）、以及 `pm2` 调用（`pm2-runner`）——消除常驻窗口与瞬时闪窗。真机验证：重启后 daemon 控制台窗口 `Visible=False`、全机无可见控制台窗口。
 - **重任务"收不到结果"= 触发 iLink 连续发送上限**（关键）：iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 10；`ret=-2` 被复用为"限流/参数错误",见 NousResearch/hermes-agent#21011「sendmessage rate limited: ret=-2」+ 微信 `errcode 40258` 秒级限流）。重任务每 15s 发一条进度、6.5min 会发 20+ 条 → 第 ~10 条后被拒,而**最终答案恰排在最后被丢**。机制修复：
   - **全局发送节流**（任意两条 ≥1.5s,`WECHAT_MIN_SEND_GAP_MS`）；
   - **按用户、跨回合持续的发送计数**（`budgetOf`），**只在该用户发来任何消息时重置**（镜像服务端"距上一条用户消息计数"规则）——修正了"新任务从 0 计数撞上限"的 bug；

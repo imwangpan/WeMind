@@ -71,6 +71,7 @@ export async function runWatchdog(): Promise<void> {
     const child: ChildProcess = spawn(process.execPath, [cliPath, "daemon"], {
       env: process.env, // WECHAT_ACCOUNT 已在本进程环境中
       stdio: ["ignore", logFd, logFd], // stdout/stderr 都并入 daemon.log（与 run-daemon.ps1 一致）
+      windowsHide: true, // 不弹出控制台窗口（Windows）：日志已重定向到 daemon.log，无需可见窗口
     });
     const code = await new Promise<number>((resolve) => {
       child.on("exit", (c) => resolve(c ?? -1));

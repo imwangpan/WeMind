@@ -67,7 +67,10 @@ function reset(): void {
   if (c?.pid) {
     try {
       if (process.platform === "win32")
-        spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
+        spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true, // 避免瞬时闪出控制台窗口
+        });
       else c.kill();
     } catch {
       /* ignore */
