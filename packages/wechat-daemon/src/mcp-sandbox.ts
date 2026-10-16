@@ -4,6 +4,7 @@ import os from "node:os";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { resolveAgent } from "./brain-agents.js";
+import { loadBrainConfig } from "./brain-config.js";
 import { readMcpServers, withMcpServers, parseJsonc } from "./agent-mcp.js";
 
 /**
@@ -17,7 +18,7 @@ import { readMcpServers, withMcpServers, parseJsonc } from "./agent-mcp.js";
  * kiro 行为与改造前完全一致（默认值即 kiro 约定）。
  */
 
-const AG = resolveAgent();
+const AG = resolveAgent(loadBrainConfig());
 
 /** brain 专用沙箱根目录（由 agent 的 homeEnvVar 指向它）。 */
 export const BRAIN_HOME =
