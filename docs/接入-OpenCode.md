@@ -9,7 +9,7 @@
 ## 0. TL;DR
 
 - WeMind 有**两种接入形态**：① `@wemind/wechat-mcp`（OpenCode 当 MCP 客户端消费微信工具）；② daemon（OpenCode 当**常驻 ACP 大脑**）。
-- 本文重点做 **形态②**：让 `WEMIND_BRAIN=opencode` 把 daemon 的大脑换成 `opencode acp`。
+- 本文重点做 **形态②**：用 `wemind brain set opencode`（或一次性 `WEMIND_BRAIN=opencode`）把 daemon 的大脑换成 `opencode acp`。
 - **M1 已实测**：`initialize` / `session/new` / `session/prompt` / `session/load`（自愈）/ 工具调用全部可用，且 **OpenCode 全程不向客户端发反向请求**（无 `fs/*`、无 `session/request_permission`）——现有 `acp-brain.ts` 协议层**不需要改动**。
 - 剩余工作量集中在 **预设 + 沙箱**：OpenCode 的配置目录环境变量、配置文件名与 **MCP 配置格式**都与 kiro 不同，需要按 agent 适配。
 - 预计 M2（预设 + brain 沙箱）为主工作量；M3（记忆继承 + worker）顺势复用。
@@ -193,9 +193,8 @@ worker 策略相反（**继承全量 MCP，仅排除 wechat**），但同样要�
 #### Step 8 · 验证
 
 ```powershell
-$env:WEMIND_BRAIN = "opencode"
-# 解析预检（daemon 的 dist 只产物为 cli.js，故用 tsx 直跑源码）
-npx tsx -e "import('./packages/wechat-daemon/src/brain-agents.ts').then(m=>console.log(m.resolveAgent()))"
+wemind brain set opencode --restart   # 落盘持久（推荐）；一次性覆盖：$env:WEMIND_BRAIN = "opencode"
+wemind brain check                    # 真起一个进程跑 ACP 握手（initialize + session/new）
 ```
 启动 daemon 后微信发消息，`~/.wemind/<acct>/daemon.log` 应出现：
 `[acp] spawn opencode acp … → initialized → session/new|session/load → prompt ok`。

@@ -4,6 +4,7 @@ import os from "node:os";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { resolveAgent } from "./brain-agents.js";
+import { loadBrainConfig } from "./brain-config.js";
 import { readMcpServers, withMcpServers, parseJsonc } from "./agent-mcp.js";
 
 /**
@@ -19,7 +20,7 @@ import { readMcpServers, withMcpServers, parseJsonc } from "./agent-mcp.js";
  * 与 mcp-sandbox.ts 有少量重复（mirrorRealKiro/syncSettings），刻意复制以隔离演进、不动已稳定的 brain 沙箱。
  */
 
-const AG = resolveAgent();
+const AG = resolveAgent(loadBrainConfig());
 
 /** worker 专用沙箱根（由 agent 的 homeEnvVar 指向它）。 */
 export const WORKER_HOME =

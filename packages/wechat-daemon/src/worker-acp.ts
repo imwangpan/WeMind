@@ -6,6 +6,7 @@ import fs from "node:fs";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { WORKER_HOME } from "./worker-sandbox.js";
 import { resolveAgent } from "./brain-agents.js";
+import { loadBrainConfig } from "./brain-config.js";
 
 /**
  * worker ACP 客户端：维护一个常驻的 ACP agent 进程，专跑「漫长任务」（与 acp-brain 的对话大脑并存、互不干扰）。
@@ -22,7 +23,7 @@ function dlog(...a: unknown[]): void {
   console.error("[worker]", ...a);
 }
 
-const AGENT = resolveAgent(); // 复用同一 ACP agent 解析（kiro acp --trust-all-tools + KIRO_HOME 沙箱）
+const AGENT = resolveAgent(loadBrainConfig()); // 复用同一 ACP agent 解析（env > 账号 brain.json > auto）
 const WORKER_CWD = process.env.WEMIND_WORKER_CWD?.trim() || os.homedir(); // 任务工作目录（按 kiro 约定，MVP 默认主目录）
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WEMIND_WORKER_IDLE_MS) || 180_000; // 无任何帧多久算"卡死"（worker 比 brain 宽松：3min）
