@@ -152,6 +152,8 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 
 > **重置**：删 `account.json`+`state.json` = 退出登录重新扫码；删 `brain-sessions.json`+`brain-home/sessions/` = 清空对话记忆。
 
+> 📄 **速查**：改数据目录 / 迁移数据 / 环境变量用法（`WEMIND_HOME`、`WECHAT_DATA_DIR` 等，含初次运行指定路径与运行后迁移） → [docs/速查-数据目录与环境变量.md](docs/速查-数据目录与环境变量.md)。
+
 ## 本地开发
 
 ```bash
