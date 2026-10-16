@@ -83,7 +83,10 @@ function reset(): void {
   if (c?.pid) {
     try {
       if (process.platform === "win32")
-        spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
+        spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true, // 避免瞬时闪出控制台窗口
+        });
       else c.kill();
     } catch {
       /* ignore */
@@ -255,6 +258,9 @@ async function ensureProcess(): Promise<void> {
   reset();
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (AGENT.homeEnvVar) env[AGENT.homeEnvVar] = WORKER_HOME; // 配置目录（MCP/记忆）走 WORKER_HOME 沙箱
+  // 预设声明的额外环境变量（%HOME% → 沙箱根）
+  for (const [k, v] of Object.entries(AGENT.env ?? {}))
+    env[k] = v.replaceAll("%HOME%", WORKER_HOME);
   const cwd = effectiveCwd();
   const proc = spawn(AGENT.bin, AGENT.args, {
     shell: AGENT.shell,

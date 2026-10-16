@@ -18,6 +18,7 @@ function pm2Run(
     shell: true,
     stdio: opts.quiet ? "ignore" : "inherit",
     env: opts.env ?? process.env,
+    windowsHide: true, // 避免瞬时闪出控制台窗口
   });
 }
 

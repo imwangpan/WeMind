@@ -19,6 +19,7 @@
 
 ### Added
 
+- **大脑接入通用化（第二档）· OpenCode 原生预设**：新增 `opencode` 预设，`WEMIND_BRAIN=opencode` 即可让 `opencode acp` 当大脑（Windows 经 shell 启动——PATH 上只有 `opencode.cmd`）。用 **`XDG_CONFIG_HOME`** 把配置目录指向沙箱（`OPENCODE_CONFIG_DIR` 只「追加」、不替换默认 global，无法隔离，故不用），MCP 写进 `<沙箱>/opencode/opencode.json` 的 `mcp.servers`。沙箱**按 agent 分派**：`AcpAgentPreset` 新增 `configSubdir`/`mcpFormat`/`mcpConfigFile`/`catalogFile`/`env`/`inheritFiles`，新增 `agent-mcp.ts` 做 MCP 配置格式读写，`mcp-sandbox.ts`/`worker-sandbox.ts` 据此选配置目录与写法——**kiro 全部走默认值、行为不变**。记忆继承：`skills`/`agents`/`commands` 目录 junction + `AGENTS.md` 单文件拷贝；并把用户全局 `opencode.json`（去掉 `mcp` 段）作基底写入沙箱，以继承 `model` 等设置。真机端到端实测通过（微信发消息 → `opencode acp` → 自动回复）；M1 冒烟脚本（`scripts/acp-smoke.mjs`/`acp-smoke2.mjs`）确认无 ACP 反向请求。设计、隔离验证与风险见 `docs/接入-OpenCode.md`。
 - **`wemind` 常驻新增自带看门狗（方案 b 阶段 1）**：`wemind start` 默认用零依赖的 Node 看门狗常驻（detached 脱离 + 崩溃 5s 重拉 + `wrapper.pid` 单实例 + 日志并入 `daemon.log`），**不再必须装 pm2**；`--runner pm2`（或 `WEMIND_RUNNER`）仍可切回 pm2，两套共存。新增 `cli.js _watchdog` 子命令、`manage` 的 `--runner` 解析，start 前自动停现有 runner 防双跑。Windows 真机验证通过；跨平台开机自启（`service install`）留阶段 2。设计见 `docs/wemind-CLI化设计.md` §10。
 - **可发布的 `wemind` CLI + 新手教程**：把常驻应用（原 `@wemind/wechat-daemon`）改造为可发布的 **`wemind`** 命令行包——`npm i -g wemind` / `npx wemind` 即可用，全程不碰源码、跨平台。统一 bin 分发：`wemind login/list/start/stop/task/daemon`（`daemon` 跑本体、其余即原 `manage` 子命令）；常驻委托 **pm2**（方案 a：看门狗 / 自启 / 多账号）。打包用 tsdown 把 core 内联为单文件 `dist/cli.js`（保留 shebang）。与轻包 `@wemind/wechat-mcp` 构成**两个对外发布入口**（前者完整助手、后者纯 MCP 工具）。新增面向新用户的 [新手教程](docs/新手教程.md)（两条路线、两阶段安装、通俗一步步）。设计见 `docs/wemind-CLI化设计.md`。
 - **本地双入口：命令派发 + 命令式看/敲（方案 C 迭代）**：给 worker 任务加**本地终端入口**，与微信入口并列管同一任务。新增 `manage.js` 命令 `task "<描述>" [--cwd <目录>]`（本地派发，默认 cwd=终端当前目录——微信入口做不到指定工作目录）、`task-reply`（注入/回复）、`task-status`（看状态 + 最近输出，**不依赖微信**）、`task-stop`（结束）。机制为**文件桥**：CLI 原子写 `~/.wemind/<account>/task-inbox/*.json`，daemon 独立定时器（`WEMIND_TASK_SCAN_MS` 默认 1s，不挂 poller）扫描分发到 task-manager（dispatch/reply/stop），并把任务状态快照写 `task-state.json` 供 `task-status` 读；启动清空 inbox 防重放、写命令前预检 daemon 存活。worker-acp 支持 per-task cwd（`setWorkerCwd`，spawn 时生效）。两入口复用同一 task-manager，微信侧行为不变。本地端到端实测通过。详见 `docs/本地双入口-命令派发与看敲.md`。
@@ -45,6 +46,7 @@
 
 ### Fixed
 
+- **常驻/子进程控制台窗口（Windows）**：`watchdog-runner` 拉起 daemon 时漏了 `windowsHide`，导致后台常驻一个**无用且可见**的控制台窗口（它只是 node 进程的控制台，日志其实早已重定向到 `daemon.log`；手动关掉会杀死 daemon、被看门狗重拉→反复弹窗）。补齐 `windowsHide: true`：daemon 启动（`watchdog-runner`）、杀进程的 `taskkill`（`acp-brain`/`worker-acp`/`manage`）、以及 `pm2` 调用（`pm2-runner`）——消除常驻窗口与瞬时闪窗。真机验证：重启后 daemon 控制台窗口 `Visible=False`、全机无可见控制台窗口。
 - **重任务"收不到结果"= 触发 iLink 连续发送上限**（关键）：iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 10；`ret=-2` 被复用为"限流/参数错误",见 NousResearch/hermes-agent#21011「sendmessage rate limited: ret=-2」+ 微信 `errcode 40258` 秒级限流）。重任务每 15s 发一条进度、6.5min 会发 20+ 条 → 第 ~10 条后被拒,而**最终答案恰排在最后被丢**。机制修复：
   - **全局发送节流**（任意两条 ≥1.5s,`WECHAT_MIN_SEND_GAP_MS`）；
   - **按用户、跨回合持续的发送计数**（`budgetOf`），**只在该用户发来任何消息时重置**（镜像服务端"距上一条用户消息计数"规则）——修正了"新任务从 0 计数撞上限"的 bug；
