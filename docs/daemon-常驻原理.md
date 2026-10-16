@@ -34,6 +34,8 @@ Windows 计划任务（登录触发）  或  启动文件夹里的 .vbs
 | `daemon.pid` | ② daemon | `index.ts` 启动时 | 精确定位本账号 node 进程 |
 | `brain.pid` | ③ 大脑 | `acp-brain.ts` spawn 后 | 区分「bot 的大脑」与用户自己日常用的 agent，便于清理 |
 
+> **身份校验（防 pid 复用）**：pid 会被系统复用（尤其**重启后**）——只凭「pid 还活着」就杀进程或判定「运行中」，可能**误杀别人的进程**、或反而看不出「其实没起来」。所以所有基于 pid 文件的判断/停止都会先**核对该 pid 的命令行是否确属本程序**（`proc-identity.ts`）：daemon/wrapper 需含 `wechat-daemon/dist/cli.js` 或 `run-daemon.ps1`；大脑需含其启动命令（如 `opencode acp`，据此与用户自己的 `opencode serve` 区分）。查不到命令行时**一律判否、不杀**。
+
 > 停止顺序必须自上而下：**先停 wrapper（断掉看门狗），再停 daemon，最后清大脑**——否则先杀 daemon 只会被 wrapper 在 5 秒后重新拉起。
 
 ---
@@ -170,7 +172,7 @@ foreach ($key in $accounts) {
 | 命令 | 做什么 |
 |------|--------|
 | `start <key\|label>` | 起该账号的 wrapper（经 `Start-Process` 脱离） |
-| `list` | 列出各账号状态（读 wrapper/daemon/brain pid 判断「运行中」） |
+| `list` | 列出各账号状态（读 wrapper/daemon/brain pid，并**核对命令行身份**后判断「运行中」） |
 | `logout <key>` | 停整条链（wrapper→daemon→brain）+ iLink 下线 + 清凭证，**保留目录** |
 | `delete <key>` | 停整条链 + 删数据目录 + 注销注册表 |
 
@@ -188,6 +190,7 @@ foreach ($key in $accounts) {
 | 登录会话过期 `-14` | ② daemon | 暂停 1 小时，等重新登录后自动恢复 |
 | 重复启动 / 多实例 | ① Mutex | 抢不到锁的 wrapper 直接退出 |
 | 开机没起来 | 〇 触发器 | 检查计划任务是否存在/启用、PS7 路径、`ExecutionTimeLimit=0` |
+| 开机没起来（陈旧 pid 被复用） | 〇/① pid 文件 | pid 存活还须**身份校验**确属本程序，否则看门狗会误判「已有实例」而静默退出 |
 
 ---
 
