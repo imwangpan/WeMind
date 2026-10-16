@@ -64,8 +64,9 @@ describe("matchesMarkers（纯逻辑，无系统调用）", () => {
     expect(matchesMarkers(String.raw`opencode.exe serve --service`, m)).toBe(false);
   });
 
-  it("brainPidMarkers：剥扩展名/取文件名；bin 为空 → 空（恒判否）", () => {
+  it("brainPidMarkers：剥扩展名/取文件名（两种分隔符都认）；bin 为空 → 空（恒判否）", () => {
     expect(brainPidMarkers(String.raw`C:\x\opencode.cmd`, ["acp"])).toEqual([["opencode", "acp"]]);
+    expect(brainPidMarkers("/usr/local/bin/opencode", ["acp"])).toEqual([["opencode", "acp"]]);
     expect(brainPidMarkers("kiro-cli.exe", ["acp", "--trust-all-tools"])).toEqual([
       ["kiro-cli", "acp", "--trust-all-tools"],
     ]);

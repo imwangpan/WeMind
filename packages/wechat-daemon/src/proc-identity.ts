@@ -25,6 +25,15 @@ function normalize(s: string): string {
   return s.replaceAll("\\", "/").toLowerCase();
 }
 
+/**
+ * 取文件名。**不依赖平台**：`/` 与 `\` 都当分隔符——
+ * POSIX 的 `path.basename` 不认 `\`，会把 Windows 风格路径整条留下（CI 上踩过）。
+ */
+function baseName(p: string): string {
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
 /** 某条命令行是否命中「任一 marker 组合」（组合内每个 token 都必须出现、大小写与斜杠不敏感）。 */
 export function matchesMarkers(line: string | null | undefined, markerSets: string[][]): boolean {
   if (!line) return false;
@@ -112,7 +121,7 @@ export const CLI_PID_MARKERS: string[][] = [["wechat-daemon", "cli.js"], ["run-d
  * bin 为空（配置异常）时返回空数组 → matchesMarkers 恒判否，绝不误杀。
  */
 export function brainPidMarkers(bin: string, args: string[]): string[][] {
-  const name = path.basename(bin ?? "").replace(/\.(exe|cmd|bat|ps1)$/i, "");
+  const name = baseName(bin ?? "").replace(/\.(exe|cmd|bat|ps1)$/i, "");
   const tokens = [name, ...args].filter((t) => t !== "");
   return tokens.length ? [tokens] : [];
 }
