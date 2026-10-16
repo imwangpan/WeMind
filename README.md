@@ -69,18 +69,19 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
 
 ### OpenCode
 
-在 `opencode.json` 中添加：
+在 `opencode.json` 中添加（V2 格式：MCP server 定义在 `mcp.servers` 下）：
 
 ```json
 {
   "mcp": {
-    "wechat": {
-      "type": "local",
-      "command": [
-        "node",
-        "/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"
-      ],
-      "enabled": true
+    "servers": {
+      "wechat": {
+        "type": "local",
+        "command": [
+          "node",
+          "/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"
+        ]
+      }
     }
   }
 }
@@ -300,6 +301,8 @@ daemon 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio
 `kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量即可。协议层（`session/new`/`prompt`/`update` 等）是标准 ACP，所有 ACP agent 共用。
 
 > 详细步骤、各 agent 需确认的 4 件事、MCP 沙箱差异、验证方法见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)。
+>
+> **OpenCode 已内置预设**：`WEMIND_BRAIN=opencode` 即可让 `opencode acp` 当大脑（自动用 `XDG_CONFIG_HOME` 隔离配置目录、curated MCP、继承记忆/技能）。完整设计、M1 实测与风险见 **[docs/接入-OpenCode.md](docs/接入-OpenCode.md)**。
 
 ### 收发图片
 
