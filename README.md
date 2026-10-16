@@ -2,7 +2,7 @@
 
 > _Your AI mind, reachable on WeChat. —— 你的 AI 大脑，在微信上随时可达。_
 
-WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态：一个**可发布的 MCP Server**，和一个**常驻自动收发的守护进程**。
+WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态：一个**已发布到 npm 的 MCP Server**，和一个**常驻自动收发的守护进程**。
 
 > 🚀 **第一次用？** 看 **[新手教程](docs/新手教程.md)** —— 从零一步步搭起你的微信 AI（两种用法：接入现有 AI 客户端 / 常驻自动助手）。
 
@@ -43,14 +43,14 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
 | 包                          | 路径                         | 说明                                                                                         | 发布                            |
 | --------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
 | `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（内联进 mcp-server）       |
-| `@wemind/wechat-mcp`        | `packages/wechat-mcp`        | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入                                 | **可发布**（bin: `wemind-mcp`） |
-| `wemind`                    | `packages/wechat-daemon`     | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发                                             | 可发布（bin: `wemind`）         |
+| `@wemind/wechat-mcp`        | `packages/wechat-mcp`        | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入                                 | **已发布**（bin: `wemind-mcp`） |
+| `wemind`                    | `packages/wechat-daemon`     | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发                                             | 未发布（bin: `wemind`）         |
 
 `mcp-server` 发布时用 [tsdown](https://tsdown.dev/)（rolldown + oxc）把 `core` **内联**进单一产物，因此对外只需发布这一个自包含的包；`daemon` 在本仓库内通过 workspace 直接引用 `core` 源码，永不发布。
 
 ## 快速开始
 
-> **接入形态**：`@wemind/wechat-mcp` 设计为可发布的独立 npm 包，未来可用 `npx -y @wemind/wechat-mcp` 直接接入。当前尚未发布到公共 registry，请先按「本地开发」构建，再用绝对路径指向 `packages/wechat-mcp/dist/index.js` 接入 MCP 客户端。
+> **接入形态**：`@wemind/wechat-mcp` 已发布到 npm，可直接通过 `npx -y @wemind/wechat-mcp` 接入。以下配置适用于 Claude Desktop、OpenCode、Cursor 等 MCP 客户端。本地开发时也可以构建后直接运行 `packages/wechat-mcp/dist/index.js`。
 
 ### Claude Desktop
 
@@ -60,8 +60,8 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
 {
   "mcpServers": {
     "wechat": {
-      "command": "node",
-      "args": ["/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "@wemind/wechat-mcp"]
     }
   }
 }
@@ -77,10 +77,7 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
     "servers": {
       "wechat": {
         "type": "local",
-        "command": [
-          "node",
-          "/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"
-        ]
+        "command": ["npx", "-y", "@wemind/wechat-mcp"]
       }
     }
   }
@@ -89,10 +86,13 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
 
 ### Cursor / 其他 MCP 客户端
 
+Cursor 等客户端用与 Claude Desktop 相同的 `mcpServers` 结构（Cursor 的配置文件为 `~/.cursor/mcp.json`）：
+
 ```json
 {
-  "command": "node",
-  "args": ["/abs/path/to/WeMind/packages/wechat-mcp/dist/index.js"]
+  "mcpServers": {
+    "wechat": { "command": "npx", "args": ["-y", "@wemind/wechat-mcp"] }
+  }
 }
 ```
 
@@ -180,7 +180,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 
 ## 守护进程（daemon）：脱离 kiro-cli 常驻自动收发
 
-> 📦 **作为 `wemind` CLI 使用**：本守护进程已可打包为可发布的 **`wemind`** 命令（`npm i -g wemind` 后用 `wemind login` / `start` / `list` / `task`，常驻委托 pm2）。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**；下文是从源码运行与原理说明。
+> 📦 **作为 `wemind` CLI 使用**：本守护进程已打包为 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`，常驻委托 pm2）——**尚未发布到 npm**，当前请按下文从源码运行（发布后 `npm i -g wemind` 即可全局使用）。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**。
 
 `packages/wechat-daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
 调 **常驻 `kiro-cli acp` 进程**（JSON-RPC over stdio）当大脑生成回复 → 自动回发。
@@ -378,4 +378,4 @@ wemind login --label 工作号 --start
 
 ## 许可证
 
-MIT（沿用原项目）
+[MIT](LICENSE) —— 沿用原项目 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server)（同为 MIT）。

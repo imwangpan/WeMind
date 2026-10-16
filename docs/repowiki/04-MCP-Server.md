@@ -2,7 +2,7 @@
 
 > 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. 守护进程 Daemon](05-守护进程-Daemon.md)
 
-MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。这是 WeMind **可发布**的对外产物（bin: `wemind-mcp`）。
+MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。这是 WeMind **已发布到 npm** 的对外产物（`@wemind/wechat-mcp`，bin: `wemind-mcp`）。
 
 ## 4.1 模块结构
 
@@ -112,34 +112,38 @@ sequenceDiagram
 
 ## 4.7 接入示例
 
-构建后用绝对路径指向 `packages/wechat-mcp/dist/index.js`：
+已发布到 npm，直接用 `npx`（无需 clone / 构建）：
 
 ```json
-// Claude Desktop: claude_desktop_config.json
+// Claude Desktop / Cursor: claude_desktop_config.json / ~/.cursor/mcp.json
 {
   "mcpServers": {
-    "wechat": {
-      "command": "node",
-      "args": ["/abs/path/WeMind/packages/wechat-mcp/dist/index.js"]
-    }
+    "wechat": { "command": "npx", "args": ["-y", "@wemind/wechat-mcp"] }
   }
 }
 ```
 
 ```json
-// OpenCode: opencode.json
+// OpenCode: opencode.json（V2：server 定义在 mcp.servers 下）
 {
   "mcp": {
-    "wechat": {
-      "type": "local",
-      "command": ["node", "/abs/path/WeMind/packages/wechat-mcp/dist/index.js"],
-      "enabled": true
+    "servers": {
+      "wechat": { "type": "local", "command": ["npx", "-y", "@wemind/wechat-mcp"] }
     }
   }
 }
 ```
 
-> 设计意图：`@wemind/wechat-mcp` 是可发布的独立 npm 包，未来可用 `npx -y @wemind/wechat-mcp` 直接接入。当前尚未发布到公共 registry，需先本地构建。
+本地开发（改了本仓源码）才需构建，并用绝对路径指向 `packages/wechat-mcp/dist/index.js`：
+
+```json
+{
+  "command": "node",
+  "args": ["/abs/path/WeMind/packages/wechat-mcp/dist/index.js"]
+}
+```
+
+> 设计意图：`@wemind/wechat-mcp` 是独立发布的自包含 npm 包（tsdown 单文件、内核已内联），已于 2026-10 发布到公共 registry（`@wemind/wechat-mcp@1.0.1`）——`npx -y @wemind/wechat-mcp` 即可接入（该包只有一个 bin `wemind-mcp`，npx 按「唯一 bin」规则自动解析）。
 
 ## 4.8 打包发布（tsdown.config.ts）
 
@@ -151,7 +155,7 @@ MCP server 用 [tsdown](https://tsdown.dev/)（rolldown + oxc，tsup 的继任�
 - **`dts: false`** —— 该包不对外暴露类型；关掉也避免 tsdown 加载 `typescript` 包（TypeScript 7.0 原生已不再暴露旧 JS API，否则启动即报错）；
 - 入口 shebang（`#!/usr/bin/env node`）由 rolldown 自动保留。
 
-`package.json` 标记 `publishConfig.access: public`，是三个包里唯一可发布的。
+`package.json` 标记 `publishConfig.access: public`，是三个包里唯一**已发布**的（`@wemind/wechat-mcp`）。
 
 ## 4.9 MCP 形态 vs Daemon 形态
 
