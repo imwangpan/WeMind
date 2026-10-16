@@ -128,7 +128,7 @@ wrapper 自己不会开机自动出现，需要一个系统级触发器：
 $pwsh    = "C:\Program Files\PowerShell\7\pwsh.exe"          # 必须 PS7 全路径
 $wrapper = "<仓库绝对路径>\scripts\run-daemon.ps1"
 $action  = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`""
-Register-ScheduledTask -TaskName "mcp-wechat-daemon" `
+Register-ScheduledTask -TaskName "wemind-daemon" `
   -Action $action `
   -Trigger (New-ScheduledTaskTrigger -AtLogOn) `
   -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew) -Force

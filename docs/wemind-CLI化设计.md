@@ -1,10 +1,10 @@
 # WeMind CLI 化设计（可发布的 `wemind` 命令）
 
-> 状态：设计定稿（2026-06-24），待实现。
+> 状态：设计定稿（2026-06-24）；**已实现**（2026-10 复核：`wemind login/start/stop/list/task/daemon`、自带看门狗与 pm2 双 runner 均已落地）。唯一未落地项：`wemind service install` 自动化（见 §10 阶段 2，按需排期）。
 
 ## 1. 目标
 
-把「完整应用」（现 `@wemind/wechat-daemon` 包）做成**可发布的 `wemind` CLI**：用户 `npm i -g wemind` 或 `npx wemind …` 即可使用，**全程不碰源码、三平台通用**。
+把「完整应用」（原 `@wemind/wechat-daemon` 包）做成**可发布的 `wemind` CLI**：用户 `npm i -g wemind` 或 `npx wemind …` 即可使用，**全程不碰源码、三平台通用**。
 
 对外形成**两个发布入口**：
 
