@@ -1,0 +1,6 @@
+# 统一行尾：仓库内一律存 LF，检出也写 LF（跨平台，避免 CRLF 脏数据污染 diff）
+# 例外：Windows 脚本用 CRLF（部分 cmd.exe / PowerShell 场景更稳）
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
