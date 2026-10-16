@@ -19,7 +19,7 @@ packages/wechat-mcp/src/
 
 ## 4.2 入口与生命周期（index.ts）
 
-入口是一个标准 MCP server：用 `@modelcontextprotocol/sdk` 的 `McpServer` + `StdioServerTransport`（stdio 传输），server name 为 `wemind`，版本来自 `version.ts`。
+入口是一个标准 MCP server：用 **MCP TypeScript SDK v2** 的 `@modelcontextprotocol/server`（`McpServer`）与 `@modelcontextprotocol/server/stdio`（`StdioServerTransport`，stdio 传输），server name 为 `wemind`，版本来自 `version.ts`。
 
 启动 `main()` 流程：
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 
 import {
   getUpdates,
@@ -42,7 +42,10 @@ export async function getMessages(
 }> {
   const account = loadAccount();
   if (!account?.botToken) {
-    throw new McpError(ErrorCode.InvalidParams, "Not logged in. Call login_qrcode first.");
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      "Not logged in. Call login_qrcode first.",
+    );
   }
 
   if (isSessionPaused(account.botId)) {
@@ -102,8 +105,8 @@ export async function getMessages(
       return sessionExpiredResult(account.botId);
     }
     if (resp.errcode) {
-      throw new McpError(
-        ErrorCode.InternalError,
+      throw new ProtocolError(
+        ProtocolErrorCode.InternalError,
         `Server error: errcode=${resp.errcode} errmsg=${resp.errmsg ?? "unknown"}`,
       );
     }
