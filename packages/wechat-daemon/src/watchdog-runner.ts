@@ -7,18 +7,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, accountDir } from "@wemind/wechat-ilink-core";
 import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
+import { CLI_PID_MARKERS, isOurProcess } from "./proc-identity.js";
 
 const RESTART_DELAY_MS = 5000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function readPidFile(file: string): number | null {
   try {
@@ -29,10 +21,11 @@ function readPidFile(file: string): number | null {
   }
 }
 
-/** 单实例守卫：已有存活看门狗返回 false；否则写自己 pid、返回 true。 */
+/** 单实例守卫：已有存活**且确认是我们**的看门狗返回 false；否则写自己 pid、返回 true。 */
 function acquireSingleton(wrapperPidFile: string): boolean {
   const old = readPidFile(wrapperPidFile);
-  if (old && isAlive(old)) return false;
+  // 身份校验：陈旧 pid + 重启后 pid 复用时会误判「已有实例」→ 看门狗直接退出、daemon 静默不起。
+  if (old && isOurProcess(old, CLI_PID_MARKERS)) return false;
   fs.writeFileSync(wrapperPidFile, String(process.pid), "ascii");
   return true;
 }
