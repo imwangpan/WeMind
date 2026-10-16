@@ -33,7 +33,7 @@ npm run build           # 在仓库根：先构建出 packages/wechat-daemon/dis
 
 前提：**至少登录过一个账号**（`~/.wemind/accounts.json` 存在）。没有注册表时配置会回退到单账号 `default`（数据目录 `~/.wemind/default`）。登录见 README 的「多账号管理」。
 
-`agent 二进制要在 PATH 上`：pm2 不像 PowerShell wrapper 那样兜底找 `%LOCALAPPDATA%\Kiro-Cli`。确保 `kiro-cli`（或你选的 ACP agent）在 PATH，或在 `ecosystem.config.cjs` 的 `env` 里加 `WEMIND_BRAIN_BIN`（见 docs/接入其它-ACP-Agent.md）。
+`agent 二进制要在 PATH 上`：pm2 不像 PowerShell wrapper 那样兜底找 `%LOCALAPPDATA%\Kiro-Cli`。确保 `kiro-cli`（或你选的 ACP agent）在 PATH，或在 `ecosystem.config.cjs` 的 `env` 里加 `WEMIND_BRAIN_BIN`（见 docs/接入其它-ACP-Agent.md）。更好的做法：`wemind brain set <预设> --bin <绝对路径>` 落到账号 `brain.json`，各启动方式通吃。
 
 ---
 
@@ -120,7 +120,7 @@ pm2 save                       # 保存当前列表（改动后记得存，否�
 
 可在 `ecosystem.config.cjs` 各 app 的 `env` 里加（或系统级设置）：
 
-- `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_HOME_ENV` —— 选/配 ACP agent（见 docs/接入其它-ACP-Agent.md）；
+- `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_HOME_ENV` —— 选/配 ACP agent（见 docs/接入其它-ACP-Agent.md）。**更省心**：用 `wemind brain set <预设> [--bin <绝对路径>]` 把选择落到账号 `brain.json`——pm2 / 看门狗 / 手动启动都读它，无需在 `env` 里配；
 - `WECHAT_OWNER_ID` —— 发件人白名单（默认仅本人）；
 - `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` —— 大脑回合空闲/硬超时。
 
