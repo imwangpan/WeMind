@@ -112,13 +112,15 @@ async function main() {
 
   const account = loadAccount();
   if (account?.botToken) {
-    console.error(`[wemind] Connected. Logged in as bot ${account.botId}, user ${account.userId}`);
+    console.error(
+      `[wemind/wechat-mcp] Connected. Logged in as bot ${account.botId}, user ${account.userId}`,
+    );
     void notifyStart({
       baseUrl: account.baseUrl,
       token: account.botToken,
     }).catch(() => {});
   } else {
-    console.error("[wemind] Connected. Not logged in. Call login_qrcode to start.");
+    console.error("[wemind/wechat-mcp] Connected. Not logged in. Call login_qrcode to start.");
   }
 
   // 优雅关停：通知服务端下线（best-effort，notifyStop 内部已吞异常）再退出
@@ -133,6 +135,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[wemind] Fatal error:", err);
+  console.error("[wemind/wechat-mcp] Fatal error:", err);
   process.exit(1);
 });
