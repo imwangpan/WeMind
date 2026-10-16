@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, accountDir } from "@wemind/wechat-ilink-core";
+import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
 
 const RESTART_DELAY_MS = 5000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -81,6 +82,14 @@ export async function runWatchdog(): Promise<void> {
       fs.closeSync(logFd);
     } catch {
       /* ignore */
+    }
+    if (code === BRAIN_CONFIG_EXIT_CODE) {
+      // 大脑配置错误：重拉无益（需人工修），停在看门狗循环外，避免每 5s 刷一条。
+      fs.appendFileSync(
+        log,
+        `[wrapper] 大脑配置错误（exit ${code}），已停止自动重启。修好后执行：wemind start <账号>\n`,
+      );
+      return;
     }
     fs.appendFileSync(
       log,
