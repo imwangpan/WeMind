@@ -71,6 +71,9 @@ describe("matchesMarkers（纯逻辑，无系统调用）", () => {
       ["kiro-cli", "acp", "--trust-all-tools"],
     ]);
     expect(brainPidMarkers("", [])).toEqual([]);
+    // bin 只剩目录 / 为空 → 绝不退化成「只按 args 匹配」（否则会误伤含 acp 的无关进程）
+    expect(brainPidMarkers("", ["acp"])).toEqual([]);
+    expect(brainPidMarkers("/x/", ["acp"])).toEqual([]);
   });
 });
 

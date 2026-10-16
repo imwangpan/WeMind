@@ -122,6 +122,6 @@ export const CLI_PID_MARKERS: string[][] = [["wechat-daemon", "cli.js"], ["run-d
  */
 export function brainPidMarkers(bin: string, args: string[]): string[][] {
   const name = baseName(bin ?? "").replace(/\.(exe|cmd|bat|ps1)$/i, "");
-  const tokens = [name, ...args].filter((t) => t !== "");
-  return tokens.length ? [tokens] : [];
+  if (!name) return []; // bin 为空 / 只剩目录（配置异常）→ 恒判否，绝不误杀
+  return [[name, ...args].filter((t) => t !== "")];
 }
