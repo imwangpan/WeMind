@@ -110,9 +110,18 @@ $env:WEMIND_BRAIN = "acme"   # 启动 daemon
 |------|------|------|
 | `name` | 是 | 预设名（也用于日志） |
 | `bin` | 是 | 非 Windows 可执行名 |
-| `binWin` | 否 | Windows 可执行名，缺省为 `bin + ".exe"` |
+| `binWin` | 否 | Windows 可执行名，缺省为 `bin + ".exe"`（经 shell 启动时可用裸名让 shell 解析） |
 | `args` | 是 | 进入 ACP 模式的启动参数数组 |
 | `homeEnvVar` | 否 | 配置目录环境变量名；留空则不向 agent 传沙箱目录 |
+| `shell` | 否 | 是否经 shell 启动（`.cmd`/`.bat`/`npx` 类在 Windows 需要 `true`） |
+| `realHome` | 否 | 被继承的真实配置目录（记忆/技能来源） |
+| `inheritDirs` | 否 | 从 `realHome` 链入沙箱的「目录式」记忆子目录 |
+| `inheritFiles` | 否 | 从 `realHome` 拷入沙箱的单文件记忆（如 `AGENTS.md`） |
+| `configSubdir` | 否 | agent 配置目录相对沙箱根的子路径（kiro 空；opencode `opencode`） |
+| `mcpFormat` | 否 | MCP 配置格式：`kiro`（`mcpServers`）或 `opencode`（`mcp.servers`）；默认 `kiro` |
+| `mcpConfigFile` | 否 | MCP 配置文件相对配置目录的路径（默认 `settings/mcp.json`） |
+| `catalogFile` | 否 | 可选 MCP 目录来源文件相对 `realHome` 的路径（默认 `settings/mcp.json`） |
+| `env` | 否 | 额外注入的环境变量（值里 `%HOME%` → 沙箱根），如 opencode 的 `OPENCODE_DISABLE_PROJECT_CONFIG` |
 
 ---
 
@@ -126,6 +135,7 @@ ACP agent 分两类，接入方式不同：
 | 预设键 | agent | 类型 | 状态 | 启动（示意） |
 |--------|-------|------|------|------|
 | `kiro` | kiro-cli | 原生 | ✅ **已实测**（默认） | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
+| `opencode` | OpenCode | 原生 | ✅ **已实测** | `opencode acp`，`XDG_CONFIG_HOME`（详见 [接入-OpenCode.md](接入-OpenCode.md)） |
 | `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --experimental-acp`，`GEMINI_CLI_HOME`（flag 以官方为准） |
 | `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @zed-industries/claude-code-acp`（Zed 官方适配器；需 Claude Code 登录或 `ANTHROPIC_API_KEY`） |
 | `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，需自行安装其二进制；Codex 本身暂不原生支持 ACP） |
@@ -149,10 +159,15 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 实现方式是：把 `homeEnvVar`（kiro 是 `KIRO_HOME`）指向沙箱目录，并在该目录放一个 **kiro 格式的 `mcp.json`**。
 
-**注意**：这套「沙箱 + mcp.json」目前是按 **kiro 的约定**写的。换成别的 agent 时：
+**注意**：这套「沙箱 + MCP 配置」现在**按 agent 分派**（预设字段驱动，见 `brain-agents.ts`）：
 
-- 若该 agent 也用「某个 HOME 环境变量 + 兼容的 `mcp.json`」（多数基于同生态的 CLI 类似），设对 `homeEnvVar` 即可，MCP 注入大概率可用；
-- 若该 agent 的配置目录结构 / MCP 配置格式不同，则**动态 MCP 加载/卸载功能可能不生效**（agent 读不到我们写的 `mcp.json`）。此时基本对话、工具（agent 自带的）仍正常，只是「微信里动态加载 MCP」这一项要按该 agent 的格式另行适配。
+- `homeEnvVar` 决定把哪个环境变量指向沙箱（kiro 用 `KIRO_HOME`；opencode 用 `XDG_CONFIG_HOME`——后者能**替换**默认 global 目录，实现真正隔离）；
+- `configSubdir` 决定 agent 配置目录相对沙箱根的位置（kiro 空=沙箱根；opencode `opencode`）；
+- `mcpFormat` / `mcpConfigFile` / `catalogFile` 决定 MCP 文件的结构与路径（kiro：`settings/mcp.json` 的 `mcpServers`；opencode：`opencode.json` 的 `mcp.servers`）。
+
+因此：**kiro 与 opencode 现已开箱支持「微信里动态加载/卸载 MCP」**。其它 agent 若格式不同，则是上述预设字段填对即可；实在不同再按其约定适配。
+
+- 若该 agent 也用「某个 HOME 环境变量 + 兼容结构」，设对 `homeEnvVar` 即可，MCP 注入大概率可用；
 - 该 agent 完全不需要配置目录时，把 `homeEnvVar` 留空，仅做隔离 cwd。
 
 > 简言之：**对话/工具是通用的；「动态 MCP 注入」依赖该 agent 的配置约定，跨 agent 不保证开箱即用。**
@@ -206,7 +221,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 3. 也可不经微信、直接验证解析结果：
 
    ```powershell
-   node --input-type=module -e "import { resolveAgent } from './packages/wechat-daemon/dist/brain-agents.js'; console.log(resolveAgent())"
+   npx tsx -e "import { resolveAgent } from './packages/wechat-daemon/src/brain-agents.ts'; console.log(resolveAgent())"
    ```
 
 ---

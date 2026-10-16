@@ -32,6 +32,13 @@ export type AcpAgentPreset = {
   // —— 继承「记忆/规则/技能」配置（让微信大脑与日常使用读到同样内容）——
   realHome?: string; // 该 agent 真实配置目录（被继承的来源）。不同 agent 布局不同，故下沉到预设
   inheritDirs?: string[]; // 从 realHome junction 进沙箱的「知识/记忆」类子目录（不含 MCP/会话目录）
+  inheritFiles?: string[]; // 从 realHome 拷进沙箱配置目录的「单文件」记忆（如 AGENTS.md；目录式记忆用 inheritDirs）
+  // —— 沙箱约定（不同 agent 的配置目录位置与 MCP 文件格式不同）——
+  configSubdir?: string; // agent 配置目录相对沙箱根的子路径（kiro 空=沙箱根；opencode "opencode"）
+  mcpFormat?: "kiro" | "opencode"; // MCP 配置文件的组织格式（默认 kiro）
+  mcpConfigFile?: string; // MCP 配置文件相对「配置目录」的路径（默认 settings/mcp.json）
+  catalogFile?: string; // 可选 MCP 目录来源文件相对 realHome 的路径（默认 settings/mcp.json）
+  env?: Record<string, string>; // 额外注入的环境变量；值里 %HOME% → 沙箱根目录
 };
 
 /**
@@ -61,6 +68,29 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     args: ["--experimental-acp"],
     homeEnvVar: "GEMINI_CLI_HOME",
     shell: true,
+  },
+  // OpenCode：原生 ACP（`opencode acp`）。
+  // - Windows 上是 npm shim（PATH 只有 opencode.cmd），故 shell:true + 裸名 binWin。
+  // - 配置目录走 XDG_CONFIG_HOME（指向沙箱 → 配置落在 <沙箱>/opencode/），可真正替换默认 global 目录实现隔离；
+  //   （OPENCODE_CONFIG_DIR 只「追加」不替换 global，无法隔离，故不用它。）
+  // - MCP 配置文件是 opencode.json 的 mcp.servers（格式与 kiro 的 settings/mcp.json 不同）。
+  // - 记忆/技能为目录式 skills/agents/commands + 单文件 AGENTS.md。
+  // 详见 docs/接入-OpenCode.md（含 M1 实测）。
+  opencode: {
+    name: "opencode",
+    bin: "opencode",
+    binWin: "opencode",
+    args: ["acp"],
+    shell: true,
+    homeEnvVar: "XDG_CONFIG_HOME",
+    realHome: path.join(os.homedir(), ".config", "opencode"),
+    inheritDirs: ["skills", "agents", "commands"],
+    inheritFiles: ["AGENTS.md"],
+    configSubdir: "opencode",
+    mcpFormat: "opencode",
+    mcpConfigFile: "opencode.json",
+    catalogFile: "opencode.json",
+    env: { OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, // 不从 cwd 祖先目录发现用户 opencode.json
   },
 
   // —— 需适配器（CLI 不原生支持 ACP，经第三方适配器桥接；未实测）——
@@ -92,6 +122,12 @@ export type ResolvedAgent = {
   inherit: boolean;
   realHome?: string;
   inheritDirs: string[];
+  inheritFiles: string[];
+  configSubdir: string;
+  mcpFormat: "kiro" | "opencode";
+  mcpConfigFile: string;
+  catalogFile: string;
+  env: Record<string, string>;
 };
 
 /** 解析当前要用的 ACP agent（预设 + 环境变量覆盖）。 */
@@ -129,5 +165,20 @@ export function resolveAgent(): ResolvedAgent {
     ? dirsEnv.split(/[,\s]+/).filter(Boolean)
     : (preset.inheritDirs ?? []);
 
-  return { name: preset.name, bin, args, homeEnvVar, shell, inherit, realHome, inheritDirs };
+  return {
+    name: preset.name,
+    bin,
+    args,
+    homeEnvVar,
+    shell,
+    inherit,
+    realHome,
+    inheritDirs,
+    inheritFiles: preset.inheritFiles ?? [],
+    configSubdir: preset.configSubdir ?? "",
+    mcpFormat: preset.mcpFormat ?? "kiro",
+    mcpConfigFile: preset.mcpConfigFile ?? "settings/mcp.json",
+    catalogFile: preset.catalogFile ?? "settings/mcp.json",
+    env: preset.env ?? {},
+  };
 }

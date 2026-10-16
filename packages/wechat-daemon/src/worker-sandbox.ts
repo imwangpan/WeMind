@@ -4,6 +4,7 @@ import os from "node:os";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { resolveAgent } from "./brain-agents.js";
+import { readMcpServers, withMcpServers, parseJsonc } from "./agent-mcp.js";
 
 /**
  * worker 沙箱：与 brain 沙箱（mcp-sandbox.ts）并列，但 MCP 策略相反。
@@ -12,20 +13,28 @@ import { resolveAgent } from "./brain-agents.js";
  * 而非 brain 的「默认空 + 对话中按需加载」——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。
  * 记忆/技能/规则（mirrorRealKiro）与 settings（syncSettings，含模型/信任）的继承与 brain 一致。
  *
+ * 按 agent 适配（同 mcp-sandbox.ts）：配置目录、MCP 格式、设置继承方式均随 agent 而变。
+ *
  * 设计依据：docs/方案C-MVP-远程human-in-the-loop.md §8.4。
  * 与 mcp-sandbox.ts 有少量重复（mirrorRealKiro/syncSettings），刻意复制以隔离演进、不动已稳定的 brain 沙箱。
  */
 
-/** worker 专用 KIRO_HOME（auth 在平台数据目录、不随 KIRO_HOME 移动，故 worker 仍登录态）。 */
+const AG = resolveAgent();
+
+/** worker 专用沙箱根（由 agent 的 homeEnvVar 指向它）。 */
 export const WORKER_HOME =
   process.env.WEMIND_WORKER_HOME?.trim() || path.join(DATA_DIR, "worker-home");
-const WORKER_MCP_JSON = path.join(WORKER_HOME, "settings", "mcp.json");
 
-/** MCP「目录」：可继承的 MCP 定义来源（同 brain，默认取 agent 真实配置目录的 settings/mcp.json）。 */
+/** 该 agent 在 worker 沙箱里的「配置目录」（kiro=沙箱根；opencode=<沙箱>/opencode）。 */
+export const WORKER_CONFIG_DIR = path.join(WORKER_HOME, AG.configSubdir);
+
+const WORKER_MCP_JSON = path.join(WORKER_CONFIG_DIR, AG.mcpConfigFile);
+
+/** MCP「目录」：可继承的 MCP 定义来源（同 brain，默认取 agent 真实配置目录的 catalogFile）。 */
 const CATALOG =
   process.env.WEMIND_MCP_CATALOG?.trim() ||
   process.env.WECHAT_MCP_CATALOG?.trim() ||
-  path.join(resolveAgent().realHome || path.join(os.homedir(), ".kiro"), "settings", "mcp.json");
+  path.join(AG.realHome || path.join(os.homedir(), ".kiro"), AG.catalogFile);
 
 /** worker 不继承的 MCP：wechat 始终强制排除（防回环），外加 WEMIND_WORKER_MCP_EXCLUDE 指定的。 */
 function excludeSet(): Set<string> {
@@ -49,9 +58,7 @@ function readJson(file: string): Record<string, unknown> | null {
 }
 
 function loadCatalog(): Record<string, unknown> {
-  const j = readJson(CATALOG);
-  const servers = j?.mcpServers;
-  return servers && typeof servers === "object" ? (servers as Record<string, unknown>) : {};
+  return readMcpServers(readJson(CATALOG), AG.mcpFormat);
 }
 
 /** worker 继承全量 MCP：复制 catalog 全部 server，去掉排除集与 disabled:true 的。 */
@@ -65,16 +72,16 @@ export function applyWorkerSandbox(): void {
       continue; // 跳过用户已禁用的
     servers[name] = def;
   }
+  const existing = readJson(WORKER_MCP_JSON) ?? {};
+  const next = withMcpServers(existing, servers, AG.mcpFormat);
   fs.mkdirSync(path.dirname(WORKER_MCP_JSON), { recursive: true });
-  fs.writeFileSync(WORKER_MCP_JSON, JSON.stringify({ mcpServers: servers }, null, 2), "utf-8");
+  fs.writeFileSync(WORKER_MCP_JSON, JSON.stringify(next, null, 2), "utf-8");
 }
 
-/** 继承真实 settings/ 下除 mcp.json 外的文件（cli.json 含模型/免确认等）。逻辑同 brain 的 syncSettings。 */
-function syncSettings(): void {
-  const ag = resolveAgent();
-  if (!ag.inherit || !ag.realHome) return;
-  const realSettings = path.join(ag.realHome, "settings");
-  const workerSettings = path.join(WORKER_HOME, "settings");
+/** kiro：继承真实 settings/ 下除 mcp.json 外的文件（cli.json 含模型/免确认等）。逻辑同 brain 的 syncKiroSettings。 */
+function syncKiroSettings(): void {
+  const realSettings = path.join(AG.realHome!, "settings");
+  const workerSettings = path.join(WORKER_CONFIG_DIR, "settings");
   if (!fs.existsSync(realSettings)) return;
   try {
     fs.mkdirSync(workerSettings, { recursive: true });
@@ -98,19 +105,45 @@ function syncSettings(): void {
   }
 }
 
-/** 用 junction/symlink 把真实配置目录的记忆/技能/规则类子目录链入 worker-home。逻辑同 brain 的 mirrorRealKiro。 */
-function mirrorRealKiro(): void {
-  const ag = resolveAgent();
-  if (!ag.inherit || !ag.realHome || ag.inheritDirs.length === 0) return;
-  if (path.resolve(WORKER_HOME) === path.resolve(ag.realHome)) return; // 安全：别把自己链给自己
+/** opencode：把用户全局 opencode.json(c)（去 mcp 段）作基底写入 worker 沙箱，继承 model 等；mcp 由 applyWorkerSandbox 覆盖。 */
+function syncOpencodeBase(): void {
+  const src = ["opencode.json", "opencode.jsonc"]
+    .map((f) => path.join(AG.realHome!, f))
+    .find((f) => fs.existsSync(f));
+  if (!src) return;
+  let parsed: Record<string, unknown> | null = null;
   try {
-    fs.mkdirSync(WORKER_HOME, { recursive: true });
+    const raw = fs.readFileSync(src, "utf-8");
+    parsed = src.endsWith(".jsonc")
+      ? parseJsonc(raw)
+      : (JSON.parse(raw) as Record<string, unknown>);
+  } catch {
+    return;
+  }
+  if (!parsed || typeof parsed !== "object") return;
+  delete (parsed as Record<string, unknown>).mcp;
+  fs.mkdirSync(WORKER_CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(WORKER_MCP_JSON, JSON.stringify(parsed, null, 2), "utf-8");
+}
+
+function syncSettings(): void {
+  if (!AG.inherit || !AG.realHome) return;
+  if (AG.mcpFormat === "opencode") syncOpencodeBase();
+  else syncKiroSettings();
+}
+
+/** 用 junction/symlink 把真实配置目录的记忆/技能/规则类子目录链入 worker 配置目录；单文件记忆直接拷。逻辑同 brain 的 mirrorRealKiro。 */
+function mirrorRealKiro(): void {
+  if (!AG.inherit || !AG.realHome) return;
+  if (path.resolve(WORKER_HOME) === path.resolve(AG.realHome)) return; // 安全：别把自己链给自己
+  try {
+    fs.mkdirSync(WORKER_CONFIG_DIR, { recursive: true });
   } catch {
     /* ignore */
   }
-  for (const d of ag.inheritDirs) {
-    const target = path.join(ag.realHome, d);
-    const link = path.join(WORKER_HOME, d);
+  for (const d of AG.inheritDirs) {
+    const target = path.join(AG.realHome, d);
+    const link = path.join(WORKER_CONFIG_DIR, d);
     if (!fs.existsSync(target)) continue;
     let present = false;
     try {
@@ -148,6 +181,15 @@ function mirrorRealKiro(): void {
       fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
     } catch {
       /* 权限不足等：best-effort 忽略 */
+    }
+  }
+  for (const f of AG.inheritFiles) {
+    const src = path.join(AG.realHome, f);
+    const dst = path.join(WORKER_CONFIG_DIR, f);
+    try {
+      if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
+    } catch {
+      /* ignore */
     }
   }
 }
