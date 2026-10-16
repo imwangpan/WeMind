@@ -114,7 +114,9 @@ function syncOpencodeBase(): void {
   let parsed: Record<string, unknown> | null = null;
   try {
     const raw = fs.readFileSync(src, "utf-8");
-    parsed = src.endsWith(".jsonc") ? parseJsonc(raw) : (JSON.parse(raw) as Record<string, unknown>);
+    parsed = src.endsWith(".jsonc")
+      ? parseJsonc(raw)
+      : (JSON.parse(raw) as Record<string, unknown>);
   } catch {
     return;
   }
