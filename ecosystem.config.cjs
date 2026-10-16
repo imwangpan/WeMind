@@ -37,6 +37,9 @@ function appFor(key) {
     autorestart: true,
     restart_delay: 5000,
     max_restarts: 50,
+    // 大脑配置错误（brain-agents.ts 的 BRAIN_CONFIG_EXIT_CODE=78）需人工修，重拉无益：
+    // 视为「已停止」，别反复重启刷日志（与原 wrapper、CLI 自带看门狗一致）
+    stop_exit_codes: [78],
     // 日志合并到各账号数据目录的 daemon.log，与现有约定一致
     out_file: path.join(dataDir, "daemon.log"),
     error_file: path.join(dataDir, "daemon.log"),
