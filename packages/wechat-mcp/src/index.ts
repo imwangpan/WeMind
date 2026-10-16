@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 import { loadAccount, notifyStart, notifyStop } from "@wemind/wechat-ilink-core";
 import { VERSION } from "./version.js";
@@ -77,8 +77,8 @@ IMPORTANT BEHAVIOR — you MUST follow this workflow:
 This ensures the WeChat user sees a "typing..." indicator while you are working on their request.`,
     inputSchema: getMessagesSchema,
   },
-  async (input, extra) => {
-    return await getMessages(input, extra?.signal);
+  async (input, ctx) => {
+    return await getMessages(input, ctx?.mcpReq.signal);
   },
 );
 

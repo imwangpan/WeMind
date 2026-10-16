@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 
 import {
   sendMessage,
@@ -25,7 +25,10 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
 }> {
   const account = loadAccount();
   if (!account?.botToken) {
-    throw new McpError(ErrorCode.InvalidParams, "Not logged in. Call login_qrcode first.");
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      "Not logged in. Call login_qrcode first.",
+    );
   }
   if (isSessionPaused(account.botId)) {
     return sessionExpiredResult(account.botId);
@@ -34,8 +37,8 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
   const state = loadState();
   const contextToken = state.contextTokens[`${account.botId}:${input.to}`];
   if (!contextToken) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
       `No conversation found with user ${input.to}. iLink bots cannot initiate; receive a message from them first.`,
     );
   }
