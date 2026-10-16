@@ -1,0 +1,78 @@
+name: Publish @wemind/wechat-mcp
+
+on:
+  push:
+    branches: [main]
+    # MCP 包、打包内联的 core 或构建配置变更时运行检查。
+    paths:
+      - "packages/wechat-mcp/**"
+      - "packages/wechat-ilink-core/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/wechat-mcp-publish.yml"
+  # 也可以在 GitHub Actions 页面手动运行。
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-wechat-mcp
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: 校验 MCP 包版本与锁文件一致
+        run: |
+          node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const packageJson = JSON.parse(readFileSync("packages/wechat-mcp/package.json", "utf8"));
+          const lockfile = JSON.parse(readFileSync("package-lock.json", "utf8"));
+          const lockVersion = lockfile.packages["packages/wechat-mcp"]?.version;
+          if (packageJson.version !== lockVersion) {
+            console.error(`版本不一致：package.json=${packageJson.version}, package-lock.json=${lockVersion}`);
+            process.exit(1);
+          }
+          NODE
+      - name: Ensure npm supports trusted publishing
+        run: npm install --global "npm@^11.5.1"
+      - run: npm ci
+      - name: Install Rolldown Linux binding
+        run: |
+          binding_version="$(node -p "require('./node_modules/rolldown/package.json').optionalDependencies['@rolldown/binding-linux-x64-gnu']")"
+          npm install --no-save --ignore-scripts "@rolldown/binding-linux-x64-gnu@$binding_version"
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - name: Verify npm package contents
+        run: npm pack --dry-run --workspace @wemind/wechat-mcp
+      # 只有当前版本尚未发布到 npm 时才会发布；代码变更后需提升版本号，否则只运行检查并跳过发布。
+      - name: Check whether this version is already published
+        id: version
+        shell: bash
+        run: |
+          package_name="$(node -p "require('./packages/wechat-mcp/package.json').name")"
+          package_version="$(node -p "require('./packages/wechat-mcp/package.json').version")"
+          if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${package_name}@${package_version} is already published; skipping publish."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish to npm
+        if: steps.version.outputs.publish == 'true'
+        run: npm publish --workspace @wemind/wechat-mcp
