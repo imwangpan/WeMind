@@ -28,6 +28,14 @@ import {
 import { pm2Start, pm2Stop } from "./pm2-runner.js";
 import { watchdogStart } from "./watchdog-runner.js";
 import {
+  CLI_PID_MARKERS,
+  brainPidMarkers,
+  commandLines,
+  isAlive,
+  isOurProcess,
+  matchesMarkers,
+} from "./proc-identity.js";
+import {
   ACP_AGENT_PRESETS,
   AUTO_PROBE_ORDER,
   resolveAgent,
@@ -70,13 +78,12 @@ function readPid(dir: string, name: string): number | null {
     return null;
   }
 }
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * 该 pid 是否「活着**且确实是我们自己的** CLI 进程」。
+ * 只判存活不够：pid 会复用（尤其重启后），陈旧 pid 文件可能指向**别人的**进程 → 会误杀/误判。
+ */
+function aliveOurs(pid: number | null, markers: string[][] = CLI_PID_MARKERS): boolean {
+  return isOurProcess(pid, markers);
 }
 function killPid(pid: number): void {
   if (process.platform === "win32")
@@ -137,21 +144,25 @@ function startDaemon(key: string, runner?: string): void {
 function stopDaemon(key: string): string {
   pm2Stop(key); // best-effort：停掉 pm2 托管的 app（若有）
   const dir = accountDir(key);
-  const wpid = readPid(dir, "wrapper.pid");
-  const dpid = readPid(dir, "daemon.pid");
-  const bpid = readPid(dir, "brain.pid");
+  const ag = resolveAgent(loadBrainConfig(dir));
+  const cand = [
+    { pid: readPid(dir, "wrapper.pid"), name: "wrapper", markers: CLI_PID_MARKERS },
+    { pid: readPid(dir, "daemon.pid"), name: "daemon", markers: CLI_PID_MARKERS },
+    { pid: readPid(dir, "brain.pid"), name: "brain", markers: brainPidMarkers(ag.bin, ag.args) },
+  ];
+  // 只杀「活着**且身份确认**」的：pid 会被复用，陈旧 pid 文件可能指向别人的进程 → 绝不误杀。
+  // 命令行一次批量查（Windows 下较慢）；正常情况（陈旧 pid 早已不存在）根本不会发起查询。
+  const lines = commandLines(cand.map((c) => c.pid));
   const stopped: string[] = [];
-  if (wpid && alive(wpid)) {
-    killPid(wpid);
-    stopped.push(`wrapper ${wpid}`);
-  }
-  if (dpid && alive(dpid)) {
-    killPid(dpid);
-    stopped.push(`daemon ${dpid}`);
-  }
-  if (bpid && alive(bpid)) {
-    killPid(bpid);
-    stopped.push(`brain ${bpid}`);
+  const skipped: string[] = [];
+  for (const c of cand) {
+    if (!c.pid || !isAlive(c.pid)) continue;
+    if (matchesMarkers(lines.get(c.pid), c.markers)) {
+      killPid(c.pid);
+      stopped.push(`${c.name} ${c.pid}`);
+    } else {
+      skipped.push(`${c.name} ${c.pid}`); // 活着的 pid 但不是我们的（pid 复用）→ 不杀
+    }
   }
   for (const f of ["wrapper.pid", "daemon.pid", "brain.pid"]) {
     try {
@@ -160,7 +171,11 @@ function stopDaemon(key: string): string {
       /* ignore */
     }
   }
-  return stopped.length ? `已停止 ${stopped.join(" + ")}` : "无运行中的进程";
+  const parts: string[] = [];
+  if (stopped.length) parts.push(`已停止 ${stopped.join(" + ")}`);
+  if (skipped.length)
+    parts.push(`跳过 ${skipped.join(" + ")}（非本程序，未杀；已清陈旧 pid 文件）`);
+  return parts.length ? parts.join("；") : "无运行中的进程";
 }
 
 /** 把 STAGING 的登录按 botId 归档 + 登记。 */
@@ -291,14 +306,27 @@ function cmdList(): string {
   const def = getDefaultKey();
   const accs = listAccounts();
   if (!accs.length) return "（无已登记账号）。用 `login` 添加。";
-  return accs
-    .map((a) => {
-      const dir = accountDir(a.key);
-      const dpid = readPid(dir, "daemon.pid");
-      const bpid = readPid(dir, "brain.pid");
-      const running = dpid && alive(dpid) ? `运行中(pid ${dpid})` : "已停止";
-      const brainPid = bpid && alive(bpid) ? `  brain(pid ${bpid})` : "";
-      return `- ${a.key}${a.key === def ? " [默认]" : ""}  label=${a.label}  botId=${a.botId}  agent=${agentLabel(dir)}  ${running}${brainPid}`;
+  // 先收集各账号的 pid + 大脑特征，再**一次性**批量查命令行（Windows 下每次查询较慢）；
+  // 只凭「pid 活着」显示状态会在重启后 pid 复用时骗人，所以要带身份校验。
+  const entries = accs.map((a) => {
+    const dir = accountDir(a.key);
+    const ag = resolveAgent(loadBrainConfig(dir));
+    return {
+      a,
+      dir,
+      dpid: readPid(dir, "daemon.pid"),
+      bpid: readPid(dir, "brain.pid"),
+      brainMarkers: brainPidMarkers(ag.bin, ag.args),
+    };
+  });
+  const lines = commandLines(entries.flatMap((e) => [e.dpid, e.bpid]));
+  const aliveOursIn = (pid: number | null, markers: string[][]): boolean =>
+    !!pid && matchesMarkers(lines.get(pid), markers);
+  return entries
+    .map((e) => {
+      const running = aliveOursIn(e.dpid, CLI_PID_MARKERS) ? `运行中(pid ${e.dpid})` : "已停止";
+      const brainPid = aliveOursIn(e.bpid, e.brainMarkers) ? `  brain(pid ${e.bpid})` : "";
+      return `- ${e.a.key}${e.a.key === def ? " [默认]" : ""}  label=${e.a.label}  botId=${e.a.botId}  agent=${agentLabel(e.dir)}  ${running}${brainPid}`;
     })
     .join("\n");
 }
@@ -361,7 +389,7 @@ function cmdBrainSet(
   ];
   if (opts.restart) {
     const dpid = readPid(dir, "daemon.pid");
-    if (dpid && alive(dpid)) {
+    if (aliveOurs(dpid)) {
       startDaemon(key);
       lines.push(`已重启 daemon（账号 ${key}）。`);
     } else {
@@ -514,7 +542,7 @@ function pickKey(sel?: string): string {
 /** 预检 daemon 存活（本地命令需 daemon 在跑才有人消费收件箱）。 */
 function requireDaemonAlive(key: string): void {
   const pid = readPid(accountDir(key), "daemon.pid");
-  if (!pid || !alive(pid))
+  if (!aliveOurs(pid))
     throw new Error(
       `账号 ${key} 的 daemon 未运行。先启动：node packages/wechat-daemon/dist/manage.js start ${key}`,
     );
