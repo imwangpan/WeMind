@@ -64,7 +64,10 @@ function alive(pid: number): boolean {
 }
 function killPid(pid: number): void {
   if (process.platform === "win32")
-    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true, // 避免瞬时闪出控制台窗口
+    });
   else {
     try {
       process.kill(pid);
