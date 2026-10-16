@@ -47,7 +47,7 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
     msg: {
       from_user_id: "",
       to_user_id: input.to,
-      client_id: generateId("mcp-wechat"),
+      client_id: generateId("wemind-mcp"),
       message_type: MessageType.BOT,
       message_state: MessageState.FINISH,
       item_list: [{ type: MessageItemType.TEXT, text_item: { text: input.text } }],
