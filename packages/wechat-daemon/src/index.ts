@@ -36,6 +36,8 @@ import type {
   ImageItem,
 } from "@wemind/wechat-ilink-core";
 import { askBrain, newSession, restart } from "./acp-brain.js";
+import { resolveAgent, agentProblem, BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
+import { loadBrainConfig } from "./brain-config.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
 import { extractImages, resolveImageBytes } from "./image-reply.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
@@ -799,6 +801,17 @@ function scanTaskInbox(owner: string): void {
 }
 
 export async function runDaemon(): Promise<void> {
+  // 启动即校验大脑：早失败、说人话——避免「进程看着正常、直到第一条消息才炸」
+  // （历史上表现为反复「⏳ 响应中断了，正在自动重试…」，实为默认大脑的二进制没装）。
+  const agent = resolveAgent(loadBrainConfig());
+  const brainProblem = agentProblem(agent);
+  if (brainProblem) {
+    log(`FATAL 大脑不可用：${brainProblem}`);
+    process.exit(BRAIN_CONFIG_EXIT_CODE); // 看门狗据此停止自动重启（配置错误重拉无益）
+  }
+  log(
+    `brain=${agent.name} bin=${agent.bin} args=[${agent.args.join(" ")}] shell=${agent.shell} (source: ${agent.source})`,
+  );
   const account = loadAccount();
   if (!account?.botToken) {
     log("not logged in; run the MCP login_qrcode flow first.");

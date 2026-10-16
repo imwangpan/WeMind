@@ -38,13 +38,48 @@ daemon 只用到 ACP 的标准方法，与具体是哪个 agent 无关：
 
 ---
 
-## 3. 配置方式 A：环境变量（零代码，最快）
+## 3. 配置方式 A：选大脑（推荐落盘持久；环境变量为一次性覆盖）
 
-给 daemon 进程设这些环境变量即可，优先级高于预设默认值：
+**选择存在「账号级配置文件」里**（`<数据目录>/brain.json`），任何入口重启都能复现；`wemind brain` 是切换它的正门：
+
+| 命令 | 作用 |
+|------|------|
+| `wemind brain [<key\|label>]` | 查看：配置、生效值、来源、二进制是否可用 |
+| `wemind brain set <预设\|auto> [--bin X] [--args "…"] [--shell\|--no-shell] [--restart] [<key\|label>]` | 写入 brain.json（`--restart` 顺带重启 daemon 立即生效） |
+| `wemind brain unset [<key\|label>]` | 删除 brain.json，回退到自动探测/默认 |
+| `wemind brain check [<key\|label>]` | 真起一个进程跑 ACP 握手（`initialize` + `session/new`），验证「不仅找得到、而且能说 ACP」 |
+
+```powershell
+wemind brain set opencode --restart    # 切到 OpenCode 并立即重启 daemon
+wemind brain                            # 查看当前大脑
+wemind brain check                      # 真机自检（真实 ACP 握手）
+```
+
+`brain.json` 形如（`bin` / `args` / `shell` / `homeEnvVar` 可选，用于**覆盖该预设**的启动细节）：
+
+```json
+{ "agent": "opencode" }
+```
+
+> `--bin` / `--args` 只覆盖**已知预设**的启动细节（例如把 `opencode` 预设指向绝对路径的 `opencode.exe`）。
+> 全新 agent 请先按 §4 加一条预设——预设携带沙箱/MCP 约定，光有二进制不足以接进来。
+
+### 3.1 选择优先级（`resolveAgent()`）
+
+```
+预设：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
+```
+
+- **`auto`（未配置时的默认）**：按 `kiro → opencode → gemini` 取第一个**二进制在 PATH 上可解析**的预设；适配器类（`claude-code`/`codex`）不参与（`npx` 几乎总存在，会误选）。
+- 一个都没装 → daemon **启动即失败并说人话**（不再「跑起来、第一条消息才炸」），提示安装或 `wemind brain set`。
+
+### 3.2 环境变量（一次性覆盖，优先级最高）
+
+临时试别的 agent 用它；**别写进 profile**——那等于把隐式默认换成另一个值固定死，换个入口重启仍会漂移。给 daemon 进程设这些变量，优先级高于 brain.json 与预设默认值：
 
 | 环境变量 | 作用 | 默认 |
 |------|------|------|
-| `WEMIND_BRAIN` | 选用哪个预设（见 §5），如 `kiro` / `gemini` | `kiro` |
+| `WEMIND_BRAIN` | 选用哪个预设（见 §5），如 `kiro` / `opencode` / `auto` | `auto`（自动探测） |
 | `WEMIND_BRAIN_BIN` | 覆盖二进制（绝对路径或 PATH 上的名字） | 预设自动在 PATH 解析 |
 | `WEMIND_BRAIN_ARGS` | 覆盖 ACP 启动参数（**空格分隔**） | 预设值 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「配置目录环境变量名」（指向 brain 沙箱） | 预设值 |
@@ -58,9 +93,9 @@ daemon 只用到 ACP 的标准方法，与具体是哪个 agent 无关：
 解析优先级（`resolveAgent()`）：
 
 ```
-二进制：WEMIND_BRAIN_BIN  >  (kiro 预设时) KIRO_CLI_BIN  >  PATH 查找  >  预设裸名
-参数：  WEMIND_BRAIN_ARGS（空格切分）  >  预设 args
-目录变量：WEMIND_BRAIN_HOME_ENV  >  预设 homeEnvVar
+二进制：WEMIND_BRAIN_BIN  >  (kiro 预设时) KIRO_CLI_BIN  >  brain.json 的 bin  >  PATH 查找  >  预设裸名
+参数：  WEMIND_BRAIN_ARGS（空格切分）  >  brain.json 的 args  >  预设 args
+目录变量：WEMIND_BRAIN_HOME_ENV  >  brain.json 的 homeEnvVar  >  预设 homeEnvVar
 ```
 
 ### 例子
@@ -97,11 +132,12 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
 };
 ```
 
-然后构建并用 `WEMIND_BRAIN=acme` 选用：
+然后构建并选用（推荐落盘持久）：
 
 ```powershell
 npm run build
-$env:WEMIND_BRAIN = "acme"   # 启动 daemon
+wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
+# 或一次性覆盖（仅对本次启动的 daemon 生效）：$env:WEMIND_BRAIN = "acme"
 ```
 
 `AcpAgentPreset` 字段：
@@ -134,7 +170,7 @@ ACP agent 分两类，接入方式不同：
 
 | 预设键 | agent | 类型 | 状态 | 启动（示意） |
 |--------|-------|------|------|------|
-| `kiro` | kiro-cli | 原生 | ✅ **已实测**（默认） | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
+| `kiro` | kiro-cli | 原生 | ✅ **已实测** | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
 | `opencode` | OpenCode | 原生 | ✅ **已实测** | `opencode acp`，`XDG_CONFIG_HOME`（详见 [接入-OpenCode.md](接入-OpenCode.md)） |
 | `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --experimental-acp`，`GEMINI_CLI_HOME`（flag 以官方为准） |
 | `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @zed-industries/claude-code-acp`（Zed 官方适配器；需 Claude Code 登录或 `ANTHROPIC_API_KEY`） |
@@ -218,7 +254,14 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
    - 卡在 `initialize` 超时 → 该 agent 可能不是 ACP，或参数没真正进入 ACP server 模式（检查 §2 第 4 项）；
    - `prompt ok` 出现即表示一轮成功。
 
-3. 也可不经微信、直接验证解析结果：
+3. 也可不经微信、直接验证选择与连通性：
+
+   ```powershell
+   wemind brain          # 查看：解析到哪个预设/二进制、来源、是否可用
+   wemind brain check    # 真起一个 agent 进程跑 ACP 握手（initialize + session/new）
+   ```
+
+   想直接看解析对象（不走 CLI）：
 
    ```powershell
    npx tsx -e "import { resolveAgent } from './packages/wechat-daemon/src/brain-agents.ts'; console.log(resolveAgent())"
@@ -237,16 +280,21 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 ## 10. 速查
 
 ```text
-最快接入（环境变量）：
+选择大脑（推荐，落盘持久）：
+  wemind brain set <预设|auto> [--bin X] [--args "…"] [--restart]   # 写入 <数据目录>/brain.json
+  wemind brain / wemind brain check                                 # 查看 / 真机自检
+  （未配置时默认 auto：按 kiro → opencode → gemini 探测已安装者）
+
+一次性覆盖（仅本次启动的进程）：
   WEMIND_BRAIN_BIN=<二进制>
   WEMIND_BRAIN_ARGS=<进入 ACP 的参数，空格分隔>
   WEMIND_BRAIN_HOME_ENV=<配置目录环境变量名，没有则不设>
 
 长期接入（加预设）：
-  在 brain-agents.ts 的 ACP_AGENT_PRESETS 加一条 → npm run build → WEMIND_BRAIN=<键>
+  在 brain-agents.ts 的 ACP_AGENT_PRESETS 加一条 → npm run build → wemind brain set <键>
 
 验证：
-  看 daemon.log 的 [acp] spawn / prompt ok；或 node 跑 resolveAgent()
+  看 daemon.log 的 [acp] spawn / prompt ok；或 wemind brain check
 ```
 
 

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME } from "./mcp-sandbox.js";
 import { resolveAgent } from "./brain-agents.js";
+import { loadBrainConfig } from "./brain-config.js";
 
 /**
  * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。
@@ -19,7 +20,7 @@ function dlog(...a: unknown[]): void {
   console.error("[acp]", ...a);
 }
 
-const AGENT = resolveAgent(); // 当前 ACP agent（二进制/参数/配置目录环境变量）
+const AGENT = resolveAgent(loadBrainConfig()); // 当前 ACP agent（env > 账号 brain.json > auto）
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 120_000; // 多久没收到任何帧才算"卡死"。重任务单次慢抓取可静默较久（直连 kiro-cli 无此限制），放宽到 2min 兜底真死
 const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 900_000; // 单回合硬上限 15min。实测重任务(联网核实)需 ~6.5min；context_token 无时间 TTL(官方)，长回合用本消息 token 仍可送达。卡死由 idle/首帧超时兜底

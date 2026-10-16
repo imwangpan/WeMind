@@ -103,7 +103,7 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 
 ## 6.4 可配置的 agent（brain-agents.ts）
 
-大脑通过标准 ACP 驱动，默认 `kiro-cli`，但任意兼容 ACP 的 agent 都能接入，**无需改代码，仅靠环境变量或加预设**。
+大脑通过标准 ACP 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini` 探测已安装者），任意兼容 ACP 的 agent 都能接入，**无需改代码，仅靠账号级配置 / 环境变量 / 加预设**。
 
 ### AcpAgentPreset 与解析
 
@@ -113,20 +113,30 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 
 | 预设 | agent | 类型 | 状态 | 启动 |
 |------|-------|------|------|------|
-| `kiro` | kiro-cli | 原生 ACP | ✅ 已实测（默认） | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
+| `kiro` | kiro-cli | 原生 ACP | ✅ 已实测 | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
+| `opencode` | OpenCode | 原生 ACP | ✅ 已实测 | `opencode acp`，`XDG_CONFIG_HOME` |
 | `gemini` | Gemini CLI | 原生 ACP | ⚠️ 未实测 | `gemini --experimental-acp`，`GEMINI_CLI_HOME` |
 | `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @zed-industries/claude-code-acp` |
 | `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器） |
 
 两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不说 ACP，要起一个桥接进程）。
 
-### 环境变量覆盖
+### 选择与覆盖
 
-`resolveAgent()` 按以下优先级解析（零代码接入）：
+三档优先级（`resolveAgent()`）：**环境变量 > 账号 `brain.json` > `auto`**。
+
+| 层 | 内容 | 用途 |
+|----|------|------|
+| 环境变量 | `WEMIND_BRAIN` / `_BIN` / `_ARGS` / `_HOME_ENV` / `_SHELL` / `_INHERIT` / `_REAL_HOME` / `_INHERIT_DIRS` / `KIRO_CLI_BIN` | 一次性覆盖（临时试别的 agent，别写进 profile） |
+| 账号配置 | `<数据目录>/brain.json`：`{ agent, bin?, args?, shell?, homeEnvVar? }` | **持久选择**，任何入口重启都复现 |
+| `auto` | 未配置时按 `kiro → opencode → gemini` 探测第一个可用预设 | 缺省兜底 |
+
+- 切换用 CLI：`wemind brain set <预设|auto> [--bin X] [--args "…"] [--restart]`、`wemind brain unset`、`wemind brain`（查看）、`wemind brain check`（真起进程跑 ACP 握手）。
+- **启动即校验**：daemon 起来时先解析并校验二进制；不可用则 `[daemon] FATAL 大脑不可用：…` 并以退出码 78 退出（看门狗据此停止自动重启，不再每 5s 刷屏）；未知预设名也不再静默回退 kiro。
 
 | 环境变量 | 作用 |
 |----------|------|
-| `WEMIND_BRAIN` | 选预设（默认 `kiro`） |
+| `WEMIND_BRAIN` | 选预设（默认 `auto`） |
 | `WEMIND_BRAIN_BIN` | 覆盖二进制 |
 | `WEMIND_BRAIN_ARGS` | 覆盖启动参数（空格分隔） |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖配置目录环境变量名 |
@@ -138,7 +148,7 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 
 ### 接入新 agent 的两种方式
 
-**方式 A（环境变量，最快）**：
+**方式 A（落盘持久，推荐）**：`wemind brain set <预设>`；仅临时覆盖才用环境变量：
 
 ```powershell
 $env:WEMIND_BRAIN_BIN      = "acme-agent"
@@ -146,7 +156,7 @@ $env:WEMIND_BRAIN_ARGS     = "serve --acp"
 $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 ```
 
-**方式 B（加预设，长期）**：在 `ACP_AGENT_PRESETS` 加一条 → `npm run build` → `WEMIND_BRAIN=acme`。
+**方式 B（加预设，长期）**：在 `ACP_AGENT_PRESETS` 加一条 → `npm run build` → `wemind brain set acme`。
 
 ### 跨 agent 的限制
 
@@ -157,7 +167,7 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 
 ### 验证接入
 
-启动 daemon 后给 bot 发消息，看 `~/.wemind/<key>/daemon.log` 应出现 `[acp] spawn ...` → `initialized` → `session/new` 或 `load` → `session/prompt` → `prompt ok`。也可直接 `node -e "...resolveAgent()"` 看解析结果。
+启动 daemon 后给 bot 发消息，看 `~/.wemind/<key>/daemon.log` 应出现 `[acp] spawn ...` → `initialized` → `session/new` 或 `load` → `session/prompt` → `prompt ok`。也可 `wemind brain` 看解析结果、`wemind brain check` 真起一个进程跑 ACP 握手（`initialize` + `session/new`）。
 
 ## 6.5 大脑 vs worker 的沙箱对比
 

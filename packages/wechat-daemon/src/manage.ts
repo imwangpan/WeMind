@@ -27,6 +27,30 @@ import {
 } from "@wemind/wechat-ilink-core";
 import { pm2Start, pm2Stop } from "./pm2-runner.js";
 import { watchdogStart } from "./watchdog-runner.js";
+import {
+  CLI_PID_MARKERS,
+  brainPidMarkers,
+  commandLines,
+  isAlive,
+  isOurProcess,
+  matchesMarkers,
+} from "./proc-identity.js";
+import {
+  ACP_AGENT_PRESETS,
+  AUTO_PROBE_ORDER,
+  resolveAgent,
+  agentProblem,
+  presetAvailable,
+  type ResolvedAgent,
+} from "./brain-agents.js";
+import {
+  loadBrainConfig,
+  saveBrainConfig,
+  clearBrainConfig,
+  brainConfigPath,
+  type BrainConfig,
+} from "./brain-config.js";
+import { checkAgent } from "./brain-check.js";
 
 /**
  * WeMind 多账号管理 CLI。
@@ -54,13 +78,12 @@ function readPid(dir: string, name: string): number | null {
     return null;
   }
 }
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * 该 pid 是否「活着**且确实是我们自己的** CLI 进程」。
+ * 只判存活不够：pid 会复用（尤其重启后），陈旧 pid 文件可能指向**别人的**进程 → 会误杀/误判。
+ */
+function aliveOurs(pid: number | null, markers: string[][] = CLI_PID_MARKERS): boolean {
+  return isOurProcess(pid, markers);
 }
 function killPid(pid: number): void {
   if (process.platform === "win32")
@@ -121,21 +144,25 @@ function startDaemon(key: string, runner?: string): void {
 function stopDaemon(key: string): string {
   pm2Stop(key); // best-effort：停掉 pm2 托管的 app（若有）
   const dir = accountDir(key);
-  const wpid = readPid(dir, "wrapper.pid");
-  const dpid = readPid(dir, "daemon.pid");
-  const bpid = readPid(dir, "brain.pid");
+  const ag = resolveAgent(loadBrainConfig(dir));
+  const cand = [
+    { pid: readPid(dir, "wrapper.pid"), name: "wrapper", markers: CLI_PID_MARKERS },
+    { pid: readPid(dir, "daemon.pid"), name: "daemon", markers: CLI_PID_MARKERS },
+    { pid: readPid(dir, "brain.pid"), name: "brain", markers: brainPidMarkers(ag.bin, ag.args) },
+  ];
+  // 只杀「活着**且身份确认**」的：pid 会被复用，陈旧 pid 文件可能指向别人的进程 → 绝不误杀。
+  // 命令行一次批量查（Windows 下较慢）；正常情况（陈旧 pid 早已不存在）根本不会发起查询。
+  const lines = commandLines(cand.map((c) => c.pid));
   const stopped: string[] = [];
-  if (wpid && alive(wpid)) {
-    killPid(wpid);
-    stopped.push(`wrapper ${wpid}`);
-  }
-  if (dpid && alive(dpid)) {
-    killPid(dpid);
-    stopped.push(`daemon ${dpid}`);
-  }
-  if (bpid && alive(bpid)) {
-    killPid(bpid);
-    stopped.push(`brain ${bpid}`);
+  const skipped: string[] = [];
+  for (const c of cand) {
+    if (!c.pid || !isAlive(c.pid)) continue;
+    if (matchesMarkers(lines.get(c.pid), c.markers)) {
+      killPid(c.pid);
+      stopped.push(`${c.name} ${c.pid}`);
+    } else {
+      skipped.push(`${c.name} ${c.pid}`); // 活着的 pid 但不是我们的（pid 复用）→ 不杀
+    }
   }
   for (const f of ["wrapper.pid", "daemon.pid", "brain.pid"]) {
     try {
@@ -144,7 +171,11 @@ function stopDaemon(key: string): string {
       /* ignore */
     }
   }
-  return stopped.length ? `已停止 ${stopped.join(" + ")}` : "无运行中的进程";
+  const parts: string[] = [];
+  if (stopped.length) parts.push(`已停止 ${stopped.join(" + ")}`);
+  if (skipped.length)
+    parts.push(`跳过 ${skipped.join(" + ")}（非本程序，未杀；已清陈旧 pid 文件）`);
+  return parts.length ? parts.join("；") : "无运行中的进程";
 }
 
 /** 把 STAGING 的登录按 botId 归档 + 登记。 */
@@ -275,15 +306,162 @@ function cmdList(): string {
   const def = getDefaultKey();
   const accs = listAccounts();
   if (!accs.length) return "（无已登记账号）。用 `login` 添加。";
-  return accs
-    .map((a) => {
-      const dpid = readPid(accountDir(a.key), "daemon.pid");
-      const bpid = readPid(accountDir(a.key), "brain.pid");
-      const running = dpid && alive(dpid) ? `运行中(pid ${dpid})` : "已停止";
-      const brain = bpid && alive(bpid) ? `  brain(pid ${bpid})` : "";
-      return `- ${a.key}${a.key === def ? " [默认]" : ""}  label=${a.label}  botId=${a.botId}  ${running}${brain}`;
+  // 先收集各账号的 pid + 大脑特征，再**一次性**批量查命令行（Windows 下每次查询较慢）；
+  // 只凭「pid 活着」显示状态会在重启后 pid 复用时骗人，所以要带身份校验。
+  const entries = accs.map((a) => {
+    const dir = accountDir(a.key);
+    const ag = resolveAgent(loadBrainConfig(dir));
+    return {
+      a,
+      dir,
+      dpid: readPid(dir, "daemon.pid"),
+      bpid: readPid(dir, "brain.pid"),
+      brainMarkers: brainPidMarkers(ag.bin, ag.args),
+    };
+  });
+  const lines = commandLines(entries.flatMap((e) => [e.dpid, e.bpid]));
+  const aliveOursIn = (pid: number | null, markers: string[][]): boolean =>
+    !!pid && matchesMarkers(lines.get(pid), markers);
+  return entries
+    .map((e) => {
+      const running = aliveOursIn(e.dpid, CLI_PID_MARKERS) ? `运行中(pid ${e.dpid})` : "已停止";
+      const brainPid = aliveOursIn(e.bpid, e.brainMarkers) ? `  brain(pid ${e.bpid})` : "";
+      return `- ${e.a.key}${e.a.key === def ? " [默认]" : ""}  label=${e.a.label}  botId=${e.a.botId}  agent=${agentLabel(e.dir)}  ${running}${brainPid}`;
     })
     .join("\n");
+}
+
+// ===== 大脑（ACP agent）选择：账号级持久配置 brain.json，见 brain-config.ts =====
+const BRAIN_SRC_LABEL: Record<ResolvedAgent["source"], string> = {
+  env: "环境变量 WEMIND_BRAIN*",
+  file: "账号 brain.json",
+  auto: "自动探测（未配置）",
+};
+
+/** list 用：账号「配置 / 自动探测」得到的大脑标签（不看当前 shell 的 env，避免误导）。 */
+function agentLabel(dir: string): string {
+  const cfg = loadBrainConfig(dir);
+  if (cfg?.agent && cfg.agent.toLowerCase() !== "auto") return cfg.agent;
+  const picked = AUTO_PROBE_ORDER.find((k) => presetAvailable(k));
+  return picked ? `${picked}（自动）` : "（无可用）";
+}
+
+/** `wemind brain`（show）：打印某账号大脑的「配置」与「生效」情况。 */
+function describeBrain(key: string): string {
+  const dir = accountDir(key);
+  const cfg = loadBrainConfig(dir);
+  const ag = resolveAgent(cfg);
+  const problem = agentProblem(ag);
+  const cfgLine = cfg
+    ? `brain.json → agent=${cfg.agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}${cfg.shell !== undefined ? ` shell=${cfg.shell}` : ""}`
+    : "（未设置 brain.json）";
+  return [
+    `账号 ${key}`,
+    `  配置：${cfgLine}`,
+    `  请求：${ag.requestedKey}    来源：${BRAIN_SRC_LABEL[ag.source]}`,
+    `  生效：name=${ag.name}  bin=${ag.bin}  args=[${ag.args.join(" ")}]  shell=${ag.shell}  home_env=${ag.homeEnvVar ?? "(无)"}`,
+    `  可用：${problem ? `❌ ${problem}` : `✅ ${ag.binPath ?? ag.bin}`}`,
+    `  预设：${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
+    `  自动探测顺序：${AUTO_PROBE_ORDER.join(" → ")}`,
+  ].join("\n");
+}
+
+/** `wemind brain set <预设|auto>`：把选择按账号落盘（可选 --bin/--args/--shell；--restart 立即重启 daemon）。 */
+function cmdBrainSet(
+  agentName: string,
+  key: string,
+  opts: { bin?: string; args?: string; shell?: boolean; restart: boolean },
+): string {
+  const agent = agentName.trim().toLowerCase();
+  if (agent !== "auto" && !ACP_AGENT_PRESETS[agent])
+    throw new Error(
+      `未知预设「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制用 --bin 搭配任一预设）`,
+    );
+  const cfg: BrainConfig = { agent };
+  if (opts.bin) cfg.bin = opts.bin;
+  if (opts.args !== undefined) cfg.args = opts.args.trim() ? opts.args.trim().split(/\s+/) : [];
+  if (opts.shell !== undefined) cfg.shell = opts.shell;
+  const dir = accountDir(key);
+  saveBrainConfig(cfg, dir);
+  const lines = [
+    `已设置 ${key} 的大脑：agent=${agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}`,
+    `配置文件：${brainConfigPath(dir)}`,
+  ];
+  if (opts.restart) {
+    const dpid = readPid(dir, "daemon.pid");
+    if (aliveOurs(dpid)) {
+      startDaemon(key);
+      lines.push(`已重启 daemon（账号 ${key}）。`);
+    } else {
+      lines.push(`daemon 未在运行，未重启（用 wemind start ${key} 启动）。`);
+    }
+  } else {
+    lines.push(`（daemon 需重启才生效：wemind start ${key}）`);
+  }
+  return lines.join("\n");
+}
+
+/** `wemind brain unset`：清除账号级配置，回退到自动探测/默认。 */
+function cmdBrainUnset(key: string): string {
+  const ok = clearBrainConfig(accountDir(key));
+  return ok
+    ? `${key} 已清除 brain.json（回退到自动探测/默认）。daemon 需重启才生效。`
+    : `${key} 未设置 brain.json（无需清除）。`;
+}
+
+/** `wemind brain check`：真起一个进程跑 ACP 握手，验证大脑「不仅找得到、而且能说 ACP」。 */
+async function cmdBrainCheck(key: string): Promise<string> {
+  const ag = resolveAgent(loadBrainConfig(accountDir(key)));
+  const problem = agentProblem(ag);
+  if (problem) return `❌ ${key} 的大脑不可用：${problem}`;
+  const r = await checkAgent(ag);
+  return `${r.ok ? "✅" : "❌"} ${key} 大脑自检（${ag.name}，bin=${ag.bin}）：${r.detail}（${r.ms}ms）`;
+}
+
+/** brain 子命令派发：show（默认）/ set / unset / check。 */
+async function cmdBrain(rest: string[]): Promise<string> {
+  const argv = [...rest];
+  const takeFlag = (name: string): string | undefined => {
+    const i = argv.indexOf(name);
+    if (i < 0) return undefined;
+    const v = argv[i + 1];
+    argv.splice(i, 2);
+    return v;
+  };
+  const bin = takeFlag("--bin");
+  const argsOverride = takeFlag("--args");
+  const restart = argv.includes("--restart");
+  if (restart) argv.splice(argv.indexOf("--restart"), 1);
+  const shell = argv.includes("--shell") ? true : argv.includes("--no-shell") ? false : undefined;
+  for (const f of ["--shell", "--no-shell"]) {
+    const i = argv.indexOf(f);
+    if (i >= 0) argv.splice(i, 1);
+  }
+  const pos = argv.filter((x) => x && !x.startsWith("--"));
+  const first = (pos[0] || "").toLowerCase();
+  const SUBCOMMANDS = new Set(["show", "set", "unset", "check"]);
+  if (first && !SUBCOMMANDS.has(first)) {
+    // 省略子命令 → 视为 `brain show <key|label>`（如 `wemind brain 主号`）。
+    return describeBrain(pickKey(pos[0]));
+  }
+  const sub = first || "show";
+  switch (sub) {
+    case "show":
+      return describeBrain(pickKey(pos[1]));
+    case "set": {
+      if (!pos[1])
+        throw new Error(
+          '用法: brain set <预设|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]',
+        );
+      return cmdBrainSet(pos[1], pickKey(pos[2]), { bin, args: argsOverride, shell, restart });
+    }
+    case "unset":
+      return cmdBrainUnset(pickKey(pos[1]));
+    case "check":
+      return await cmdBrainCheck(pickKey(pos[1]));
+    default:
+      throw new Error(`未知 brain 子命令「${sub}」（可用：show / set / unset / check）`);
+  }
 }
 
 function cmdAdopt(key: string, label?: string): string {
@@ -364,7 +542,7 @@ function pickKey(sel?: string): string {
 /** 预检 daemon 存活（本地命令需 daemon 在跑才有人消费收件箱）。 */
 function requireDaemonAlive(key: string): void {
   const pid = readPid(accountDir(key), "daemon.pid");
-  if (!pid || !alive(pid))
+  if (!aliveOurs(pid))
     throw new Error(
       `账号 ${key} 的 daemon 未运行。先启动：node packages/wechat-daemon/dist/manage.js start ${key}`,
     );
@@ -458,6 +636,9 @@ export async function runManage(argv: string[]): Promise<void> {
     case "list":
       console.log(cmdList());
       break;
+    case "brain":
+      console.log(await cmdBrain(rest));
+      break;
     case "adopt":
       console.log(cmdAdopt(rest[0], label));
       break;
@@ -535,6 +716,10 @@ export async function runManage(argv: string[]): Promise<void> {
   login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动归档（--start 顺带启动 daemon）
   list                           列出账号、别名、运行状态
   start <key|label>              启动某账号的 daemon
+  stop <key|label>               停止某账号的 daemon
+  brain [show|set|unset|check] [<key|label>]   查看/切换/清除/自检账号的大脑（ACP agent）
+                                 set: brain set <预设|auto> [--bin X] [--args "…"] [--restart] [<key|label>]
+                                 大脑选择按账号持久化在 brain.json；环境变量 WEMIND_BRAIN* 为一次性覆盖
   task "<描述>" [--cwd 目录] [<key|label>]   本地派发任务给 worker（默认 cwd=当前终端目录）
   task-reply "<内容>" [<key|label>]          回复/注入当前任务（「task-reply 继续」= 续跑）
   task-status [<key|label>]                  查看当前任务状态与最近输出
