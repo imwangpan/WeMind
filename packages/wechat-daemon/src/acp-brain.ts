@@ -244,6 +244,9 @@ async function ensureProcess(): Promise<void> {
   reset();
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (AGENT.homeEnvVar) env[AGENT.homeEnvVar] = BRAIN_HOME; // 把 brain 沙箱目录传给 agent
+  // 预设声明的额外环境变量（%HOME% → 沙箱根），如 opencode 的 OPENCODE_DISABLE_PROJECT_CONFIG
+  for (const [k, v] of Object.entries(AGENT.env ?? {}))
+    env[k] = v.replaceAll("%HOME%", BRAIN_HOME);
   const proc = spawn(AGENT.bin, AGENT.args, {
     shell: AGENT.shell,
     windowsHide: true,
