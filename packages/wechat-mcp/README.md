@@ -2,7 +2,7 @@
 
 > 基于 **MCP（Model Context Protocol）** 的微信 Bot server——让任何兼容 MCP 的 AI Agent 通过**个人微信**收发消息。底层走腾讯官方 **iLink / 微信 ClawBot** 通道。
 
-[WeMind](https://github.com/imwangpan/WeMind) monorepo 的可发布包；内核 `@wemind/wechat-ilink-core` 已用 tsdown 内联进产物，对外只需这一个自包含的包。
+[WeMind](https://github.com/imwangpan/WeMind) monorepo 中已发布到 npm 的包（`@wemind/wechat-mcp`）；内核 `@wemind/wechat-ilink-core` 已用 tsdown 内联进产物，对外只需这一个自包含的包。
 
 ## 接入
 
@@ -18,15 +18,16 @@
 }
 ```
 
-**OpenCode** (`opencode.json`)
+**OpenCode** (`opencode.json`，V2：server 定义在 `mcp.servers` 下)
 
 ```json
 {
   "mcp": {
-    "wechat": {
-      "type": "local",
-      "command": ["npx", "-y", "@wemind/wechat-mcp"],
-      "enabled": true
+    "servers": {
+      "wechat": {
+        "type": "local",
+        "command": ["npx", "-y", "@wemind/wechat-mcp"]
+      }
     }
   }
 }
