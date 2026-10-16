@@ -64,7 +64,7 @@ export function saveAccount(account: AccountData): void {
     if (!warnedWinPerms) {
       warnedWinPerms = true;
       console.error(
-        `[wemind] warning: ${file} stores the bot token in plaintext; ` +
+        `[wemind/wechat-ilink-core] warning: ${file} stores the bot token in plaintext; ` +
           `Windows cannot restrict it via chmod. Protect ${DATA_DIR} with folder permissions or disk encryption.`,
       );
     }
