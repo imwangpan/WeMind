@@ -110,7 +110,7 @@ if (-not $createdNew) { 记日志「已有实例在跑」; exit 0 }   # 抢不�
 
 ## 5. 第③层：大脑（ACP 子进程）的生命周期
 
-大脑不是随 daemon 一起起的，而是**懒启动**：第一条消息到来、worker 调用 `askBrain` 时才 `spawn` 一个 ACP agent 进程（默认 `kiro-cli acp`），之后**常驻复用**（每用户一个 ACP session，原生多轮记忆）。
+大脑不是随 daemon 一起起的，而是**懒启动**：第一条消息到来、worker 调用 `askBrain` 时才 `spawn` 一个 ACP agent 进程（用哪个 agent 由账号 `brain.json` / `WEMIND_BRAIN` 决定，未配置则 `auto` 探测；见 [`接入其它-ACP-Agent.md`](接入其它-ACP-Agent.md)），之后**常驻复用**（每用户一个 ACP session，原生多轮记忆）。
 
 自愈：`session/prompt` 超时或失败 → 杀掉可能假死的 agent 进程 → 下一条消息重建，并用 `session/load` 按持久化的 sessionId 恢复上下文。所以大脑这层也有自己的「崩了重建」，且不丢对话历史。
 
