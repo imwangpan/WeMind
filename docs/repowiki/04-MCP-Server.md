@@ -2,7 +2,7 @@
 
 > 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. 守护进程 Daemon](05-守护进程-Daemon.md)
 
-MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。这是 WeMind **已发布到 npm** 的对外产物（`@wemind/wechat-mcp`，bin: `wemind-mcp`）。
+MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。这是 WeMind 里**唯一已发布到 npm 的子包**（`@wemind/wechat-mcp`，bin: `wemind-mcp`）。
 
 ## 4.1 模块结构
 
@@ -112,7 +112,7 @@ sequenceDiagram
 
 ## 4.7 接入示例
 
-已发布到 npm，直接用 `npx`（无需 clone / 构建）：
+该子包已发布到 npm，直接用 `npx`（无需 clone / 构建）：
 
 ```json
 // Claude Desktop / Cursor: claude_desktop_config.json / ~/.cursor/mcp.json
@@ -143,7 +143,7 @@ sequenceDiagram
 }
 ```
 
-> 设计意图：`@wemind/wechat-mcp` 是独立发布的自包含 npm 包（tsdown 单文件、内核已内联），已于 2026-10 发布到公共 registry（`@wemind/wechat-mcp@1.0.1`）——`npx -y @wemind/wechat-mcp` 即可接入（该包只有一个 bin `wemind-mcp`，npx 按「唯一 bin」规则自动解析）。
+> 设计意图：`@wemind/wechat-mcp` 是独立发布的**自包含子包**（tsdown 单文件、内核已内联），已于 2026-10 发布到公共 registry（`@wemind/wechat-mcp`，最新版本见 npm）——`npx -y @wemind/wechat-mcp` 即可接入（该包只有一个 bin `wemind-mcp`，npx 按「唯一 bin」规则自动解析）。
 
 ## 4.8 打包发布（tsdown.config.ts）
 

@@ -10,7 +10,7 @@
 
 | 入口 | 定位 | 现状 |
 | --- | --- | --- |
-| `@wemind/wechat-mcp` | 轻包，纯 MCP server，插进任意 MCP 客户端 | 已发布到 npm（1.0.1），不动 |
+| `@wemind/wechat-mcp` | 轻包，纯 MCP server，插进任意 MCP 客户端 | 子包已发布到 npm（走 GitHub Actions 自动发布，最新版本见 npm），不动 |
 | `wemind` | 完整应用 CLI：常驻自动收发 + 远程任务 + 多账号 | 本设计新增 |
 
 ## 2. 决策记录（2026-06-24 拍板）
