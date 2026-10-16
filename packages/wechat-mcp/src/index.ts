@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 import { loadAccount, notifyStart, notifyStop } from "@wemind/wechat-ilink-core";
 import { VERSION } from "./version.js";
@@ -28,36 +28,45 @@ const server = new McpServer(
   },
 );
 
-server.tool(
+server.registerTool(
   "login_qrcode",
-  "Get a WeChat login QR code. Scan it with WeChat to connect the bot. Returns the QR code URL. Call check_qrcode_status afterwards to verify.",
-  loginQrcodeSchema.shape,
+  {
+    description:
+      "Get a WeChat login QR code. Scan it with WeChat to connect the bot. Returns the QR code URL. Call check_qrcode_status afterwards to verify.",
+    inputSchema: loginQrcodeSchema,
+  },
   async () => {
     return await loginQrcode();
   },
 );
 
-server.tool(
+server.registerTool(
   "check_qrcode_status",
-  "Check if the QR code (from login_qrcode) has been scanned and confirmed. Call this repeatedly until status is 'confirmed'.",
-  checkQrcodeStatusSchema.shape,
+  {
+    description:
+      "Check if the QR code (from login_qrcode) has been scanned and confirmed. Call this repeatedly until status is 'confirmed'.",
+    inputSchema: checkQrcodeStatusSchema,
+  },
   async () => {
     return await checkQrcodeStatus();
   },
 );
 
-server.tool(
+server.registerTool(
   "logout",
-  "Log out the current WeChat bot session and clear all saved credentials.",
-  logoutSchema.shape,
+  {
+    description: "Log out the current WeChat bot session and clear all saved credentials.",
+    inputSchema: logoutSchema,
+  },
   async () => {
     return await logout();
   },
 );
 
-server.tool(
+server.registerTool(
   "get_messages",
-  `Poll for new WeChat messages. Always call with wait=true to block until a message arrives.
+  {
+    description: `Poll for new WeChat messages. Always call with wait=true to block until a message arrives.
 
 IMPORTANT BEHAVIOR — you MUST follow this workflow:
 1. Call get_messages with wait=true and a very large timeout (e.g. 60000). This is a long-polling call that blocks until a message arrives. Set your tool call timeout to at least 120 seconds to avoid premature cancellation.
@@ -66,25 +75,32 @@ IMPORTANT BEHAVIOR — you MUST follow this workflow:
 4. Once you have finished processing and sent your reply via send_text_message, call send_typing with status="cancel" and to=<from_user_id> to stop the typing indicator.
 
 This ensures the WeChat user sees a "typing..." indicator while you are working on their request.`,
-  getMessagesSchema.shape,
-  async (input, extra) => {
-    return await getMessages(input, extra?.signal);
+    inputSchema: getMessagesSchema,
+  },
+  async (input, ctx) => {
+    return await getMessages(input, ctx?.mcpReq.signal);
   },
 );
 
-server.tool(
+server.registerTool(
   "send_text_message",
-  "Send a text message to a WeChat user. The 'to' field is the user ID from a received message.",
-  sendTextMessageSchema.shape,
+  {
+    description:
+      "Send a text message to a WeChat user. The 'to' field is the user ID from a received message.",
+    inputSchema: sendTextMessageSchema,
+  },
   async (input) => {
     return await sendTextMessage(input);
   },
 );
 
-server.tool(
+server.registerTool(
   "send_typing",
-  "Send or cancel a typing indicator to a WeChat user. The 'to' field is the user ID from a received message. Status 'typing' shows the indicator, 'cancel' stops it.",
-  sendTypingSchema.shape,
+  {
+    description:
+      "Send or cancel a typing indicator to a WeChat user. The 'to' field is the user ID from a received message. Status 'typing' shows the indicator, 'cancel' stops it.",
+    inputSchema: sendTypingSchema,
+  },
   async (input) => {
     return await sendTypingIndicator(input);
   },

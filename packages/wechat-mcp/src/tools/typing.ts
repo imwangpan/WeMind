@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 
 import {
   sendTyping,
@@ -29,7 +29,10 @@ export async function sendTypingIndicator(input: {
 }> {
   const account = loadAccount();
   if (!account?.botToken) {
-    throw new McpError(ErrorCode.InvalidParams, "Not logged in. Call login_qrcode first.");
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      "Not logged in. Call login_qrcode first.",
+    );
   }
   if (isSessionPaused(account.botId)) {
     return sessionExpiredResult(account.botId);
@@ -40,8 +43,8 @@ export async function sendTypingIndicator(input: {
   const contextToken = state.contextTokens[ctxKey];
 
   if (!contextToken) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
       `No conversation found with user ${input.to}. Send or receive a message first.`,
     );
   }
@@ -54,8 +57,8 @@ export async function sendTypingIndicator(input: {
   });
 
   if (configResp.errmsg || !configResp.typing_ticket) {
-    throw new McpError(
-      ErrorCode.InternalError,
+    throw new ProtocolError(
+      ProtocolErrorCode.InternalError,
       `getConfig failed: ${configResp.errmsg ?? "no typing_ticket (likely ret!=0)"}`,
     );
   }

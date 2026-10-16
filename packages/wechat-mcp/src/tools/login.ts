@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import QRCode from "qrcode";
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 
 import {
   fetchQRCode,
@@ -147,7 +147,10 @@ export async function checkQrcodeStatus(): Promise<{
 
   const qrState = loadQrState();
   if (!qrState) {
-    throw new McpError(ErrorCode.InvalidParams, "No pending QR code. Call login_qrcode first.");
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      "No pending QR code. Call login_qrcode first.",
+    );
   }
 
   if (!isQrFresh(qrState.createdAt)) {
@@ -177,8 +180,8 @@ export async function checkQrcodeStatus(): Promise<{
       !statusResponse.ilink_bot_id ||
       !statusResponse.ilink_user_id
     ) {
-      throw new McpError(
-        ErrorCode.InternalError,
+      throw new ProtocolError(
+        ProtocolErrorCode.InternalError,
         "Login confirmed but server returned incomplete data.",
       );
     }
