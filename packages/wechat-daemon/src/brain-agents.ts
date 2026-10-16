@@ -2,6 +2,8 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
+import type { BrainConfig } from "./brain-config.js";
+
 /**
  * ACP agent 预设与解析。
  *
@@ -10,8 +12,9 @@ import os from "node:os";
  * agent 不需要改协议代码——只需告诉我们三件事：① 二进制名；② 进入 ACP 模式的启动参数；
  * ③ 该 agent 读取「配置/数据目录」的环境变量名（我们把它指向 brain 沙箱）。
  *
- * 选择与覆盖（均为环境变量，零代码接入）：
- *  - `WEMIND_BRAIN`            选预设（默认 `kiro`）
+ * 选择与覆盖（优先级从高到低）：
+ *  ① 环境变量（一次性覆盖；临时试别的 agent 用它，别写进 profile）：
+ *  - `WEMIND_BRAIN`            选预设（默认 `auto`：自动探测已安装的预设，见 AUTO_PROBE_ORDER）
  *  - `WEMIND_BRAIN_BIN`        覆盖二进制（绝对路径或 PATH 上的名字）
  *  - `WEMIND_BRAIN_ARGS`       覆盖启动参数（空格分隔）
  *  - `WEMIND_BRAIN_HOME_ENV`   覆盖「配置目录环境变量名」
@@ -20,6 +23,11 @@ import os from "node:os";
  *  - `WEMIND_BRAIN_REAL_HOME`  覆盖被继承的真实配置目录（默认取预设 realHome）
  *  - `WEMIND_BRAIN_INHERIT_DIRS` 覆盖继承的子目录清单（逗号/空格分隔）
  *  - `KIRO_CLI_BIN`            旧的 kiro 专用覆盖（仅 kiro 预设、且未设 WEMIND_BRAIN_BIN 时仍生效）
+ *  ② 账号级持久配置（`<数据目录>/brain.json`，见 brain-config.ts）：`agent` / `bin` / `args` /
+ *     `shell` / `homeEnvVar`。落盘后任何入口重启都能复现，切换用 `wemind brain set <预设>`。
+ *  ③ `auto`（未配置时的兜底）：按 AUTO_PROBE_ORDER 取第一个二进制可解析的预设；一个都没有
+ *     则标记 unavailable，由启动校验明确报错（不再「静默跑起来、第一条消息才炸」）。
+ *  另：未知的 `WEMIND_BRAIN` 值不再静默回退 kiro，而是 `known:false`，交由启动校验报错。
  */
 
 export type AcpAgentPreset = {
@@ -113,6 +121,44 @@ function onPath(exe: string): string | null {
   return null;
 }
 
+/**
+ * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的预设。
+ * 只收纳**原生 ACP 且二进制可直接判定**的预设——适配器类（`claude-code` 走 `npx`、
+ * `codex` 走 `codex-acp`）不参与自动探测（`npx` 几乎总在 PATH 上，会把它们误选出来）。
+ */
+export const AUTO_PROBE_ORDER = ["kiro", "opencode", "gemini"] as const;
+
+/** 预设在该平台的「可执行文件名」（用于 PATH 探测）。 */
+function presetExe(preset: AcpAgentPreset): string {
+  return process.platform === "win32" ? (preset.binWin ?? `${preset.bin}.exe`) : preset.bin;
+}
+
+/** 预设的二进制是否能在 PATH 上解析到（只判定、不启动）。 */
+export function presetAvailable(key: string): boolean {
+  const preset = ACP_AGENT_PRESETS[key];
+  return !!preset && onPath(presetExe(preset)) !== null;
+}
+
+/**
+ * 解析一个 bin 说明（绝对/相对路径，或 PATH 上的裸名）到实际文件；解析不到返回 null。
+ * 裸名在 Windows 上会补试 `.exe`/`.cmd`，覆盖 npm shim 的常见布局。
+ */
+function locateBin(bin: string): string | null {
+  if (!bin) return null;
+  if (bin.includes("/") || bin.includes(path.sep)) return fs.existsSync(bin) ? bin : null;
+  const candidates = [bin];
+  if (process.platform === "win32" && !/\.[A-Za-z0-9]+$/.test(bin))
+    candidates.push(`${bin}.exe`, `${bin}.cmd`);
+  for (const c of candidates) {
+    const hit = onPath(c);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** daemon 因「大脑配置错误」退出时用的退出码；看门狗据此停止自动重启（配置错误需人工修，重拉无益）。 */
+export const BRAIN_CONFIG_EXIT_CODE = 78;
+
 export type ResolvedAgent = {
   name: string;
   bin: string;
@@ -128,30 +174,65 @@ export type ResolvedAgent = {
   mcpConfigFile: string;
   catalogFile: string;
   env: Record<string, string>;
+  /** 请求的原始值（来自 env / brain.json / 缺省 `auto`）。 */
+  requestedKey: string;
+  /** `requestedKey` 的来源。 */
+  source: "env" | "file" | "auto";
+  /** `requestedKey` 是否为已知预设（未知 → false，不再静默回退 kiro）。 */
+  known: boolean;
+  /** 二进制是否解析到了实际文件（找不到 → false）。 */
+  available: boolean;
+  /** 解析到的二进制绝对路径（`available` 时才有）。 */
+  binPath: string | null;
 };
 
-/** 解析当前要用的 ACP agent（预设 + 环境变量覆盖）。 */
-export function resolveAgent(): ResolvedAgent {
-  const key = (process.env.WEMIND_BRAIN?.trim() || "kiro").toLowerCase();
-  const preset = ACP_AGENT_PRESETS[key] ?? ACP_AGENT_PRESETS.kiro;
+/** 解析当前要用的 ACP agent：环境变量 > 账号 brain.json > auto。 */
+export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
+  const envKey = process.env.WEMIND_BRAIN?.trim();
+  const fileKey = cfg?.agent?.trim();
+  const requestedKey = (envKey || fileKey || "auto").toLowerCase();
+  const source: ResolvedAgent["source"] = envKey ? "env" : fileKey ? "file" : "auto";
+
+  // 选预设：auto → 探测第一个可用；未知值 → 标 known:false（结构上退回 kiro 兜底，交启动校验报错）。
+  let known = true;
+  let key = requestedKey;
+  if (key === "auto") {
+    key = AUTO_PROBE_ORDER.find((k) => presetAvailable(k)) ?? "kiro";
+  } else if (!ACP_AGENT_PRESETS[key]) {
+    known = false;
+    key = "kiro";
+  }
+  const preset = ACP_AGENT_PRESETS[key];
 
   const shellEnv = process.env.WEMIND_BRAIN_SHELL?.trim();
   const shell =
     shellEnv !== undefined && shellEnv !== ""
       ? shellEnv === "1" || shellEnv.toLowerCase() === "true"
-      : (preset.shell ?? false);
+      : (cfg?.shell ?? preset.shell ?? false);
 
-  const exe = process.platform === "win32" ? (preset.binWin ?? `${preset.bin}.exe`) : preset.bin;
-  // 经 shell 启动时用裸名（让 shell 从 PATH 解析，避免带空格的全路径在 shell 下出问题）；否则在 PATH 上找全路径
-  const bin =
+  // 二进制：env 覆盖 > (kiro 旧变量) > brain.json 覆盖 > PATH 解析 > 预设裸名。
+  // 经 shell 启动时用裸名（让 shell 从 PATH 解析，避免带空格的全路径在 shell 下出问题）。
+  const explicitBin =
     process.env.WEMIND_BRAIN_BIN?.trim() ||
     (preset.name === "kiro" ? process.env.KIRO_CLI_BIN?.trim() : undefined) ||
-    (shell ? (process.platform === "win32" ? exe : preset.bin) : onPath(exe) || preset.bin);
+    cfg?.bin?.trim() ||
+    "";
+  const exe = presetExe(preset);
+  const binPath = explicitBin ? locateBin(explicitBin) : onPath(exe);
+  const bin =
+    explicitBin ||
+    (shell ? (process.platform === "win32" ? exe : preset.bin) : binPath || preset.bin);
+  const available = known && binPath !== null;
 
   const argsOverride = process.env.WEMIND_BRAIN_ARGS?.trim();
-  const args = argsOverride ? argsOverride.split(/\s+/) : preset.args;
+  const args = argsOverride
+    ? argsOverride.split(/\s+/)
+    : cfg?.args && cfg.args.length
+      ? cfg.args
+      : preset.args;
 
-  const homeEnvVar = process.env.WEMIND_BRAIN_HOME_ENV?.trim() || preset.homeEnvVar;
+  const homeEnvVar =
+    process.env.WEMIND_BRAIN_HOME_ENV?.trim() || cfg?.homeEnvVar?.trim() || preset.homeEnvVar;
 
   // 继承「记忆/规则/技能」：来源目录与子目录清单按 agent 而异（下沉到预设），env 可覆盖
   const inherit =
@@ -180,5 +261,24 @@ export function resolveAgent(): ResolvedAgent {
     mcpConfigFile: preset.mcpConfigFile ?? "settings/mcp.json",
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},
+    requestedKey,
+    source,
+    known,
+    available,
+    binPath,
   };
+}
+
+/**
+ * 校验解析后的大脑是否可用：可用返回 null，否则返回一句面向用户的说明。
+ * 供 daemon 启动校验（早失败、说人话）与 `wemind brain` / `wemind brain check` 复用。
+ */
+export function agentProblem(ag: ResolvedAgent): string | null {
+  if (!ag.known)
+    return `未知大脑预设「${ag.requestedKey}」。可选：${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制可用 WEMIND_BRAIN_BIN 或 brain set --bin 指定）`;
+  if (ag.requestedKey === "auto" && !ag.available)
+    return `自动探测未找到可用的大脑（已试：${AUTO_PROBE_ORDER.join("、")}）。请安装其中之一，或运行 \`wemind brain set <预设>\``;
+  if (!ag.available)
+    return `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <预设>\` 切换`;
+  return null;
 }
