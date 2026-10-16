@@ -109,7 +109,7 @@ pm2 save                       # 保存当前列表（改动后记得存，否�
 
 **不要对同一账号同时跑 pm2 和 `run-daemon.ps1`**——会出现两个 daemon 抢同一 token、互相打架。二选一：
 
-- 用 pm2 → 关掉/删除原计划任务「mcp-wechat-daemon」，并确保没有 `run-daemon.ps1` 在跑；
+- 用 pm2 → 关掉/删除原计划任务「wemind-daemon」，并确保没有 `run-daemon.ps1` 在跑；
 - 用原 PowerShell 方案 → 不要 `pm2 start`。
 
 原 PowerShell 方案的命名 Mutex 只防它自己重复，**不感知 pm2**，所以互斥要靠你在两套之间二选一。

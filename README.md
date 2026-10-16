@@ -326,7 +326,7 @@ daemon 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio
 $pwsh = "C:\Program Files\PowerShell\7\pwsh.exe"
 $wrapper = "<仓库绝对路径>\scripts\run-daemon.ps1"
 $action = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`""
-Register-ScheduledTask -TaskName "mcp-wechat-daemon" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew) -Force
+Register-ScheduledTask -TaskName "wemind-daemon" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew) -Force
 ```
 
 若环境禁止创建计划任务（提示「拒绝访问」），改用**启动文件夹**自启：在
