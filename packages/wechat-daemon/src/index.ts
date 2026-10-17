@@ -54,7 +54,7 @@ import {
 } from "./task-manager.js";
 import { ensureWorkerHome } from "./worker-sandbox.js";
 
-const log = (...a: unknown[]) => console.error("[daemon]", ...a);
+const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon]", ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** 分类大脑错误：backend=模型后端瞬时错误(可多重试)；timeout=超时/卡死；other=其它。 */

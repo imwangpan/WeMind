@@ -12,12 +12,12 @@ const argv = process.argv.slice(2);
 
 if (argv[0] === "daemon") {
   runDaemon().catch((err: unknown) => {
-    console.error("[daemon] fatal:", err);
+    console.error("[wemind/wechat-daemon] fatal:", err);
     process.exit(1);
   });
 } else if (argv[0] === "_watchdog") {
   runWatchdog().catch((err: unknown) => {
-    console.error("[watchdog] fatal:", err);
+    console.error("[wemind/wechat-daemon/watchdog] fatal:", err);
     process.exit(1);
   });
 } else {

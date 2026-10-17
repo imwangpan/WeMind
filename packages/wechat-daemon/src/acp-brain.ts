@@ -12,12 +12,12 @@ import { loadBrainConfig } from "./brain-config.js";
  * 通过标准 ACP 协议驱动，agent 可配置（默认 kiro-cli，见 brain-agents.ts），任意兼容 ACP 的 CLI 均可接入。
  * - 每用户一个 ACP session（原生多轮记忆）；session 映射持久化到磁盘。
  * - 自愈：session/prompt 超时/失败 → 杀进程重建；重建后用 session/load 恢复上下文。
- * - 诊断日志（[acp] 前缀，进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差。
+ * - 诊断日志（[wemind/wechat-daemon/acp] 前缀，进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差。
  * 跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
  */
 
 function dlog(...a: unknown[]): void {
-  console.error("[acp]", ...a);
+  console.error("[wemind/wechat-daemon/acp]", ...a);
 }
 
 const AGENT = resolveAgent(loadBrainConfig()); // 当前 ACP agent（env > 账号 brain.json > auto）

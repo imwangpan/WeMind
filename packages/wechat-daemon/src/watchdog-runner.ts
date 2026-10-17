@@ -38,7 +38,10 @@ export async function runWatchdog(): Promise<void> {
   const wrapperPidFile = path.join(dataDir, "wrapper.pid");
 
   if (!acquireSingleton(wrapperPidFile)) {
-    fs.appendFileSync(log, `[wrapper] 已有实例在跑，本次退出。${new Date().toISOString()}\n`);
+    fs.appendFileSync(
+      log,
+      `[wemind/wechat-daemon/wrapper] 已有实例在跑，本次退出。${new Date().toISOString()}\n`,
+    );
     return;
   }
   const cleanup = () => {
@@ -60,7 +63,10 @@ export async function runWatchdog(): Promise<void> {
 
   const cliPath = process.argv[1]; // 当前 cli.js（本进程即 `node cli.js _watchdog`）
   for (;;) {
-    fs.appendFileSync(log, `[wrapper] start daemon ${new Date().toISOString()}\n`);
+    fs.appendFileSync(
+      log,
+      `[wemind/wechat-daemon/wrapper] start daemon ${new Date().toISOString()}\n`,
+    );
     const logFd = fs.openSync(log, "a");
     const child: ChildProcess = spawn(process.execPath, [cliPath, "daemon"], {
       env: process.env, // WECHAT_ACCOUNT 已在本进程环境中
@@ -80,13 +86,13 @@ export async function runWatchdog(): Promise<void> {
       // 大脑配置错误：重拉无益（需人工修），停在看门狗循环外，避免每 5s 刷一条。
       fs.appendFileSync(
         log,
-        `[wrapper] 大脑配置错误（exit ${code}），已停止自动重启。修好后执行：wemind start <账号>\n`,
+        `[wemind/wechat-daemon/wrapper] 大脑配置错误（exit ${code}），已停止自动重启。修好后执行：wemind start <账号>\n`,
       );
       return;
     }
     fs.appendFileSync(
       log,
-      `[wrapper] daemon exited (code=${code}), restart in 5s ${new Date().toISOString()}\n`,
+      `[wemind/wechat-daemon/wrapper] daemon exited (code=${code}), restart in 5s ${new Date().toISOString()}\n`,
     );
     await sleep(RESTART_DELAY_MS);
   }
