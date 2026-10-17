@@ -1,9 +1,10 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import type { ResolvedAgent } from "./brain-agents.js";
+import { spawnAgent } from "./spawn-agent.js";
 
 /**
  * 「大脑连通性自检」：真正起一个 ACP agent 进程并跑完 initialize / session/new 握手，
@@ -21,13 +22,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 20_000): Promise
   if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把「配置目录」指向临时沙箱
   for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
 
-  const proc = spawn(ag.bin, ag.args, {
-    shell: ag.shell,
-    windowsHide: true,
-    cwd: home,
-    env,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  const proc = spawnAgent(ag, { cwd: home, env });
 
   let buf = "";
   let seq = 0;
