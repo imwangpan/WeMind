@@ -296,7 +296,9 @@ export async function notifyStart(params: { baseUrl: string; token?: string }): 
       label: "notifyStart",
     });
   } catch (err) {
-    console.error(`[ilink] notifyStart failed (ignored, best-effort): ${String(err)}`);
+    console.error(
+      `[wemind/wechat-ilink-core/ilink] notifyStart failed (ignored, best-effort): ${String(err)}`,
+    );
   }
 }
 
@@ -312,6 +314,8 @@ export async function notifyStop(params: { baseUrl: string; token?: string }): P
       label: "notifyStop",
     });
   } catch (err) {
-    console.error(`[ilink] notifyStop failed (ignored, best-effort): ${String(err)}`);
+    console.error(
+      `[wemind/wechat-ilink-core/ilink] notifyStop failed (ignored, best-effort): ${String(err)}`,
+    );
   }
 }
