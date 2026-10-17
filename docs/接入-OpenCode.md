@@ -197,7 +197,7 @@ wemind brain set opencode --restart   # 落盘持久（推荐）；一次性覆�
 wemind brain check                    # 真起一个进程跑 ACP 握手（initialize + session/new）
 ```
 启动 daemon 后微信发消息，`~/.wemind/<acct>/daemon.log` 应出现：
-`[acp] spawn opencode acp … → initialized → session/new|session/load → prompt ok`。
+`[wemind/wechat-daemon/acp] spawn opencode acp … → initialized → session/new|session/load → prompt ok`。
 
 **最快冒烟（不改代码，纯环境变量）**：
 ```powershell
