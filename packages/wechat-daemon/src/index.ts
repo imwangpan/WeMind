@@ -213,7 +213,7 @@ async function reply(
       msg: {
         from_user_id: "",
         to_user_id: to,
-        client_id: generateId("daemon"),
+        client_id: generateId("wemind/wechat-daemon"),
         message_type: MessageType.BOT,
         message_state: state,
         item_list: [{ type: MessageItemType.TEXT, text_item: { text } }],
