@@ -242,12 +242,12 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 2. 看该账号日志 `~/.wemind/<key>/daemon.log`，应出现：
 
    ```
-   [acp] spawn <name> acp pid=<pid> bin=<解析到的二进制> args=[<启动参数>]
-   [acp] initialized
-   [acp] → session/new#... 或 session/load#...
-   [acp] → session/prompt#... (idle=... cap=...)
-   [acp] prompt ok <耗时>ms chunks=<n> updateTypes=[...]
-   [daemon] replied to <user>: <回复前若干字>
+   [wemind/wechat-daemon/acp] spawn <name> acp pid=<pid> bin=<解析到的二进制> args=[<启动参数>]
+   [wemind/wechat-daemon/acp] initialized
+   [wemind/wechat-daemon/acp] → session/new#... 或 session/load#...
+   [wemind/wechat-daemon/acp] → session/prompt#... (idle=... cap=...)
+   [wemind/wechat-daemon/acp] prompt ok <耗时>ms chunks=<n> updateTypes=[...]
+   [wemind/wechat-daemon] replied to <user>: <回复前若干字>
    ```
 
    - 没有 `spawn` 行 / 立刻 `acp exited` → 二进制或参数不对（检查 §2 第 1、2 项）；
@@ -294,7 +294,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
   在 brain-agents.ts 的 ACP_AGENT_PRESETS 加一条 → npm run build → wemind brain set <键>
 
 验证：
-  看 daemon.log 的 [acp] spawn / prompt ok；或 wemind brain check
+  看 daemon.log 的 [wemind/wechat-daemon/acp] spawn / prompt ok；或 wemind brain check
 ```
 
 

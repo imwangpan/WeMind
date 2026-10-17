@@ -46,9 +46,9 @@ Windows 计划任务（登录触发）  或  启动文件夹里的 .vbs
 
 ```powershell
 while ($true) {
-  "[wrapper] start daemon $(Get-Date -Format o)" | Add-Content $log
+  "[wemind/wechat-daemon/wrapper] start daemon $(Get-Date -Format o)" | Add-Content $log
   & $node "packages/wechat-daemon/dist/cli.js" daemon *>> $log   # 阻塞，直到 node 退出
-  "[wrapper] daemon exited (code=$LASTEXITCODE), restart in 5s ..." | Add-Content $log
+  "[wemind/wechat-daemon/wrapper] daemon exited (code=$LASTEXITCODE), restart in 5s ..." | Add-Content $log
   Start-Sleep -Seconds 5
 }
 ```

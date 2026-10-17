@@ -132,7 +132,7 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 | `auto` | 未配置时按 `kiro → opencode → gemini` 探测第一个可用预设 | 缺省兜底 |
 
 - 切换用 CLI：`wemind brain set <预设|auto> [--bin X] [--args "…"] [--restart]`、`wemind brain unset`、`wemind brain`（查看）、`wemind brain check`（真起进程跑 ACP 握手）。
-- **启动即校验**：daemon 起来时先解析并校验二进制；不可用则 `[daemon] FATAL 大脑不可用：…` 并以退出码 78 退出（看门狗据此停止自动重启，不再每 5s 刷屏）；未知预设名也不再静默回退 kiro。
+- **启动即校验**：daemon 起来时先解析并校验二进制；不可用则 `[wemind/wechat-daemon] FATAL 大脑不可用：…` 并以退出码 78 退出（看门狗据此停止自动重启，不再每 5s 刷屏）；未知预设名也不再静默回退 kiro。
 
 | 环境变量 | 作用 |
 |----------|------|
@@ -167,7 +167,7 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 
 ### 验证接入
 
-启动 daemon 后给 bot 发消息，看 `~/.wemind/<key>/daemon.log` 应出现 `[acp] spawn ...` → `initialized` → `session/new` 或 `load` → `session/prompt` → `prompt ok`。也可 `wemind brain` 看解析结果、`wemind brain check` 真起一个进程跑 ACP 握手（`initialize` + `session/new`）。
+启动 daemon 后给 bot 发消息，看 `~/.wemind/<key>/daemon.log` 应出现 `[wemind/wechat-daemon/acp] spawn ...` → `initialized` → `session/new` 或 `load` → `session/prompt` → `prompt ok`。也可 `wemind brain` 看解析结果、`wemind brain check` 真起一个进程跑 ACP 握手（`initialize` + `session/new`）。
 
 ## 6.5 大脑 vs worker 的沙箱对比
 
