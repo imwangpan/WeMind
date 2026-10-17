@@ -30,7 +30,7 @@ function readJson<T>(filePath: string): T | null {
   } catch (e) {
     // 文件存在但解析失败（写途崩溃/外部破坏）：不静默清空，备份坏文件 + 记日志，便于排查与人工恢复
     console.error(
-      `[store] ${filePath} parse failed, backing up and treating as empty: ${String(e)}`,
+      `[wemind/wechat-ilink-core/store] ${filePath} parse failed, backing up and treating as empty: ${String(e)}`,
     );
     try {
       fs.renameSync(filePath, `${filePath}.corrupt-${Date.now()}`);

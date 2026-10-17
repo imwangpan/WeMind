@@ -34,7 +34,9 @@ export function readAllowFrom(dir: string = DATA_DIR): string[] {
       : [];
   } catch (e) {
     // 存在但损坏：本清单是安全闸，损坏返回 [] 是 fail-closed（全员锁死），必须可见 → 记日志 + 备份坏文件
-    console.error(`[allow-from] ${filePath(dir)} parse failed, backing up: ${String(e)}`);
+    console.error(
+      `[wemind/wechat-ilink-core/allow-from] ${filePath(dir)} parse failed, backing up: ${String(e)}`,
+    );
     try {
       fs.renameSync(filePath(dir), `${filePath(dir)}.corrupt-${Date.now()}`);
     } catch {
