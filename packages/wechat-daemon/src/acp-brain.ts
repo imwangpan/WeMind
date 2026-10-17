@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -6,6 +6,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME } from "./mcp-sandbox.js";
 import { resolveAgent } from "./brain-agents.js";
 import { loadBrainConfig } from "./brain-config.js";
+import { spawnAgent } from "./spawn-agent.js";
 
 /**
  * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。
@@ -250,12 +251,7 @@ async function ensureProcess(): Promise<void> {
   if (AGENT.homeEnvVar) env[AGENT.homeEnvVar] = BRAIN_HOME; // 把 brain 沙箱目录传给 agent
   // 预设声明的额外环境变量（%HOME% → 沙箱根），如 opencode 的 OPENCODE_DISABLE_PROJECT_CONFIG
   for (const [k, v] of Object.entries(AGENT.env ?? {})) env[k] = v.replaceAll("%HOME%", BRAIN_HOME);
-  const proc = spawn(AGENT.bin, AGENT.args, {
-    shell: AGENT.shell,
-    windowsHide: true,
-    cwd: BRAIN_HOME,
-    env,
-  });
+  const proc = spawnAgent(AGENT, { cwd: BRAIN_HOME, env });
   child = proc;
   dlog(`spawn ${AGENT.name} acp pid=${proc.pid} bin=${AGENT.bin} args=[${AGENT.args.join(" ")}]`);
   try {

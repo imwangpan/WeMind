@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -7,6 +7,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { WORKER_HOME } from "./worker-sandbox.js";
 import { resolveAgent } from "./brain-agents.js";
 import { loadBrainConfig } from "./brain-config.js";
+import { spawnAgent } from "./spawn-agent.js";
 
 /**
  * worker ACP 客户端：维护一个常驻的 ACP agent 进程，专跑「漫长任务」（与 acp-brain 的对话大脑并存、互不干扰）。
@@ -263,9 +264,7 @@ async function ensureProcess(): Promise<void> {
   for (const [k, v] of Object.entries(AGENT.env ?? {}))
     env[k] = v.replaceAll("%HOME%", WORKER_HOME);
   const cwd = effectiveCwd();
-  const proc = spawn(AGENT.bin, AGENT.args, {
-    shell: AGENT.shell,
-    windowsHide: true,
+  const proc = spawnAgent(AGENT, {
     cwd, // 任务工作目录（本地派发可指定，否则默认 WORKER_CWD），区别于 KIRO_HOME 沙箱
     env,
   });
