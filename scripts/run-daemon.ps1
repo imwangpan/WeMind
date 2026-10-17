@@ -24,7 +24,7 @@ $mutexName = "wemind-daemon-" + ([System.BitConverter]::ToString($sha) -replace 
 $createdNew = $false
 $global:WeMindMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
 if (-not $createdNew) {
-  "[wrapper] 已有实例在跑（dataKey=$dataKey, mutex=$mutexName），本次退出。$(Get-Date -Format o)" | Add-Content $log
+  "[wemind/wechat-daemon/wrapper] 已有实例在跑（dataKey=$dataKey, mutex=$mutexName），本次退出。$(Get-Date -Format o)" | Add-Content $log
   exit 0
 }
 
@@ -47,7 +47,7 @@ if (-not $node) {
     if ($cand -and (Test-Path $cand)) {
       $node = $cand
       $env:PATH = "$(Split-Path -Parent $cand);$env:PATH"
-      "[wrapper] PATH 中无 node，回退到 $cand 并前置其目录到 PATH" | Add-Content $log
+      "[wemind/wechat-daemon/wrapper] PATH 中无 node，回退到 $cand 并前置其目录到 PATH" | Add-Content $log
       break
     }
   }
@@ -61,15 +61,15 @@ if (-not (Get-Command kiro-cli -ErrorAction SilentlyContinue)) {
 }
 
 while ($true) {
-  "[wrapper] start daemon $(Get-Date -Format o)" | Add-Content $log
+  "[wemind/wechat-daemon/wrapper] start daemon $(Get-Date -Format o)" | Add-Content $log
   & $node "packages/wechat-daemon/dist/cli.js" daemon *>> $log
   $code = $LASTEXITCODE
   # 退出码 78 = 大脑配置错误（见 brain-agents.ts 的 BRAIN_CONFIG_EXIT_CODE）：
   # 需人工修（换预设 / 装二进制），重拉无益 → 停在循环外，避免每 5s 刷一条日志。
   if ($code -eq 78) {
-    "[wrapper] 大脑配置错误（exit 78），已停止自动重启。修好后重新登录或手动启动。$(Get-Date -Format o)" | Add-Content $log
+    "[wemind/wechat-daemon/wrapper] 大脑配置错误（exit 78），已停止自动重启。修好后重新登录或手动启动。$(Get-Date -Format o)" | Add-Content $log
     break
   }
-  "[wrapper] daemon exited (code=$code), restart in 5s $(Get-Date -Format o)" | Add-Content $log
+  "[wemind/wechat-daemon/wrapper] daemon exited (code=$code), restart in 5s $(Get-Date -Format o)" | Add-Content $log
   Start-Sleep -Seconds 5
 }

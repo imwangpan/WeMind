@@ -20,7 +20,7 @@ import { loadBrainConfig } from "./brain-config.js";
  */
 
 function dlog(...a: unknown[]): void {
-  console.error("[worker]", ...a);
+  console.error("[wemind/wechat-daemon/worker]", ...a);
 }
 
 const AGENT = resolveAgent(loadBrainConfig()); // 复用同一 ACP agent 解析（env > 账号 brain.json > auto）

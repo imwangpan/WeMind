@@ -1,6 +1,6 @@
 import { askWorker, stopWorker, setWorkerCwd, type WorkerProgressEvent } from "./worker-acp.js";
 
-const log = (...a: unknown[]) => console.error("[task]", ...a);
+const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon/task]", ...a);
 
 type TaskStatus = "running" | "waiting";
 type ActiveTask = {
