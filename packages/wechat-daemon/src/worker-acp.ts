@@ -29,7 +29,8 @@ const WORKER_CWD = process.env.WEMIND_WORKER_CWD?.trim() || os.homedir(); // 任
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WEMIND_WORKER_IDLE_MS) || 180_000; // 无任何帧多久算"卡死"（worker 比 brain 宽松：3min）
 const PROMPT_CAP_MS = Number(process.env.WEMIND_WORKER_CAP_MS) || 1_800_000; // 单轮硬上限 30min（漫长任务）
-const FIRST_FRAME_MS = Number(process.env.WEMIND_WORKER_FIRST_FRAME_MS) || 30_000; // 从未出帧多久判"开局即卡死"
+const FIRST_FRAME_MS =
+  Number(process.env.WEMIND_WORKER_FIRST_FRAME_MS) || AGENT.firstFrameMs || 30_000; // 预设可覆盖
 const SESSION_MAP_FILE = path.join(DATA_DIR, "worker-sessions.json");
 const WORKER_PID_FILE = path.join(DATA_DIR, "worker.pid"); // 标记 worker kiro-cli pid，便于与 brain/用户会话区分、精确清理
 const TASK_KEY = "task"; // MVP 单任务的固定 session key
@@ -122,6 +123,31 @@ function saveSessionMap(m: Record<string, string>): void {
   fs.writeFileSync(SESSION_MAP_FILE, JSON.stringify(m, null, 2), "utf-8");
 }
 
+function handleReverseRequest(f: Record<string, any>): void {
+  const method = String(f.method);
+  dlog(`← reverse request ${method}#${f.id}`);
+  if (method === "session/request_permission") {
+    const options = Array.isArray(f.params?.options) ? f.params.options : [];
+    const allow =
+      process.env.WEMIND_ACP_AUTO_ALLOW === "1"
+        ? options.find((o: any) => o?.kind === "allow_once" || o?.kind === "allow_always")
+        : undefined;
+    const result = allow
+      ? { outcome: { outcome: "selected", optionId: allow.optionId } }
+      : { outcome: { outcome: "cancelled" } };
+    child?.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: f.id, result }) + "\n");
+    dlog(`permission ${allow ? "allowed" : "rejected"}`);
+    return;
+  }
+  child?.stdin.write(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: f.id,
+      error: { code: -32601, message: "method not supported" },
+    }) + "\n",
+  );
+}
+
 function handleFrame(f: Record<string, any>): void {
   lastFrameAt = Date.now();
   frameSeq += 1;
@@ -134,6 +160,10 @@ function handleFrame(f: Record<string, any>): void {
       dlog(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`);
       p.reject(new Error(JSON.stringify(f.error)));
     } else p.resolve(f.result);
+    return;
+  }
+  if (f.method && f.id !== undefined) {
+    handleReverseRequest(f);
     return;
   }
   if (f.method === "session/update") {
@@ -292,23 +322,43 @@ async function ensureProcess(): Promise<void> {
   dlog("initialized");
 }
 
+async function applyModel(sid: string): Promise<void> {
+  if (!AGENT.model) return;
+  try {
+    await request(
+      "session/set_config_option",
+      { sessionId: sid, configId: "model", value: AGENT.model },
+      REQ_TIMEOUT,
+    );
+    dlog(`model set ${AGENT.model}`);
+  } catch (e) {
+    dlog(`model set failed (${String(e)})`);
+    throw e;
+  }
+}
+
 async function ensureSession(key: string): Promise<string> {
   const existing = taskSessions.get(key);
   if (existing) return existing;
   const map = loadSessionMap();
   const saved = map[key];
   if (saved) {
-    try {
-      await request(
-        "session/load",
-        { sessionId: saved, cwd: effectiveCwd(), mcpServers: [] },
-        REQ_TIMEOUT,
-      );
-      taskSessions.set(key, saved);
-      dlog(`session/load ok ${saved}`);
-      return saved;
-    } catch (e) {
-      dlog(`session/load failed (${String(e)}), creating new`);
+    const methods: Array<"load" | "resume"> =
+      AGENT.restore === "resume" ? ["resume"] : ["load", "resume"];
+    for (const method of methods) {
+      try {
+        await request(
+          `session/${method}`,
+          { sessionId: saved, cwd: effectiveCwd(), mcpServers: [] },
+          REQ_TIMEOUT,
+        );
+        await applyModel(saved);
+        taskSessions.set(key, saved);
+        dlog(`session/${method} ok ${saved}`);
+        return saved;
+      } catch (e) {
+        dlog(`session/${method} failed (${String(e)})`);
+      }
     }
   }
   const res = (await request(
@@ -317,6 +367,7 @@ async function ensureSession(key: string): Promise<string> {
     REQ_TIMEOUT,
   )) as { sessionId?: string };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
+  await applyModel(res.sessionId);
   taskSessions.set(key, res.sessionId);
   map[key] = res.sessionId;
   saveSessionMap(map);

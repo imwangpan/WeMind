@@ -96,7 +96,7 @@ poller（长轮询，不被大脑阻塞）
 | **反向请求** | agent 发给 client 的请求（`session/request_permission`、`fs/*`、`terminal/*`）；不应答会挂起 |
 | **committed-only** | agent 只在消息提交后发正文（非逐 token），如 DSH 官方 ACP |
 | **brain.json** | 账号级大脑选择，`<数据目录>/brain.json`；`wemind brain set` 写入 |
-| **auto** | 未配置时的探测顺序：`kiro → opencode → gemini` |
+| **auto** | 未配置时的探测顺序：`kiro → opencode → gemini → deepseek` |
 
 ---
 
@@ -110,7 +110,8 @@ poller（长轮询，不被大脑阻塞）
 | 任意兼容 ACP 的 agent 都「无需改代码」 | ⚪ **不成立** | 需要 load/resume、反向请求、首帧/心跳、image 能力适配 |
 | `session/load` 是 ACP 通用能力 | ⚪ **不成立** | DSH 只有 `session/resume`；`load` 返回 `-32601` |
 | 仓库存在 `Brain` 接口 | ⚪ **不存在** | `acp-brain.ts` 直接导出 `askBrain`/`newSession`/`restart` |
-| `wemind brain check` 默认 20s | ✅ 代码 | 冷启动慢的 agent 可能误报 |
+| `wemind brain check` 默认 60s | ✅ 代码 | 冷启动慢的 agent 仍可能误报 |
+| `deepseek` 预设已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume`；收图友好拒绝 |
 | `onPath()` 会补试 `.cmd` | ⚪ **不会** | 只有 `dsh.cmd` 时 `binWin` 必须写 `dsh.cmd` |
 | DSH `0.2.1-rc.2` 有 resume/list/close | ✅ 实测 | `docs/接入-DeepSeek.md` 附录 |
 | DSH `0.2.1-rc.2` 有 `session/load` | ❌ 实测 | `-32601 Method not found` |

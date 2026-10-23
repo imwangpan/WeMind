@@ -58,6 +58,22 @@ function readJson(file: string): Record<string, unknown> | null {
   }
 }
 
+/** 同 brain：把凭据文件（如 DSH 的 .credentials.yaml）新者胜地同步进 worker 沙箱。 */
+function syncCredentialFile(): void {
+  if (!AG.credentialFile || !AG.realHome) return;
+  const src = path.join(AG.realHome, AG.credentialFile);
+  const dst = path.join(WORKER_CONFIG_DIR, AG.credentialFile);
+  try {
+    if (!fs.existsSync(src)) return;
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    const s = fs.statSync(src);
+    const d = fs.existsSync(dst) ? fs.statSync(dst) : null;
+    if (!d || s.mtimeMs > d.mtimeMs + 1000) fs.copyFileSync(src, dst);
+  } catch {
+    /* best-effort */
+  }
+}
+
 function loadCatalog(): Record<string, unknown> {
   return readMcpServers(readJson(CATALOG), AG.mcpFormat);
 }
@@ -200,4 +216,5 @@ export function ensureWorkerHome(): void {
   syncSettings(); // 先同步「非 MCP」设置（模型/免确认等）
   applyWorkerSandbox(); // 再写全量 MCP（除 wechat 等排除集）
   mirrorRealKiro(); // 链入记忆/steering/skills（sessions 仍隔离）
+  syncCredentialFile(); // 凭据（如 DSH 的 .credentials.yaml）
 }

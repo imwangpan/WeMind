@@ -35,7 +35,7 @@ import type {
   SendMessageReq,
   ImageItem,
 } from "@wemind/wechat-ilink-core";
-import { askBrain, newSession, restart } from "./acp-brain.js";
+import { askBrain, newSession, restart, supportsImages, heartbeatMs } from "./acp-brain.js";
 import { resolveAgent, agentProblem, BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
 import { loadBrainConfig } from "./brain-config.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
@@ -270,6 +270,8 @@ const MIN_SEND_GAP_MS = Number(process.env.WECHAT_MIN_SEND_GAP_MS) || 1500;
 
 // iLink 在用户回复前能连续发送的消息数上限（实测约 10，可调）。
 const CONSEC_SEND_LIMIT = Number(process.env.WECHAT_CONSEC_SEND_LIMIT) || 10;
+// 静默期心跳：默认 15s；预设可放宽（如 DSH committed-only，但仍会发 thought/usage 帧）。
+const HEARTBEAT_MS = Number(process.env.WECHAT_BRAIN_HEARTBEAT_MS) || heartbeatMs() || 15_000;
 // 「距该用户上一条消息以来」bot 已连续发送的条数 + 是否处于"等待继续"段。按用户(to)维护、**跨回合持续**，
 // 仅在该用户发来任何消息时重置（镜像服务端"任何用户消息都重置连续发送配额"的规则）。
 // 这样即使 A 任务期间你发了 B、A 又继续发了几条，B 任务接手时计数是延续的，不会误以为"还能再发10条"而撞上限。
@@ -397,11 +399,11 @@ async function handleMessage(
     log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
     sendProgress("🤖 收到，正在处理…");
   }
-  // 心跳：仅当 brain 真正静默(无任何帧)超过 15s 才提示——首条用友好措辞，后续才带计时
+  // 心跳：仅当 brain 真正静默(无任何帧)超过 HEARTBEAT_MS 才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
   let answerNoticeSent = false; // "正在整理回复"只发一次
   const heartbeat = setInterval(() => {
-    if (Date.now() - lastProgressAt >= 15000) {
+    if (Date.now() - lastProgressAt >= HEARTBEAT_MS) {
       hbCount += 1;
       sendProgress(
         hbCount === 1
@@ -409,7 +411,7 @@ async function handleMessage(
           : `⏳ 仍在处理中…（已 ${Math.round((Date.now() - t0) / 1000)} 秒）`,
       );
     }
-  }, 15000);
+  }, HEARTBEAT_MS);
 
   // 收图：下载并解密（失败的跳过）
   const images: Array<{ data: string; mimeType: string }> = [];
@@ -423,6 +425,27 @@ async function handleMessage(
         log("image download failed:", String(e));
       }
     }
+  }
+
+  // 当前大脑不接受图片（如 DSH 0.2.1-rc.2 image:false）：不要让它以 -32602 失败重试
+  if (images.length > 0 && !supportsImages()) {
+    clearInterval(keepAlive);
+    clearInterval(heartbeat);
+    await setTyping(account, to, cx(), 2);
+    budgetOf(to).count += 1;
+    try {
+      await sendOrdered(
+        account,
+        to,
+        cx(),
+        "🖼️ 当前大脑暂不支持看图，请改用文字描述，或切换到支持图片的大脑。",
+        MessageState.FINISH,
+      );
+      log("image unsupported by current brain; rejected gracefully");
+    } finally {
+      activeTurn = null;
+    }
+    return;
   }
 
   // 一次尝试：带进度（步骤编号每次尝试重置）。进度消息节流：避免一回合刷十几条触发 iLink 发送限流（疑似 ret=-2 主因）

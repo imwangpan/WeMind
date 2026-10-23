@@ -21,7 +21,7 @@ catalog（定义从哪来）
   └─ 微信指令「加载 <名>」/「卸载 <名>」修改；wechat 永久禁止
 
 transport（怎么让 agent 看到）
-  └─ brain：applySandbox() 写沙箱配置文件（kiro/opencode），或 mcpViaAcp 传 session/new
+  └─ brain：applySandbox() 写沙箱配置文件（kiro/opencode），或 mcpViaAcp 传 session/new（M3，**尚未实现**）
   └─ worker：applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）
 ```
 
@@ -72,6 +72,8 @@ transport（怎么让 agent 看到）
 ```
 
 ### DSH
+
+> **状态：M3 未实现。** 当前 `deepseek` 预设仍会写一个 DSH 不读的 `settings/mcp.json`；微信「加载 MCP」对 DSH 暂不生效。下面是把 M3 做出来后的目标形态。
 
 DSH 的 ACP 走 `session/new` 的 `mcpServers`，没有 kiro 式文件。用中立 catalog：
 

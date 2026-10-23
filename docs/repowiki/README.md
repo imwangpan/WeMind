@@ -63,7 +63,7 @@ WeMind 把「个人微信」变成一个 AI Agent 的输入输出通道。它基
 | 语言 / 运行时 | TypeScript / Node.js >= 20（Node 24 验证，兼容 Bun） |
 | 仓库结构 | npm workspaces monorepo（3 个 package） |
 | 后端渠道 | 腾讯 iLink / 微信 ClawBot（`ilinkai.weixin.qq.com`） |
-| 默认 AI 大脑 | `auto`：按 `kiro → opencode → gemini` 探测；落盘在 `<数据目录>/brain.json` |
+| 默认 AI 大脑 | `auto`：按 `kiro → opencode → gemini → deepseek` 探测；落盘在 `<数据目录>/brain.json` |
 | 数据目录 | `~/.wemind/<account>/`（独立于代码仓库） |
 | 许可证 | MIT |
 
