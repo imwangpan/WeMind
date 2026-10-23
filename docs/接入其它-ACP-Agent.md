@@ -77,7 +77,7 @@ wemind brain check                      # 真机自检（真实 ACP 握手）
 预设：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
 ```
 
-- **`auto`（未配置时的默认）**：按 `kiro → opencode → gemini` 取第一个**二进制在 PATH 上可解析**的预设；适配器类（`claude-code`/`codex`）不参与（`npx` 几乎总存在，会误选）。
+- **`auto`（未配置时的默认）**：按 `kiro → opencode → gemini → deepseek` 取第一个**二进制在 PATH 上可解析**的预设；适配器类（`claude-code`/`codex`）不参与（`npx` 几乎总存在，会误选）。
 - 一个都没装 → daemon **启动即失败并说人话**（不再「跑起来、第一条消息才炸」），提示安装或 `wemind brain set`。
 
 ### 3.2 环境变量（一次性覆盖，优先级最高）
@@ -179,7 +179,7 @@ ACP agent 分两类，接入方式不同：
 |--------|-------|------|------|------|
 | `kiro` | kiro-cli | 原生 | ✅ **已实测** | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
 | `opencode` | OpenCode | 原生 | ✅ **已实测** | `opencode acp`，`XDG_CONFIG_HOME`（详见 [接入-OpenCode.md](接入-OpenCode.md)） |
-| `deepseek`（未内置） | DeepSeek Harness `dsh` | 原生（官方 ACP profile） | 🟡 **评估中**：prompt / 工具 / resume 上下文 / stdio MCP 已实测；`load` ❌、`image` ❌；未加预设 | `dsh --profile acp`，`DSH_HOME`（详见 [接入-DeepSeek.md](接入-DeepSeek.md)） |
+| `deepseek` | DeepSeek Harness `dsh` | 原生（官方 ACP profile） | ✅ **已内置/已实测**：prompt / 工具 / resume 上下文 / stdio MCP；`load` ❌、`image:false`（收图友好拒绝） | `dsh --profile acp`，`DSH_HOME`；建议 `--bin` 绝对路径（详见 [接入-DeepSeek.md](接入-DeepSeek.md)） |
 | `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --experimental-acp`，`GEMINI_CLI_HOME`（flag 以官方为准） |
 | `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @zed-industries/claude-code-acp`（Zed 官方适配器；需 Claude Code 登录或 `ANTHROPIC_API_KEY`） |
 | `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，需自行安装其二进制；Codex 本身暂不原生支持 ACP） |
@@ -282,13 +282,13 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 - 本指南覆盖「**能说 ACP 的 agent CLI**」。这是接入成本最低的一档，但**不等于零适配**：先跑能力探针，再决定是否需要改 `acp-brain.ts` / `worker-acp.ts`。
 - **能力差异清单**（接入前逐条确认）：
-  - **会话恢复**：有 `session/load`？只有 `session/resume`？都没有？当前客户端只调 `load`，缺失会退化成新建；
+  - **会话恢复**：有 `session/load`？只有 `session/resume`？都没有？当前客户端会按预设 `restore` 选 `load`/`resume`；DSH 走 `resume`，其余 agent 先 `load`，失败再试 `resume`/`new`；
   - **图片**：`initialize.promptCapabilities.image` 是否为 true？false 时带图 `session/prompt` 会报 `-32602`；
   - **MCP**：走 agent 配置文件，还是 ACP `session/new` 的 `mcpServers`？支持 stdio/HTTP 哪些传输？
   - **反向请求**：是否会发 `session/request_permission` / `fs/*` / `terminal/*`？当前 `handleFrame` 不应答，遇到会挂起；
   - **进度**：是否逐 token 发 `agent_message_chunk`？committed-only 时 15s 心跳会烧连发额度；
   - **Windows**：二进制是 `.exe` 还是 `.cmd`/`npx`？后者必须 `shell:true`，`binWin` 要写实际文件名。
-- **不支持 ACP 的对象**（如直接调 OpenAI / Anthropic / Ollama 等 LLM HTTP API）走不了本路，需要「第二档：API 适配器」。**注意：仓库当前没有 `Brain` 接口抽象**——`acp-brain.ts` 直接导出 `askBrain`/`newSession`/`restart`，`index.ts` 直接调用。要做第二档，得先抽一个接口，再写 HTTP 实现，并自行维护多轮历史与（如需）工具循环。纯对话容易，复刻 kiro 那样的「会用工具的 agent」相当于自造迷你 agent。该档尚未实现。
+- **不支持 ACP 的对象**（如直接调 OpenAI / Anthropic / Ollama 等 LLM HTTP API）走不了本路，需要「第二档：API 适配器」。**注意：仓库当前没有 `Brain` 接口抽象，这是刻意的**——ACP 是唯一实现，先不抽接口避免增加间接层；等 API 适配器真正立项时，再抽 `askBrain`/`newSession`/`restart` 契约并改 `index.ts` 调用方，然后写 HTTP 实现（自行维护多轮历史与工具循环）。纯对话容易，复刻 kiro 那样的「会用工具的 agent」相当于自造迷你 agent。该档尚未实现。
 - 另：**MCP 服务模式**（`@wemind/wechat-mcp`）与本文无关且本就 agent 无关——任何支持 MCP 的客户端（Claude Desktop、Cursor、kiro IDE 等）都能直接驱动 WeMind 收发微信，不需要 daemon 这套大脑。
 
 ---
@@ -299,7 +299,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 选择大脑（推荐，落盘持久）：
   wemind brain set <预设|auto> [--bin X] [--args "…"] [--restart]   # 写入 <数据目录>/brain.json
   wemind brain / wemind brain check                                 # 查看 / 真机自检
-  （未配置时默认 auto：按 kiro → opencode → gemini 探测已安装者）
+  （未配置时默认 auto：按 kiro → opencode → gemini → deepseek 探测已安装者）
 
 一次性覆盖（仅本次启动的进程）：
   WEMIND_BRAIN_BIN=<二进制>
@@ -312,7 +312,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 验证：
   看 daemon.log 的 [wemind/wechat-daemon/acp] spawn / prompt ok；或 wemind brain check
   接入前先跑：node scripts/acp-probe.mjs（记录 initialize、首帧、update、load/resume、反向请求）
-  注意：brain check 默认 20s，冷启动慢的 agent 可能误报
+  注意：brain check 默认 60s，冷启动慢的 agent 仍可能误报
 ```
 
 

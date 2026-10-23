@@ -15,7 +15,7 @@ import { spawnAgent } from "./spawn-agent.js";
  */
 export type CheckResult = { ok: boolean; detail: string; ms: number };
 
-export async function checkAgent(ag: ResolvedAgent, timeoutMs = 20_000): Promise<CheckResult> {
+export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise<CheckResult> {
   const started = Date.now();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-check-"));
   const env: NodeJS.ProcessEnv = { ...process.env };

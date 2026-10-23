@@ -192,7 +192,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 > 📦 **作为 `wemind` CLI 使用**：本守护进程已打包为 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`，常驻委托 pm2）——**尚未发布到 npm**，当前请按下文从源码运行（发布后 `npm i -g wemind` 即可全局使用）。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**。
 
 `packages/wechat-daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
-调 **常驻 ACP agent**（JSON-RPC over stdio；未配置时 `auto` 探测 kiro/opencode/gemini）当大脑生成回复 → 自动回发。
+调 **常驻 ACP agent**（JSON-RPC over stdio；未配置时 `auto` 探测 kiro/opencode/gemini/deepseek）当大脑生成回复 → 自动回发。
 进程常驻、原生多轮记忆，回复从 `agent_message_chunk` 流式拼接（天然无 ANSI/工具旁白）；
 带**存活检测**（进程不在自动重启）。它**只依赖内核包 `@wemind/wechat-ilink-core`**，不碰 MCP 那层，是一个完全独立、可单独运行的包。
 
@@ -299,7 +299,7 @@ brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认�
 
 ### 切换大脑 Agent（通用化）
 
-daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC over stdio）** 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini` 探测已安装者）。**多数原生 ACP agent 可以零代码接入**；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 `packages/wechat-daemon/src/brain-agents.ts` 与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §9）。
+daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC over stdio）** 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini → deepseek` 探测已安装者）。**多数原生 ACP agent 可以零代码接入**；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 `packages/wechat-daemon/src/brain-agents.ts` 与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §9）。
 
 | 环境变量                | 作用                                                | 默认         |
 | ----------------------- | --------------------------------------------------- | ------------ |
@@ -315,7 +315,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC over stdio）** 
 >
 > **OpenCode 已内置预设**：`WEMIND_BRAIN=opencode` 即可让 `opencode acp` 当大脑（自动用 `XDG_CONFIG_HOME` 隔离配置目录、curated MCP、继承记忆/技能）。完整设计、M1 实测与风险见 **[docs/接入-OpenCode.md](docs/接入-OpenCode.md)**。
 >
-> **DeepSeek 评估中（未接入，官方 ACP 已真机实测）**：`dsh 0.2.1-rc.2` 无 `session/load`（有 `resume`，上下文保留）、`image:false`、默认 `deepseek-official` 路由需 API key（桌面登录要选 `deepseek-account`）；完整实测、模型/凭据方案与分阶段计划见 **[docs/接入-DeepSeek.md](docs/接入-DeepSeek.md)**。
+> **DeepSeek 已接入（官方 DSH）**：`wemind brain set deepseek --bin "<...>\dsh.cmd"` 即用 `dsh --profile acp` 当大脑；预设已处理 `DSH_HOME` 沙箱、`.credentials.yaml`、`model=deepseek-account/deepseek-flash`、`session/resume`、图片拦截。实测与限制见 **[docs/接入-DeepSeek.md](docs/接入-DeepSeek.md)**。
 
 ### 收发图片
 

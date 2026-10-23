@@ -4,12 +4,16 @@
 
 ## [Unreleased] — fork
 
+### Added
+
+- **DeepSeek 官方 DSH 大脑（M1/M2，2026-10-24）**：新增 `deepseek` 预设（`dsh --profile acp`，`binWin: "dsh.cmd"`，`DSH_HOME` 沙箱，`.credentials.yaml` 从真实 `~/.dsh` 新者胜同步）；`session/set_config_option` 选 `deepseek-account/deepseek-flash`（桌面登录；默认 `deepseek-official` 需 API key）；`session/resume` 兜底（DSH 无 `load`）；反向请求应答器；预设级 `firstFrameMs`/`heartbeatMs`/`images`；图片在 `image:false` 时友好拒绝。真机验证：prompt、工具调用、强杀后 resume 上下文保留、stdio MCP；代码级 `A1=STORED` / `A2=PINEAPPLE`。详见 `docs/接入-DeepSeek.md`。
+
 ### Docs
 
 - **AI 上手材料 + 文档漂移修正（2026-10-24）**：
   - 新增根 `AGENTS.md`、`docs/ai/README.md`、`docs/ai/recipes/{add-acp-agent,add-mcp,debug-daemon,run-e2e}.md`、`scripts/doctor.ps1`、`scripts/acp-probe.mjs`、`scripts/check-docs.ps1`、`llms.txt`；CI 增加 Markdown 链接检查；
   - 修正「任意兼容 ACP 的 agent 无需改代码」的绝对说法：`session/load` 并非通用能力（DSH 只有 `session/resume`），反向请求、首帧/心跳、`image:false`、MCP 传输都需按 agent 适配；
-  - 修正「默认大脑是 kiro」为 `auto`（`kiro → opencode → gemini`）；
+  - 修正「默认大脑是 kiro」为 `auto`（`kiro → opencode → gemini → deepseek`）；
   - 修正「仓库有 `Brain` 接口」的表述：当前只有 `acp-brain.ts` 的函数导出，API 适配档尚未实现；
   - 给 README / repowiki / 接入指南补「适用版本 + 最后核对」与「实测/假设」标注；DeepSeek 0.2.1-rc.2 的实测见 `docs/接入-DeepSeek.md`。
 

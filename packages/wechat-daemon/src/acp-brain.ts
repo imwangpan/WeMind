@@ -25,7 +25,8 @@ const AGENT = resolveAgent(loadBrainConfig()); // 当前 ACP agent（env > 账�
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 120_000; // 多久没收到任何帧才算"卡死"。重任务单次慢抓取可静默较久（直连 kiro-cli 无此限制），放宽到 2min 兜底真死
 const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 900_000; // 单回合硬上限 15min。实测重任务(联网核实)需 ~6.5min；context_token 无时间 TTL(官方)，长回合用本消息 token 仍可送达。卡死由 idle/首帧超时兜底
-const FIRST_FRAME_MS = Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || 25_000; // 从未出过帧多久判定"开局即卡死"——比 idle 更快砍掉，省下重试前的空等
+const FIRST_FRAME_MS =
+  Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || AGENT.firstFrameMs || 25_000; // 预设可覆盖；DSH 实测首帧 1–4s，兜底 60s
 const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
 const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 标记当前账号的大脑 kiro-cli pid，便于与用户自己的会话区分/清理
 
@@ -107,6 +108,33 @@ function saveSessionMap(m: Record<string, string>): void {
   fs.writeFileSync(SESSION_MAP_FILE, JSON.stringify(m, null, 2), "utf-8");
 }
 
+function handleReverseRequest(f: Record<string, any>): void {
+  const method = String(f.method);
+  dlog(`← reverse request ${method}#${f.id}`);
+  if (method === "session/request_permission") {
+    const options = Array.isArray(f.params?.options) ? f.params.options : [];
+    // 默认拒绝（安全）；可信部署可显式开启一次性放行
+    const allow =
+      process.env.WEMIND_ACP_AUTO_ALLOW === "1"
+        ? options.find((o: any) => o?.kind === "allow_once" || o?.kind === "allow_always")
+        : undefined;
+    const result = allow
+      ? { outcome: { outcome: "selected", optionId: allow.optionId } }
+      : { outcome: { outcome: "cancelled" } };
+    child?.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: f.id, result }) + "\n");
+    dlog(`permission ${allow ? "allowed" : "rejected"}`);
+    return;
+  }
+  // 未知反向请求也要回错误，否则对端会挂起
+  child?.stdin.write(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: f.id,
+      error: { code: -32601, message: "method not supported" },
+    }) + "\n",
+  );
+}
+
 function handleFrame(f: Record<string, any>): void {
   lastFrameAt = Date.now();
   frameSeq += 1;
@@ -119,6 +147,11 @@ function handleFrame(f: Record<string, any>): void {
       dlog(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`);
       p.reject(new Error(JSON.stringify(f.error)));
     } else p.resolve(f.result);
+    return;
+  }
+  // agent -> client 的反向请求（带 method + id）；必须应答，否则会挂到超时
+  if (f.method && f.id !== undefined) {
+    handleReverseRequest(f);
     return;
   }
   if (f.method === "session/update") {
@@ -277,29 +310,52 @@ async function ensureProcess(): Promise<void> {
   dlog("initialized");
 }
 
+/** 按预设选择模型路由（如 DSH 的 deepseek-account）；没有 model 的 agent 跳过。 */
+async function applyModel(sid: string): Promise<void> {
+  if (!AGENT.model) return;
+  try {
+    await request(
+      "session/set_config_option",
+      { sessionId: sid, configId: "model", value: AGENT.model },
+      REQ_TIMEOUT,
+    );
+    dlog(`model set ${AGENT.model}`);
+  } catch (e) {
+    dlog(`model set failed (${String(e)})`);
+    throw e;
+  }
+}
+
 async function ensureSession(userId: string): Promise<string> {
   const existing = userSessions.get(userId);
   if (existing) return existing;
   const map = loadSessionMap();
   const saved = map[userId];
   if (saved) {
-    try {
-      await request(
-        "session/load",
-        { sessionId: saved, cwd: BRAIN_HOME, mcpServers: [] },
-        REQ_TIMEOUT,
-      );
-      userSessions.set(userId, saved);
-      dlog(`session/load ok ${saved}`);
-      return saved;
-    } catch (e) {
-      dlog(`session/load failed (${String(e)}), creating new`);
+    // 预设指定 resume（DSH）；其余仍先 load，失败再试 resume，最后 new
+    const methods: Array<"load" | "resume"> =
+      AGENT.restore === "resume" ? ["resume"] : ["load", "resume"];
+    for (const method of methods) {
+      try {
+        await request(
+          `session/${method}`,
+          { sessionId: saved, cwd: BRAIN_HOME, mcpServers: [] },
+          REQ_TIMEOUT,
+        );
+        await applyModel(saved);
+        userSessions.set(userId, saved);
+        dlog(`session/${method} ok ${saved}`);
+        return saved;
+      } catch (e) {
+        dlog(`session/${method} failed (${String(e)})`);
+      }
     }
   }
   const res = (await request("session/new", { cwd: BRAIN_HOME, mcpServers: [] }, REQ_TIMEOUT)) as {
     sessionId?: string;
   };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
+  await applyModel(res.sessionId);
   userSessions.set(userId, res.sessionId);
   map[userId] = res.sessionId;
   saveSessionMap(map);
@@ -324,8 +380,16 @@ export async function askBrain(
   seenTools.clear();
   const t0 = Date.now();
   const prompt: unknown[] = [];
-  for (const im of images ?? [])
-    prompt.push({ type: "image", mimeType: im.mimeType, data: im.data });
+  if (images?.length && !AGENT.images) {
+    prompt.push({
+      type: "text",
+      text: "（用户发来图片，但当前大脑不支持图片输入；请让用户改用文字，或切换到支持图片的大脑。不要臆测图片内容。）",
+    });
+  }
+  if (AGENT.images) {
+    for (const im of images ?? [])
+      prompt.push({ type: "image", mimeType: im.mimeType, data: im.data });
+  }
   if (!hintedSessions.has(sid)) {
     hintedSessions.add(sid);
     prompt.push({
@@ -368,4 +432,14 @@ export async function newSession(userId: string): Promise<void> {
 /** MCP 激活集变更后调用：重启 acp 进程（重建后会 session/load 恢复上下文）。 */
 export function restart(): void {
   reset();
+}
+
+/** 当前大脑是否接受图片输入（预设能力；默认 true）。 */
+export function supportsImages(): boolean {
+  return AGENT.images;
+}
+
+/** 当前预设的静默期心跳覆盖（默认 undefined → 15s）。 */
+export function heartbeatMs(): number | undefined {
+  return AGENT.heartbeatMs;
 }
