@@ -6,7 +6,7 @@
 
 ### Added
 
-- **DeepSeek 官方 DSH 大脑（M1/M2，2026-10-24）**：新增 `deepseek` 预设（`dsh --profile acp`，`binWin: "dsh.cmd"`，`DSH_HOME` 沙箱，`.credentials.yaml` 从真实 `~/.dsh` 新者胜同步）；`session/set_config_option` 选 `deepseek-account/deepseek-flash`（桌面登录；默认 `deepseek-official` 需 API key）；`session/resume` 兜底（DSH 无 `load`）；反向请求应答器；预设级 `firstFrameMs`/`heartbeatMs`/`images`；图片在 `image:false` 时友好拒绝。真机验证：prompt、工具调用、强杀后 resume 上下文保留、stdio MCP；代码级 `A1=STORED` / `A2=PINEAPPLE`。详见 `docs/接入-DeepSeek.md`。
+- **DeepSeek 官方 DSH 大脑（M1/M2，2026-10-24）**：新增 `deepseek` 预设（`dsh --profile acp`，`binWin: "dsh.cmd"`，`DSH_HOME` 沙箱，`.credentials.yaml` 从真实 `~/.dsh` 新者胜同步）；`session/set_config_option` 选 `deepseek-account/deepseek-flash`（桌面登录；默认 `deepseek-official` 需 API key）；`session/resume` 兜底（DSH 无 `load`）；反向请求应答器；预设级 `firstFrameMs`/`heartbeatMs`/`images`；图片在 `image:false` 时友好拒绝。真机验证：prompt、工具调用、强杀后 resume 上下文保留、stdio MCP；代码级 `A1=STORED` / `A2=PINEAPPLE`；微信 E2E 收到「你好」并回复。详见 `docs/接入-DeepSeek.md`。
 
 ### Docs
 

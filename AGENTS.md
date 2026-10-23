@@ -118,7 +118,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1         # 检查 Markdown 相对链
 ## 6. 已知坑 / 文档漂移（2026-10-24 已核对）
 
 - **默认大脑不是 kiro**：未配置时是 `auto`，按 `kiro → opencode → gemini → deepseek` 探测；落盘配置在 `<数据目录>/brain.json`。
-- **DeepSeek 已内置预设**：官方 DSH `dsh --profile acp`；桌面端通常要用 `wemind brain set deepseek --bin "<...>\dsh.cmd"` 落绝对路径，并依赖 `DSH_HOME` 沙箱里的 `.credentials.yaml`（从 `~/.dsh` 同步）。详见 [`docs/接入-DeepSeek.md`](docs/接入-DeepSeek.md)。
+- **DeepSeek 已内置预设**：官方 DSH `dsh --profile acp`；桌面端通常要用 `wemind brain set deepseek --bin "<...>\dsh.cmd"` 落绝对路径，并依赖 `DSH_HOME` 沙箱里的 `.credentials.yaml`（从 `~/.dsh` 同步）。微信 E2E 已通过。详见 [`docs/接入-DeepSeek.md`](docs/接入-DeepSeek.md)。
 - **「无需改代码」有边界**：只对满足「有 `session/load`、不发反向请求、首帧快、MCP 走配置文件」的 agent 成立。DSH 不满足，但已用预设字段 + M2 适配补齐。
 - **仓库没有 `Brain` 接口（刻意）**：ACP agent 本身就是大脑边界；目前只有 ACP 一种实现，抽接口只会增加间接层。等真的要做「裸 API 大脑」时再抽 `ask/newSession/restart` 契约，并同步 `index.ts` 调用方。
 - **`wemind brain check` 默认 60s**：冷启动慢的 agent 仍可能误报；这是已知项，不要把它当「agent 不可用」的唯一证据。
