@@ -1,6 +1,8 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-本文说明如何把 WeMind 守护进程（daemon）的「大脑」从默认的 `kiro-cli` 换成**任意兼容 ACP 的 agent**，无需改动代码，仅靠环境变量或新增一条预设即可。
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24 ｜ **状态**：kiro/opencode 已实测；其它预设为示例，接入前按 §8 验证。
+>
+> 本文说明如何把 WeMind 守护进程（daemon）的「大脑」从默认的 `auto`（优先 kiro）换成另一个 ACP agent。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 
 ---
 
@@ -8,20 +10,23 @@
 
 WeMind 的 daemon 把一个 agent CLI 当作常驻「大脑」，通过 **ACP（Agent Client Protocol）** 与它对话。ACP 是一个**通用协议**——JSON-RPC 2.0 over stdio（每行一个 JSON 消息），由 Zed 提出，kiro-cli、Gemini CLI 等多家 agent CLI 都已支持。
 
-daemon 只用到 ACP 的标准方法，与具体是哪个 agent 无关：
+daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力不同：
 
-- `initialize` —— 握手；
+- `initialize` —— 握手；返回 `agentCapabilities`（是否支持 load/resume、image、MCP）；
 - `session/new` —— 新建会话；
-- `session/load` —— 按 sessionId 恢复会话（自愈重建后用它找回多轮上下文）；
+- `session/load` —— 按 sessionId 恢复会话（**不是所有 agent 都实现**）；
+- `session/resume` —— 部分 agent（如 DSH）用它恢复持久会话；
 - `session/prompt` —— 发一轮提问；
-- `session/update`（通知）—— 流式回包：`agent_message_chunk`（正文）、`tool_call`/`tool_call_update`（工具进度）等。
+- `session/update`（通知）—— 流式回包：`agent_message_chunk`（正文）、`tool_call`/`tool_call_update`（工具进度）等；
+- `session/request_permission`（反向请求）—— agent 请求权限；不应答会挂起。
 
-因此「接入一个新 agent」本质上只需要告诉 WeMind **怎么把它以 ACP 模式启动起来**，协议层完全复用。
+因此「接入一个新 agent」主要是告诉 WeMind **怎么把它以 ACP 模式启动起来**；协议层能复用，但**能力差异要按 agent 补**（见 §9）。
 
 相关代码：
 
 - `packages/wechat-daemon/src/brain-agents.ts` —— 预设表与解析逻辑（本文主角）；
-- `packages/wechat-daemon/src/acp-brain.ts` —— ACP 客户端（协议层，通用，一般不用改）。
+- `packages/wechat-daemon/src/acp-brain.ts` —— ACP 客户端（协议层；缺 load/反向请求时需要改）；
+- `packages/wechat-daemon/src/worker-acp.ts` —— worker 的 ACP 客户端（与 brain 是两份实现，改动要同步）。
 
 ---
 
@@ -32,9 +37,11 @@ daemon 只用到 ACP 的标准方法，与具体是哪个 agent 无关：
 | 1 | **二进制名/路径** | 可执行文件名（在 PATH 上）或绝对路径 | `kiro-cli`（Win：`kiro-cli.exe`） |
 | 2 | **ACP 启动参数** | 让该 CLI 进入「ACP server over stdio」模式的命令行参数 | `acp --trust-all-tools` |
 | 3 | **配置目录环境变量名** | 该 agent 读取其配置/数据目录的环境变量名；WeMind 会把它指向 brain 沙箱目录，用于隔离与可选的 MCP 注入。没有就留空 | `KIRO_HOME` |
-| 4 | **ACP 兼容性** | 该 CLI 是否真的实现了 ACP（上面那几个方法） | 是 |
+| 4 | **ACP 兼容性** | 该 CLI 是否实现了 ACP 的最小方法集；**还要看** `initialize.agentCapabilities` 的 `load/resume/image/mcp` 与是否会发反向请求 | 是 |
 
-> 第 1、2 项几乎所有 agent 都有；第 3 项各家差异较大（见 §6 MCP 沙箱）；第 4 项是前提——不支持 ACP 的 agent 走不了这条路，得用「第二档：裸 LLM API 适配器」（尚未实现）。
+> 第 1、2 项几乎所有 agent 都有；第 3 项各家差异较大（见 §6 MCP 沙箱）；第 4 项是前提——不支持 ACP 的 agent 走不了这条路，得用「第二档：裸 LLM API 适配器」（尚未实现，见 §9）。
+>
+> **不要只看「支持 ACP」四个字**：`session/load`、图片、MCP 传输、权限请求都可能不同。接入前先跑 [`scripts/acp-probe.mjs`](../scripts/acp-probe.mjs)，把 `initialize` 能力与一次 prompt 的 `session/update` 类型记录下来。
 
 ---
 
@@ -172,11 +179,12 @@ ACP agent 分两类，接入方式不同：
 |--------|-------|------|------|------|
 | `kiro` | kiro-cli | 原生 | ✅ **已实测** | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
 | `opencode` | OpenCode | 原生 | ✅ **已实测** | `opencode acp`，`XDG_CONFIG_HOME`（详见 [接入-OpenCode.md](接入-OpenCode.md)） |
+| `deepseek`（未内置） | DeepSeek Harness `dsh` | 原生（官方 ACP profile） | 🟡 **评估中**：prompt / 工具 / resume 上下文 / stdio MCP 已实测；`load` ❌、`image` ❌；未加预设 | `dsh --profile acp`，`DSH_HOME`（详见 [接入-DeepSeek.md](接入-DeepSeek.md)） |
 | `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --experimental-acp`，`GEMINI_CLI_HOME`（flag 以官方为准） |
 | `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @zed-industries/claude-code-acp`（Zed 官方适配器；需 Claude Code 登录或 `ANTHROPIC_API_KEY`） |
 | `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，需自行安装其二进制；Codex 本身暂不原生支持 ACP） |
 
-> ⚠️ 除 `kiro` 外均为**示例预设**：包名、参数、二进制可能随上游变化，**接入前务必对照各自官方/仓库核对**，必要时改 `ACP_AGENT_PRESETS` 里的对应条目或用环境变量覆盖。
+> ⚠️ 除 `kiro`、`opencode` 外均为**示例/评估**：包名、参数、二进制、ACP 能力可能随上游变化，**接入前务必对照各自官方/仓库核对**，并跑 §8 的验证。DeepSeek 的 M0 已实测（prompt/resume/工具/MCP；见其文档），但**没有内置预设**，需先补 M1/M2。
 
 **适配器类的准备工作（示例）**：
 
@@ -272,8 +280,15 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 ## 9. 适用范围与限制
 
-- 本指南覆盖「**任意兼容 ACP 的 agent CLI**」。这是接入成本最低的一档——配置即用。
-- **不支持 ACP 的对象**（如直接调 OpenAI / Anthropic / Ollama 等 LLM HTTP API）走不了本路，需要「第二档：API 适配器」——为 `Brain` 接口（`askBrain`/`newSession`/`restart`）另写一个基于 HTTP 的实现，并自行维护多轮对话历史、（如需）工具调用循环。纯对话容易，要复刻 kiro 那样的「会用工具的 agent」则相当于自造一个迷你 agent。该档尚未实现。
+- 本指南覆盖「**能说 ACP 的 agent CLI**」。这是接入成本最低的一档，但**不等于零适配**：先跑能力探针，再决定是否需要改 `acp-brain.ts` / `worker-acp.ts`。
+- **能力差异清单**（接入前逐条确认）：
+  - **会话恢复**：有 `session/load`？只有 `session/resume`？都没有？当前客户端只调 `load`，缺失会退化成新建；
+  - **图片**：`initialize.promptCapabilities.image` 是否为 true？false 时带图 `session/prompt` 会报 `-32602`；
+  - **MCP**：走 agent 配置文件，还是 ACP `session/new` 的 `mcpServers`？支持 stdio/HTTP 哪些传输？
+  - **反向请求**：是否会发 `session/request_permission` / `fs/*` / `terminal/*`？当前 `handleFrame` 不应答，遇到会挂起；
+  - **进度**：是否逐 token 发 `agent_message_chunk`？committed-only 时 15s 心跳会烧连发额度；
+  - **Windows**：二进制是 `.exe` 还是 `.cmd`/`npx`？后者必须 `shell:true`，`binWin` 要写实际文件名。
+- **不支持 ACP 的对象**（如直接调 OpenAI / Anthropic / Ollama 等 LLM HTTP API）走不了本路，需要「第二档：API 适配器」。**注意：仓库当前没有 `Brain` 接口抽象**——`acp-brain.ts` 直接导出 `askBrain`/`newSession`/`restart`，`index.ts` 直接调用。要做第二档，得先抽一个接口，再写 HTTP 实现，并自行维护多轮历史与（如需）工具循环。纯对话容易，复刻 kiro 那样的「会用工具的 agent」相当于自造迷你 agent。该档尚未实现。
 - 另：**MCP 服务模式**（`@wemind/wechat-mcp`）与本文无关且本就 agent 无关——任何支持 MCP 的客户端（Claude Desktop、Cursor、kiro IDE 等）都能直接驱动 WeMind 收发微信，不需要 daemon 这套大脑。
 
 ---
@@ -296,6 +311,8 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 验证：
   看 daemon.log 的 [wemind/wechat-daemon/acp] spawn / prompt ok；或 wemind brain check
+  接入前先跑：node scripts/acp-probe.mjs（记录 initialize、首帧、update、load/resume、反向请求）
+  注意：brain check 默认 20s，冷启动慢的 agent 可能误报
 ```
 
 

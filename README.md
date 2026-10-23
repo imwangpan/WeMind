@@ -2,9 +2,13 @@
 
 > _Your AI mind, reachable on WeChat. —— 你的 AI 大脑，在微信上随时可达。_
 
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。
+
 WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态：一个 MCP Server 子包（`@wemind/wechat-mcp`，**已发布到 npm**），和一个常驻守护进程（**未发布**，从源码运行）。
 
 > 🚀 **第一次用？** 看 **[新手教程](docs/新手教程.md)** —— 从零一步步搭起你的微信 AI（两种用法：接入现有 AI 客户端 / 常驻自动助手）。
+>
+> 🤖 **AI agent / 新协作者**：先读 **[AGENTS.md](AGENTS.md)**，再按需看 **[docs/ai/README.md](docs/ai/README.md)**（压缩上下文 + 任务配方）。
 
 ## 📖 文档 / RepoWiki
 
@@ -12,6 +16,8 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
 
 | 入口                                                     | 内容                                                    |
 | -------------------------------------------------------- | ------------------------------------------------------- |
+| [AGENTS.md](AGENTS.md)                                   | **AI 首轮入口**：30 秒定位、硬约束、改哪里、已知坑     |
+| [docs/ai/README.md](docs/ai/README.md)                   | AI 上下文包：术语、数据流、事实状态表、任务配方         |
 | [RepoWiki 首页](docs/repowiki/README.md)                 | 按角色的阅读导航 + 章节目录                             |
 | [系统架构](docs/repowiki/02-系统架构.md)                 | 三包协作、两种接入形态、poller/worker 解耦、双 ACP 进程 |
 | [iLink 协议内核](docs/repowiki/03-iLink-协议内核.md)     | HTTP 客户端、协议类型、错误码、收发图加解密             |
@@ -19,6 +25,7 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
 | [ACP 大脑与沙箱](docs/repowiki/06-ACP-大脑与沙箱.md)     | 常驻 ACP 进程、MCP 沙箱、记忆继承、换大脑               |
 | [远程任务 Worker](docs/repowiki/07-远程任务-Worker.md)   | 受控工作机、任务状态机、微信/本地双入口                 |
 | [配置项与环境变量](docs/repowiki/09-配置项与环境变量.md) | 全部 env 速查表                                         |
+| [llms.txt](llms.txt)                                     | 机器可读文档索引                                        |
 
 > 本 README 是面向用户的使用说明；RepoWiki 是面向开发者的深度技术文档，两者互补。
 
@@ -143,11 +150,11 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `account.json`                                | Bot Token、botId、userId、baseUrl（POSIX 下权限 600；**Windows 下为明文**，见「安全说明」）                 |
 | `state.json`                                  | 长轮询游标（`updatesBuf`）、各会话 `context_token`、`lastMessageId`（去重）                                 |
 | `qr_login.json` / `qrcode.png` / `qrcode.txt` | 扫码登录临时态与二维码（登录后即失效）                                                                      |
-| `brain-sessions.json`                         | `userId → ACP sessionId` 映射，daemon 重启后据此 `session/load` 恢复多轮上下文                              |
+| `brain-sessions.json`                         | `userId → ACP sessionId` 映射；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建） |
 | `brain-mcps.json`                             | brain 当前激活的 MCP 集（默认空）                                                                           |
-| `brain-home/`                                 | brain 的沙箱 `KIRO_HOME`（独立于你本人的 `~/.kiro`），含 `settings/mcp.json`（默认空）与各 ACP 会话落盘记录 |
-| `worker-sessions.json`                        | worker（远程任务）单任务 `ACP sessionId` 映射，daemon 重启后据此 `session/load` 续传                        |
-| `worker-home/`                                | worker 的沙箱 `KIRO_HOME`（`settings/mcp.json` 继承**全量 MCP 除 `wechat`** ＋ 记忆/技能/settings 含模型）  |
+| `brain-home/`                                 | brain 沙箱（由预设的 `homeEnvVar` 指向它；kiro 是 `KIRO_HOME`，opencode 是 `XDG_CONFIG_HOME`），含 agent 配置与 ACP 会话 |
+| `worker-sessions.json`                        | worker（远程任务）单任务 `ACP sessionId` 映射，daemon 重启后据此 `load`/`resume` 续传                      |
+| `worker-home/`                                | worker 沙箱（同 brain 机制；MCP 继承**全量除 `wechat`** ＋ 记忆/技能/settings）                              |
 | `worker.pid`                                  | worker 大脑进程 pid（与 brain/用户会话区分、便于精确清理）                                                  |
 
 **多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<名>` 切换（→ `~/.wemind/<名>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。
@@ -180,12 +187,12 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 - **服务稳定性**：这是腾讯新开放的插件功能，官方条款保留随时停服的权利，请勿用于关键业务。
 - 需要较新的微信客户端并启用 ClawBot 插件。
 
-## 守护进程（daemon）：脱离 kiro-cli 常驻自动收发
+## 守护进程（daemon）：脱离 IDE/终端常驻自动收发
 
 > 📦 **作为 `wemind` CLI 使用**：本守护进程已打包为 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`，常驻委托 pm2）——**尚未发布到 npm**，当前请按下文从源码运行（发布后 `npm i -g wemind` 即可全局使用）。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**。
 
 `packages/wechat-daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
-调 **常驻 `kiro-cli acp` 进程**（JSON-RPC over stdio）当大脑生成回复 → 自动回发。
+调 **常驻 ACP agent**（JSON-RPC over stdio；未配置时 `auto` 探测 kiro/opencode/gemini）当大脑生成回复 → 自动回发。
 进程常驻、原生多轮记忆，回复从 `agent_message_chunk` 流式拼接（天然无 ANSI/工具旁白）；
 带**存活检测**（进程不在自动重启）。它**只依赖内核包 `@wemind/wechat-ilink-core`**，不碰 MCP 那层，是一个完全独立、可单独运行的包。
 
@@ -194,7 +201,7 @@ npm run build
 npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 ```
 
-> ⚠️ **安全（务必读）**：daemon 用 `--trust-all-tools`，意味着**任何能给这个微信 ClawBot 会话发消息的人，都能让 Kiro 在运行 daemon 的电脑上执行任意工具（含 shell / 写文件）**。
+> ⚠️ **安全（务必读）**：kiro 预设用 `--trust-all-tools`，意味着**任何能给这个微信 ClawBot 会话发消息的人，都能让 Kiro 在运行 daemon 的电脑上执行任意工具（含 shell / 写文件）**。其它 agent 的批准策略不同，但同理要假设「它能执行工具」。
 > 唯一的安全闸是**发件人授权**：daemon 默认只处理**已授权用户**的消息，其余忽略。**不要关掉它。**
 >
 > **配对授权（allowFrom）**：授权用户存于每账号的 `~/.wemind/<account>/allowFrom.json`。**扫码登录者会被自动授权**（`finalize`/`adopt` 时加入；daemon 启动也会把账号本人种入，老账号自动迁移），通常**无需任何手动配置**。管理命令：`allowlist <key|label>` 查看、`allow <key|label> <userId>` 授权、`revoke <key|label> <userId>` 撤销（增删即时生效，无需重启 daemon）。鉴权 = 账号本人(始终允许) 或 在 allowFrom 中；`WECHAT_OWNER_ID` 仍可作覆盖。
@@ -237,7 +244,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 
 除了「对话大脑」，daemon 还能把**漫长任务**交给一个**受控的 ACP worker 进程**跑——你在电脑上派发任务后离开，它在「需要你决策」（如列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑（远程 human-in-the-loop）。
 
-worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 跑在任务工作目录、继承你 `~/.kiro` 的**全量 MCP（除 `wechat`）＋ 记忆/技能/模型**，能力与你本地的 kiro 一致。
+worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 跑在任务工作目录、继承所用 agent 真实配置目录的**全量 MCP（除 `wechat`）＋ 记忆/技能/模型**（kiro 即 `~/.kiro`，opencode 即 `~/.config/opencode`）。
 
 **指令集**：
 
@@ -251,7 +258,7 @@ worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 
 
 - worker 只在 **waiting（刚停下问你）** 时才默认接管你的无前缀消息；它埋头跑时大脑照常可用。
 - worker 每轮输出带 `🤖【任务】` 标记；跑一轮期间持续「正在输入中」（typing 不占连续发送上限）。
-- 中断（崩溃/超时）靠 `session/load` 恢复——回「继续」即从中断处续跑。
+- 中断（崩溃/超时）靠 `session/load`（不支持时 `session/resume`）恢复——回「继续」即从中断处续跑；两者都不可用时只能重开。
 - 详见 [docs/方案C-MVP-远程human-in-the-loop.md](docs/方案C-MVP-远程human-in-the-loop.md)。
 
 **本地终端入口**（与微信并列、管同一任务，**不依赖微信**）：在电脑前用 `wemind` 直接管 worker 任务，适合开任务时贴长描述 / 指定工作目录，或专注电脑工作不想掏手机时。
@@ -288,29 +295,31 @@ brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认�
 | `卸载 <名>` / `unload <名>` | 移除                                            |
 | `新会话` / `重置` / `/new`  | 开启新 ACP 会话（清空多轮上下文）               |
 
-加载/卸载 MCP 后 daemon 会**重启 ACP 进程**以按新沙箱 `mcp.json` 重载，下一条消息生效。激活的 MCP 等于对白名单发件人全权开放（brain 是 `--trust-all-tools`），按需加载、用完可卸载。
+加载/卸载 MCP 后 daemon 会**重启 ACP 进程**以按新沙箱配置重载，下一条消息生效。激活的 MCP 等于对白名单发件人全权开放（kiro 预设是 `--trust-all-tools`；其它 agent 按其批准策略），按需加载、用完可卸载。
 
 ### 切换大脑 Agent（通用化）
 
-daemon 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动，默认是 `kiro-cli`，但任何兼容 ACP 的 agent CLI 都能接入，**无需改代码，仅靠环境变量**（见 `packages/wechat-daemon/src/brain-agents.ts`）：
+daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC over stdio）** 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini` 探测已安装者）。**多数原生 ACP agent 可以零代码接入**；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 `packages/wechat-daemon/src/brain-agents.ts` 与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §9）。
 
 | 环境变量                | 作用                                                | 默认         |
 | ----------------------- | --------------------------------------------------- | ------------ |
-| `WEMIND_BRAIN`          | 选预设（如 `kiro`、`gemini`）                       | `kiro`       |
+| `WEMIND_BRAIN`          | 选预设（如 `kiro`、`opencode`、`auto`）             | `auto`       |
 | `WEMIND_BRAIN_BIN`      | 覆盖二进制（绝对路径或 PATH 上的名字）              | 预设自动解析 |
 | `WEMIND_BRAIN_ARGS`     | 覆盖进入 ACP 模式的启动参数（空格分隔）             | 预设值       |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（指向 brain 沙箱） | 预设值       |
 | `KIRO_CLI_BIN`          | 旧的 kiro 专用二进制覆盖（仍兼容）                  | —            |
 
-`kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量即可。协议层（`session/new`/`prompt`/`update` 等）是标准 ACP，所有 ACP agent 共用。
+`kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量。**ACP 是「最小方法集」而非完全统一**：`session/load`、`session/resume`、`image`、MCP 传输、反向请求都按 agent 而异，接入前先跑能力探针。
 
 > 详细步骤、各 agent 需确认的 4 件事、MCP 沙箱差异、验证方法见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)。
 >
 > **OpenCode 已内置预设**：`WEMIND_BRAIN=opencode` 即可让 `opencode acp` 当大脑（自动用 `XDG_CONFIG_HOME` 隔离配置目录、curated MCP、继承记忆/技能）。完整设计、M1 实测与风险见 **[docs/接入-OpenCode.md](docs/接入-OpenCode.md)**。
+>
+> **DeepSeek 评估中（未接入，官方 ACP 已真机实测）**：`dsh 0.2.1-rc.2` 无 `session/load`（有 `resume`，上下文保留）、`image:false`、默认 `deepseek-official` 路由需 API key（桌面登录要选 `deepseek-account`）；完整实测、模型/凭据方案与分阶段计划见 **[docs/接入-DeepSeek.md](docs/接入-DeepSeek.md)**。
 
 ### 收发图片
 
-- **收图**（用户发图 → 大脑看图）：daemon 下载并 AES-128-ECB 解密入站图片，作为 ACP image 块喂给大脑（`promptCapabilities.image:true`），大脑能"看"图回应。
+- **收图**（用户发图 → 大脑看图）：daemon 下载并 AES-128-ECB 解密入站图片，作为 ACP image 块喂给大脑——**前提是该 agent `initialize` 广告了 `promptCapabilities.image:true`**（kiro/opencode 支持；DSH 官方 0.2.1-rc.2 实测为 `false`，带图会 `-32602`）。
 - **发图**（大脑发图 → 用户）：大脑在回复里用 **Markdown 图片语法 `![](图片的 http 链接或本地文件绝对路径)`**，或直接给出**裸图片 URL**，daemon 会自动把它下载/读取后作为图片消息发出，并把剩余文字另发。大脑本身不会文生图，但能发：联网搜到的图、本地已有的图、自己用代码渲染保存的图表。底层走 `getUploadUrl` + AES-128-ECB 加密上传 CDN（`no_need_thumb`，免缩略图）。
 - **发文件 / 视频**：core `sendFile` 按扩展名自动判类型（图/视频/文件），组装 `image_item / video_item / file_item`，上传链路与发图同构。
 - **收语音**（语音输入）：用户发语音 → 直接取 `voice_item.text`（微信侧已做语音转文字）当文本喂大脑，**零依赖**（无需 SILK 解码/外接 ASR）。**发语音**（bot 语音回复）暂不做（需 TTS + SILK，且语音回复体验通常不如文本）。
