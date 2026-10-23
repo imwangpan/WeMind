@@ -1,6 +1,6 @@
 # 接入 DeepSeek（评估与实施方案）
 
-> **状态**：官方 DSH **已接入**（M1/M2 已实现，2026-10-24）；真机实测 `dsh 0.2.1-rc.2`：`initialize` / `session/new` / `prompt` / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 带图（-32602）/ stdio MCP 已验；微信端到端待你发一条消息确认。
+> **状态**：官方 DSH **已接入并微信端到端验证**（2026-10-24，M1/M2 已实现；收到「你好」并正常回复）；真机实测 `dsh 0.2.1-rc.2`：`initialize` / `session/new` / `prompt` / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 带图（-32602）/ stdio MCP 已验。
 > **范围**：daemon 的常驻「大脑」（形态②，ACP）。MCP 客户端形态另见 §2.4。
 > **相关文档**：[接入-OpenCode.md](接入-OpenCode.md)（同类接入的实测样板）· [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](repowiki/06-ACP-大脑与沙箱.md)。
 
@@ -19,6 +19,7 @@
   - `session/new` 默认模型是 `deepseek-official/deepseek-v4-flash`，**该路由需要 `DEEPSEEK_API_KEY`**；桌面端登录态对应的是 `deepseek-account/deepseek-flash`，**必须用 `session/set_config_option` 显式切换**，否则即使桌面已登录也会报 `no API key`；
   - 首帧实测约 **1.0–2.3s**（简单/工具提示），正文在回合结束前一次性提交；会发 `agent_thought_chunk` / `tool_call` / `usage_update` 保持活动；
   - 未观察到反向请求；stdio `mcpServers` 被 `session/new` 接受；stdout 会混入一行非 JSON 日志（当前客户端会忽略）。
+- **微信 E2E 已通（2026-10-24）**：`spawn deepseek` → 旧 opencode session 不可 resume（`-32602 session is not resumable`）→ 回退 `session/new` → `model set` → `prompt ok` → 用户收到「你好！很高兴见到你 😊」。下一次消息会走新的 DSH `session/resume`。
 - 工作量：**M0 冒烟 0.5 人日；MVP 2–3 人日；含 MCP/worker/记忆继承的完整对齐 5–7 人日**。
 - 最大未决项从「凭据隔离」变成「**模型路由 + 凭据来源**」：桌面登录可用，但需把 `DSH_HOME` 的 `.credentials.yaml` 带进沙箱（或改用 `DEEPSEEK_API_KEY`），并显式选 `deepseek-account` 路由（§8 R1/R18）。
 
@@ -250,7 +251,7 @@
    - 首帧 1.0–2.3s；`session/update` 含 `agent_thought_chunk` / `tool_call` / `usage_update` / `agent_message_chunk`；
    - 本轮未观察到反向请求；stdout 会混入非 JSON 日志行（客户端会忽略）。
 
-   > 以上均已在本轮真机验证；剩微信端到端（需登录 bot）。
+   > 以上均已在本轮真机验证；微信 E2E 也已通过（见 §7.3 / 附录 A）。
 
 3. 对社区适配器重复同一脚本：
 
@@ -420,7 +421,7 @@ DSH 的布局（官方文档）：
 - `brain-agents.test.ts` 增加 `deepseek` 预设断言（`shell`、`homeEnvVar`、`model`、`restore`、`firstFrameMs`、`mcpViaAcp`）。
 - 新增 `agent-mcp` 的单测（`toAcpMcpServers` 三种格式）。
 - 更新 `docs/接入其它-ACP-Agent.md` §5 预设表、README「切换大脑 Agent」段、CHANGELOG。
-- 真机实测已补入附录；剩微信端到端（需登录 bot）。
+- 真机实测与微信 E2E 已补入附录。
 
 ### 5.4 工作量汇总
 
@@ -544,7 +545,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 ## 9. 决策建议
 
 - **M1/M2 已实现**：`deepseek` 预设（`dsh.cmd` + `DSH_HOME` + `.credentials.yaml` 同步 + `model` 选择）、`resume` 兜底、反向请求应答、`firstFrameMs`/`heartbeatMs`、图片拦截。
-- **M0 已真机验证**：`initialize` / `session/new` / prompt / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 图片（-32602）/ stdio MCP 均已验；代码级集成测试 `A1=STORED`、`A2=PINEAPPLE` 通过。剩微信端到端（需你发一条消息）。
+- **M0 已真机验证**：`initialize` / `session/new` / prompt / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 图片（-32602）/ stdio MCP 均已验；代码级集成测试 `A1=STORED`、`A2=PINEAPPLE` 通过；**微信 E2E 已通过**（`spawn deepseek` → `model set` → `prompt ok` → 收到回复）。
 - **B 不采用**：按你的决定只走官方 DSH；社区 `deepseek-acp` 仅保留在文档里备查。
 - **若「微信收图」是必保功能**：官方当前 `image:false`，当前实现会友好拒绝；把「官方打开 image」作为跟进项，再讨论是否值得引入 B。
 - **M3（MCP）可以先不做**：DSH 自带工具已能覆盖大部分微信场景；等确有 MCP 需求再投入 1–2 天。要做就按 agent 各自的 catalog，不要跨 agent 借文件。
@@ -585,9 +586,10 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | 图片 prompt | ❌ `-32602` | 未测 | 官方收图不可用 |
 | stdout 纯净性 | 混入 `[llm-deepseek-account] ...` 非 JSON 行 | 未测 | 解析器需容错 |
 | 代码级 `askBrain` 集成 | `A1=STORED` → `restart()` → `A2=PINEAPPLE`；`model set` / `resume` 均成功 | — | **M1/M2 代码路径验证通过** |
+| **微信端到端** | 收到「你好」→ `spawn deepseek` → 旧 opencode session `resume` 失败 → `session/new` → `model set` → `prompt ok` 693ms → 回复「你好！很高兴见到你 😊」 | — | **E2E 通过** |
 
 > 结论：官方路线可行且 M1/M2 已落地；关键增量是 **model 选择**、`resume` 兜底、图片拦截/心跳兜底。社区适配器按决定不采用，不再作为回退路径。
 
 ---
 
-> **下一步**：代码与预设已完成（见 §5.3 M1/M2）；剩下**微信端到端**——在微信给 bot 发一条消息，确认 `daemon.log` 的 `spawn deepseek` → `model set` → `prompt ok`。收图目前会被友好拒绝（官方 `image:false`）。
+> **下一步**：微信 E2E 已通（`spawn deepseek` → `model set` → `prompt ok` → 回复）；可继续验：再发一条确认 `session/resume`、发图确认友好拒绝、发「任务：」验 worker。收图目前会被友好拒绝（官方 `image:false`）。
