@@ -4,6 +4,15 @@
 
 ## [Unreleased] — fork
 
+### Docs
+
+- **AI 上手材料 + 文档漂移修正（2026-10-24）**：
+  - 新增根 `AGENTS.md`、`docs/ai/README.md`、`docs/ai/recipes/{add-acp-agent,add-mcp,debug-daemon,run-e2e}.md`、`scripts/doctor.ps1`、`scripts/acp-probe.mjs`、`scripts/check-docs.ps1`、`llms.txt`；CI 增加 Markdown 链接检查；
+  - 修正「任意兼容 ACP 的 agent 无需改代码」的绝对说法：`session/load` 并非通用能力（DSH 只有 `session/resume`），反向请求、首帧/心跳、`image:false`、MCP 传输都需按 agent 适配；
+  - 修正「默认大脑是 kiro」为 `auto`（`kiro → opencode → gemini`）；
+  - 修正「仓库有 `Brain` 接口」的表述：当前只有 `acp-brain.ts` 的函数导出，API 适配档尚未实现；
+  - 给 README / repowiki / 接入指南补「适用版本 + 最后核对」与「实测/假设」标注；DeepSeek 0.2.1-rc.2 的实测见 `docs/接入-DeepSeek.md`。
+
 ### Changed
 
 - **命名收口：分清「项目 / 子包」（清掉上游遗留前缀）**：日志前缀由上游的 `[mcp-wechat]` 改为「按子包自报家门」——MCP server 用 `[wemind/wechat-mcp]`、内核提示用 `[wemind/wechat-ilink-core]`；MCP 消息的 `client_id` 前缀同步为 `wemind/wechat-mcp`、守护进程侧为 `wemind/wechat-daemon`。文档与 README 里凡「已发布」一律明确为**子包** `@wemind/wechat-mcp`——它只是本项目的 `packages/wechat-mcp` 一部分，目前也是**唯一**对外发布的包，不代表整个项目（包表格已补总说明）。守护进程计划任务名 `mcp-wechat-daemon` → `wemind-daemon`；daemon 侧日志标签由短标签（`[daemon]`/`[acp]`/`[worker]`/`[task]`/`[watchdog]`/`[wrapper]`）统一为命名空间式 `[wemind/wechat-daemon]`（子系统加 `/acp`、`/worker`、`/task`、`/watchdog`、`/wrapper` 后缀），内核侧由 `[ilink]`/`[store]`/`[accounts]`/`[allow-from]` 统一为 `[wemind/wechat-ilink-core]`（子系统加 `/ilink`、`/store`、`/accounts`、`/allow-from` 后缀）。`packages/wechat-mcp` 的 npm 元数据补 `repository`（`directory: packages/wechat-mcp`）/`homepage`（指向子包目录）/`bugs`/`author`，并加 MIT `LICENSE`（仓库根 + 子包各一份，含上游与本 Fork 版权行）。

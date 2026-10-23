@@ -3,8 +3,12 @@
 > *Your AI mind, reachable on WeChat.*
 >
 > 基于 MCP (Model Context Protocol) 的微信 AI 机器人 —— 让任何 AI Agent 都能收发微信消息。
+>
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24 ｜ 各篇若有「实测/假设」差异，以篇内标注为准。
 
-这是 WeMind 仓库的完整技术 wiki，面向想深入理解项目架构、协议、运行机制与扩展方式的开发者。内容全部依据源码整理，与代码实现保持一致。
+这是 WeMind 仓库的完整技术 wiki，面向想深入理解项目架构、协议、运行机制与扩展方式的开发者。内容依据源码与真机实测整理；**接入类结论会标注「实测 / 假设」**，不要把通用 ACP 说法当成某个 agent 的事实。
+
+> 🤖 **只要快速上手？** 先读 [AGENTS.md](../../AGENTS.md) 和 [docs/ai/README.md](../ai/README.md)；本 wiki 用于深读。
 
 ---
 
@@ -59,7 +63,7 @@ WeMind 把「个人微信」变成一个 AI Agent 的输入输出通道。它基
 | 语言 / 运行时 | TypeScript / Node.js >= 20（Node 24 验证，兼容 Bun） |
 | 仓库结构 | npm workspaces monorepo（3 个 package） |
 | 后端渠道 | 腾讯 iLink / 微信 ClawBot（`ilinkai.weixin.qq.com`） |
-| 默认 AI 大脑 | `kiro-cli`，经标准 ACP 驱动（可换任意兼容 ACP 的 agent） |
+| 默认 AI 大脑 | `auto`：按 `kiro → opencode → gemini` 探测；落盘在 `<数据目录>/brain.json` |
 | 数据目录 | `~/.wemind/<account>/`（独立于代码仓库） |
 | 许可证 | MIT |
 

@@ -1,6 +1,8 @@
 # 7. 远程任务 Worker
 
 > 上一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md) ｜ 下一页：[8. 数据存储与多账号](08-数据存储与多账号.md)
+>
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
 
 除了「对话大脑」，daemon 还能把**漫长任务**交给一个**受控的 ACP worker 进程**跑 —— 你在电脑上派发任务后离开，它在「需要你决策」（列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑。这就是**远程 human-in-the-loop（人在回路）**。
 
@@ -18,7 +20,7 @@
 | B | 文件状态/命令桥 | 适合任务在无 ACP 能力的环境跑，但需任务侧改造、非实时 |
 | **C** | **独立受控 ACP worker 进程** | 双向、实时、多轮、可重连、可多 worker（**已采用**） |
 
-**为什么用 ACP**：ACP 天生为「外部程序控制 agent」设计，`session/prompt` 下发指令、`session/update` 实时回传、`session/load` 断线续传。worker 本质就是把对话大脑那套 ACP 客户端能力复用到「第二个 agent 进程」上。
+**为什么用 ACP**：ACP 天生为「外部程序控制 agent」设计，`session/prompt` 下发指令、`session/update` 实时回传、`session/load`（或 `resume`）断线续传。worker 本质就是把对话大脑那套 ACP 客户端能力复用到「第二个 agent 进程」上；**它同样受 agent 能力差异影响**（见 §6.6）。
 
 ## 7.2 核心模型：worker = 独立的多轮对话 agent
 
@@ -28,7 +30,7 @@
 派发任务  = 给 worker 发第 1 个 prompt（任务描述）
 一轮结束  = worker 这一轮 ACP 响应完成 → 把本轮输出推微信
 微信回复  = 给 worker 发下一个 prompt（注入）→ 又一轮 → 再推送 …
-任务中断  = worker 进程退出/超时 → 推微信告警 → 用户回「继续」→ session/load 恢复后续跑
+任务中断  = worker 进程退出/超时 → 推微信告警 → 用户回「继续」→ session/load（或 resume）恢复后续跑
 ```
 
 关键洞察：`askWorker(prompt)`「发一个 prompt、等这一轮结束、返回拼接文本」恰好就是「一轮」的天然单元。ACP 模式下 agent 每响应完一轮就明确进入「等待下一条指令」状态，daemon 一清二楚，无需抓屏猜测。
@@ -43,7 +45,7 @@ graph TD
         WA["worker-acp.ts<br/>独立 ACP 客户端"]
         SB["worker-sandbox.ts<br/>WORKER_HOME 沙箱"]
     end
-    WP["worker agent 进程<br/>kiro-cli acp（独立于 brain）"]
+    WP["worker agent 进程<br/>ACP agent（与 brain 同预设，独立进程）"]
     WL -->|dispatch/inject/stop| TM
     TM -->|askWorker/stopWorker| WA
     WA <-->|JSON-RPC over stdio| WP
@@ -84,7 +86,7 @@ stateDiagram-v2
 | 沙箱 home | `BRAIN_HOME`（默认空 MCP） | `WORKER_HOME`（继承全量 MCP 除 wechat） |
 | 超时 | idle 120s / cap 15min / 首帧 25s | idle 180s / cap 30min / 首帧 30s（更宽松） |
 
-`setWorkerCwd(cwd?)` 设置「下次 spawn 用的 cwd」（本地命令派发可指定终端当前目录）；子进程 cwd 在 spawn 时固定，故 cwd 在派发（首轮）生效。中断恢复靠 `reset()` 后下次 `ensureSession` 走 `session/load`。
+`setWorkerCwd(cwd?)` 设置「下次 spawn 用的 cwd」（本地命令派发可指定终端当前目录）；子进程 cwd 在 spawn 时固定，故 cwd 在派发（首轮）生效。中断恢复靠 `reset()` 后下次 `ensureSession` 走 `session/load`（不支持时 `session/resume`/`new`）。
 
 ### worker 沙箱
 
@@ -108,7 +110,7 @@ worker 的微信侧路由在 `workerLoop` 内（详见 [5. 守护进程 Daemon](
 
 - worker 只在 **waiting**（刚停下问你）时才默认接管无前缀消息；它埋头跑时大脑照常可用。
 - worker 每轮输出带 `🤖【任务】` 标记；跑一轮期间持续「正在输入中」（不占连续发送上限）。
-- 中断靠 `session/load` 恢复 —— 回「继续」即从中断处续跑。
+- 中断靠 `session/load`（不支持时 `resume`/`new`）恢复 —— 回「继续」即从中断处续跑。
 - 进度默认安静（只在轮次结束/中断/派发回执推文字），`WEMIND_WORKER_PROGRESS=1` 可开全程进度。
 
 **「继续」语义消歧**：daemon 里「继续」有两个含义 —— 连续发送上限的等待段恢复（`budgetOf.awaiting`）vs 注入 worker。判定顺序保证两者不互相吞掉。

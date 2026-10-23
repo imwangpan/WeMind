@@ -2,6 +2,7 @@
 
 > **状态**：M1 冒烟验证 **已完成 ✅** · M2（预设 + 沙箱）**已实现 ✅**；M3+ 见 §3.6。
 > **实测环境**：Windows 11 / Node ≥20 / OpenCode **v2.0.29** / WeMind 1.0.1。
+> **最后核对**：2026-10-24 ｜ 本文结论**仅适用于 OpenCode v2.0.29**；其它 agent 的能力（load/image/MCP）可能不同。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](repowiki/06-ACP-大脑与沙箱.md)。
 
 ---
