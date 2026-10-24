@@ -54,6 +54,7 @@ export type AcpAgentPreset = {
   images?: boolean; // 是否接受图片输入（默认 true；DSH 官方 0.2.1-rc.2 为 false）
   credentialFile?: string; // 需要从 realHome 同步进沙箱的凭据文件（相对路径；如 DSH 的 .credentials.yaml）
   model?: string; // 需要 session/set_config_option 选择的模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）
+  mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
 };
 
 /**
@@ -129,6 +130,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     heartbeatMs: 60_000,
     images: false,
     model: '["deepseek-account","deepseek-flash"]',
+    mcpViaAcp: true, // 不写 mcp.json；激活集转成 ACP mcpServers 传给 session/new|resume
   },
 
   // —— 需适配器（CLI 不原生支持 ACP，经第三方适配器桥接；未实测）——
@@ -210,6 +212,7 @@ export type ResolvedAgent = {
   images: boolean;
   credentialFile?: string;
   model?: string;
+  mcpViaAcp: boolean;
   /** 请求的原始值（来自 env / brain.json / 缺省 `auto`）。 */
   requestedKey: string;
   /** `requestedKey` 的来源。 */
@@ -303,6 +306,7 @@ export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
     images: preset.images ?? true,
     credentialFile: preset.credentialFile,
     model: preset.model,
+    mcpViaAcp: preset.mcpViaAcp ?? false,
     requestedKey,
     source,
     known,

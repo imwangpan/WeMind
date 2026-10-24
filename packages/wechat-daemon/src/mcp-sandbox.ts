@@ -5,7 +5,7 @@ import os from "node:os";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { resolveAgent } from "./brain-agents.js";
 import { loadBrainConfig } from "./brain-config.js";
-import { readMcpServers, withMcpServers, parseJsonc } from "./agent-mcp.js";
+import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
 
 /**
  * brain 的 MCP 沙箱：brain 跑在独立配置目录下，默认不加载任何 MCP。
@@ -163,8 +163,10 @@ function saveActive(list: string[]): void {
   fs.writeFileSync(ACTIVE_FILE, JSON.stringify({ active: list }, null, 2), "utf-8");
 }
 
-/** 按激活集从目录取定义，写入沙箱 MCP 配置（默认空）。保留配置里其它键（如 opencode 的 model）。 */
+/** 按激活集从目录取定义，写入沙箱 MCP 配置（默认空）。保留配置里其它键（如 opencode 的 model）。
+ *  `mcpViaAcp` 预设（DSH）不写文件——激活集经 activeMcpServers() 转成 ACP mcpServers 随 session 下发。 */
 export function applySandbox(): void {
+  if (AG.mcpViaAcp) return;
   const cat = loadCatalog();
   const active = loadActive().filter((n) => cat[n] && !FORBIDDEN.has(n));
   const servers: Record<string, unknown> = {};
@@ -173,6 +175,19 @@ export function applySandbox(): void {
   const next = withMcpServers(existing, servers, AG.mcpFormat);
   fs.mkdirSync(path.dirname(BRAIN_MCP_JSON), { recursive: true });
   fs.writeFileSync(BRAIN_MCP_JSON, JSON.stringify(next, null, 2), "utf-8");
+}
+
+/** brain 当前应挂载的 ACP mcpServers（mcpViaAcp 预设用）：激活集 → catalog 定义 → ACP 声明。
+ *  跳过不可转换的坏条目并记日志——官方 DSH 的 session/new 遇到起不来的 MCP 会回滚整个会话。 */
+export function activeMcpServers() {
+  const cat = loadCatalog();
+  const active = loadActive().filter((n) => cat[n] && !FORBIDDEN.has(n));
+  const picked: Record<string, unknown> = {};
+  for (const n of active) picked[n] = cat[n];
+  const { servers, skipped } = toAcpMcpServers(picked, { exclude: FORBIDDEN });
+  if (skipped.length)
+    console.error(`[wemind/wechat-daemon/mcp] 跳过无法转换的 MCP：${skipped.join(", ")}`);
+  return servers;
 }
 
 /** kiro：继承真实 settings/ 下除 mcp.json 外的文件（cli.json 含模型/免确认等），让大脑与日常使用同款配置。 */
@@ -223,8 +238,10 @@ function syncOpencodeBase(): void {
   fs.writeFileSync(BRAIN_MCP_JSON, JSON.stringify(parsed, null, 2), "utf-8");
 }
 
-/** 继承真实配置目录的「非 MCP」设置（模型/免确认等），让大脑与日常使用同款配置；mcp 段保持沙箱权威。 */
+/** 继承真实配置目录的「非 MCP」设置（模型/免确认等），让大脑与日常使用同款配置；mcp 段保持沙箱权威。
+ *  `mcpViaAcp` 预设没有文件式 MCP/settings 可继承，跳过（模型走 preset.model + set_config_option）。 */
 function syncSettings(): void {
+  if (AG.mcpViaAcp) return;
   if (!AG.inherit || !AG.realHome) return;
   if (AG.mcpFormat === "opencode") syncOpencodeBase();
   else syncKiroSettings();
@@ -242,6 +259,9 @@ export function addMcp(name: string): string {
   if (FORBIDDEN.has(name)) return `不允许加载「${name}」（防回环）。`;
   const cat = loadCatalog();
   if (!cat[name]) return `未找到 MCP「${name}」。可选：${catalogNames().join(", ") || "（无）"}`;
+  // 预校验：坏条目不进激活集（官方 DSH 的 session/new 会因起不来的 MCP 回滚整会话）
+  if (AG.mcpViaAcp && !toAcpMcpServers({ [name]: cat[name] }).servers.length)
+    return `MCP「${name}」的定义无法转换（需要 command 或 url），已拒绝加载。`;
   const a = loadActive();
   if (!a.includes(name)) {
     a.push(name);
