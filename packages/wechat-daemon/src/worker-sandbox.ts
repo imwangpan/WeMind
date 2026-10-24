@@ -5,7 +5,7 @@ import os from "node:os";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { resolveAgent } from "./brain-agents.js";
 import { loadBrainConfig } from "./brain-config.js";
-import { readMcpServers, withMcpServers, parseJsonc } from "./agent-mcp.js";
+import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
 
 /**
  * worker 沙箱：与 brain 沙箱（mcp-sandbox.ts）并列，但 MCP 策略相反。
@@ -78,8 +78,10 @@ function loadCatalog(): Record<string, unknown> {
   return readMcpServers(readJson(CATALOG), AG.mcpFormat);
 }
 
-/** worker 继承全量 MCP：复制 catalog 全部 server，去掉排除集与 disabled:true 的。 */
+/** worker 继承全量 MCP：复制 catalog 全部 server，去掉排除集与 disabled:true 的。
+ *  `mcpViaAcp` 预设（DSH）不写文件——全量集合经 workerMcpServers() 转成 ACP mcpServers 随 session 下发。 */
 export function applyWorkerSandbox(): void {
+  if (AG.mcpViaAcp) return;
   const cat = loadCatalog();
   const ex = excludeSet();
   const servers: Record<string, unknown> = {};
@@ -93,6 +95,22 @@ export function applyWorkerSandbox(): void {
   const next = withMcpServers(existing, servers, AG.mcpFormat);
   fs.mkdirSync(path.dirname(WORKER_MCP_JSON), { recursive: true });
   fs.writeFileSync(WORKER_MCP_JSON, JSON.stringify(next, null, 2), "utf-8");
+}
+
+/** worker 当前应挂载的 ACP mcpServers（mcpViaAcp 预设用）：全量 catalog（除排除集/disabled/坏条目）→ ACP 声明。 */
+export function workerMcpServers() {
+  const cat = loadCatalog();
+  const ex = excludeSet();
+  const picked: Record<string, unknown> = {};
+  for (const [name, def] of Object.entries(cat)) {
+    if (ex.has(name)) continue;
+    if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true) continue;
+    picked[name] = def;
+  }
+  const { servers, skipped } = toAcpMcpServers(picked, { exclude: ex });
+  if (skipped.length)
+    console.error(`[wemind/wechat-daemon/mcp] worker 跳过无法转换的 MCP：${skipped.join(", ")}`);
+  return servers;
 }
 
 /** kiro：继承真实 settings/ 下除 mcp.json 外的文件（cli.json 含模型/免确认等）。逻辑同 brain 的 syncKiroSettings。 */
@@ -144,6 +162,7 @@ function syncOpencodeBase(): void {
 }
 
 function syncSettings(): void {
+  if (AG.mcpViaAcp) return; // 无文件式 settings/MCP 可继承；模型走 preset.model
   if (!AG.inherit || !AG.realHome) return;
   if (AG.mcpFormat === "opencode") syncOpencodeBase();
   else syncKiroSettings();

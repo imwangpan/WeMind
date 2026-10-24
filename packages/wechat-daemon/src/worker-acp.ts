@@ -4,7 +4,7 @@ import os from "node:os";
 import fs from "node:fs";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import { WORKER_HOME } from "./worker-sandbox.js";
+import { WORKER_HOME, workerMcpServers } from "./worker-sandbox.js";
 import { resolveAgent } from "./brain-agents.js";
 import { loadBrainConfig } from "./brain-config.js";
 import { spawnAgent } from "./spawn-agent.js";
@@ -340,6 +340,8 @@ async function applyModel(sid: string): Promise<void> {
 async function ensureSession(key: string): Promise<string> {
   const existing = taskSessions.get(key);
   if (existing) return existing;
+  // mcpViaAcp 预设（DSH）：worker 继承全量 MCP（除排除集），随 session 下发；其余 agent 传空
+  const mcpServers = AGENT.mcpViaAcp ? workerMcpServers() : [];
   const map = loadSessionMap();
   const saved = map[key];
   if (saved) {
@@ -349,12 +351,12 @@ async function ensureSession(key: string): Promise<string> {
       try {
         await request(
           `session/${method}`,
-          { sessionId: saved, cwd: effectiveCwd(), mcpServers: [] },
+          { sessionId: saved, cwd: effectiveCwd(), mcpServers },
           REQ_TIMEOUT,
         );
         await applyModel(saved);
         taskSessions.set(key, saved);
-        dlog(`session/${method} ok ${saved}`);
+        dlog(`session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
         return saved;
       } catch (e) {
         dlog(`session/${method} failed (${String(e)})`);
@@ -363,7 +365,7 @@ async function ensureSession(key: string): Promise<string> {
   }
   const res = (await request(
     "session/new",
-    { cwd: effectiveCwd(), mcpServers: [] },
+    { cwd: effectiveCwd(), mcpServers },
     REQ_TIMEOUT,
   )) as { sessionId?: string };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
@@ -371,7 +373,7 @@ async function ensureSession(key: string): Promise<string> {
   taskSessions.set(key, res.sessionId);
   map[key] = res.sessionId;
   saveSessionMap(map);
-  dlog(`session/new ok ${res.sessionId}`);
+  dlog(`session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
   return res.sessionId;
 }
 
