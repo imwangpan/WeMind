@@ -99,7 +99,11 @@ export function injectTask(to: string, text: string): void {
 
 /** 结束任务：停 worker、清状态、唤醒退出循环。 */
 export function stopTask(to: string): string {
-  if (!activeTask || activeTask.to !== to) return "当前没有正在运行的任务。";
+  if (!activeTask || activeTask.to !== to) {
+    // daemon 重启后内存无任务，但 task-state.json 可能残留 active/waiting（幽灵任务）→ 仍要落盘 idle
+    emitState();
+    return "当前没有正在运行的任务。";
+  }
   const task = activeTask;
   activeTask = null; // 先清，runTask 循环靠它感知被 stop
   if (task.injectResolver) {

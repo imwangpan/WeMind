@@ -40,6 +40,8 @@
 ## M5 · 加固与覆盖（除标注外均完成）
 
 1. **worker E2E** ✅ 2026-10-24：`task "create hello.txt" --cwd <临时目录>` → 文件内容 `hello` + 输出 `DONE`；`task-reply "read hello.txt"` → 输出 `hello`；`task-stop` → idle。日志：`[wemind/wechat-daemon/worker] spawn deepseek ... → model set → session/new → prompt ok`（2305ms / 1575ms）。
+   - **微信派发亦已实测 ✅**（2026-10-24）：`任务：在 D:\... 创建文件` → worker 正常 spawn（`mcp=[test-echo]`，全量继承 catalog）→ 目标目录在工作区（cwd=用户主目录）外被沙箱拒绝 → 模型两次 `session/request_permission` 申请提权 → **应答器默认拒绝、不卡死**，agent 如实汇报阻塞并 waiting。任务本身未完成属**沙箱按设计工作**，非 bug。顺带发现并修复：daemon 重启后 `task-stop` 不清 `task-state.json` 的幽灵 waiting 状态（已修，`stopTask` 无活跃任务时也落盘 idle）。
+   - **运维注意**：微信派发的 worker cwd 默认是用户主目录——跨盘/工作区外的写入会被 `workspace-write` 拒绝（提权默认拒绝）；且此时 `TEMP` 在工作区内，DSH 的 pwsh 工具会报 `Windows ACL temp root must be outside the workspace`。跨盘任务建议本地 `task --cwd <目标目录>` 派发或设 `WEMIND_WORKER_CWD`。
 2. **图片**（待上游）：官方 `image:false`；**微信侧友好拒绝已实测 ✅（2026-10-24）**——发图收到「当前大脑暂不支持看图…」，日志 `image unsupported by current brain; rejected gracefully`，无 `-32602` 重试。官方打开 `image` 后移除拦截并回归。
 3. **多账号** ✅ 机制已验证（2026-10-24）：两个独立数据目录各跑一轮 brain → 各自 `brain-home`/`worker-home` 均有独立 `.credentials.yaml`，`brain-sessions.json` 的 sessionId 不同，均正常回答；双**真机微信**账号（需第二个扫码登录）待用户需要时再验。
 4. **升级守卫** ✅：`scripts/doctor.ps1` 比对 `dsh --version` 与已实测版本（0.2.1-rc.2），不一致时提示先跑 `scripts/acp-probe.mjs` 回归。

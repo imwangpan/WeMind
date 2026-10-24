@@ -86,6 +86,7 @@ wemind task-stop
 - **它停下来 ≠ 卡住**：worker 每跑完一轮会停下等你（waiting），这是设计；你不回它就一直等，回了才续跑。
 - **中断恢复**：worker 崩溃/超时会提示「回复『继续』恢复」，回 `继续` 会尝试从上次会话续上（`session/load`，不支持时 `resume`；都没有则重开）。
 - **安全**：kiro 预设用 `--trust-all-tools`，能在指定目录全权操作（含 shell/写文件）；其它 agent 的批准策略不同，但同理要假设它能执行工具。微信侧靠 allowFrom 授权清单兜底；本地侧 = 能在你电脑敲命令的人（机主）。
+- **DeepSeek（DSH）大脑的沙箱边界**：微信派发的 worker 工作目录默认是**用户主目录**，DSH 的 `workspace-write` 只允许写工作区+临时目录——跨盘/工作区外的写入会被拒，模型申请提权时默认**拒绝**（`WEMIND_ACP_AUTO_ALLOW=1` 才放行）。跨盘任务建议本地 `task --cwd <目标目录>` 派发或设 `WEMIND_WORKER_CWD`；另注意 cwd=主目录时 `TEMP` 在工作区内，DSH 的 pwsh 工具会报 `Windows ACL temp root must be outside the workspace`。
 
 ---
 
