@@ -598,6 +598,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | **M5：多账号机制** | 双数据目录各跑一轮：brain-home/worker-home 凭据各自独立，session id 不同，均答 `OK` | — | **机制通过**（双真机微信待需要时验） |
 | **M5：model 失败路径** | 非法 model → `-32602 unknown model option`，随后默认路由明确报 no API key | — | 失败不静默 |
 | **M5：图片友好拒绝（微信侧）** | 用户发图 → 收到「当前大脑暂不支持看图…」；日志 `image unsupported by current brain; rejected gracefully` | — | **通过**（无 `-32602` 重试） |
+| **M5：微信派发 worker + 权限请求** | `任务：…` → worker spawn（`mcp=[test-echo]` 全量继承）→ 越界写被沙箱拒 → 2 次 `session/request_permission` 均被应答器拒绝（**不卡死**）→ agent 汇报阻塞 waiting | — | **机制通过**（越界拒绝属沙箱按设计；顺带修复重启后幽灵任务状态） |
 
 > 结论：官方路线可行且 M1–M5 已落地（图片除外，上游 `image:false`）；关键增量是 **model 选择**、`resume` 兜底、图片拦截/心跳兜底、**MCP via ACP**。社区适配器按当前选择暂不采用，仅保留备查。
 

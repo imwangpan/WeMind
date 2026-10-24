@@ -6,6 +6,7 @@
 
 ### Added
 
+- **微信派发 worker + 权限应答实测（2026-10-24）**：`任务：…` 微信入口派发 DSH worker 正常；越界写被沙箱拒后模型发起 `session/request_permission`，应答器默认拒绝且**不卡死**。顺带修复：daemon 重启后 `task-stop` 不清 `task-state.json` 的幽灵 waiting 状态（无活跃任务时也落盘 idle）。
 - **「正在输入」指示修复（2026-10-24）**：进度文本消息会把客户端刚显示的 typing 顶掉、旧 8s 续发间隔又赶不上快回合——现在**每条进度消息送达后立刻补发一次 typing**，续发间隔 8s→5s（小于客户端自动过期，防闪烁；brain 与 worker 一致），`setTyping` 失败记日志（区分偶发网络失败与 ticket 获取失败）。
 - **DeepSeek 官方 DSH 大脑（M1/M2，2026-10-24）**：新增 `deepseek` 预设（`dsh --profile acp`，`binWin: "dsh.cmd"`，`DSH_HOME` 沙箱，`.credentials.yaml` 从真实 `~/.dsh` 新者胜同步）；`session/set_config_option` 选 `deepseek-account/deepseek-flash`（桌面登录；默认 `deepseek-official` 需 API key）；`session/resume` 兜底（DSH 无 `load`）；反向请求应答器；预设级 `firstFrameMs`/`heartbeatMs`/`images`；图片在 `image:false` 时友好拒绝。真机验证：prompt、工具调用、强杀后 resume 上下文保留；代码级 `A1=STORED` / `A2=PINEAPPLE`；微信 brain E2E 与 worker E2E（`task` 写文件/`task-reply`/`task-stop`）均通过。详见 `docs/接入-DeepSeek.md`。
 - **DeepSeek 动态 MCP 注入（M3，2026-10-24）**：预设 `mcpViaAcp: true`——不写 MCP 配置文件；`agent-mcp.ts` 新增 `toAcpMcpServers()`（kiro/opencode/remote → ACP stdio/HTTP 声明，坏条目进 skipped，`isConvertibleToAcp` 供预校验）；`activeMcpServers()`/`workerMcpServers()` 把 brain 激活集 / worker 全量（除排除集）转换后随 `session/new|resume` 下发；`addMcp` 拒绝无法转换的定义（官方 DSH 遇起不来的 MCP 会回滚整会话）。真机验证：假 stdio MCP 在 new/resume 两轮都被模型真实调用（marker 两次），坏 MCP 回滚复现。
