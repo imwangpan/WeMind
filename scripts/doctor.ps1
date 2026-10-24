@@ -133,8 +133,8 @@ Section "ACP agent 二进制"
 $agents = @(
   @{ Name = "kiro-cli"; Preset = "kiro" },
   @{ Name = "opencode"; Preset = "opencode" },
-  @{ Name = "dsh"; Preset = "deepseek（评估中，未内置预设）" },
-  @{ Name = "dsh.cmd"; Preset = "deepseek（评估中，未内置预设）" },
+  @{ Name = "dsh"; Preset = "deepseek（已内置预设）" },
+  @{ Name = "dsh.cmd"; Preset = "deepseek（已内置预设）" },
   @{ Name = "deepseek-acp"; Preset = "社区 DeepSeek 适配器（评估中）" },
   @{ Name = "gemini"; Preset = "gemini（示例预设）" },
   @{ Name = "codex-acp"; Preset = "codex（示例预设）" },
@@ -145,12 +145,23 @@ foreach ($a in $agents) {
   if ($c) { Item $a.Name ("{0}  [{1}]" -f $c.Source, $a.Preset) }
 }
 $dshDesktop = $null
-$dshCandidates = @(
-  (Join-Path $env:LOCALAPPDATA "Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"),
-  ("D:\Users\$env:USERNAME\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"),
-  (Join-Path $env:ProgramFiles "DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd")
-)
-foreach ($c in $dshCandidates) {
+$dshCandidates = @()
+if ($env:LOCALAPPDATA) {
+  $dshCandidates += (Join-Path $env:LOCALAPPDATA "Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd")
+}
+if ($env:ProgramFiles) {
+  $dshCandidates += (Join-Path $env:ProgramFiles "DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd")
+}
+if (${env:ProgramFiles(x86)}) {
+  $dshCandidates += (Join-Path ${env:ProgramFiles(x86)} "DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd")
+}
+# 安装器可能把 app 放到非系统盘的用户目录；遍历盘符找 <drive>:\Users\<user>\AppData\Local\Programs\...
+foreach ($drive in (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
+  if ($drive.Root) {
+    $dshCandidates += (Join-Path $drive.Root "Users\$env:USERNAME\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd")
+  }
+}
+foreach ($c in ($dshCandidates | Select-Object -Unique)) {
   if ($c -and (Test-Path -LiteralPath $c)) { $dshDesktop = $c; break }
 }
 $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")

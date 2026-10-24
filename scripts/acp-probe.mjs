@@ -4,7 +4,7 @@
 // whether the agent preserves context across a restart.
 //
 // Usage (PowerShell):
-//   $env:ACP_BIN = "D:\...\dsh.cmd"
+//   $env:ACP_BIN = "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"
 //   $env:ACP_ARGS = '["--profile","acp"]'
 //   $env:ACP_SHELL = "1"
 //   $env:ACP_HOME_ENV = "DSH_HOME"
