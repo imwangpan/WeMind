@@ -10,7 +10,7 @@
 
 - **DeepSeek 本身不是现成的 ACP CLI**。要像 kiro / opencode 一样当 daemon 大脑，实际接入的是 **DeepSeek Harness（`dsh`）的 ACP profile**；另有一个社区适配器 `deepseek-acp` 和「裸 API」两条备选。
 - **推荐方案 A（长期）**：官方 `@deepseek-ai/dsh --profile acp`。官方维护、与 DeepSeek 模型/工具/沙箱同源；代价是 WeMind 侧要补 4 类通用能力（**模型路由选择**、`session/resume` 兜底、反向请求应答、首帧/心跳）。
-- **方案 B（不采用）**：社区 `deepseek-acp`。按你的决定，本次只走官方 DSH；B 仅保留为备查（若官方 `image` 永远不打开且收图是硬需求，再讨论）。
+- **方案 B（暂不采用）**：社区 `deepseek-acp`。按你的要求先只用官方 DSH；B 仅保留为备查（若官方 `image` 永远不打开且收图是硬需求，再讨论）。
 - **方案 C（不推荐作平替）**：直接调 DeepSeek OpenAI 兼容 API。需要新写一层「Brain」和工具循环，等于自造迷你 agent，能力与 kiro/opencode 不对等；仅在「只要聊天、不要工具」时考虑。
 - **已实测（2026-10-24，桌面端 `dsh 0.2.1-rc.2`）**：
   - ACP 只广告 `sessionCapabilities {close,list,resume}`（**无 load**）、`mcpCapabilities {http:true}`、`promptCapabilities {image:false}`；
@@ -202,7 +202,7 @@
 ### 5.1 选型结论
 
 1. **主方案 A（已实现）**：官方 `dsh --profile acp` 作为 `deepseek` 预设，长期维护。
-2. **不采用 B**：社区 `deepseek-acp` 仅备查；按你的决定不引入第三方依赖。
+2. **暂不采用 B**：社区 `deepseek-acp` 仅备查；按你的要求先只走官方 DSH，不引入第三方依赖。
 3. **不做 C**（除非明确只要聊天）。
 
 ### 5.2 目标架构
@@ -551,7 +551,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 
 - **M1/M2 已实现**：`deepseek` 预设（`dsh.cmd` + `DSH_HOME` + `.credentials.yaml` 同步 + `model` 选择）、`resume` 兜底、反向请求应答、`firstFrameMs`/`heartbeatMs`、图片拦截。
 - **M0 已真机验证**：`initialize` / `session/new` / prompt / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 图片（-32602）/ stdio MCP 均已验；代码级集成测试 `A1=STORED`、`A2=PINEAPPLE` 通过；**微信 E2E 已通过**（`spawn deepseek` → `model set` → `prompt ok` → 收到回复）。
-- **B 不采用**：按你的决定只走官方 DSH；社区 `deepseek-acp` 仅保留在文档里备查。
+- **B 暂不采用**：按你的要求先只走官方 DSH；社区 `deepseek-acp` 仅保留在文档里备查。
 - **若「微信收图」是必保功能**：官方当前 `image:false`，当前实现会友好拒绝；把「官方打开 image」作为跟进项，再讨论是否值得引入 B。
 - **M3（MCP）可以先不做**：DSH 自带工具已能覆盖大部分微信场景；等确有 MCP 需求再投入 1–2 天。要做就按 agent 各自的 catalog，不要跨 agent 借文件。
 
@@ -594,7 +594,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | **微信端到端** | 收到「你好」→ `spawn deepseek` → 旧 opencode session `resume` 失败 → `session/new` → `model set` → `prompt ok` 693ms → 回复「你好！很高兴见到你 😊」 | — | **E2E 通过** |
 | **worker E2E** | `task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok` 2305ms（tool_call）→ `hello.txt`；`task-reply` 第二轮 1575ms → `hello`；`task-stop` idle | — | **worker E2E 通过** |
 
-> 结论：官方路线可行且 M1/M2 已落地；关键增量是 **model 选择**、`resume` 兜底、图片拦截/心跳兜底。社区适配器按决定不采用，不再作为回退路径。
+> 结论：官方路线可行且 M1/M2 已落地；关键增量是 **model 选择**、`resume` 兜底、图片拦截/心跳兜底。社区适配器按当前选择暂不采用，仅保留备查。
 
 ---
 
