@@ -19,8 +19,9 @@
   - `session/new` 默认模型是 `deepseek-official/deepseek-v4-flash`，**该路由需要 `DEEPSEEK_API_KEY`**；桌面端登录态对应的是 `deepseek-account/deepseek-flash`，**必须用 `session/set_config_option` 显式切换**，否则即使桌面已登录也会报 `no API key`；
   - 首帧实测约 **1.0–2.3s**（简单/工具提示），正文在回合结束前一次性提交；会发 `agent_thought_chunk` / `tool_call` / `usage_update` 保持活动；
   - 未观察到反向请求；stdio `mcpServers` 被 `session/new` 接受；stdout 会混入一行非 JSON 日志（当前客户端会忽略）。
-- **微信 E2E 已通（2026-10-24）**：`spawn deepseek` → 旧 opencode session 不可 resume（`-32602 session is not resumable`）→ 回退 `session/new` → `model set` → `prompt ok` → 用户收到「你好！很高兴见到你 😊」。下一次消息会走新的 DSH `session/resume`。
+- **微信 E2E 已通（2026-10-24）**：`spawn deepseek` → 旧 opencode session 不可 resume（`-32602 session is not resumable`）→ 回退 `session/new` → `model set` → `prompt ok` → 用户收到「你好！很高兴见到你 😊」。**后续微信侧 `session/resume ok ... mcp=[test-echo]` 亦已实证**（M3 微信链路测试中）。
 - **Worker E2E 已通（2026-10-24）**：`task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok`（2.3s，含 tool_call）→ `hello.txt`；`task-reply` 第二轮读文件输出 `hello`；`task-stop` 后 idle。
+- **微信侧动态 MCP + 图片拒绝已实测（2026-10-24）**：`MCP`/`加载 test-echo`/调用（答 `MCP-OK`，调用记录落盘）/`卸载` 全链路通过；发图收到友好拒绝（`image unsupported by current brain; rejected gracefully`）。
 - 工作量：**M0 冒烟 0.5 人日；MVP 2–3 人日；含 MCP/worker/记忆继承的完整对齐 5–7 人日**。
 - 最大未决项从「凭据隔离」变成「**模型路由 + 凭据来源**」：桌面登录可用，但需把 `DSH_HOME` 的 `.credentials.yaml` 带进沙箱（或改用 `DEEPSEEK_API_KEY`），并显式选 `deepseek-account` 路由（§8 R1/R18）。
 
@@ -503,7 +504,7 @@ wemind brain check           # 真起进程跑 initialize + session/new（60s �
 3. 发一个 >30s 的任务 → 不因首帧超时被杀；微信能看到「步骤」进度，且静默期**不会**每 15s 刷一条「还在思考」。
 4. 发「新会话」→ 走 `session/new`，旧上下文清空。
 5. 触发一次越界写（如让它在 `BRAIN_HOME` 外写文件）→ 观察 permission 请求被应答（拒绝或按 env 放行），**不能卡死**。
-6. 发一张图片 → 官方 DSH 应被 M1 的拦截逻辑友好拒绝（而不是 `-32602` 重试）；B 则应能看图。
+6. ✅ 发一张图片 → 友好拒绝（「当前大脑暂不支持看图…」；日志 `image unsupported by current brain; rejected gracefully`，无 `-32602` 重试；已实测 2026-10-24）。
 7. 两个账号同时跑 → 各自 `brain-home` / `worker-home` 隔离，互不抢会话。
 8. ✅ `加载 <MCP>` → 下一条消息生效（`session/new|resume` 带 `mcpServers`）；`wechat` 仍被禁止；DSH 不读 kiro 的 MCP 文件（M3 已实现，真机验证见附录）。
 9. worker：`task "create hello.txt..." --cwd <临时目录>` → 文件 `hello.txt` 内容 `hello` + 输出 `DONE`；`task-reply "read hello.txt..."` → 输出 `hello`；`task-stop` → idle。日志见 `[wemind/wechat-daemon/worker] spawn deepseek ... → model set → prompt ok`。
@@ -592,9 +593,11 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | **微信端到端** | 收到「你好」→ `spawn deepseek` → 旧 opencode session `resume` 失败 → `session/new` → `model set` → `prompt ok` 693ms → 回复「你好！很高兴见到你 😊」 | — | **E2E 通过** |
 | **worker E2E** | `task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok` 2305ms（tool_call）→ `hello.txt`；`task-reply` 第二轮 1575ms → `hello`；`task-stop` idle | — | **worker E2E 通过** |
 | **M3：MCP via ACP** | 假 stdio MCP 经 `toAcpMcpServers()` 转换：`session/new` 挂载 → 模型调用（marker `called`）答 `ok`；`session/resume` 再挂 → 再调用答 `okPINEAPPLE`；坏 MCP → `session/new` 回滚（`initial connection or tool synchronization failed`） | — | **M3 通过**（HTTP 未实测） |
+| **M3：微信侧全链路** | 用户实测：`MCP` 列出 test-echo → `加载` → 下一条消息 `session/resume ok ... mcp=[test-echo]`，模型调用工具答 `MCP-OK`（调用记录落盘）→ `卸载` 激活集回空 | — | **微信侧通过**（含微信侧 `resume` 首次实证） |
 | **M4：记忆/技能** | 真实 `~/.dsh` 放测试 skill（KIWANO）+ `AGENTS.md` 规则（MANGO-42）→ brain/worker 沙箱均可读，回答均 `CODEWORD=MANGO-42 SECRET=KIWANO`；现场已还原 | — | **M4 通过** |
 | **M5：多账号机制** | 双数据目录各跑一轮：brain-home/worker-home 凭据各自独立，session id 不同，均答 `OK` | — | **机制通过**（双真机微信待需要时验） |
 | **M5：model 失败路径** | 非法 model → `-32602 unknown model option`，随后默认路由明确报 no API key | — | 失败不静默 |
+| **M5：图片友好拒绝（微信侧）** | 用户发图 → 收到「当前大脑暂不支持看图…」；日志 `image unsupported by current brain; rejected gracefully` | — | **通过**（无 `-32602` 重试） |
 
 > 结论：官方路线可行且 M1–M5 已落地（图片除外，上游 `image:false`）；关键增量是 **model 选择**、`resume` 兜底、图片拦截/心跳兜底、**MCP via ACP**。社区适配器按当前选择暂不采用，仅保留备查。
 

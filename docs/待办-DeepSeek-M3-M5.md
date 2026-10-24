@@ -17,6 +17,7 @@
 - 假 stdio MCP（echo 工具，被调用时写 marker）：`session/new` 挂载成功，模型调用工具 → marker 第 1 次 `called`，回答 `ok`；
 - `session/resume` 带同一 `mcpServers` → 模型再次调用 → marker 第 2 次 `called`，回答 `okPINEAPPLE`（上下文保留）；
 - **坏条目回滚验证**：起不来的 MCP 让 `session/new` 直接失败（`mcp-client: initial connection or tool synchronization failed`）——因此 `addMcp` 预校验拒绝无法转换的定义，`toAcpMcpServers` 跳过坏条目并记日志；
+- **微信侧全链路 ✅（2026-10-24，用户实测）**：`MCP` 列出 test-echo → `加载 test-echo` → 下一条消息 `session/resume ok ... mcp=[test-echo]`（**微信侧 resume 也由此验证**），模型调用工具回答 `MCP-OK`（调用记录落盘）→ `卸载 test-echo` 激活集回空；
 - 单测：`agent-mcp.test.ts`（转换/跳过/排除/预校验）、`brain-agents.test.ts`（mcpViaAcp 解析），全量 136 tests 通过。
 
 **遗留**：HTTP MCP 未真机实测（`http:true` 已广告）；catalog 默认来源仍是 `~/.dsh/settings/mcp.json`（不存在 → 需 `WEMIND_MCP_CATALOG` 指向中立文件）。
@@ -39,7 +40,7 @@
 ## M5 · 加固与覆盖（除标注外均完成）
 
 1. **worker E2E** ✅ 2026-10-24：`task "create hello.txt" --cwd <临时目录>` → 文件内容 `hello` + 输出 `DONE`；`task-reply "read hello.txt"` → 输出 `hello`；`task-stop` → idle。日志：`[wemind/wechat-daemon/worker] spawn deepseek ... → model set → session/new → prompt ok`（2305ms / 1575ms）。
-2. **图片**（待上游）：官方 `image:false`；已实现友好拒绝 + ACP 级 `-32602` 验证。跟进官方打开 `image` 后移除拦截并回归；微信端发图实测待用户配合。
+2. **图片**（待上游）：官方 `image:false`；**微信侧友好拒绝已实测 ✅（2026-10-24）**——发图收到「当前大脑暂不支持看图…」，日志 `image unsupported by current brain; rejected gracefully`，无 `-32602` 重试。官方打开 `image` 后移除拦截并回归。
 3. **多账号** ✅ 机制已验证（2026-10-24）：两个独立数据目录各跑一轮 brain → 各自 `brain-home`/`worker-home` 均有独立 `.credentials.yaml`，`brain-sessions.json` 的 sessionId 不同，均正常回答；双**真机微信**账号（需第二个扫码登录）待用户需要时再验。
 4. **升级守卫** ✅：`scripts/doctor.ps1` 比对 `dsh --version` 与已实测版本（0.2.1-rc.2），不一致时提示先跑 `scripts/acp-probe.mjs` 回归。
 5. **测试** ✅：`toAcpMcpServers`/预校验/`mcpViaAcp` 单测（全量 136 通过）；`set_config_option` 失败路径真机验证（非法 model → `-32602 unknown model option`，随后在默认路由明确报 no API key，不静默）。
