@@ -137,7 +137,7 @@ async function runTask(to: string, firstInstruction: string): Promise<void> {
   let instruction: string | null = firstInstruction;
   while (activeTask && instruction !== null) {
     typing(to); // 立即一次「正在输入」
-    const ti = setInterval(() => typing(to), 8000); // 每 8s 续命（typing 不占连续发送上限），表明 worker 在干活
+    const ti = setInterval(() => typing(to), 5000); // 每 5s 续命（小于客户端 typing 自动过期，防闪烁；不占连续发送上限），表明 worker 在干活
     try {
       const onProgress = PROGRESS
         ? (ev: WorkerProgressEvent) => {

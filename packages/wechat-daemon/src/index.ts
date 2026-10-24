@@ -195,8 +195,9 @@ async function setTyping(
       token: account.botToken,
       body: { ilink_user_id: to, typing_ticket: cfg.typing_ticket, status },
     });
-  } catch {
-    /* best-effort */
+  } catch (e) {
+    // typing 是体验增强（best-effort 不阻断），但失败要留痕：区分「偶发网络失败」与「ticket 拿不到」
+    log(`setTyping(${status}) failed:`, String(e));
   }
 }
 
@@ -363,10 +364,11 @@ async function handleMessage(
   activeTurn = { from: to, token: ctx };
   const cx = () => activeTurn?.token ?? ctx;
   await setTyping(account, to, cx(), 1);
-  // 处理期间每 8s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了
+  // 处理期间每 5s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了。
+  // 间隔需小于客户端对 typing 的自动过期（约 5–8s），否则中间会出现指示闪烁的空洞。
   const keepAlive = setInterval(() => {
     void setTyping(account, to, cx(), 1).catch(() => {});
-  }, 8000);
+  }, 5000);
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
@@ -377,20 +379,23 @@ async function handleMessage(
     lastProgressAt = Date.now();
     const b = budgetOf(to);
     if (b.awaiting) return; // 等待「继续」期间不发任何进度
+    // 发出一条文本会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，
+    // 否则快回合（回复 < 旧 8s 续发间隔）全程看不到指示。
+    const sendWithTyping = (text: string) => {
+      void sendOrdered(account, to, cx(), text, MessageState.GENERATING)
+        .then(() => setTyping(account, to, cx(), 1))
+        .catch(() => {});
+    };
     if (b.count >= CONSEC_SEND_LIMIT - 2) {
       b.count += 1;
       b.awaiting = true;
-      void sendOrdered(
-        account,
-        to,
-        cx(),
+      sendWithTyping(
         "⚠️ 接近微信连续消息上限，我先暂停进度提示、继续在后台处理；完成后会把结果直接发给你。想立刻恢复进度可回复「继续」。",
-        MessageState.GENERATING,
       );
       return;
     }
     b.count += 1;
-    void sendOrdered(account, to, cx(), msg, MessageState.GENERATING);
+    sendWithTyping(msg);
   };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
   // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）

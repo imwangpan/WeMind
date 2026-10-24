@@ -69,7 +69,7 @@ stateDiagram-v2
 
 - `running`：worker 正跑一轮。此时用户来消息 → 暂存为 `pendingInject`（只留最近一条），回执「已记下，等这步跑完处理」。
 - `waiting`：等用户注入。收到即转 `running`。若有暂存的 `pendingInject` 直接消费。
-- `runTask` 是后台异步循环：`askWorker` → 推送 `🤖【任务】<输出>` → typing 保活（每 8s）→ 等注入 → 续跑。**绝不在 `workerLoop` 里 await 它**，否则长任务会阻塞 poller 入队（含用户的注入回复）。
+- `runTask` 是后台异步循环：`askWorker` → 推送 `🤖【任务】<输出>` → typing 保活（每 5s）→ 等注入 → 续跑。**绝不在 `workerLoop` 里 await 它**，否则长任务会阻塞 poller 入队（含用户的注入回复）。
 
 依赖注入（task-manager 不直接碰发送层/文件，保持可测）：`setTaskPush`（推送文本，走 daemon 的 `sendOrdered` + 最新 token）、`setTaskTyping`（发打字状态）、`setTaskStateSink`（落盘 `task-state.json`）。
 
