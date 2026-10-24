@@ -23,7 +23,7 @@
 DSH 的 L3 示例（隔离凭据；不要把真实 `~/.dsh` 交给探针）：
 
 ```powershell
-$env:ACP_BIN = "D:\...\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"
+$env:ACP_BIN = "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"  # 按实际安装位置调整
 $env:ACP_ARGS = '["--profile","acp"]'
 $env:ACP_SHELL = "1"
 $env:ACP_HOME_ENV = "DSH_HOME"

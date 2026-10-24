@@ -1,6 +1,6 @@
 # 接入 DeepSeek（评估与实施方案）
 
-> **状态**：官方 DSH **已接入并微信端到端验证**（2026-10-24，M1/M2 已实现；收到「你好」并正常回复）；真机实测 `dsh 0.2.1-rc.2`：`initialize` / `session/new` / `prompt` / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 带图（-32602）/ stdio MCP 已验。
+> **状态**：官方 DSH **已接入，微信 brain + worker E2E 均通过**（2026-10-24，M1/M2 已实现）；真机实测 `dsh 0.2.1-rc.2`：`initialize` / `session/new` / `prompt` / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 带图（-32602）/ stdio MCP 已验。
 > **范围**：daemon 的常驻「大脑」（形态②，ACP）。MCP 客户端形态另见 §2.4。
 > **相关文档**：[接入-OpenCode.md](接入-OpenCode.md)（同类接入的实测样板）· [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](repowiki/06-ACP-大脑与沙箱.md)。
 
@@ -20,6 +20,7 @@
   - 首帧实测约 **1.0–2.3s**（简单/工具提示），正文在回合结束前一次性提交；会发 `agent_thought_chunk` / `tool_call` / `usage_update` 保持活动；
   - 未观察到反向请求；stdio `mcpServers` 被 `session/new` 接受；stdout 会混入一行非 JSON 日志（当前客户端会忽略）。
 - **微信 E2E 已通（2026-10-24）**：`spawn deepseek` → 旧 opencode session 不可 resume（`-32602 session is not resumable`）→ 回退 `session/new` → `model set` → `prompt ok` → 用户收到「你好！很高兴见到你 😊」。下一次消息会走新的 DSH `session/resume`。
+- **Worker E2E 已通（2026-10-24）**：`task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok`（2.3s，含 tool_call）→ `hello.txt`；`task-reply` 第二轮读文件输出 `hello`；`task-stop` 后 idle。
 - 工作量：**M0 冒烟 0.5 人日；MVP 2–3 人日；含 MCP/worker/记忆继承的完整对齐 5–7 人日**。
 - 最大未决项从「凭据隔离」变成「**模型路由 + 凭据来源**」：桌面登录可用，但需把 `DSH_HOME` 的 `.credentials.yaml` 带进沙箱（或改用 `DEEPSEEK_API_KEY`），并显式选 `deepseek-account` 路由（§8 R1/R18）。
 
@@ -86,7 +87,7 @@
 **事实（截至 2026-10-24）**：
 
 - npm 最新 `@deepseek-ai/dsh@0.2.1-rc.2`，bin `dsh`；依赖 `@deepseek-ai/dsh-acp-app` / `@deepseek-ai/dsh-acp` 同版本。
-- **桌面端已自带 CLI**：本机路径 `D:\Users\imwan\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd`，`dsh --version` 输出 **0.2.1-rc.2**；**该目录只有 `dsh.cmd`（没有无扩展名的 `dsh`）**，所以预设的 `binWin` 要写 `dsh.cmd`（或 `WEMIND_BRAIN_BIN` 指向绝对路径），否则 `onPath("dsh")` 找不到。
+- **桌面端已自带 CLI**：安装在 `<DeepSeek Harness 安装目录>` 下的 `resources\runtime\cli\bin\dsh.cmd`（常见为 `$env:LOCALAPPDATA\Programs\DeepSeek Harness\...`；安装器也可能把它放在其它盘/目录，用 `Get-Command dsh` 或实际安装位置确认）。`dsh --version` 输出 **0.2.1-rc.2**；**该目录只有 `dsh.cmd`（没有无扩展名的 `dsh`）**，所以预设的 `binWin` 要写 `dsh.cmd`（或 `WEMIND_BRAIN_BIN` 指向实际绝对路径），否则 `onPath("dsh")` 找不到。
 - 启动：`dsh --profile acp`，stdio 上的纯 ACP JSON-RPC；`dsh --profile acp --help` 打印帮助后退出，不占 stdin/stdout。
 - 随附 profile 默认用 `deepseek-official` + `deepseek-v4-flash` 建会话；实测 `session/new` 返回的 `configOptions` 含 `model`（`deepseek-official/deepseek-v4-flash`、`deepseek-account/deepseek-flash`、`deepseek-account/deepseek-v4-pro`）和 `reasoning_effort`（默认 `high`）。
 - 官方 ACP 的定位是 **automation-only**：只暴露标准 ACP v1，不提供 DSH 专属的编辑器呈现（标题、计划卡片、终端卡片、elicitation 等）。
@@ -225,9 +226,9 @@
 1. **不需要另装 CLI**：桌面端已自带 `dsh.cmd`（0.2.1-rc.2），直接用它：
 
    ```powershell
-   $dsh = "D:\Users\imwan\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"
+   $dsh = "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"  # 按实际安装位置调整
    & $dsh --version                     # 0.2.1-rc.2
-   $env:DSH_HOME = "D:\tmp\dsh-probe"   # 用临时 home，避免污染真实会话
+   $env:DSH_HOME = "$env:TEMP\dsh-probe"   # 用临时 home，避免污染真实会话
    & $dsh --profile acp --help
    ```
 
@@ -460,10 +461,12 @@ DSH 的布局（官方文档）：
 
 ### 7.1 安装与凭据
 
+> 下面所有路径都是**占位/示例**：按你自己的 DeepSeek Harness 安装位置替换，不要照抄别人的本机路径。桌面端常见位置是 `$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd`，也可能在其它盘。
+
 **不需要另装 CLI**：桌面端已自带 0.2.1-rc.2。
 
 ```powershell
-$dsh = "D:\Users\imwan\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"
+$dsh = "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"  # 按实际安装位置调整
 & $dsh --version     # 0.2.1-rc.2
 ```
 
@@ -486,7 +489,8 @@ $env:DEEPSEEK_API_KEY = "sk-..."
 
 ```powershell
 npm run build
-wemind brain set deepseek --bin "D:\Users\imwan\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" --restart
+$dsh = "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"  # 按实际安装位置调整
+wemind brain set deepseek --bin $dsh --restart
 wemind brain                 # 应显示 name=deepseek、bin=...dsh.cmd、home_env=DSH_HOME
 wemind brain check           # 真起进程跑 initialize + session/new（60s 内）
 ```
@@ -504,6 +508,7 @@ wemind brain check           # 真起进程跑 initialize + session/new（60s �
 6. 发一张图片 → 官方 DSH 应被 M1 的拦截逻辑友好拒绝（而不是 `-32602` 重试）；B 则应能看图。
 7. 两个账号同时跑 → 各自 `brain-home` / `worker-home` 隔离，互不抢会话。
 8. （M3 若做）`加载 <MCP>` → 下一条消息生效；`wechat` 仍被禁止；DSH 不读 kiro 的 MCP 文件。
+9. worker：`task "create hello.txt..." --cwd <临时目录>` → 文件 `hello.txt` 内容 `hello` + 输出 `DONE`；`task-reply "read hello.txt..."` → 输出 `hello`；`task-stop` → idle。日志见 `[wemind/wechat-daemon/worker] spawn deepseek ... → model set → prompt ok`。
 
 ### 7.4 回滚
 
@@ -587,9 +592,12 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | stdout 纯净性 | 混入 `[llm-deepseek-account] ...` 非 JSON 行 | 未测 | 解析器需容错 |
 | 代码级 `askBrain` 集成 | `A1=STORED` → `restart()` → `A2=PINEAPPLE`；`model set` / `resume` 均成功 | — | **M1/M2 代码路径验证通过** |
 | **微信端到端** | 收到「你好」→ `spawn deepseek` → 旧 opencode session `resume` 失败 → `session/new` → `model set` → `prompt ok` 693ms → 回复「你好！很高兴见到你 😊」 | — | **E2E 通过** |
+| **worker E2E** | `task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok` 2305ms（tool_call）→ `hello.txt`；`task-reply` 第二轮 1575ms → `hello`；`task-stop` idle | — | **worker E2E 通过** |
 
 > 结论：官方路线可行且 M1/M2 已落地；关键增量是 **model 选择**、`resume` 兜底、图片拦截/心跳兜底。社区适配器按决定不采用，不再作为回退路径。
 
 ---
 
 > **下一步**：微信 E2E 已通（`spawn deepseek` → `model set` → `prompt ok` → 回复）；可继续验：再发一条确认 `session/resume`、发图确认友好拒绝、发「任务：」验 worker。收图目前会被友好拒绝（官方 `image:false`）。
+>
+> **后续待办**：M3（MCP via ACP）、M4（记忆/技能完整验收）、M5（worker E2E/加固）暂不实施，已记录在 [`待办-DeepSeek-M3-M5.md`](待办-DeepSeek-M3-M5.md)。

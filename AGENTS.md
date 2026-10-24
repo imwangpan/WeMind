@@ -154,6 +154,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1         # 检查 Markdown 相对链
 - 接入其它 agent：[`docs/接入其它-ACP-Agent.md`](docs/接入其它-ACP-Agent.md)
 - OpenCode 接入实测：[`docs/接入-OpenCode.md`](docs/接入-OpenCode.md)
 - DeepSeek 评估与实测：[`docs/接入-DeepSeek.md`](docs/接入-DeepSeek.md)
+- DeepSeek 后续待办（M3–M5）：[`docs/待办-DeepSeek-M3-M5.md`](docs/待办-DeepSeek-M3-M5.md)
 - 机器可读索引：[`llms.txt`](llms.txt)
 
 ---
