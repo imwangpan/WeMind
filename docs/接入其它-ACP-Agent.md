@@ -209,7 +209,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 - `configSubdir` 决定 agent 配置目录相对沙箱根的位置（kiro 空=沙箱根；opencode `opencode`）；
 - `mcpFormat` / `mcpConfigFile` / `catalogFile` 决定 MCP 文件的结构与路径（kiro：`settings/mcp.json` 的 `mcpServers`；opencode：`opencode.json` 的 `mcp.servers`）。
 
-因此：**kiro 与 opencode 现已开箱支持「微信里动态加载/卸载 MCP」**。其它 agent 若格式不同，则是上述预设字段填对即可；实在不同再按其约定适配。
+因此：**kiro 与 opencode 现已开箱支持「微信里动态加载/卸载 MCP」**；**DSH 走 `mcpViaAcp: true`**——不写配置文件，激活集由 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发（已真机验证）。其它 agent 若格式不同，则是上述预设字段填对即可；实在不同再按其约定适配。
 
 - 若该 agent 也用「某个 HOME 环境变量 + 兼容结构」，设对 `homeEnvVar` 即可，MCP 注入大概率可用；
 - 该 agent 完全不需要配置目录时，把 `homeEnvVar` 留空，仅做隔离 cwd。

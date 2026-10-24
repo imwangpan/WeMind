@@ -107,7 +107,7 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 
 > 一个被修复的坑：早期 brain 沙箱缺 `chat.defaultModel`，大脑用 kiro 默认模型而非用户配置的模型，导致「同样任务比直接用 kiro 问题多」。修复后继承真实 settings。**注意：换模型后旧 ACP 会话可能仍绑旧模型，需在微信发「新会话」重建。**
 
-`ensureBrainHome()` 启动时按顺序执行：`syncSettings` → `applySandbox`（写 curated mcp.json）→ `mirrorRealKiro`。
+`ensureBrainHome()` 启动时按顺序执行：`syncSettings` → `applySandbox`（写 curated mcp.json；`mcpViaAcp` 预设如 DSH 跳过文件，改由 `activeMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发）→ `mirrorRealKiro` → `syncCredentialFile`。
 
 ## 6.4 可配置的 agent（brain-agents.ts）
 
