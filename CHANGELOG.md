@@ -8,7 +8,7 @@
 
 - **DeepSeek 官方 DSH 大脑（M1/M2，2026-10-24）**：新增 `deepseek` 预设（`dsh --profile acp`，`binWin: "dsh.cmd"`，`DSH_HOME` 沙箱，`.credentials.yaml` 从真实 `~/.dsh` 新者胜同步）；`session/set_config_option` 选 `deepseek-account/deepseek-flash`（桌面登录；默认 `deepseek-official` 需 API key）；`session/resume` 兜底（DSH 无 `load`）；反向请求应答器；预设级 `firstFrameMs`/`heartbeatMs`/`images`；图片在 `image:false` 时友好拒绝。真机验证：prompt、工具调用、强杀后 resume 上下文保留；代码级 `A1=STORED` / `A2=PINEAPPLE`；微信 brain E2E 与 worker E2E（`task` 写文件/`task-reply`/`task-stop`）均通过。详见 `docs/接入-DeepSeek.md`。
 - **DeepSeek 动态 MCP 注入（M3，2026-10-24）**：预设 `mcpViaAcp: true`——不写 MCP 配置文件；`agent-mcp.ts` 新增 `toAcpMcpServers()`（kiro/opencode/remote → ACP stdio/HTTP 声明，坏条目进 skipped，`isConvertibleToAcp` 供预校验）；`activeMcpServers()`/`workerMcpServers()` 把 brain 激活集 / worker 全量（除排除集）转换后随 `session/new|resume` 下发；`addMcp` 拒绝无法转换的定义（官方 DSH 遇起不来的 MCP 会回滚整会话）。真机验证：假 stdio MCP 在 new/resume 两轮都被模型真实调用（marker 两次），坏 MCP 回滚复现。
-- **DeepSeek M4/M5 验收（2026-10-24）**：记忆/技能继承真机验收（测试 skill + `AGENTS.md` 规则在 brain/worker 双沙箱生效，现场已还原）；多账号隔离机制验证（双数据目录各自沙箱/凭据/session）；`doctor.ps1` 升级守卫（dsh 版本 ≠ 0.2.1-rc.2 提示跑 `acp-probe` 回归）；`set_config_option` 失败路径验证。剩余开放项：图片（上游 `image:false`）、HTTP MCP 实测、双真机微信账号。
+- **DeepSeek M4/M5 验收（2026-10-24）**：记忆/技能继承真机验收（测试 skill + `AGENTS.md` 规则在 brain/worker 双沙箱生效，现场已还原）；多账号隔离机制验证（双数据目录各自沙箱/凭据/session）；`doctor.ps1` 升级守卫（dsh 版本 ≠ 0.2.1-rc.2 提示跑 `acp-probe` 回归）；`set_config_option` 失败路径验证；**微信侧动态 MCP 全链路 + 图片友好拒绝用户实测通过**（`session/resume ok ... mcp=[test-echo]`，工具真实调用返回 `MCP-OK`）。剩余开放项：图片输入（上游 `image:false`）、HTTP MCP 实测、双真机微信账号。
 
 ### Docs
 
