@@ -170,7 +170,13 @@ Item "用户 PATH 含 dsh 目录" (YesNo $hasDshPath)
 if ($dshDesktop) {
   Item "dsh（桌面端）" $dshDesktop
   $ver = (& $dshDesktop --version 2>$null) -join " "
-  if ($ver) { Item "  --version" $ver }
+  if ($ver) {
+    Item "  --version" $ver
+    # 升级守卫：WeMind 的 deepseek 预设按此实测版本开发；版本变化时 ACP 面（resume/model/MCP）可能漂移
+    if ($ver.Trim() -ne "0.2.1-rc.2") {
+      Write-Output "  ⚠ dsh 版本与已实测版本（0.2.1-rc.2）不同：升级后先跑 node scripts/acp-probe.mjs 回归（initialize/resume/model/MCP），再让 daemon 使用。"
+    }
+  }
 }
 $dshHome = Join-Path $env:USERPROFILE ".dsh"
 if (Test-Path -LiteralPath $dshHome) {

@@ -289,6 +289,7 @@ deepseek: {
   heartbeatMs: 60_000,           // 有 thought/usage 帧时通常不触发；极端静默兜底
   images: false,                 // 当前 DSH ACP 不接受图片
   credentialFile: ".credentials.yaml", // 从 ~/.dsh 新者胜同步进沙箱
+  mcpViaAcp: true,               // MCP 不写文件，随 session/new|resume 的 mcpServers 下发
 },
 ```
 
@@ -300,7 +301,7 @@ deepseek: {
 - **模型必须显式选**：默认 `deepseek-official` 需要 API key；桌面登录只对应 `deepseek-account`。不选就会 `no API key`，不是「桌面没登录」。
 - **不要**把 `DEEPSEEK_API_KEY` 写进预设的 `env`（会把密钥固化进源码/构建产物）；daemon 继承进程环境即可。
 - `configSubdir` 留空：`DSH_HOME` 本身就是 home。
-- `mcpFormat` 目前仍是默认 `kiro`：DSH 不读它，会写一个无害的 `settings/mcp.json`；**M3 才做 `mcpViaAcp`**（跳过文件写入、把激活集转成 `session/new` 的 `mcpServers`）。每个 agent 只读自己的 MCP 配置。
+- MCP 走 `mcpViaAcp: true`：**不写任何 MCP 配置文件**，激活集由 `toAcpMcpServers()` 转成 `session/new|resume` 的 `mcpServers` 下发（见 M3）。每个 agent 只读自己的 MCP 配置；DSH 的 catalog 用 `WEMIND_MCP_CATALOG` 指向中立文件。
 - `AUTO_PROBE_ORDER` 末尾追加 `"deepseek"`（不要插到 kiro/opencode 前面，避免老用户装了就悄悄换大脑）；`auto` 仍优先 kiro/opencode。
 - 文档标注 **Node ≥22**；`agentProblem` 对 deepseek 找不到二进制时提示 `--bin`。
 - **图片**：`image:false`，`index.ts` 在 `askBrain` 前拦截微信图片，回一句「当前大脑暂不支持看图……」，不会以 `-32602` 失败重试。
@@ -388,26 +389,22 @@ deepseek: {
    - committed 模式下只发一条「该大脑完成后一次性返回」的说明，后续不再按 15s 刷；
    - 不要用假 `activity` 掩盖真实卡死；`WECHAT_BRAIN_CAP_MS` 仍兜底。
 
-#### M3 · MCP 注入（未实现，可选，1–2 人日）
+#### M3 · MCP 注入 ✅ 已实现并真机验证（2026-10-24）
 
-DSH 不读 kiro/opencode 的 MCP 配置文件；它自己的 MCP 通过 ACP `session/new` 的 `mcpServers` 挂载（本机实测 stdio 被接受，`http:true` 已广告）：
+DSH 不读 kiro/opencode 的 MCP 配置文件；它自己的 MCP 通过 ACP `session/new` 的 `mcpServers` 挂载（stdio 实测接受，`http:true` 已广告）。**已落地**：
 
-1. 新增纯函数 `toAcpMcpServers(catalog, format)`：
-   - kiro `{ command, args, env }` → `{ name, command, args, env }`；
+1. `agent-mcp.ts` 的纯函数 `toAcpMcpServers()`：
+   - kiro `{ command, args, env }` → `{ name, command, args, env }`（env 转 `{name,value}[]`）；
    - opencode `{ type:"local", command:[...], environment }` → 拆 `command[0]` / `args` / `env`；
-   - `{ type:"remote", url }` → `{ name, type:"http", url, headers }`（官方不支持 SSE，跳过）；
-   - 始终排除 `wechat`。
-2. `ensureSession` 把激活集转成 `mcpServers` 传给 `session/new` / `session/resume`（仅 `mcpViaAcp` 的预设）。
-3. **catalog 按 agent 各自的约定读取，不要跨 agent 借文件**：
-   - kiro：`~/.kiro/settings/mcp.json`；
-   - opencode：`~/.config/opencode/opencode.json`；
-   - DSH：若它自身有 MCP 配置文件就读它；**没有就用 WeMind 的中立 catalog**（`WEMIND_MCP_CATALOG`，或 `<数据目录>/mcp-catalog.json`），再转成 ACP `mcpServers`。
-   - 不能要求 DSH 去读 kiro 的 `settings/mcp.json`——那是把 A 的配置格式硬塞给 B，和现有「按 agent 分派 mcpFormat」的设计也冲突。
-4. 若某个 MCP 起不来，官方 `session/new` 会回滚整个会话 → 加载前做校验/告警，不要把坏条目写进激活集。
+   - `{ url }` → `{ name, type:"http", url, headers }`；
+   - 始终排除 `wechat`；**坏条目进 `skipped` 并记日志**（`isConvertibleToAcp` 供 `addMcp` 预校验）。
+2. 预设 `mcpViaAcp: true`：`applySandbox`/`syncSettings` 跳过文件写入；`ensureSession` 把激活集（`activeMcpServers()`）/ worker 全量（`workerMcpServers()`）转成 `mcpServers` 传给 `session/new` / `session/resume`。
+3. **catalog 按 agent 各自的约定读取，不跨 agent 借文件**：DSH 用 `WEMIND_MCP_CATALOG` 指向中立 kiro 格式文件（默认 `~/.dsh/settings/mcp.json` 不存在 → 未设 catalog 时为空）。
+4. **坏条目防护**：官方 `session/new` 遇到起不来的 MCP 会回滚整个会话（实测 `mcp-client: initial connection or tool synchronization failed`）——`addMcp` 预校验拒绝无法转换的定义。
 
-> 若 M3 不做：DeepSeek 大脑仍可用 DSH 内置工具（shell/文件/网页搜索等），只是微信「加载 MCP」对 DeepSeek 不生效，需在文档中明确标注。
+**真机验证（假 stdio MCP，echo 工具写 marker）**：`session/new` 挂载 → 模型调用工具（marker `called`）回答 `ok`；`session/resume` 带同一声明 → 再次调用（marker 第 2 次）回答 `okPINEAPPLE`。HTTP MCP 未真机实测（能力已广告）。
 
-#### M4 · 记忆 / 技能继承（0.5 人日）
+#### M4 · 记忆 / 技能继承 ✅ 已验收（2026-10-24，现场已还原）
 
 DSH 的布局（官方文档）：
 
@@ -415,14 +412,15 @@ DSH 的布局（官方文档）：
 - 用户技能：`$DSH_HOME/skills`（另有 `~/.agents/skills`）；
 - 项目技能：`<projectRoot>/.dsh/skills`、`<projectRoot>/.agents/skills`。
 
-因此预设用 `realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGENTS.md"]` 即可复用现有 `mirrorRealKiro()`。共享根 `~/.agents` 默认不被沙箱影响（`DSH_AGENTS_HOME` 不指向沙箱），会自然被读到；若要严格隔离再显式设置。
+预设用 `realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGENTS.md"]` 复用 `mirrorRealKiro()`。**验收**：真实 `~/.dsh` 放测试 skill（secret `KIWANO`）+ `AGENTS.md` 规则（`MANGO-42`）→ brain/worker 两沙箱均可读，回答均 `CODEWORD=MANGO-42 SECRET=KIWANO`；验证后已还原。共享根 `~/.agents` 默认不被沙箱影响（`DSH_AGENTS_HOME` 不指向沙箱）。
 
-#### M5 · 验证与文档（0.5 人日）
+#### M5 · 验证与文档 ✅（除图片/双真机账号外完成）
 
-- `brain-agents.test.ts` 增加 `deepseek` 预设断言（`shell`、`homeEnvVar`、`model`、`restore`、`firstFrameMs`、`mcpViaAcp`）。
-- 新增 `agent-mcp` 的单测（`toAcpMcpServers` 三种格式）。
-- 更新 `docs/接入其它-ACP-Agent.md` §5 预设表、README「切换大脑 Agent」段、CHANGELOG。
-- 真机实测与微信 E2E 已补入附录。
+- `brain-agents.test.ts`：deepseek 预设断言（含 `mcpViaAcp`）；`agent-mcp.test.ts`：`toAcpMcpServers` 转换/跳过/预校验。
+- 全量 136 tests 通过；`set_config_option` 失败路径真机验证（非法 model → `-32602 unknown model option` → 默认路由明确报 no API key）。
+- `scripts/doctor.ps1` 升级守卫：dsh 版本 ≠ 0.2.1-rc.2 时提示先跑 `scripts/acp-probe.mjs` 回归。
+- 多账号机制验证：双数据目录各自沙箱/凭据/session 独立；双真机微信账号待需要时再验。
+- 文档同步：待办 / 本文附录 / `add-mcp` 配方 / README / CHANGELOG。
 
 ### 5.4 工作量汇总
 
@@ -431,7 +429,7 @@ DSH 的布局（官方文档）：
 | M0 | 官方/社区冒烟、决策门 | 0.5 |
 | M1 | 预设 + 沙箱 | 0.5–1 |
 | M2 | **model 选择** / resume / 反向请求 / 首帧 / 心跳 / 图片拦截 / check 超时 | 1–2 |
-| M3 | MCP via ACP（可选） | 1–2 |
+| M3 | MCP via ACP（✅ 已实现并验证） | 1–2 |
 | M4 | skills / AGENTS.md 继承 | 0.5 |
 | M5 | 测试 + 文档 | 0.5 |
 | **合计** | MVP（M0–M2、M4–M5） | **2–3** |
@@ -507,7 +505,7 @@ wemind brain check           # 真起进程跑 initialize + session/new（60s �
 5. 触发一次越界写（如让它在 `BRAIN_HOME` 外写文件）→ 观察 permission 请求被应答（拒绝或按 env 放行），**不能卡死**。
 6. 发一张图片 → 官方 DSH 应被 M1 的拦截逻辑友好拒绝（而不是 `-32602` 重试）；B 则应能看图。
 7. 两个账号同时跑 → 各自 `brain-home` / `worker-home` 隔离，互不抢会话。
-8. （M3 若做）`加载 <MCP>` → 下一条消息生效；`wechat` 仍被禁止；DSH 不读 kiro 的 MCP 文件。
+8. ✅ `加载 <MCP>` → 下一条消息生效（`session/new|resume` 带 `mcpServers`）；`wechat` 仍被禁止；DSH 不读 kiro 的 MCP 文件（M3 已实现，真机验证见附录）。
 9. worker：`task "create hello.txt..." --cwd <临时目录>` → 文件 `hello.txt` 内容 `hello` + 输出 `DONE`；`task-reply "read hello.txt..."` → 输出 `hello`；`task-stop` → idle。日志见 `[wemind/wechat-daemon/worker] spawn deepseek ... → model set → prompt ok`。
 
 ### 7.4 回滚
@@ -553,7 +551,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 - **M0 已真机验证**：`initialize` / `session/new` / prompt / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 图片（-32602）/ stdio MCP 均已验；代码级集成测试 `A1=STORED`、`A2=PINEAPPLE` 通过；**微信 E2E 已通过**（`spawn deepseek` → `model set` → `prompt ok` → 收到回复）。
 - **B 暂不采用**：按你的要求先只走官方 DSH；社区 `deepseek-acp` 仅保留在文档里备查。
 - **若「微信收图」是必保功能**：官方当前 `image:false`，当前实现会友好拒绝；把「官方打开 image」作为跟进项，再讨论是否值得引入 B。
-- **M3（MCP）可以先不做**：DSH 自带工具已能覆盖大部分微信场景；等确有 MCP 需求再投入 1–2 天。要做就按 agent 各自的 catalog，不要跨 agent 借文件。
+- **M3（MCP）已完成**：`mcpViaAcp` 已实现并真机验证（见 §5.3 M3）；HTTP MCP 实测与 resource/prompt 范围留待后续。
 
 ---
 
@@ -593,11 +591,15 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | 代码级 `askBrain` 集成 | `A1=STORED` → `restart()` → `A2=PINEAPPLE`；`model set` / `resume` 均成功 | — | **M1/M2 代码路径验证通过** |
 | **微信端到端** | 收到「你好」→ `spawn deepseek` → 旧 opencode session `resume` 失败 → `session/new` → `model set` → `prompt ok` 693ms → 回复「你好！很高兴见到你 😊」 | — | **E2E 通过** |
 | **worker E2E** | `task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok` 2305ms（tool_call）→ `hello.txt`；`task-reply` 第二轮 1575ms → `hello`；`task-stop` idle | — | **worker E2E 通过** |
+| **M3：MCP via ACP** | 假 stdio MCP 经 `toAcpMcpServers()` 转换：`session/new` 挂载 → 模型调用（marker `called`）答 `ok`；`session/resume` 再挂 → 再调用答 `okPINEAPPLE`；坏 MCP → `session/new` 回滚（`initial connection or tool synchronization failed`） | — | **M3 通过**（HTTP 未实测） |
+| **M4：记忆/技能** | 真实 `~/.dsh` 放测试 skill（KIWANO）+ `AGENTS.md` 规则（MANGO-42）→ brain/worker 沙箱均可读，回答均 `CODEWORD=MANGO-42 SECRET=KIWANO`；现场已还原 | — | **M4 通过** |
+| **M5：多账号机制** | 双数据目录各跑一轮：brain-home/worker-home 凭据各自独立，session id 不同，均答 `OK` | — | **机制通过**（双真机微信待需要时验） |
+| **M5：model 失败路径** | 非法 model → `-32602 unknown model option`，随后默认路由明确报 no API key | — | 失败不静默 |
 
-> 结论：官方路线可行且 M1/M2 已落地；关键增量是 **model 选择**、`resume` 兜底、图片拦截/心跳兜底。社区适配器按当前选择暂不采用，仅保留备查。
+> 结论：官方路线可行且 M1–M5 已落地（图片除外，上游 `image:false`）；关键增量是 **model 选择**、`resume` 兜底、图片拦截/心跳兜底、**MCP via ACP**。社区适配器按当前选择暂不采用，仅保留备查。
 
 ---
 
-> **下一步**：微信 E2E 已通（`spawn deepseek` → `model set` → `prompt ok` → 回复）；可继续验：再发一条确认 `session/resume`、发图确认友好拒绝、发「任务：」验 worker。收图目前会被友好拒绝（官方 `image:false`）。
+> **下一步**：M3–M5 已完成（见附录与待办文档）。剩余开放项：官方打开 `image` 后回归收图；HTTP MCP 实测；双真机微信账号；DSH 升级时先跑 `scripts/acp-probe.mjs` 回归（`doctor.ps1` 会提醒）。
 >
-> **后续待办**：M3（MCP via ACP）、M4（记忆/技能完整验收）、M5（worker E2E/加固）暂不实施，已记录在 [`待办-DeepSeek-M3-M5.md`](待办-DeepSeek-M3-M5.md)。
+> **后续待办**：M3–M5 已完成并回填（M3 动态 MCP ✅、M4 记忆/技能 ✅、M5 除图片[上游]与双真机账号外 ✅），明细与遗留见 [`待办-DeepSeek-M3-M5.md`](待办-DeepSeek-M3-M5.md)。
