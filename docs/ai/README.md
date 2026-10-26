@@ -45,7 +45,7 @@ wechat-ilink-core  ◄──  wechat-mcp      （tsdown 内联 core，发布单�
 |---|---|---|---|
 | `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink HTTP、类型、错误码、会话守卫、账号/状态、收发图加解密 | 私有 |
 | `@wemind/wechat-mcp` | `packages/wechat-mcp` | 6 个 MCP 工具 | 已发布（`wemind-mcp`） |
-| `wemind` | `packages/wechat-daemon` | daemon + ACP 大脑 + worker + CLI | 未发布 |
+| `wemind` | `packages/wechat-daemon` | daemon + ACP 大脑 + worker + CLI | 已发布（`wemind`，bin 同名） |
 
 依赖方向单向；消费方只依赖 core，mcp 与 daemon 互不耦合。
 

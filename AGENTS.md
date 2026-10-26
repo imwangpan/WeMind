@@ -41,12 +41,13 @@ WeMind 把**个人微信**变成 AI agent 的输入输出通道，对外有两�
 packages/
   wechat-ilink-core/    iLink HTTP 客户端、类型、错误码、会话守卫、账号/状态、收发图加解密（私有，不发布）
   wechat-mcp/           MCP server，6 个工具（已发布到 npm，bin: wemind-mcp）
-  wechat-daemon/        常驻 daemon + ACP 大脑 + worker + CLI（未发布，bin: wemind）
+  wechat-daemon/        常驻 daemon + ACP 大脑 + worker + CLI（发布包 wemind，bin: wemind）
 docs/
   repowiki/             完整技术 wiki（人读；AI 可按需检索）
   ai/                   AI 上下文包 + 任务配方（先读这里）
+  发布-wemind-npm.md     wemind 独立发布方案（命名/打包/CI/版本同步/验收）
  接入-*.md              各 agent 的接入设计/实测
-scripts/                daemon wrapper、pm2、doctor、冒烟脚本
+scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-guard / check-version）
 ```
 
 关键文件：

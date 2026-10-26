@@ -10,7 +10,7 @@
 
 ## 0. 前提
 
-> `wemind` 为发布后的命令；当前未发布到 npm 时，把下文所有 `wemind` 替换为 `node packages/wechat-daemon/dist/cli.js`（如 `node packages/wechat-daemon/dist/cli.js list`）。
+> `wemind` 是发布后的命令（`npm i -g wemind`，或 `npx wemind …`）；仍从源码跑时，把下文所有 `wemind` 替换为 `node packages/wechat-daemon/dist/cli.js`（如 `node packages/wechat-daemon/dist/cli.js list`）。
 
 - daemon 正在运行（且已扫码登录某账号）。检查：
   ```bash
