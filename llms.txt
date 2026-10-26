@@ -1,0 +1,65 @@
+# WeMind
+
+> WeMind turns a personal WeChat account into an I/O channel for AI agents. It ships two mutually exclusive forms: an MCP server (`@wemind/wechat-mcp`) that any MCP client can drive, and a daemon (`wemind`) that long-polls WeChat itself, calls a resident ACP agent as its "brain", and replies automatically. Same bot token = one consumer only.
+
+## Start here (AI agents)
+
+- [AGENTS.md](AGENTS.md): first-entry map, invariants, commands, known traps.
+- [docs/ai/README.md](docs/ai/README.md): compressed context pack, glossary, data flows, verified-vs-assumed facts.
+- [docs/ai/recipes/](docs/ai/recipes/): task recipes.
+
+## Architecture
+
+- [docs/repowiki/01-项目概览.md](docs/repowiki/01-项目概览.md): project overview, fork history, packages.
+- [docs/repowiki/02-系统架构.md](docs/repowiki/02-系统架构.md): three packages, two forms, process model.
+- [docs/repowiki/05-守护进程-Daemon.md](docs/repowiki/05-守护进程-Daemon.md): poller/worker, turn orchestration, send limits.
+- [docs/repowiki/06-ACP-大脑与沙箱.md](docs/repowiki/06-ACP-大脑与沙箱.md): ACP client, sessions, MCP sandbox, memory inheritance.
+- [docs/repowiki/07-远程任务-Worker.md](docs/repowiki/07-远程任务-Worker.md): remote task worker.
+- [docs/repowiki/08-数据存储与多账号.md](docs/repowiki/08-数据存储与多账号.md): data dirs, accounts.
+- [docs/repowiki/09-配置项与环境变量.md](docs/repowiki/09-配置项与环境变量.md): env vars.
+- [docs/repowiki/10-部署与运维.md](docs/repowiki/10-部署与运维.md): deployment, watchdog, pm2.
+- [docs/repowiki/11-开发指南.md](docs/repowiki/11-开发指南.md): build, test, conventions.
+
+## Agent integration
+
+- [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md): generic ACP brain guide.
+- [docs/接入-OpenCode.md](docs/接入-OpenCode.md): OpenCode integration, with real M1 measurements.
+- [docs/接入-DeepSeek.md](docs/接入-DeepSeek.md): DeepSeek/DSH evaluation, 0.2.1-rc.2 measurements, plan.
+- [docs/ai/recipes/add-acp-agent.md](docs/ai/recipes/add-acp-agent.md): add a preset + capability adaptations.
+- [docs/ai/recipes/add-mcp.md](docs/ai/recipes/add-mcp.md): MCP catalog/activation/transport.
+- [docs/ai/recipes/debug-daemon.md](docs/ai/recipes/debug-daemon.md): triage daemon/brain failures.
+- [docs/ai/recipes/run-e2e.md](docs/ai/recipes/run-e2e.md): end-to-end acceptance.
+
+## Code map
+
+- `packages/wechat-ilink-core/`: iLink HTTP client, types, errors, session guard, account/state, image crypto. Private.
+- `packages/wechat-mcp/`: MCP server with 6 tools. Published as `@wemind/wechat-mcp`.
+- `packages/wechat-daemon/`: daemon, ACP brain, worker, CLI. Unpublished (`wemind`).
+- `packages/wechat-daemon/src/brain-agents.ts`: `ACP_AGENT_PRESETS`, `resolveAgent()`, `agentProblem()`.
+- `packages/wechat-daemon/src/acp-brain.ts`: resident ACP client (brain).
+- `packages/wechat-daemon/src/worker-acp.ts`: resident ACP client (worker).
+- `packages/wechat-daemon/src/mcp-sandbox.ts`: brain sandbox + MCP activation.
+- `packages/wechat-daemon/src/index.ts`: message routing, turn orchestration, progress budget.
+
+## Commands
+
+- `npm run build`, `npm run typecheck`, `npm test`, `npm run lint`.
+- `node packages/wechat-daemon/dist/cli.js list`
+- `node packages/wechat-daemon/dist/cli.js brain <key>`
+- `node packages/wechat-daemon/dist/cli.js brain check <key>`
+- `pwsh -NoProfile -File scripts/doctor.ps1`
+- `pwsh -NoProfile -File scripts/check-docs.ps1`
+- `node scripts/acp-probe.mjs` (env: `ACP_BIN`, `ACP_ARGS`, `ACP_SHELL`, `ACP_HOME_ENV`, `ACP_HOME`, `ACP_MODEL`)
+
+## Hard facts (2026-10-24)
+
+- Default brain selection is `auto`: `kiro → opencode → gemini`; persisted in `<data>/brain.json`.
+- `session/load` is not universal. DSH 0.2.1-rc.2 returns `-32601`; it has `session/resume` instead.
+- DSH 0.2.1-rc.2 advertises `promptCapabilities.image:false`; image prompts fail with `-32602`.
+- The repo has no `Brain` interface; `acp-brain.ts` exports `askBrain`/`newSession`/`restart`.
+- iLink consecutive send limit is ~10; progress messages consume it.
+- Windows `.cmd`/`.bat` agents must be launched through a shell; `binWin` must match the real filename (e.g. `dsh.cmd`).
+
+## License
+
+MIT. Forked from `Howardzhangdqs/mcp-wechat-server` (MIT).

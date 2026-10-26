@@ -1,6 +1,8 @@
 # 方案 C：受控 ACP 工作机（设计文档）
 
 > 状态：**MVP 已实现** ✅（2026-06-17，真机跑通，见 [方案C-MVP-远程human-in-the-loop.md](方案C-MVP-远程human-in-the-loop.md)）。本文为总设计与方案对比（A/B/C）；MVP 落地细节（worker-acp / task-manager / 消息路由 / typing）见 MVP 文档。
+>
+> **历史/设计说明（2026-10-24 补）**：文中以 `session/load` 为恢复路径；该能力并非所有 ACP agent 都有（如 DSH 只有 `session/resume`）。当前实现需按 agent 能力兜底。
 > 关联：MVP 设计文档、README「远程任务（worker）」、`packages/wechat-daemon/src/{worker-acp,task-manager,worker-sandbox}.ts`、`acp-brain.ts`、`brain-agents.ts`。
 
 ---

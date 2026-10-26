@@ -74,6 +74,32 @@ describe("resolveAgent 预设", () => {
     expect(ag.env).toEqual({ OPENCODE_DISABLE_PROJECT_CONFIG: "1" });
   });
 
+  it("deepseek：dsh.cmd + DSH_HOME + resume/model/images=false", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "deepseek";
+    const ag = resolveAgent();
+    expect(ag.name).toBe("deepseek");
+    expect(ag.bin).toBe(process.platform === "win32" ? "dsh.cmd" : "dsh");
+    expect(ag.args).toEqual(["--profile", "acp"]);
+    expect(ag.shell).toBe(true);
+    expect(ag.homeEnvVar).toBe("DSH_HOME");
+    expect(ag.restore).toBe("resume");
+    expect(ag.firstFrameMs).toBe(60_000);
+    expect(ag.heartbeatMs).toBe(60_000);
+    expect(ag.images).toBe(false);
+    expect(ag.credentialFile).toBe(".credentials.yaml");
+    expect(ag.model).toBe('["deepseek-account","deepseek-flash"]');
+    expect(ag.mcpViaAcp).toBe(true); // MCP 走 session/new|resume 的 mcpServers，不写文件
+  });
+
+  it("kiro/opencode：mcpViaAcp 默认 false（仍走沙箱配置文件）", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "kiro";
+    expect(resolveAgent().mcpViaAcp).toBe(false);
+    process.env.WEMIND_BRAIN = "opencode";
+    expect(resolveAgent().mcpViaAcp).toBe(false);
+  });
+
   it("环境变量可覆盖继承目录清单", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "opencode";
