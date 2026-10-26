@@ -1,9 +1,9 @@
-name: Publish wemind
+name: Publish @wemind/cli
 
 on:
   push:
     branches: [main]
-    # 发布包 wemind 及其内联依赖（core）或构建配置变更时运行检查。
+    # 发布包 @wemind/cli（命令 wemind）及其内联依赖（core）或构建配置变更时运行检查。
     paths:
       - "packages/wechat-daemon/**"
       - "packages/wechat-ilink-core/**"
@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-wemind
+  group: publish-wemind-cli
   cancel-in-progress: false
 
 jobs:
@@ -36,7 +36,7 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - name: 校验版本号在三处一致（package.json / version.ts / package-lock.json）
+      - name: 校验包名与版本号一致（package.json / version.ts / package-lock.json）
         run: node scripts/check-version.mjs
       - name: Ensure npm supports trusted publishing
         run: npm install --global "npm@^11.5.1"
@@ -52,16 +52,18 @@ jobs:
       - run: npm test
       # prepack 守卫会拒绝「忘了 build / bin 缺失」的空壳包。
       - name: Verify npm package contents
-        run: npm pack --dry-run --workspace wemind
+        run: npm pack --dry-run --workspace @wemind/cli
       - name: Smoke test the packed CLI
         shell: bash
         run: |
           set -euo pipefail
-          npm pack --workspace wemind --pack-destination "$RUNNER_TEMP"
-          tgz="$(ls "$RUNNER_TEMP"/wemind-*.tgz | head -n1)"
+          npm pack --workspace @wemind/cli --pack-destination "$RUNNER_TEMP"
+          # scope 包打包后文件名是 wemind-cli-<ver>.tgz
+          tgz="$(ls "$RUNNER_TEMP"/wemind-cli-*.tgz | head -n1)"
           mkdir -p "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
           npm init -y >/dev/null
           npm install --no-audit --no-fund "$tgz" >/dev/null
+          # 包名与命令名不同：命令是 wemind
           ./node_modules/.bin/wemind version
           ./node_modules/.bin/wemind help | head -n 2
       # 只有当前版本尚未发布到 npm 时才会发布；代码变更后需提升版本号，否则只运行检查并跳过发布。
@@ -79,4 +81,4 @@ jobs:
           fi
       - name: Publish to npm
         if: steps.version.outputs.publish == 'true'
-        run: npm publish --workspace wemind --provenance --access public
+        run: npm publish --workspace @wemind/cli --provenance --access public
