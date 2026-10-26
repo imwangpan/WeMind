@@ -24,16 +24,24 @@ afterAll(() => {
 });
 
 describe("matchesMarkers（纯逻辑，无系统调用）", () => {
-  it("命中我们 CLI：相对/绝对路径、大小写与斜杠都不敏感", () => {
+  it("命中我们 CLI：源码仓库 / 全局安装（node_modules/wemind）/ 大小写与斜杠都不敏感", () => {
+    // 源码仓库（目录名仍是 wechat-daemon）：靠路径里的仓库名 WeMind 命中
     expect(
       matchesMarkers(
-        String.raw`node D:\repo\packages\wechat-daemon\dist\cli.js daemon`,
+        String.raw`node D:\repo\WeMind\packages\wechat-daemon\dist\cli.js daemon`,
+        CLI_PID_MARKERS,
+      ),
+    ).toBe(true);
+    // 发布后的全局安装：npm bin shim 最终 exec 的是 node_modules/wemind/dist/cli.js
+    expect(
+      matchesMarkers(
+        String.raw`C:\Users\u\AppData\Roaming\npm\node_modules\wemind\dist\cli.js daemon`,
         CLI_PID_MARKERS,
       ),
     ).toBe(true);
     expect(
       matchesMarkers(
-        "node /opt/wemind/packages/wechat-daemon/dist/cli.js _watchdog",
+        "node /usr/local/lib/node_modules/wemind/dist/cli.js _watchdog",
         CLI_PID_MARKERS,
       ),
     ).toBe(true);
@@ -43,8 +51,7 @@ describe("matchesMarkers（纯逻辑，无系统调用）", () => {
   });
 
   it("组合内 token 必须全部出现（AND），不同组合任一命中即可（OR）", () => {
-    expect(matchesMarkers("node /other/proj/cli.js daemon", CLI_PID_MARKERS)).toBe(false); // 缺 wechat-daemon
-    expect(matchesMarkers("node wechat-daemon", CLI_PID_MARKERS)).toBe(false); // 缺 cli.js
+    expect(matchesMarkers("node /other/proj/cli.js daemon", CLI_PID_MARKERS)).toBe(false); // 缺 wemind
     expect(matchesMarkers("opencode", [["opencode", "acp"]])).toBe(false); // 缺 acp
     expect(matchesMarkers("opencode acp", [["nope"], ["opencode", "acp"]])).toBe(true); // 第二组命中
   });

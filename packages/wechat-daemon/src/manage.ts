@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import QRCode from "qrcode";
 import {
   WEMIND_ROOT,
   accountDir,
@@ -51,6 +50,7 @@ import {
   type BrainConfig,
 } from "./brain-config.js";
 import { checkAgent } from "./brain-check.js";
+import { CLI_VERSION, versionLine } from "./version.js";
 
 /**
  * WeMind 多账号管理 CLI。
@@ -133,7 +133,11 @@ function resolveKey(arg: string): string {
 
 /** 启动某账号的 daemon（方案 a：委托 pm2 常驻，跑 `wemind daemon`，注入 WECHAT_ACCOUNT）。 */
 function startDaemon(key: string, runner?: string): void {
-  const cliPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
+  // 用 process.argv[1]（即正在执行的 cli.js 绝对路径），而不是 dirname(import.meta.url)：
+  // 发布后 tsdown 把 manage.ts 内联进 dist/cli.js，两者恰好相同；但若将来拆成多 chunk，
+  // argv[1] 才是「用户装的那个 bin」，dirname(import.meta.url) 可能是 dist/chunks/ 下。
+  const cliPath =
+    process.argv[1] || path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
   // start 前先停现有任何 runner（pm2 app / builtin 看门狗），避免同账号双跑抢 token
   stopDaemon(key);
   const useRunner = (runner || process.env.WEMIND_RUNNER || "builtin").toLowerCase();
@@ -215,12 +219,35 @@ function finalizeStaging(label?: string): { key: string; msg: string } {
   return { key, msg: `已归档：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}` };
 }
 
+/**
+ * 懒加载 `qrcode`：只有扫码登录要画二维码，`list` / `brain` / `task` / `daemon` 全用不上。
+ * 顶层 `import` 会让**每次**启动都付约 36ms（实测）解析 qrcode + yargs 依赖树；
+ * 这里在第一次画码时才加载，之后同进程内复用（登录过程会因过期刷新多次）。
+ * 用函数声明而非 `const QRCode = await import(...)`：后者在 ESM 顶层要多一层 TDZ 心智负担。
+ */
+let qrcodeMod: typeof import("qrcode") | undefined;
+
+async function loadQrCode(): Promise<typeof import("qrcode")> {
+  if (!qrcodeMod) {
+    try {
+      qrcodeMod = await import("qrcode");
+    } catch (e) {
+      throw new Error(
+        `无法加载二维码库 qrcode（依赖缺失或安装损坏）：${e instanceof Error ? e.message : String(e)}\n` +
+          "请重试安装：npm i -g @wemind/cli",
+      );
+    }
+  }
+  return qrcodeMod;
+}
+
 /** 一条命令完成扫码登录：自刷新二维码 + 终端码 + 自动开图 + 自动归档（→ 可选自动启动）。 */
 async function cmdLogin(
   label: string | undefined,
   autoStart: boolean,
   runner?: string,
 ): Promise<void> {
+  const QRCode = await loadQrCode(); // 只有登录路径才加载 qrcode
   fs.rmSync(STAGING, { recursive: true, force: true });
   fs.mkdirSync(STAGING, { recursive: true });
   const png = path.join(STAGING, "qrcode.png");
@@ -544,7 +571,7 @@ function requireDaemonAlive(key: string): void {
   const pid = readPid(accountDir(key), "daemon.pid");
   if (!aliveOurs(pid))
     throw new Error(
-      `账号 ${key} 的 daemon 未运行。先启动：node packages/wechat-daemon/dist/manage.js start ${key}`,
+      `账号 ${key} 的 daemon 未运行。先启动：wemind start ${key}（用 wemind list 查看状态）`,
     );
 }
 
@@ -630,6 +657,11 @@ export async function runManage(argv: string[]): Promise<void> {
   }
 
   switch (cmd) {
+    case "version":
+    case "--version":
+    case "-v":
+      console.log(versionLine());
+      break;
     case "login":
       await cmdLogin(label, autoStart, runner);
       break;
@@ -710,8 +742,8 @@ export async function runManage(argv: string[]): Promise<void> {
       break;
     }
     default:
-      console.log(`WeMind 多账号管理
-用法: node packages/wechat-daemon/dist/manage.js <command>
+      console.log(`WeMind 多账号管理（wemind v${CLI_VERSION}）
+用法: wemind <command>            其余：wemind version | help
 
   login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动归档（--start 顺带启动 daemon）
   list                           列出账号、别名、运行状态

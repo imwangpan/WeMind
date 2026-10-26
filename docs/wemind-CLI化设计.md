@@ -1,17 +1,19 @@
 # WeMind CLI 化设计（可发布的 `wemind` 命令）
 
 > 状态：设计定稿（2026-06-24）；**已实现**（2026-10 复核：`wemind login/start/stop/list/task/daemon`、自带看门狗与 pm2 双 runner 均已落地）。唯一未落地项：`wemind service install` 自动化（见 §10 阶段 2，按需排期）。
+>
+> **命名更新（2026-10-26）**：发布包名定为 **`@wemind/cli`**（收进已注册的 `@wemind` scope），**命令名仍为 `wemind`**；因此 `npx` 需写全包名 `npx -y @wemind/cli`，`npm i -g` 后命令不变。详见 [`docs/发布-wemind-npm.md`](发布-wemind-npm.md)。
 
 ## 1. 目标
 
-把「完整应用」（原 `@wemind/wechat-daemon` 包）做成**可发布的 `wemind` CLI**：用户 `npm i -g wemind` 或 `npx wemind …` 即可使用，**全程不碰源码、三平台通用**。
+把「完整应用」（原 `@wemind/wechat-daemon` 包）做成**可发布的 `wemind` 命令**（npm 包名 `@wemind/cli`）：用户 `npm i -g @wemind/cli` 即可使用，**全程不碰源码、三平台通用**。
 
 对外形成**两个发布入口**：
 
 | 入口 | 定位 | 现状 |
 | --- | --- | --- |
 | `@wemind/wechat-mcp` | 轻包，纯 MCP server，插进任意 MCP 客户端 | 子包已发布到 npm（走 GitHub Actions 自动发布，最新版本见 npm），不动 |
-| `wemind` | 完整应用 CLI：常驻自动收发 + 远程任务 + 多账号 | 本设计新增 |
+| `@wemind/cli`（命令 `wemind`） | 完整应用 CLI：常驻自动收发 + 远程任务 + 多账号 | 本设计新增 |
 
 ## 2. 决策记录（2026-06-24 拍板）
 
