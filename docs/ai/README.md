@@ -98,6 +98,29 @@ poller（长轮询，不被大脑阻塞）
 | **brain.json** | 账号级大脑选择，`<数据目录>/brain.json`；`wemind brain set` 写入 |
 | **auto** | 未配置时的探测顺序：`kiro → opencode → gemini → deepseek → qoder` |
 
+### 4.1 中英术语对照（写作口径）
+
+写文档/回答问题时统一用「推荐中文」，英文原文只在首次出现时括注即可。
+
+| 英文 | 推荐中文 | 说明 / 别译成 |
+|---|---|---|
+| **spawn** | **启动（子进程）** / 派生 | `spawn` 是进程创建原语，Node 里是 `child_process.spawn()`。别译「生成」（易与数据生成混淆） |
+| **stdio** | **标准输入输出**（首次出现写全称，之后可保留 `stdio`） | `st`andar**d** **i**nput/**o**utput 的缩写，不是普通英文词；命令行参数/API 名里保持原文 |
+| **stdin / stdout / stderr** | 标准输入 / 标准输出 / 标准错误 | 同上，代码里保留原文 |
+| **CLI** | **命令行工具**（指程序）/ **命令行界面**（指形态） | 别译「客户端」；`kiro-cli`、`claude-code` 这类名字里的 CLI 不翻 |
+| **agent** | **agent** / 智能体 | 本文统一保留 `agent`（大量专名如 ACP agent、brain agent 依赖它） |
+| **ACP** | **ACP（Agent Client Protocol）** | 首次出现给全称，之后直接用 ACP |
+| **implement / support ACP** | **实现 / 支持 ACP** | **不要**写「说 ACP」——ACP 是协议（规范），程序是「实现」它。二元化的「会说/不会说」会掩盖「实现完备度不同」这个事实 |
+| **protocol / implementation** | **协议**（规范）/ **实现**（具体程序） | 混用是常见错误来源：`session/load` 是协议里可选的，不是「协议不支持」 |
+| **reverse request** | **反向请求** | ACP 允许 agent 向 client 发起请求（`session/request_permission`、`fs/*`、`terminal/*`） |
+| **capability** | **能力**（`agentCapabilities` 保留原文） | 指「这个实现支持哪些可选特性」，不是权限 |
+| **preset** | **预设** | `ACP_AGENT_PRESETS` 的一条 |
+| **fallback / degrade** | **降级 / 退化** | 如「缺 `session/load` 时退化为 `session/new`」 |
+| **sandbox** | **沙箱** | `BRAIN_HOME` / `WORKER_HOME` |
+| **watchdog** | **看门狗** | 崩溃重拉的外层循环 |
+| **idempotent** | **幂等** | — |
+| **daemon** | **守护进程** | 本文也直接用 daemon / 「常驻进程」 |
+
 ---
 
 ## 5. 事实状态表（先看这张，别被旧文档带偏）

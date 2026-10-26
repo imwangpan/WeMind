@@ -2,9 +2,27 @@
 
 > _Your AI mind, reachable on WeChat. —— 你的 AI 大脑，在微信上随时可达。_
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。
 
-WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态（**两者都已发布到 npm**）：一个 MCP Server 包（`@wemind/wechat-mcp`），和一个常驻守护进程包（`@wemind/cli`，命令 `wemind`）。详见 [安装](#安装两种形态二选一) 与 [`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)。
+WeMind 让 AI Agent 通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态（**两者都已发布到 npm**）：一个 MCP Server 包（`@wemind/wechat-mcp`），和一个常驻守护进程包（`@wemind/cli`，命令 `wemind`）。详见 [安装](#安装两种形态二选一) 与 [`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)。
+
+### 「AI Agent」在 WeMind 里指什么
+
+本文多处出现「AI Agent」，共有三种角色，别混：
+
+| 角色 | 指什么 | 在哪出现 | 接入方式 |
+| --- | --- | --- | --- |
+| ① **MCP 客户端 agent** | 你已有的 AI 客户端（Claude Desktop / Cursor / OpenCode / Kiro 等） | 形态①：它自己调 `@wemind/wechat-mcp` 的工具、自己长轮询、自己生成回复 | 把 MCP server 配进它的配置即可，**不需要改 WeMind** |
+| ② **ACP 大脑 agent** | 一个**实现 ACP 协议**的命令行程序（`kiro-cli` / `opencode` / `gemini` / 桌面端 `dsh` …） | 形态②：daemon 把它**启动为子进程**，通过标准输入输出用 ACP 通信 | `wemind brain set <预设>` + `wemind brain check`；见 [切换大脑 Agent](#切换大脑-agent通用化) |
+| ③ **AI 编码助手（也就是你）** | 帮你改这个仓库的 coding agent（或人） | 开发本仓库时 | 先读 [AGENTS.md](AGENTS.md) → [docs/ai/README.md](docs/ai/README.md) |
+
+**能接什么、不能接什么**（形态②最关键的一条）：
+
+- ✅ **实现 ACP 的命令行程序**，或**有 ACP 适配器**的 CLI（如 Claude Code → `claude-code-acp`、Codex → `codex-acp`）——后者无需改 WeMind；
+- ✅ 判断标准是**四个必要条件**：有可执行入口、实现 ACP、覆盖最小方法集（`initialize`/`session/new`/流式 `prompt`）、能完成认证。`session/load`、`resume`、图片、MCP 传输、反向请求都是**可降级项**；
+- ❌ **没有 CLI 入口的裸 HTTP API**（OpenAI / Anthropic / Ollama 等）——目前接不了，需要另写「裸 API 大脑」实现（未立项）。若只是想让某个客户端用微信，走形态①更省事。
+
+> 📖 完整判断流程与各 agent 实测结论：[`docs/接入其它-ACP-Agent.md`](docs/接入其它-ACP-Agent.md) §0 一句话版本 ｜ 中英术语口径：[`docs/ai/README.md`](docs/ai/README.md) §4.1
 
 > 🚀 **第一次用？** 看 **[新手教程](docs/新手教程.md)** —— 从零一步步搭起你的微信 AI（两种用法：接入现有 AI 客户端 / 常驻自动助手）。
 >
@@ -324,17 +342,28 @@ brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认�
 
 ### 切换大脑 Agent（通用化）
 
-daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC over stdio）** 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini → deepseek → qoder` 探测已安装者）。**多数原生 ACP agent 可以零代码接入**；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 `packages/wechat-daemon/src/brain-agents.ts` 与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §9）。
+daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准输入输出）** 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini → deepseek → qoder` 探测已安装者）。
+
+**能不能接：四个必要条件**（详见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §0）
+
+| # | 条件 | 说明 |
+| --- | --- | --- |
+| 1 | 有**可执行入口** | daemon 要把它**启动为子进程**；纯 HTTP API（OpenAI / Anthropic / Ollama）没有进程可启动，目前接不了 |
+| 2 | **实现 ACP**，或有 **ACP 适配器** | 原生实现：kiro / opencode / gemini / DSH / Qoder；需适配器：Claude Code（`claude-code-acp`）、Codex（`codex-acp`） |
+| 3 | ACP 实现覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt`；先用 `wemind brain check` 真握手 |
+| 4 | 能**完成认证**且二进制可解析 | PATH 上能找到，或用 `--bin` 给绝对路径；`.cmd`/`.bat` 需经 shell |
+
+> **「支持 ACP」四个字不足以说明可用**：`session/load`、`session/resume`、图片输入、MCP 传输、反向请求都是**可降级项**，按 agent 而异（见 `packages/wechat-daemon/src/brain-agents.ts` 的 `AcpAgentPreset` 字段与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §9）。接入前先跑能力探针。
 
 | 环境变量                | 作用                                                | 默认         |
 | ----------------------- | --------------------------------------------------- | ------------ |
-| `WEMIND_BRAIN`          | 选预设（如 `kiro`、`opencode`、`auto`）             | `auto`       |
+| `WEMIND_BRAIN`          | 选预设（如 `kiro`、`opencode`、`deepseek`、`auto`） | `auto`       |
 | `WEMIND_BRAIN_BIN`      | 覆盖二进制（绝对路径或 PATH 上的名字）              | 预设自动解析 |
 | `WEMIND_BRAIN_ARGS`     | 覆盖进入 ACP 模式的启动参数（空格分隔）             | 预设值       |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（指向 brain 沙箱） | 预设值       |
 | `KIRO_CLI_BIN`          | 旧的 kiro 专用二进制覆盖（仍兼容）                  | —            |
 
-`kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量。**ACP 是「最小方法集」而非完全统一**：`session/load`、`session/resume`、`image`、MCP 传输、反向请求都按 agent 而异，接入前先跑能力探针。
+`kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量。持久化选择用 `wemind brain set <预设> [--bin ...]`（写入 `<数据目录>/brain.json`，任何入口重启都复现）。
 
 > 详细步骤、各 agent 需确认的 4 件事、MCP 沙箱差异、验证方法见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)。
 >
