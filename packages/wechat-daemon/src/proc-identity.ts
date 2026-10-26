@@ -113,11 +113,12 @@ export function isOurProcess(pid: number | null | undefined, markerSets: string[
  * 这串必须同时覆盖**三种**安装方式（少一种 → 对应场景下 stop/list/单实例判断全失效）：
  *  - 源码仓库：`<node> D:\repo\WeMind\packages\wechat-daemon\dist\cli.js daemon`
  *    （由 marker 组合里的 `wemind` 命中仓库名 WeMind；注意大小写不敏感比较在下面已处理）；
- *  - 全局/本地安装：`<node> …/node_modules/wemind/dist/cli.js daemon`
- *    （npm 的 bin shim 最终 exec 的正是这个路径，命中包名 `wemind`）；
+ *  - 全局/本地安装：`<node> …/node_modules/@wemind/cli/dist/cli.js daemon`
+ *    （npm 的 bin shim 最终 exec 的正是这个路径；Windows 上可能走 `…\@wemind\cli\dist\cli.js` 短路径。
+ *     两种形态都命中 marker 里的 `wemind`——它同时是 scope 名与命令名）；
  *  - 源码开发期的 PowerShell wrapper：`pwsh -File …\scripts\run-daemon.ps1`。
  *
- * 注意**不能**再用 `wechat-daemon`：那是源码目录名，发布到 npm 后包目录叫 `wemind`，
+ * 注意**不能**再用 `wechat-daemon`：那是源码目录名，发布到 npm 后包目录叫 `@wemind/cli`，
  * 用目录名做特征会让「装出来的 wemind」永远匹配不上，从而 list 永远显示「已停止」。
  */
 export const CLI_PID_MARKERS: string[][] = [["wemind", "cli.js"], ["run-daemon.ps1"]];
