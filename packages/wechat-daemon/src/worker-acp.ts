@@ -8,6 +8,7 @@ import { WORKER_HOME, workerMcpServers } from "./worker-sandbox.js";
 import { resolveAgent } from "./brain-agents.js";
 import { loadBrainConfig } from "./brain-config.js";
 import { spawnAgent } from "./spawn-agent.js";
+import { normalizeSessionMap, sessionKey } from "./session-map.js";
 
 /**
  * worker ACP 客户端：维护一个常驻的 ACP agent 进程，专跑「漫长任务」（与 acp-brain 的对话大脑并存、互不干扰）。
@@ -110,13 +111,19 @@ function reset(): void {
   stdoutBuf = "";
 }
 
+// ---- 磁盘 session 映射（`<agent>:<taskKey>` -> sessionId），与 brain 同样按 agent 分命名空间 ----
+const keyOf = (key: string): string => sessionKey(AGENT.name, key);
+
 function loadSessionMap(): Record<string, string> {
+  let raw: unknown;
   try {
-    const j = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, "utf-8"));
-    return j && typeof j === "object" ? j : {};
+    raw = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, "utf-8"));
   } catch {
     return {};
   }
+  const { map, migrated } = normalizeSessionMap(raw, AGENT.name);
+  if (migrated) saveSessionMap(map); // 立即落盘，避免下次换 agent 时旧条目再被“继承”一次
+  return map;
 }
 function saveSessionMap(m: Record<string, string>): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -343,7 +350,7 @@ async function ensureSession(key: string): Promise<string> {
   // mcpViaAcp 预设（DSH）：worker 继承全量 MCP（除排除集），随 session 下发；其余 agent 传空
   const mcpServers = AGENT.mcpViaAcp ? workerMcpServers() : [];
   const map = loadSessionMap();
-  const saved = map[key];
+  const saved = map[keyOf(key)];
   if (saved) {
     const methods: Array<"load" | "resume"> =
       AGENT.restore === "resume" ? ["resume"] : ["load", "resume"];
@@ -369,7 +376,7 @@ async function ensureSession(key: string): Promise<string> {
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   await applyModel(res.sessionId);
   taskSessions.set(key, res.sessionId);
-  map[key] = res.sessionId;
+  map[keyOf(key)] = res.sessionId;
   saveSessionMap(map);
   dlog(`session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
   return res.sessionId;
@@ -417,7 +424,7 @@ export async function askWorker(
 /** 开新任务会话：丢弃旧 session（含磁盘映射），下次 askWorker 全新开始。 */
 export function newWorkerSession(): void {
   const map = loadSessionMap();
-  delete map[TASK_KEY];
+  delete map[keyOf(TASK_KEY)]; // 只清当前 agent 的，换大脑前的任务上下文保留
   saveSessionMap(map);
   taskSessions.delete(TASK_KEY);
 }

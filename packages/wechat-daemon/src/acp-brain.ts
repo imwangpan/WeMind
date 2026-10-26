@@ -7,6 +7,7 @@ import { BRAIN_HOME, activeMcpServers } from "./mcp-sandbox.js";
 import { resolveAgent } from "./brain-agents.js";
 import { loadBrainConfig } from "./brain-config.js";
 import { spawnAgent } from "./spawn-agent.js";
+import { normalizeSessionMap, sessionKey } from "./session-map.js";
 
 /**
  * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。
@@ -94,14 +95,19 @@ function reset(): void {
   stdoutBuf = "";
 }
 
-// ---- 磁盘 session 映射（userId -> sessionId），跨进程重建保上下文 ----
+// ---- 磁盘 session 映射（`<agent>:<userId>` -> sessionId），跨进程重建保上下文 ----
+const keyOf = (userId: string): string => sessionKey(AGENT.name, userId);
+
 function loadSessionMap(): Record<string, string> {
+  let raw: unknown;
   try {
-    const j = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, "utf-8"));
-    return j && typeof j === "object" ? j : {};
+    raw = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, "utf-8"));
   } catch {
     return {};
   }
+  const { map, migrated } = normalizeSessionMap(raw, AGENT.name);
+  if (migrated) saveSessionMap(map); // 立即落盘，避免下次换 agent 时旧条目再被“继承”一次
+  return map;
 }
 function saveSessionMap(m: Record<string, string>): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -332,7 +338,7 @@ async function ensureSession(userId: string): Promise<string> {
   // mcpViaAcp 预设（DSH）：激活集随 session 下发；其余 agent 传空（走各自沙箱配置文件）
   const mcpServers = AGENT.mcpViaAcp ? activeMcpServers() : [];
   const map = loadSessionMap();
-  const saved = map[userId];
+  const saved = map[keyOf(userId)];
   if (saved) {
     // 预设指定 resume（DSH）；其余仍先 load，失败再试 resume，最后 new
     const methods: Array<"load" | "resume"> =
@@ -359,7 +365,7 @@ async function ensureSession(userId: string): Promise<string> {
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   await applyModel(res.sessionId);
   userSessions.set(userId, res.sessionId);
-  map[userId] = res.sessionId;
+  map[keyOf(userId)] = res.sessionId;
   saveSessionMap(map);
   dlog(`session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
   return res.sessionId;
@@ -424,7 +430,7 @@ export async function askBrain(
 /** 用户主动开新会话：丢弃旧 session（含磁盘映射），重建一个全新 session。 */
 export async function newSession(userId: string): Promise<void> {
   const map = loadSessionMap();
-  delete map[userId];
+  delete map[keyOf(userId)]; // 只清当前 agent 的；换大脑前那个 agent 的上下文仍保留
   saveSessionMap(map);
   userSessions.delete(userId);
   await ensureProcess();
