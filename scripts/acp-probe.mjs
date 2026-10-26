@@ -328,15 +328,20 @@ const png1x1 =
     }
     log("session/load:", short(summary.load, 600));
 
-    try {
-      summary.resume = await second.request("session/resume", {
-        sessionId: first.sid,
-        cwd: CWD,
-        mcpServers: TEST_MCP,
-      });
+    if (!summary.load.error) {
       second.sid = first.sid;
-    } catch (e) {
-      summary.resume = { error: e.message };
+      summary.resume = { skipped: "session/load ok" };
+    } else {
+      try {
+        summary.resume = await second.request("session/resume", {
+          sessionId: first.sid,
+          cwd: CWD,
+          mcpServers: TEST_MCP,
+        });
+        second.sid = first.sid;
+      } catch (e) {
+        summary.resume = { error: e.message };
+      }
     }
     log("session/resume:", short(summary.resume, 600));
 

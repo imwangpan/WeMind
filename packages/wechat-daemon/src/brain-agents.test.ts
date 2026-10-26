@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveAgent, agentProblem } from "./brain-agents.js";
+import { resolveAgent, agentProblem, AUTO_PROBE_ORDER } from "./brain-agents.js";
 
 const VARS = [
   "WEMIND_BRAIN",
@@ -87,9 +87,31 @@ describe("resolveAgent 预设", () => {
     expect(ag.firstFrameMs).toBe(60_000);
     expect(ag.heartbeatMs).toBe(60_000);
     expect(ag.images).toBe(false);
-    expect(ag.credentialFile).toBe(".credentials.yaml");
+    expect(ag.credentialFiles).toEqual([".credentials.yaml"]);
     expect(ag.model).toBe('["deepseek-account","deepseek-flash"]');
     expect(ag.mcpViaAcp).toBe(true); // MCP 走 session/new|resume 的 mcpServers，不写文件
+  });
+
+  it("qoder：原生 qodercli + QODER_CONFIG_DIR 沙箱 + settings.json + 凭据/标识文件", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "qoder";
+    const ag = resolveAgent();
+    expect(ag.name).toBe("qoder");
+    expect(ag.bin).toMatch(/qodercli(\.exe)?$/); // 原生二进制，直接起（不走 qoder 分发器）
+    expect(ag.args).toEqual(["--acp", "--yolo"]);
+    expect(ag.shell).toBe(false); // 原生 .exe/.bin，不走 shell
+    expect(ag.homeEnvVar).toBeUndefined(); // 用 env 指到「配置目录」本身，而非沙箱根
+    expect(ag.env.QODER_CONFIG_DIR).toMatch(/^%HOME%[\\/]qoder$/);
+    expect(ag.configSubdir).toBe("qoder");
+    expect(ag.mcpFormat).toBe("kiro"); // 键名同为 mcpServers
+    expect(ag.mcpConfigFile).toBe("settings.json");
+    expect(ag.catalogFile).toBe("settings.json");
+    expect(ag.settingsBase).toBe("settings.json");
+    expect(ag.credentialFiles).toEqual([".auth/user"]);
+    expect(ag.identityFiles).toEqual([".auth/machine_id"]);
+    expect(ag.inheritDirs).toEqual(["skills", "agents", "commands"]);
+    expect(ag.inheritFiles).toEqual(["AGENTS.md"]);
+    expect(ag.mcpViaAcp).toBe(false);
   });
 
   it("kiro/opencode：mcpViaAcp 默认 false（仍走沙箱配置文件）", () => {
@@ -138,6 +160,21 @@ describe("resolveAgent 选择来源与优先级", () => {
     expect(ag.homeEnvVar).toBe("OC_HOME");
   });
 
+  it("环境变量切到别的预设时，不再沿用 brain.json 里旧 agent 的 bin/args/shell", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "qoder";
+    const ag = resolveAgent({
+      agent: "deepseek",
+      bin: "C:\\dsh\\dsh.cmd",
+      args: ["--profile", "acp"],
+      shell: true,
+    });
+    expect(ag.name).toBe("qoder");
+    expect(ag.bin).toMatch(/qodercli(\.exe)?$/);
+    expect(ag.args).toEqual(["--acp", "--yolo"]);
+    expect(ag.shell).toBe(false);
+  });
+
   it("未知预设：不再静默回退 kiro，known=false 且 agentProblem 报错", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "opencod"; // 拼错
@@ -176,5 +213,10 @@ describe("resolveAgent auto 探测", () => {
     const ag = resolveAgent();
     expect(ag.available).toBe(false);
     expect(agentProblem(ag)).toMatch(/找不到大脑/);
+  });
+
+  it("auto 探测把 qoder 排在最后，不影响老用户", () => {
+    expect(AUTO_PROBE_ORDER[AUTO_PROBE_ORDER.length - 1]).toBe("qoder");
+    expect(AUTO_PROBE_ORDER.indexOf("qoder")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("deepseek"));
   });
 });

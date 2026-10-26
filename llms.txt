@@ -1,6 +1,6 @@
 # WeMind
 
-> WeMind turns a personal WeChat account into an I/O channel for AI agents. It ships two mutually exclusive forms: an MCP server (`@wemind/wechat-mcp`) that any MCP client can drive, and a daemon (`wemind`) that long-polls WeChat itself, calls a resident ACP agent as its "brain", and replies automatically. Same bot token = one consumer only.
+> WeMind turns a personal WeChat account into an I/O channel for AI agents. It ships two mutually exclusive forms: an MCP server (`@wemind/wechat-mcp`) that any MCP client can drive, and a daemon CLI (**`@wemind/cli`**, command `wemind`) that long-polls WeChat itself, calls a resident ACP agent as its "brain", and replies automatically. Same bot token = one consumer only.
 
 ## Start here (AI agents)
 
@@ -25,16 +25,24 @@
 - [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md): generic ACP brain guide.
 - [docs/接入-OpenCode.md](docs/接入-OpenCode.md): OpenCode integration, with real M1 measurements.
 - [docs/接入-DeepSeek.md](docs/接入-DeepSeek.md): DeepSeek/DSH evaluation, 0.2.1-rc.2 measurements, plan.
+- [docs/接入-Qoder.md](docs/接入-Qoder.md): Qoder CLI integration — preset, sandbox `settingsBase`, `.auth` credential sync, M0/M1 measurements.
 - [docs/ai/recipes/add-acp-agent.md](docs/ai/recipes/add-acp-agent.md): add a preset + capability adaptations.
 - [docs/ai/recipes/add-mcp.md](docs/ai/recipes/add-mcp.md): MCP catalog/activation/transport.
 - [docs/ai/recipes/debug-daemon.md](docs/ai/recipes/debug-daemon.md): triage daemon/brain failures.
 - [docs/ai/recipes/run-e2e.md](docs/ai/recipes/run-e2e.md): end-to-end acceptance.
 
+## Install
+
+- `npm i -g @wemind/cli` → command `wemind` (package name ≠ command name).
+- `npx -y @wemind/wechat-mcp` → MCP server (binary `wemind-mcp`).
+- `npx -y @wemind/cli <cmd>` works too; plain `npx wemind` does NOT (name mismatch).
+- Release process: [docs/发布-wemind-npm.md](docs/发布-wemind-npm.md).
+
 ## Code map
 
-- `packages/wechat-ilink-core/`: iLink HTTP client, types, errors, session guard, account/state, image crypto. Private.
-- `packages/wechat-mcp/`: MCP server with 6 tools. Published as `@wemind/wechat-mcp`.
-- `packages/wechat-daemon/`: daemon, ACP brain, worker, CLI. Unpublished (`wemind`).
+- `packages/wechat-ilink-core/`: iLink HTTP client, types, errors, session guard, account/state, image crypto. Private, bundled into the published packages.
+- `packages/wechat-mcp/`: MCP server with 6 tools. Published as `@wemind/wechat-mcp` (bin `wemind-mcp`).
+- `packages/wechat-daemon/`: daemon, ACP brain, worker, CLI. Published as `@wemind/cli` (bin `wemind`).
 - `packages/wechat-daemon/src/brain-agents.ts`: `ACP_AGENT_PRESETS`, `resolveAgent()`, `agentProblem()`.
 - `packages/wechat-daemon/src/acp-brain.ts`: resident ACP client (brain).
 - `packages/wechat-daemon/src/worker-acp.ts`: resident ACP client (worker).
@@ -44,18 +52,23 @@
 ## Commands
 
 - `npm run build`, `npm run typecheck`, `npm test`, `npm run lint`.
-- `node packages/wechat-daemon/dist/cli.js list`
-- `node packages/wechat-daemon/dist/cli.js brain <key>`
-- `node packages/wechat-daemon/dist/cli.js brain check <key>`
+- `npm run check:version` (package name + version consistency), `npm run verify:publish`.
+- `wemind list` / `wemind brain <key>` / `wemind brain check <key>` (installed CLI)
+- `node packages/wechat-daemon/dist/cli.js list` (same thing from source)
 - `pwsh -NoProfile -File scripts/doctor.ps1`
 - `pwsh -NoProfile -File scripts/check-docs.ps1`
 - `node scripts/acp-probe.mjs` (env: `ACP_BIN`, `ACP_ARGS`, `ACP_SHELL`, `ACP_HOME_ENV`, `ACP_HOME`, `ACP_MODEL`)
 
-## Hard facts (2026-10-24)
+## Hard facts (2026-10-26)
 
-- Default brain selection is `auto`: `kiro → opencode → gemini`; persisted in `<data>/brain.json`.
+- Published: `@wemind/wechat-mcp` and `@wemind/cli`. Never publish `@wemind/wechat-ilink-core` (private, inlined).
+- Package name ≠ command name: `@wemind/cli` installs the `wemind` binary. `npx` must use the package name.
+- Process identity markers are `wemind` + `cli.js` (NOT the source dir name `wechat-daemon`); `npm i -g` runs `.../node_modules/@wemind/cli/dist/cli.js`.
+
+- Default brain selection is `auto`: `kiro → opencode → gemini → deepseek → qoder`; persisted in `<data>/brain.json`.
 - `session/load` is not universal. DSH 0.2.1-rc.2 returns `-32601`; it has `session/resume` instead.
 - DSH 0.2.1-rc.2 advertises `promptCapabilities.image:false`; image prompts fail with `-32602`.
+- Qoder CLI 1.1.78 has load/resume/images/MCP and needs `.auth/user` + `.auth/machine_id` synced into the sandbox; its sandbox MCP lives in `settings.json.mcpServers`.
 - The repo has no `Brain` interface; `acp-brain.ts` exports `askBrain`/`newSession`/`restart`.
 - iLink consecutive send limit is ~10; progress messages consume it.
 - Windows `.cmd`/`.bat` agents must be launched through a shell; `binWin` must match the real filename (e.g. `dsh.cmd`).

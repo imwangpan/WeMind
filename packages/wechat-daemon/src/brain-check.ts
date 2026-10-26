@@ -22,6 +22,20 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
   if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把「配置目录」指向临时沙箱
   for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
 
+  // 需要登录的 agent（DSH / Qoder）缺凭据会在 session/new 报认证失败——把凭据带进临时沙箱，
+  // 否则自检会把「没登录」误报成「二进制不可用」。标识类文件（如 Qoder 的 machine_id）必须一致。
+  const cfgDir = path.join(home, ag.configSubdir);
+  for (const f of [...ag.credentialFiles, ...ag.identityFiles]) {
+    try {
+      const src = path.join(ag.realHome ?? "", f);
+      if (!ag.realHome || !fs.existsSync(src)) continue;
+      fs.mkdirSync(path.dirname(path.join(cfgDir, f)), { recursive: true });
+      fs.copyFileSync(src, path.join(cfgDir, f));
+    } catch {
+      /* best-effort */
+    }
+  }
+
   const proc = spawnAgent(ag, { cwd: home, env });
 
   let buf = "";

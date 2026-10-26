@@ -124,23 +124,35 @@ function readJson(file: string): Record<string, unknown> | null {
 }
 
 /**
- * 把 agent 的凭据文件同步进沙箱（如 DSH 的 `.credentials.yaml`）。
- * 新者胜：首次复制；真实 home 的 token 刷新后覆盖沙箱；沙箱自己刷新过则保留沙箱版本。
+ * 把 agent 的凭据文件同步进沙箱（如 DSH 的 `.credentials.yaml`、Qoder 的 `.auth/user`）。
+ * - `newer`：首次复制；真实 home 的 token 刷新后覆盖沙箱；沙箱自己刷新过则保留沙箱版本。
+ * - `always`：内容不同即覆盖（标识类文件，如 Qoder 的 `.auth/machine_id`——agent 在缺凭据时会自造一个，
+ *   它比真实文件新，「新者胜」会把错的留下，导致永远认证失败）。
  * 这是敏感文件，仅放在账号沙箱内；Windows 无 POSIX 600，建议专用账号 + 目录 ACL。
  */
-function syncCredentialFile(): void {
-  if (!AG.credentialFile || !AG.realHome) return;
-  const src = path.join(AG.realHome, AG.credentialFile);
-  const dst = path.join(BRAIN_CONFIG_DIR, AG.credentialFile);
+function syncCredentialFile(file: string, mode: "newer" | "always"): void {
+  if (!AG.realHome) return;
+  const src = path.join(AG.realHome, file);
+  const dst = path.join(BRAIN_CONFIG_DIR, file);
   try {
     if (!fs.existsSync(src)) return;
     fs.mkdirSync(path.dirname(dst), { recursive: true });
+    if (mode === "always") {
+      const same = fs.existsSync(dst) && fs.readFileSync(src).equals(fs.readFileSync(dst));
+      if (!same) fs.copyFileSync(src, dst);
+      return;
+    }
     const s = fs.statSync(src);
     const d = fs.existsSync(dst) ? fs.statSync(dst) : null;
     if (!d || s.mtimeMs > d.mtimeMs + 1000) fs.copyFileSync(src, dst);
   } catch {
     /* best-effort */
   }
+}
+
+function syncCredentials(): void {
+  for (const f of AG.credentialFiles) syncCredentialFile(f, "newer");
+  for (const f of AG.identityFiles) syncCredentialFile(f, "always");
 }
 
 function loadCatalog(): Record<string, unknown> {
@@ -238,10 +250,50 @@ function syncOpencodeBase(): void {
   fs.writeFileSync(BRAIN_MCP_JSON, JSON.stringify(parsed, null, 2), "utf-8");
 }
 
+/** Qoder 这类「设置与 MCP 同文件」的 agent：以真实 settings.json 为基底生成沙箱设置。
+ *  剥离必须由沙箱权威决定的键：
+ *  - `mcpServers`：MCP 只能来自沙箱 curated（防 wechat 回环）；
+ *  - `enabledPlugins`：插件可自带 MCP，且沙箱不继承 `plugins/`；
+ *  - `providers` / `model`：自定义供应商（BYOK）含明文密钥，`model` 又可能指向已剥离的供应商。
+ *  并强制 `general.enableAutoUpdate=false`：否则每个沙箱都会各下一份约 210 MB 的 CLI。 */
+function settingsBase(): Record<string, unknown> {
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(fs.readFileSync(path.join(AG.realHome!, AG.settingsBase!), "utf-8"));
+  } catch {
+    /* 缺失/损坏 → 空基底 */
+  }
+  const base =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? { ...(parsed as Record<string, unknown>) }
+      : {};
+  delete base.mcpServers;
+  delete base.enabledPlugins;
+  delete base.providers;
+  delete base.model;
+  const general = base.general;
+  base.general = {
+    ...(general && typeof general === "object" && !Array.isArray(general)
+      ? (general as Record<string, unknown>)
+      : {}),
+    enableAutoUpdate: false,
+  };
+  return base;
+}
+
+function syncSettingsBase(): void {
+  fs.mkdirSync(BRAIN_CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(BRAIN_MCP_JSON, JSON.stringify(settingsBase(), null, 2), "utf-8");
+}
+
 /** 继承真实配置目录的「非 MCP」设置（模型/免确认等），让大脑与日常使用同款配置；mcp 段保持沙箱权威。
  *  `mcpViaAcp` 预设没有文件式 MCP/settings 可继承，跳过（模型走 preset.model + set_config_option）。 */
 function syncSettings(): void {
   if (AG.mcpViaAcp) return;
+  if (AG.settingsBase && AG.realHome) {
+    syncSettingsBase(); // 不依赖 inherit：沙箱硬化（关自动更新）与隔离始终生效
+    return;
+  }
   if (!AG.inherit || !AG.realHome) return;
   if (AG.mcpFormat === "opencode") syncOpencodeBase();
   else syncKiroSettings();
@@ -252,7 +304,7 @@ export function ensureBrainHome(): void {
   syncSettings(); // 先同步「非 MCP」设置(模型/免确认等)，让大脑与日常使用同款配置
   applySandbox(); // 再写 curated mcp（权威，保持 MCP 隔离防回环）
   mirrorRealKiro(); // 继承真实配置目录的记忆/steering/skills（sessions 仍隔离）
-  syncCredentialFile(); // 桌面登录态等凭据（如 DSH 的 .credentials.yaml）
+  syncCredentials(); // 登录态/凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
 }
 
 export function addMcp(name: string): string {
