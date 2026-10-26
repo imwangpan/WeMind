@@ -2,23 +2,21 @@
 
 > _Your AI mind, reachable on WeChat. —— 你的 AI 大脑，在微信上随时可达。_
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-27 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。
+WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态（均已发布到 npm）：一个 MCP Server 子包（`@wemind/wechat-mcp`），和一个常驻守护进程（`@wemind/cli`）。
 
-WeMind 让你的 AI 通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种用法（**两个包都已发布到 npm**）：
-
-| 你想做的事 | 安装 | 用到什么 |
+| 形态 | 怎么装 | 适合 |
 | --- | --- | --- |
-| 在 **Claude Desktop / Cursor / OpenCode / Kiro** 里让 AI 收发你的微信 | `npx -y @wemind/wechat-mcp` | MCP Server（`wemind-mcp`） |
-| 要一个**自己常驻、7×24 自动回复**的微信 AI 助手（还能远程派任务） | `npm i -g @wemind/cli` | 常驻 CLI（命令 `wemind`）+ 一个 AI 大脑 |
+| **MCP Server**（`wemind-mcp`） | `npx -y @wemind/wechat-mcp` | 在 Claude Desktop / Cursor / OpenCode / Kiro 等已有客户端里让 AI 收发你的微信 |
+| **常驻守护进程**（命令 `wemind`） | `npm i -g @wemind/cli` | 要一个自己常驻、7×24 自动回复、还能远程派任务的微信 AI 助手 |
 
 ```bash
-# 第二种用法的典型三步
+# 常驻守护进程的典型三步
 npm i -g @wemind/cli
 wemind login --label 主号 --start    # 微信扫码登录 + 启动常驻
 wemind list                          # 查看运行状态
 ```
 
-> ⚠️ **一个 bot token 只能有一个消费者**：两种用法别同时跑，否则互相抢消息。
+> ⚠️ **一个 bot token 只能有一个消费者**：两种形态别同时跑，否则互相抢消息。
 > ⚠️ **包名 ≠ 命令名**：装 `@wemind/cli`，敲 `wemind`；`npx` 必须写全包名（`npx -y @wemind/cli`）。
 
 **下一步**：**[新手教程](docs/新手教程.md)**（从零开始，含扫码、开机自启、常见问题）｜ **[安装详解](#安装两种形态二选一)** ｜ 遇到问题看 [常见问题](#常见问题)
@@ -503,3 +501,7 @@ npx -y @wemind/cli version          # 不想全局装：注意写全包名，npx
 ## 许可证
 
 [MIT](LICENSE) —— 沿用原项目 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server)（同为 MIT）。
+
+---
+
+> **文档版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-27 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。
