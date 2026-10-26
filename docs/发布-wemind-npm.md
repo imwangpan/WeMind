@@ -1,8 +1,31 @@
-# @wemind/cli（命令 `wemind`）独立发布方案
+# @wemind/cli（命令 `wemind`）发布方案与运维手册
 
-> 分支：`feat/wemind-npm-publish` ｜ 目标包：**`@wemind/cli`**（源码 `packages/wechat-daemon/`，命令 `wemind`）｜ 计划首发版本：**1.0.0**
+> 包：**`@wemind/cli`**（源码 `packages/wechat-daemon/`，命令 `wemind`）｜ 当前线上版本：**1.0.0**（2026-10-26 发布）｜ 状态：**✅ 已发布**
 >
-> 本文件既是**方案**也是**实施记录**：§4 起的代码改动已在分支上落地并通过本地验证，§8 列出「还需要人做」的一次性动作。
+> <https://www.npmjs.com/package/@wemind/cli>
+>
+> 本文件既是**发布方案**、也是**实施记录**和**后续发版手册**：§2–§5 是命名/代码决策，§6 是每次发版都要走的检查清单，§8 记录首次发布的实际过程（含踩过的坑）。
+
+---
+
+## 0. 发布状态速查
+
+| 项 | 值 |
+| --- | --- |
+| 包名 | `@wemind/cli`（`publishConfig.access: public`） |
+| 命令 | `wemind`（`bin: { "wemind": "dist/cli.js" }`） |
+| 首发版本 / 时间 | `1.0.0` / 2026-10-26 |
+| 发布方式 | 首次：本地 `npm publish` + 浏览器二次确认（EOTP）；后续：**GitHub Actions Trusted Publishing** |
+| CI 工作流 | [`.github/workflows/wemind-publish.yml`](../.github/workflows/wemind-publish.yml)（`imwangpan/WeMind`，`push main` 触发，包已存在版本则跳过） |
+| 包内容 | 4 个文件：`dist/cli.js`、`dist/cli.js.map`、`README.md`、`package.json` |
+| 安装包体积 | ~147 KB（gzip 后更小） |
+| 运行时依赖 | 仅 `qrcode@^1.5.4`（**懒加载**，只有 `wemind login` 会加载）；内核已内联 |
+
+```bash
+npm i -g @wemind/cli     # 安装后得到 wemind 命令
+wemind version           # → wemind 1.0.0 (@wemind/cli, node …, <platform>-<arch>)
+npx -y @wemind/cli list  # 不安装临时用：必须写全包名
+```
 
 ---
 
@@ -174,49 +197,72 @@ check-version（包名+版本一致性）→ npm ci → lint → format:check �
 
 ## 5. 一致性约束（发布期必须守住）
 
-1. **`dist/` 永不入库**（`.gitignore` 已忽略），产物只由 CI 的 `npm run build` 生成 → `prepack` 守卫兜底。
+1. **`dist/` 永不入库**（`.gitignore` 已忽略），产物只由 `npm run build` / CI 生成 → `prepack` 守卫兜底。
 2. **包名与版本同步**：改版本只改 `packages/wechat-daemon/package.json`，然后同步 `src/version.ts` 与 `npm install` 刷新 lock（`check-version` 会卡住 CI）。
-3. **包名与命令名解耦，且都要守**：包名 `@wemind/cli`、命令 `wemind`。改任何一处都要同时看 README、`npx` 示例、CI 的 workspace 参数、`check-version.mjs`。
+3. **包名与命令名解耦，且都要守**：包名 `@wemind/cli`、命令 `wemind`。改任何一处都要同时看 README、`npx` 示例、CI 的 workspace 参数、`check-version.mjs`、`version.test.ts`。
 4. **内核改动要重新发布 `@wemind/cli`**：内核是内联的，`packages/wechat-ilink-core/**` 变更会触发本 workflow（paths 已包含）。
 5. **`engines.node: ">=20"`** 是承诺：构建 target 也是 `node20`；DSH CLI 这类大脑需要 node ≥22，那是**用户侧大脑**的要求，不写进本包 `engines`。
 6. **`@wemind/wechat-mcp` 与 `@wemind/cli` 各自独立版本**，互不引用。
+7. **sourcemap 必须随包**：`tsdown` 开了 `sourcemap: true`，`prepack` 守卫会检查 `.map` 存在且被 `files` 覆盖。
 
 ---
+## 6. 每次发版检查清单（后续版本都照这个走）
 
-## 6. 发布前检查清单（人执行）
-
-### 6.1 核名（一次性，必须先做）
+### 6.1 升版本号（三处必须同步）
 
 ```bash
-npm view @wemind/cli version        # 应报 404：确认这个包名没被（你自己或别人）占用
-npm view @wemind/cli@1.0.0 version  # 应报 404：确认 1.0.0 未发过
-npm whoami                          # 确认已登录且有 @wemind scope 的发布权限
+# 只改这一个文件里的 version
+#   packages/wechat-daemon/package.json   → "version"
+# 然后同步两处：
+#   packages/wechat-daemon/src/version.ts → CLI_VERSION
+#   npm install（刷新 package-lock.json 里的 packages/wechat-daemon.version）
+npm run check:version      # 不一致会直接 exit 1，挡住发版
 ```
-
-> 与之前不同：这里**不需要**再核 `wemind` 短名 —— 我们不再用那个名字。
 
 ### 6.2 本地全绿
 
 ```bash
 npm install
-npm run check:version      # 包名 + 版本一致
+npm run check:version
 npm run lint && npm run typecheck && npm run build && npm test
-npm run verify:publish      # build + 两个包的 npm pack --dry-run
+npm run verify:publish      # check:version + build + 两个包的 npm pack --dry-run
 ```
+
+> ⚠️ **`npm publish` 不会自动 build**。必须自己先 `npm run build`，否则发出的是 `dist/` 里的旧产物（`prepack` 守卫只能挡「产物缺失」，挡不住「产物是旧的」）。
 
 ### 6.3 真装冒烟（不必碰真实账号）
 
 ```bash
 npm pack --workspace @wemind/cli --pack-destination "$TEMP"
-# scope 包打包后文件名是 wemind-cli-1.0.0.tgz（不是 @wemind/cli-…）
-mkdir smoke && cd smoke && npm init -y && npm i "$TEMP/wemind-cli-1.0.0.tgz"
-./node_modules/.bin/wemind version   # → wemind 1.0.0 (@wemind/cli, node …)
+# scope 包打包后文件名是 wemind-cli-<ver>.tgz（不是 @wemind/cli-…）
+mkdir smoke && cd smoke && npm init -y && npm i "$TEMP/wemind-cli-<ver>.tgz"
+./node_modules/.bin/wemind version
 ./node_modules/.bin/wemind help
 ```
 
-### 6.4 Trusted Publishing 绑定（一次性）
+CI 里同一段逻辑已在 `wemind-publish.yml` 的 *Smoke test the packed CLI* 步骤执行。
 
-npmjs.com → `@wemind/cli` 包设置 → Trusted Publisher 选 GitHub Actions：
+### 6.4 两种发布通道
+
+**A. 走 CI（推荐，日常唯一需要的操作）**
+
+1. 把带新版本号的 commit 推到 `main`；
+2. `Publish @wemind/cli` workflow 自动跑：`check-version → 全量校验 → pack 预演 → 装包冒烟 → 检查版本是否已存在 → npm publish --provenance`；
+3. 版本没升 → 只跑检查并 `::notice::` 跳过发布（不会报错）。
+
+**B. 本地手动发（紧急时用，需要交互式 2FA）**
+
+```bash
+npm run build
+npm publish --workspace @wemind/cli --access public
+# 若提示 EOTP：在浏览器里完成确认，或 --otp=<6位码>
+```
+
+> 首次发布 1.0.0 走的就是 B（因为包还不存在时 npm 不允许配 Trusted Publisher）。**现在包已存在且已配好 Trusted Publisher，后续一律走 A。**
+
+### 6.5 Trusted Publishing 绑定（已完成，留档备查）
+
+npmjs.com → `@wemind/cli` → Settings → Trusted Publisher = GitHub Actions：
 
 | 字段 | 值 |
 | --- | --- |
@@ -225,56 +271,71 @@ npmjs.com → `@wemind/cli` 包设置 → Trusted Publisher 选 GitHub Actions�
 | Workflow filename | `wemind-publish.yml` |
 | Environment | 留空 |
 
-> 首次发布若包**还不存在**，npm 不允许配置 Trusted Publisher（与你发布 `@wemind/wechat-mcp` 时的情况一样）。两个办法：① 本地 `npm publish --workspace @wemind/cli --access public` 发一次 1.0.0，之后配 TP 交给 CI；② 先发 `1.0.0-rc.1` 占位，配好 TP 后由 CI 发正式版。**推荐 ①**，与 `wechat-mcp` 的历史做法一致。
-
-### 6.5 发布后验收
+### 6.6 发布后验收
 
 ```bash
-npm i -g @wemind/cli@1.0.0 && wemind version    # → wemind 1.0.0 (@wemind/cli, …)
-wemind list                      # 应正确显示「运行中(pid …)」（验证 P2 修复）
-wemind task "echo hi"            # daemon 在跑时应能派发
-npx -y @wemind/cli list          # 验证「npx 写全包名」这条路
+npm view @wemind/cli version              # 新版本号
+npm i -g @wemind/cli@latest && wemind version
+wemind list                               # 应正确显示「运行中(pid …)」
+npx -y @wemind/cli list                   # 验证「npx 写全包名」这条路
 ```
+
+已装用户升级：`npm i -g @wemind/cli@latest`，然后 `wemind stop <账号> && wemind start <账号>`——**正在运行的 daemon 不会自动换代码**。
 
 ---
 
 ## 7. 回滚与善后
 
-- npm 侧：24h 内可 `npm unpublish @wemind/cli@1.0.0`（建议只在「包完全不可用」时用）；否则 `npm deprecate @wemind/cli@1.0.0 "原因"` 并尽快发 1.0.1。
+- npm 侧：24h 内可 `npm unpublish @wemind/cli@<ver>`（只在「包完全不可用」时用）；否则 `npm deprecate @wemind/cli@<ver> "原因"` 并尽快发补丁版。
 - 已装用户：`npm i -g @wemind/cli@<上一版>`。
-- 数据兼容：本方案**不改**任何 `~/.wemind/<账号>/` 文件的格式与路径，升级/回滚都不影响登录态与沙箱。
+- 数据兼容：本方案**不改**任何 `~/.wemind/<账号>/` 文件的格式与路径，升级/回滚都不影响登录态、沙箱与会话。
 
 ---
 
-## 8. 还需要「人」做的动作（代码之外）
+## 8. 首次发布实录（2026-10-26，含踩过的坑）
 
-1. **§6.1 核名**：确认 `@wemind/cli` 未被占用（我无法联网核查）。
-2. 配 Trusted Publisher（§6.4），或用本地首发的过渡方式。
-3. 合并后 `push main` → 观察 `Publish @wemind/cli` workflow 首次运行。
+| 步骤 | 结果 |
+| --- | --- |
+| 核名 | `npm view @wemind/cli` → 404（可用） |
+| 登录态 | 一开始 `npm whoami` 报 **E401**（`~/.npmrc` 里的 token 已失效）→ 重新 `npm login` 后恢复 |
+| 权限 | `npm access list packages '@wemind'` → `@wemind/wechat-mcp: read-write` |
+| 本地门禁 | lint 0 错误 ｜ typecheck ✅ ｜ build ✅ ｜ **276 tests passed** ｜ prepack 守卫放行 |
+| 打包预演 | 4 文件 / 146.8 KB / sha1 `498b9d6…` |
+| 首次 publish | 返回 **EOTP**（需浏览器二次确认），上传未完成 → 网页确认并重试后成功 |
+| 结果 | `latest=1.0.0`，上传时间 2026-10-26 10:51:33；从公共 registry 真装验证全部通过 |
+
+**记录下来的坑（以后别再踩）**：
+
+1. **PowerShell 里 `@wemind` 会被当变量插值**：`npm access list packages @wemind` 报 `InvalidOperation: 无法检索变量 '$wemind'`。必须加引号 `"@wemind"` / `'@wemind'`，或用停止解析符 `--%`。
+2. **`npm view` 的 404 可能是 CDN 边缘缓存**：刚发布完立刻查可能仍 404，加 `?t=<random>` 直连 registry 或等一两分钟再查。
+3. **registry 里会出现一个 `0.0.0-stage`**：npm 暂存发布流程自动创建的临时占位版本（`description: "Temporary package placeholder for staged publishing"`、`bin: null`、无文件），`latest` 不指向它，不影响安装。介意的话可在包设置里删掉该版本。
+4. **发布后不要在旧工作区发**：必须确认 `git branch --show-current` 是目标分支、且 `dist/` 是刚 build 的。
 
 ---
 
 ## 9. 风险与备选
 
-**A. `npx` 手感变化**（本次命名方案的唯一代价）：`npx wemind` 不可用，必须 `npx -y @wemind/cli`；`npm i -g` 后命令不受影响。README / help / 文档已全部按包名写全。
+**A. `npx` 手感**：`npx wemind` 不可用，必须 `npx -y @wemind/cli`（包名与 bin 名不同）。`npm i -g` 后命令不受影响。所有文档与 `wemind help` 已按包名写全。
 
-**B. 用户机器上没有 ACP agent**：`wemind daemon` 会以退出码 78 失败并停止自动重启（已有设计），`wemind brain`/`brain check` 会给出可操作提示。**建议首发后观察**是否需要在 `wemind login` 后主动跑一次 `brain check` 并提示安装大脑（当前不做，避免拖慢登录）。
+**B. 用户机器上没有 ACP agent**：`wemind daemon` 会以退出码 78 失败并停止自动重启（脚本/watchdog/pm2 三处都尊重该退出码），`wemind brain` / `brain check` 会给出可操作提示。`wemind login` 之后不会主动检查大脑——保持登录流程轻量。
 
-**C. 进程身份新规则与旧进程**：旧版（从未发布）用 `wechat-daemon` marker；本机在跑的 daemon 命令行是 `…\WeMind\packages\wechat-daemon\dist\cli.js`，靠 **WeMind** 命中，**无需重启**即可被新 CLI 识别（已实测 `wemind list` 显示「运行中(pid 18468)」）。从「别处 clone、目录名不含 wemind」启动的旧进程会认不出——个体重启一次即可。
+**C. 进程身份与老进程**：源码期（未发布）的守护进程命令行是 `…\WeMind\packages\wechat-daemon\dist\cli.js`，靠 **WeMind** 命中新 marker；从「目录名不含 wemind」的 clone 启动的老进程会认不出——重启一次即可。
 
-**D. 若以后仍想占住 `wemind` 短名**：可以用 `bin` 为空的 `wemind` 包做「指向 `@wemind/cli` 的提示包」（不推荐：多一个要维护的包）。当前不做。
+**D. 想占住 `wemind` 短名**：可以用 `bin` 为空的 `wemind` 包做「指向 `@wemind/cli` 的提示包」（不推荐：多一个要维护的包）。当前不做。
 
-**E. Windows 上 `npm i -g` 的 shim**：`bin` 生成 `wemind.cmd`，其内容为 `exec node "…/node_modules/@wemind/cli/dist/cli.js"` —— 正好命中新的身份特征（单测已按该路径形态断言）。
+**E. Windows 上 `npm i -g` 的 shim**：`bin` 生成 `wemind.cmd`，内容为 `exec node "…/node_modules/@wemind/cli/dist/cli.js"` —— 正好命中身份特征（单测已按该路径形态断言）。
+
+**F. sourcemap 让安装包从 51 KB 涨到 ~147 KB**：换来的是用户报错时能映射回 `.ts` 源码。`prepack` 守卫会检查「声明了 sourceMappingURL 就必须带 `.map` 进包」。
 
 ---
 
-## 10. 实施顺序（建议的落地节奏）
+## 10. 时间线（已完成）
 
-| 步骤 | 内容 | 谁做 |
+| 步骤 | 内容 | 状态 |
 | --- | --- | --- |
-| 1 | 本分支代码 + 文档 + workflow（已完成；根包名已按要求保持 `wemind`） | AI ✅ |
-| 2 | 本地 §6.2 / §6.3 全绿（lint/typecheck/build/test/pack/装包冒烟） | AI ✅ |
-| 3 | 核名 `@wemind/cli`（§6.1） | **人** |
-| 4 | 本地首发 1.0.0（或先 TP 再 CI 首发） | **人** |
-| 5 | 配 Trusted Publisher，push main 验证 workflow | **人** |
-| 6 | 发布后验收 §6.5 + 真机微信收发一条消息 | **人** |
+| 1 | 代码 + 文档 + workflow（分支 `feat/wemind-npm-publish`） | ✅ |
+| 2 | 本地门禁全绿（lint/typecheck/build/test/pack/装包冒烟） | ✅ |
+| 3 | 核名 `@wemind/cli` + 登录恢复 | ✅ |
+| 4 | 本地首发 1.0.0（浏览器确认 EOTP 后成功） | ✅ |
+| 5 | 配 Trusted Publisher | ✅ |
+| 6 | 合并到 `main`，交 CI 接管后续版本 | ✅ |

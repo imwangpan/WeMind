@@ -18,6 +18,13 @@ npx -y @wemind/cli list
 
 要求：**Node.js >= 20**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / 桌面端 `dsh` 等；未配置时自动探测 `kiro → opencode → gemini → deepseek`）。
 
+## 升级
+
+```bash
+npm i -g @wemind/cli@latest
+wemind stop <账号> && wemind start <账号>   # 已在运行的 daemon 不会自动加载新代码
+```
+
 ## 三步上手
 
 ```bash
@@ -78,6 +85,8 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 ## 文档
 
 - 完整文档：<https://github.com/imwangpan/WeMind>
+- 新手一步步教程：[docs/新手教程.md](https://github.com/imwangpan/WeMind/blob/main/docs/新手教程.md)
+- 发布与版本规则：[docs/发布-wemind-npm.md](https://github.com/imwangpan/WeMind/blob/main/docs/发布-wemind-npm.md)
 - AI 协作者入口：[AGENTS.md](https://github.com/imwangpan/WeMind/blob/main/AGENTS.md)
 - 接入其它 ACP agent：[docs/接入其它-ACP-Agent.md](https://github.com/imwangpan/WeMind/blob/main/docs/接入其它-ACP-Agent.md)
 - Daemon 常驻原理：[docs/repowiki/10-部署与运维.md](https://github.com/imwangpan/WeMind/blob/main/docs/repowiki/10-部署与运维.md)
