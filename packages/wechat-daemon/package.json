@@ -1,6 +1,6 @@
 {
   "name": "@wemind/cli",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "WeMind — your AI mind, reachable on WeChat. 常驻微信 AI 助手：自动收发 + 远程任务 + 多账号，自带 AI 大脑（任意 ACP agent 可接，默认自动探测）。安装后命令为 wemind。",
   "type": "module",
   "repository": {

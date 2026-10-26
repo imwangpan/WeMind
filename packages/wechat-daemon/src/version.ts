@@ -3,7 +3,7 @@
  * 与 package.json 的 version 必须一致——单测 version.test.ts 会读 package.json 校验，
  * 避免「发了新版本、CLI 还报旧版本号」这种排查成本极高的小漂移。
  */
-export const CLI_VERSION = "1.0.0";
+export const CLI_VERSION = "1.1.0";
 
 /**
  * npm 包名（与 package.json 的 name 一致，单测校验）。
