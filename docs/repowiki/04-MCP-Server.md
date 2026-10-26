@@ -2,7 +2,7 @@
 
 > 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. 守护进程 Daemon](05-守护进程-Daemon.md)
 
-MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。这是 WeMind 里**唯一已发布到 npm 的子包**（`@wemind/wechat-mcp`，bin: `wemind-mcp`）。
+MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `wemind`，见 [`docs/发布-wemind-npm.md`](../发布-wemind-npm.md)）。
 
 ## 4.1 模块结构
 
@@ -155,7 +155,7 @@ MCP server 用 [tsdown](https://tsdown.dev/)（rolldown + oxc，tsup 的继任�
 - **`dts: false`** —— 该包不对外暴露类型；关掉也避免 tsdown 加载 `typescript` 包（TypeScript 7.0 原生已不再暴露旧 JS API，否则启动即报错）；
 - 入口 shebang（`#!/usr/bin/env node`）由 rolldown 自动保留。
 
-`package.json` 标记 `publishConfig.access: public`，是三个包里唯一**已发布**的（`@wemind/wechat-mcp`）。
+`package.json` 标记 `publishConfig.access: public`，与 `wemind` 一起属于两个**已发布**的子包（`@wemind/wechat-mcp`、`wemind`）；`@wemind/wechat-ilink-core` 保持 `private`，只做内联。
 
 ## 4.9 MCP 形态 vs Daemon 形态
 

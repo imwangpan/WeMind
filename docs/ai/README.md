@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26（`@wemind/cli@1.0.0` 与 `@wemind/wechat-mcp@1.0.4` 均已发布到 npm）
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -38,16 +38,16 @@ WeMind 只做一件事：**把个人微信的消息，变成某个 AI agent 的�
 ```text
 wechat-ilink-core  ◄──  wechat-mcp      （tsdown 内联 core，发布单包）
         ▲
-        └──────────────  wechat-daemon  （workspace 直接引用 core 源码，永不发布）
+        └──────────────  wechat-daemon（发布为 @wemind/cli，命令 wemind；core 构建时内联）
 ```
 
 | 包 | 路径 | 职责 | 发布 |
 |---|---|---|---|
-| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink HTTP、类型、错误码、会话守卫、账号/状态、收发图加解密 | 私有 |
-| `@wemind/wechat-mcp` | `packages/wechat-mcp` | 6 个 MCP 工具 | 已发布（`wemind-mcp`） |
-| `wemind` | `packages/wechat-daemon` | daemon + ACP 大脑 + worker + CLI | 未发布 |
+| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink HTTP、类型、错误码、会话守卫、账号/状态、收发图加解密 | 私有（构建时内联进上面两个包） |
+| `@wemind/wechat-mcp` | `packages/wechat-mcp` | 6 个 MCP 工具 | 已发布（bin `wemind-mcp`） |
+| `@wemind/cli` | `packages/wechat-daemon` | daemon + ACP 大脑 + worker + CLI | 已发布（命令 `wemind`） |
 
-依赖方向单向；消费方只依赖 core，mcp 与 daemon 互不耦合。
+依赖方向单向；消费方只依赖 core，mcp 与 daemon 互不耦合。**包名与命令名分离**：装 `@wemind/cli`，敲 `wemind`（`npx` 必须写全包名）。
 
 ---
 

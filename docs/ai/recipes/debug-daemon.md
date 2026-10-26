@@ -28,14 +28,20 @@
 # 环境 / 账号 / 大脑 / agent 二进制
 pwsh -NoProfile -File scripts/doctor.ps1
 
+# 下面统一写 `wemind`（已发布：npm i -g @wemind/cli）。
+# 从源码排查时等价于 `node packages/wechat-daemon/dist/cli.js <子命令>`。
+
+# 版本（先确认用户/自己用的是哪一版）
+wemind version
+
 # 账号与状态
-node packages/wechat-daemon/dist/cli.js list
+wemind list
 
 # 大脑解析（某账号）
-node packages/wechat-daemon/dist/cli.js brain <key|label>
+wemind brain <key|label>
 
 # 真机 ACP 握手（initialize + session/new）
-node packages/wechat-daemon/dist/cli.js brain check <key|label>
+wemind brain check <key|label>
 ```
 
 > `brain check` 默认 20s；冷启动慢的 agent 可能超时。先看它打印的 stderr，再判定「不可用」。

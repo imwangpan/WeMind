@@ -8,15 +8,17 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @wemind/wechat-ilink-core && npm run build -w wemind -w @wemind/wechat-mcp",
-    "typecheck": "npm run build -w @wemind/wechat-ilink-core && npm run typecheck -w wemind -w @wemind/wechat-mcp",
+    "build": "npm run build -w @wemind/wechat-ilink-core && npm run build -w @wemind/cli -w @wemind/wechat-mcp",
+    "typecheck": "npm run build -w @wemind/wechat-ilink-core && npm run typecheck -w @wemind/cli -w @wemind/wechat-mcp",
     "test": "vitest run",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "oxfmt \"packages/**/*.ts\"",
     "format:check": "oxfmt --check \"packages/**/*.ts\"",
     "daemon": "node packages/wechat-daemon/dist/cli.js daemon",
-    "start": "node packages/wechat-mcp/dist/index.js"
+    "start": "node packages/wechat-mcp/dist/index.js",
+    "check:version": "node scripts/check-version.mjs",
+    "verify:publish": "npm run check:version && npm run build && npm pack --dry-run -w @wemind/cli -w @wemind/wechat-mcp"
   },
   "keywords": [
     "mcp",
