@@ -155,7 +155,9 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     args: ["--acp", "--yolo"],
     env: { QODER_CONFIG_DIR: `%HOME%${path.sep}qoder` },
     realHome: path.join(os.homedir(), ".qoder"),
-    inheritDirs: ["skills", "agents", "commands"],
+    // memory/ 是 Qoder agent 的用户画像/偏好记忆（实测存在），与日常使用共用一份（junction）；
+    // skills/agents/commands/AGENTS.md 在 Qoder 1.1.78 的本机不存在 → 当前为空操作，保留以便上游新增后自动生效
+    inheritDirs: ["memory", "skills", "agents", "commands"],
     inheritFiles: ["AGENTS.md"],
     configSubdir: "qoder",
     mcpFormat: "kiro",

@@ -109,7 +109,7 @@ describe("resolveAgent 预设", () => {
     expect(ag.settingsBase).toBe("settings.json");
     expect(ag.credentialFiles).toEqual([".auth/user"]);
     expect(ag.identityFiles).toEqual([".auth/machine_id"]);
-    expect(ag.inheritDirs).toEqual(["skills", "agents", "commands"]);
+    expect(ag.inheritDirs).toEqual(["memory", "skills", "agents", "commands"]);
     expect(ag.inheritFiles).toEqual(["AGENTS.md"]);
     expect(ag.mcpViaAcp).toBe(false);
   });

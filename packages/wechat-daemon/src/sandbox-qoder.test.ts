@@ -32,6 +32,8 @@ beforeAll(() => {
   fs.writeFileSync(path.join(realHome, ".auth", "user"), "real-token");
   fs.writeFileSync(path.join(realHome, ".auth", "machine_id"), "real-machine");
   fs.writeFileSync(path.join(realHome, "AGENTS.md"), "# memory\n");
+  fs.mkdirSync(path.join(realHome, "memory"), { recursive: true });
+  fs.writeFileSync(path.join(realHome, "memory", "MEMORY.md"), "# profile\n");
 
   process.env.WEMIND_BRAIN = "qoder";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
@@ -69,6 +71,16 @@ describe("brain 沙箱（Qoder）", () => {
       "real-machine",
     );
     expect(fs.readFileSync(path.join(brainCfg, "AGENTS.md"), "utf-8")).toBe("# memory\n");
+  });
+
+  it("memory/ 以链接共享真实目录（大脑写入即落到真实 memory）", async () => {
+    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+    ensureBrainHome();
+    const sandboxMemory = path.join(brainCfg, "memory");
+    expect(fs.readFileSync(path.join(sandboxMemory, "MEMORY.md"), "utf-8")).toBe("# profile\n");
+    fs.writeFileSync(path.join(sandboxMemory, "written-by-brain.md"), "x");
+    expect(fs.existsSync(path.join(realHome, "memory", "written-by-brain.md"))).toBe(true);
+    fs.rmSync(path.join(realHome, "memory", "written-by-brain.md"));
   });
 
   it("machine_id 内容不同即纠正；user 仍是新者胜（沙箱刷新过则保留）", async () => {
@@ -113,6 +125,9 @@ describe("worker 沙箱（Qoder）", () => {
     expect(cfg.general.enableAutoUpdate).toBe(false);
     expect(fs.readFileSync(path.join(workerCfg, ".auth", "machine_id"), "utf-8")).toBe(
       "real-machine",
+    );
+    expect(fs.readFileSync(path.join(workerCfg, "memory", "MEMORY.md"), "utf-8")).toBe(
+      "# profile\n",
     );
   });
 });
