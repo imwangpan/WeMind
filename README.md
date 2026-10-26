@@ -51,7 +51,7 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
 | --------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
 | `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（内联进 mcp-server）       |
 | `@wemind/wechat-mcp`        | `packages/wechat-mcp`        | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入                                 | **已发布**（bin: `wemind-mcp`） |
-| `wemind`                    | `packages/wechat-daemon`     | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发                                             | **随包发布**（bin: `wemind`）   |
+| `@wemind/cli`               | `packages/wechat-daemon`     | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发                                             | **已发布**（命令 `wemind`）     |
 
 > 📌 上表「发布」列指的是**该子包**是否发布到 npm：对外发布的是 `@wemind/wechat-mcp`（MCP 形态）与 `wemind`（完整应用 CLI）两个入口。两者共用同一个 bot token 时**只能二选一**。
 
@@ -189,7 +189,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 
 ## 守护进程（daemon）：脱离 IDE/终端常驻自动收发
 
-> 📦 **作为 `wemind` CLI 使用**：本守护进程就是独立发布的 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`；常驻默认用自带看门狗，也可 `--runner pm2`）。`npm i -g wemind` 后即可全局使用（发布细节见 [`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)）；也可以按下文从源码运行。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**。
+> 📦 **作为 `wemind` CLI 使用**：本守护进程就是独立发布的 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`；常驻默认用自带看门狗，也可 `--runner pm2`）。`npm i -g @wemind/cli` 后即可全局使用（包名与命令名不同，`npx` 请写 `npx -y @wemind/cli`）（发布细节见 [`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)）；也可以按下文从源码运行。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**。
 
 `packages/wechat-daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
 调 **常驻 ACP agent**（JSON-RPC over stdio；未配置时 `auto` 探测 kiro/opencode/gemini/deepseek）当大脑生成回复 → 自动回发。
@@ -198,7 +198,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 
 ```bash
 # 方式一：装好的 CLI（推荐最终用户）
-npm i -g wemind
+npm i -g @wemind/cli    # 装完命令是 wemind
 wemind login --label 主号 --start    # 扫码登录 + 启动常驻
 wemind list                          # 账号与运行状态
 wemind brain check                   # 验证大脑能说 ACP

@@ -1,16 +1,15 @@
 {
-  "name": "wemind-monorepo",
+  "name": "wemind",
   "version": "1.0.1",
   "private": true,
   "description": "WeMind — your AI mind, reachable on WeChat. Monorepo: reusable iLink protocol core, a publishable MCP server, and a publishable always-on daemon CLI (wemind).",
-  "$comment": "根包刻意不叫 wemind：发布包 wemind 由 packages/wechat-daemon 提供。npm workspaces 里同名包会让「根包」与「工作区包」撞名，导致 -w wemind 解析到根包（private 且无 bin）。",
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @wemind/wechat-ilink-core && npm run build -w wemind -w @wemind/wechat-mcp",
-    "typecheck": "npm run build -w @wemind/wechat-ilink-core && npm run typecheck -w wemind -w @wemind/wechat-mcp",
+    "build": "npm run build -w @wemind/wechat-ilink-core && npm run build -w @wemind/cli -w @wemind/wechat-mcp",
+    "typecheck": "npm run build -w @wemind/wechat-ilink-core && npm run typecheck -w @wemind/cli -w @wemind/wechat-mcp",
     "test": "vitest run",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
@@ -19,7 +18,7 @@
     "daemon": "node packages/wechat-daemon/dist/cli.js daemon",
     "start": "node packages/wechat-mcp/dist/index.js",
     "check:version": "node scripts/check-version.mjs",
-    "verify:publish": "npm run check:version && npm run build && npm pack --dry-run -w wemind -w @wemind/wechat-mcp"
+    "verify:publish": "npm run check:version && npm run build && npm pack --dry-run -w @wemind/cli -w @wemind/wechat-mcp"
   },
   "keywords": [
     "mcp",

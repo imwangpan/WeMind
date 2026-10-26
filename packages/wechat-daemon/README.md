@@ -1,14 +1,19 @@
-# wemind
+# @wemind/cli — 命令 `wemind`
 
 > **你的 AI 大脑，挂在微信上。** 常驻微信 Bot 守护进程：自己长轮询 iLink 收消息 → 调常驻 **ACP 大脑**生成回复 → 自动回发。支持**远程任务（worker）**、**多账号**、收发图/文件。
 
 [WeMind](https://github.com/imwangpan/WeMind) monorepo 的完整应用包；只依赖内核 `@wemind/wechat-ilink-core`（构建时已内联进单文件产物），不碰 MCP 层，可独立运行。
 
+> **包名 `@wemind/cli` ≠ 命令名 `wemind`。** 与 `@modelcontextprotocol/*`、`@angular/cli`、`@openai/codex` 的惯例一致：包收在 scope 下，命令保持短名。因为包名与 bin 名不同，**`npx` 不会自动挑 bin，必须写全包名**。
+
 ## 安装
 
 ```bash
-npm i -g wemind          # 或者：npx wemind <命令>
-wemind version           # wemind 1.1.0 (node 24.x, win32-x64)
+npm i -g @wemind/cli     # 安装后得到 wemind 命令
+wemind version           # → wemind 1.0.0 (@wemind/cli, node 24.x, win32-x64)
+
+# 不安装、一次性运行（注意是包名 @wemind/cli，不是 wemind）
+npx -y @wemind/cli list
 ```
 
 要求：**Node.js >= 20**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / 桌面端 `dsh` 等；未配置时自动探测 `kiro → opencode → gemini → deepseek`）。
@@ -64,7 +69,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 
 ## 与 MCP 形态的区别
 
-| | `wemind`（本包） | `@wemind/wechat-mcp` |
+| | `@wemind/cli`（命令 `wemind`） | `@wemind/wechat-mcp` |
 | --- | --- | --- |
 | 驱动 | 自己常驻、自己调大脑 | 随 MCP 客户端生命周期，被动调工具 |
 | 大脑 | 独立 ACP agent 进程 | 就是 MCP 客户端背后的模型 |
