@@ -117,13 +117,14 @@ pwsh -NoProfile -File scripts/check-docs.ps1         # 检查 Markdown 相对链
 
 ## 6. 已知坑 / 文档漂移（2026-10-24 已核对）
 
-- **默认大脑不是 kiro**：未配置时是 `auto`，按 `kiro → opencode → gemini → deepseek` 探测；落盘配置在 `<数据目录>/brain.json`。
+- **默认大脑不是 kiro**：未配置时是 `auto`，按 `kiro → opencode → gemini → deepseek → qoder` 探测；落盘配置在 `<数据目录>/brain.json`。
 - **DeepSeek 已内置预设**：官方 DSH `dsh --profile acp`；桌面端通常要用 `wemind brain set deepseek --bin "<...>\dsh.cmd"` 落绝对路径，并依赖 `DSH_HOME` 沙箱里的 `.credentials.yaml`（从 `~/.dsh` 同步）。微信 brain/worker E2E、动态 MCP（`mcpViaAcp`）、记忆/技能继承均已验证。详见 [`docs/接入-DeepSeek.md`](docs/接入-DeepSeek.md)。
 - **「无需改代码」有边界**：只对满足「有 `session/load`、不发反向请求、首帧快、MCP 走配置文件」的 agent 成立。DSH 不满足，但已用预设字段 + M2 适配补齐。
 - **仓库没有 `Brain` 接口（当前建议）**：ACP agent 本身就是大脑边界；目前只有 ACP 一种实现，当前建议先不抽接口，避免增加间接层。等真的要做「裸 API 大脑」时再抽 `ask/newSession/restart` 契约，并同步 `index.ts` 调用方。
 - **`wemind brain check` 默认 60s**：冷启动慢的 agent 仍可能误报；这是已知项，不要把它当「agent 不可用」的唯一证据。
 - **`onPath()` 按精确文件名**：只有 `dsh.cmd` 没有无扩展名 `dsh` 时，`binWin` 必须写 `dsh.cmd`。
 - **DSH 0.2.1-rc.2 实测**：无 `session/load`（`-32601`）、`image:false`（带图 `-32602`）、有 `session/resume`；**resume 后多轮上下文保留**（PINEAPPLE，含 `taskkill /T /F` 强杀）；stdio/HTTP MCP 可用；会发 `agent_thought_chunk`/`tool_call`/`usage_update`；stdout 会混入非 JSON 日志行（解析器要容错）。
+- **Qoder 已内置预设**：`qoder` → `qodercli --acp --yolo`（**直接起本体**，不要用 `qoder` 分发器，它多套一层 `cmd → powershell`）；`QODER_CONFIG_DIR` 指向沙箱，登录态要同时同步 `.auth/user` + `.auth/machine_id`（缺一个就 `Authentication required`）；`~/.qoder` 与 Qoder Desktop 共用，沙箱设置由 `settingsBase` 复制（剥离 `providers`/`model`，防 BYOK 明文密钥进沙箱）。M0/M1 已验证。详见 [`docs/接入-Qoder.md`](docs/接入-Qoder.md)。
 - **DSH 模型路由是坑**：`session/new` 默认 `deepseek-official`（需 `DEEPSEEK_API_KEY`）；桌面登录态对应 `deepseek-account`，必须用 `session/set_config_option { configId:"model", value:'["deepseek-account","deepseek-flash"]' }` 显式切换，否则报 `no API key`。
 - **节点版本**：仓库声明 Node ≥20；DSH CLI 需要 ≥22（本机 Node 24 可用）。
 
@@ -154,6 +155,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1         # 检查 Markdown 相对链
 - 接入其它 agent：[`docs/接入其它-ACP-Agent.md`](docs/接入其它-ACP-Agent.md)
 - OpenCode 接入实测：[`docs/接入-OpenCode.md`](docs/接入-OpenCode.md)
 - DeepSeek 评估与实测：[`docs/接入-DeepSeek.md`](docs/接入-DeepSeek.md)
+- Qoder 接入设计与实测：[`docs/接入-Qoder.md`](docs/接入-Qoder.md)
 - DeepSeek 后续待办（M3–M5）：[`docs/待办-DeepSeek-M3-M5.md`](docs/待办-DeepSeek-M3-M5.md)
 - 机器可读索引：[`llms.txt`](llms.txt)
 

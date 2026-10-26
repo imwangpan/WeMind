@@ -34,6 +34,7 @@ export type AcpAgentPreset = {
   name: string;
   bin: string; // PATH 上的二进制名（非 Windows）
   binWin?: string; // Windows 下可执行名（默认在 bin 后加 .exe）
+  fallbackBinPaths?: string[]; // PATH 上找不到时的已知安装位置（如官方安装器的固定目录）
   args: string[]; // 进入 ACP 模式的启动参数
   homeEnvVar?: string; // agent 读取其配置/数据目录的环境变量名；指向 brain 沙箱。留空=不设置
   shell?: boolean; // 是否经 shell 启动（npx/.cmd/.bat 类适配器在 Windows 需要 true）
@@ -52,7 +53,9 @@ export type AcpAgentPreset = {
   firstFrameMs?: number; // 首帧超时覆盖（默认 25s；慢启动/committed-only agent 可放宽）
   heartbeatMs?: number; // 静默期心跳间隔覆盖（默认 15s；有 thought/tool/usage 帧的 agent 通常不需要）
   images?: boolean; // 是否接受图片输入（默认 true；DSH 官方 0.2.1-rc.2 为 false）
-  credentialFile?: string; // 需要从 realHome 同步进沙箱的凭据文件（相对路径；如 DSH 的 .credentials.yaml）
+  credentialFiles?: string[]; // 需要从 realHome 同步进沙箱的凭据文件（相对配置目录；新者胜）
+  identityFiles?: string[]; // 必须与 realHome 保持一致的标识文件（相对配置目录；内容不同即覆盖）
+  settingsBase?: string; // 以 realHome 下该文件为基底生成沙箱设置（剥离 MCP/插件/自定义供应商并关自动更新）
   model?: string; // 需要 session/set_config_option 选择的模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）
   mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
 };
@@ -124,13 +127,43 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     realHome: path.join(os.homedir(), ".dsh"),
     inheritDirs: ["skills"],
     inheritFiles: ["AGENTS.md"],
-    credentialFile: ".credentials.yaml",
+    credentialFiles: [".credentials.yaml"],
     restore: "resume",
     firstFrameMs: 60_000,
     heartbeatMs: 60_000,
     images: false,
     model: '["deepseek-account","deepseek-flash"]',
     mcpViaAcp: true, // 不写 mcp.json；激活集转成 ACP mcpServers 传给 session/new|resume
+  },
+
+  // Qoder CLI（官方原生 ACP，qodercli 1.1.78 实测）。
+  // - 直接起 qodercli.exe：`qoder` 是分发器（cmd → powershell → qodercli），多一层管道且会与 IDE 命令混淆；
+  // - QODER_CONFIG_DIR 指向 <沙箱>/qoder：与 Qoder Desktop 共用的 ~/.qoder 绝不写入；
+  // - 登录态要 .auth/user + .auth/machine_id 两个文件（只带 user 会 Authentication required）；
+  // - MCP 在 settings.json 的 mcpServers（与其它设置同文件），改后需重启进程 → 加载/卸载 MCP 的 restart 已覆盖；
+  // - --yolo 下工具调用不发反向请求；capabilities 有 load/resume/image；
+  // - providers（BYOK，含明文密钥）与 model 不继承，见 docs/接入-Qoder.md §5。
+  qoder: {
+    name: "qoder",
+    bin: "qodercli",
+    binWin: "qodercli.exe",
+    // 官方安装器的固定位置；pm2/服务里 PATH 可能不含它，故直接兜底
+    fallbackBinPaths:
+      process.platform === "win32"
+        ? [path.join(os.homedir(), ".qoder", "bin", "qodercli", "qodercli.exe")]
+        : [],
+    args: ["--acp", "--yolo"],
+    env: { QODER_CONFIG_DIR: `%HOME%${path.sep}qoder` },
+    realHome: path.join(os.homedir(), ".qoder"),
+    inheritDirs: ["skills", "agents", "commands"],
+    inheritFiles: ["AGENTS.md"],
+    configSubdir: "qoder",
+    mcpFormat: "kiro",
+    mcpConfigFile: "settings.json",
+    catalogFile: "settings.json",
+    settingsBase: "settings.json",
+    credentialFiles: [".auth/user"],
+    identityFiles: [".auth/machine_id"],
   },
 
   // —— 需适配器（CLI 不原生支持 ACP，经第三方适配器桥接；未实测）——
@@ -158,7 +191,7 @@ function onPath(exe: string): string | null {
  * 只收纳**原生 ACP 且二进制可直接判定**的预设——适配器类（`claude-code` 走 `npx`、
  * `codex` 走 `codex-acp`）不参与自动探测（`npx` 几乎总在 PATH 上，会把它们误选出来）。
  */
-export const AUTO_PROBE_ORDER = ["kiro", "opencode", "gemini", "deepseek"] as const;
+export const AUTO_PROBE_ORDER = ["kiro", "opencode", "gemini", "deepseek", "qoder"] as const;
 
 /** 预设在该平台的「可执行文件名」（用于 PATH 探测）。 */
 function presetExe(preset: AcpAgentPreset): string {
@@ -210,7 +243,9 @@ export type ResolvedAgent = {
   firstFrameMs?: number;
   heartbeatMs?: number;
   images: boolean;
-  credentialFile?: string;
+  credentialFiles: string[];
+  identityFiles: string[];
+  settingsBase?: string;
   model?: string;
   mcpViaAcp: boolean;
   /** 请求的原始值（来自 env / brain.json / 缺省 `auto`）。 */
@@ -243,21 +278,28 @@ export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
   }
   const preset = ACP_AGENT_PRESETS[key];
 
+  // brain.json 的 bin/args/shell/homeEnvVar 是**给落盘那个 agent** 的启动覆盖；
+  // 环境变量临时切到别的预设时不能沿用（否则会拿 deepseek 的 dsh.cmd 去起 qoder）。
+  const overrideCfg =
+    envKey && cfg?.agent?.trim() && cfg.agent.trim().toLowerCase() !== requestedKey ? null : cfg;
+
   const shellEnv = process.env.WEMIND_BRAIN_SHELL?.trim();
   const shell =
     shellEnv !== undefined && shellEnv !== ""
       ? shellEnv === "1" || shellEnv.toLowerCase() === "true"
-      : (cfg?.shell ?? preset.shell ?? false);
+      : (overrideCfg?.shell ?? preset.shell ?? false);
 
   // 二进制：env 覆盖 > (kiro 旧变量) > brain.json 覆盖 > PATH 解析 > 预设裸名。
   // 经 shell 启动时用裸名（让 shell 从 PATH 解析，避免带空格的全路径在 shell 下出问题）。
   const explicitBin =
     process.env.WEMIND_BRAIN_BIN?.trim() ||
     (preset.name === "kiro" ? process.env.KIRO_CLI_BIN?.trim() : undefined) ||
-    cfg?.bin?.trim() ||
+    overrideCfg?.bin?.trim() ||
     "";
   const exe = presetExe(preset);
-  const binPath = explicitBin ? locateBin(explicitBin) : onPath(exe);
+  const binPath = explicitBin
+    ? locateBin(explicitBin)
+    : (onPath(exe) ?? (preset.fallbackBinPaths ?? []).find((p) => fs.existsSync(p)) ?? null);
   const bin =
     explicitBin ||
     (shell ? (process.platform === "win32" ? exe : preset.bin) : binPath || preset.bin);
@@ -266,12 +308,14 @@ export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
   const argsOverride = process.env.WEMIND_BRAIN_ARGS?.trim();
   const args = argsOverride
     ? argsOverride.split(/\s+/)
-    : cfg?.args && cfg.args.length
-      ? cfg.args
+    : overrideCfg?.args && overrideCfg.args.length
+      ? overrideCfg.args
       : preset.args;
 
   const homeEnvVar =
-    process.env.WEMIND_BRAIN_HOME_ENV?.trim() || cfg?.homeEnvVar?.trim() || preset.homeEnvVar;
+    process.env.WEMIND_BRAIN_HOME_ENV?.trim() ||
+    overrideCfg?.homeEnvVar?.trim() ||
+    preset.homeEnvVar;
 
   // 继承「记忆/规则/技能」：来源目录与子目录清单按 agent 而异（下沉到预设），env 可覆盖
   const inherit =
@@ -304,7 +348,9 @@ export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
     firstFrameMs: preset.firstFrameMs,
     heartbeatMs: preset.heartbeatMs,
     images: preset.images ?? true,
-    credentialFile: preset.credentialFile,
+    credentialFiles: preset.credentialFiles ?? [],
+    identityFiles: preset.identityFiles ?? [],
+    settingsBase: preset.settingsBase,
     model: preset.model,
     mcpViaAcp: preset.mcpViaAcp ?? false,
     requestedKey,
@@ -327,6 +373,8 @@ export function agentProblem(ag: ResolvedAgent): string | null {
   if (!ag.available)
     return ag.name === "deepseek"
       ? `找不到 DeepSeek 的「${ag.bin}」。桌面端通常有 dsh.cmd；把它的绝对路径传给 \`wemind brain set deepseek --bin "<...>\\dsh.cmd"\``
-      : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <预设>\` 切换`;
+      : ag.name === "qoder"
+        ? `找不到 Qoder CLI 的「${ag.bin}」。官方安装会放在 ~/.qoder/bin/qodercli/ 并加入 PATH；确认后重开终端，或 \`wemind brain set qoder --bin "<...>\\qodercli.exe"\``
+        : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <预设>\` 切换`;
   return null;
 }

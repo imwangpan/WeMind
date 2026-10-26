@@ -58,20 +58,31 @@ function readJson(file: string): Record<string, unknown> | null {
   }
 }
 
-/** 同 brain：把凭据文件（如 DSH 的 .credentials.yaml）新者胜地同步进 worker 沙箱。 */
-function syncCredentialFile(): void {
-  if (!AG.credentialFile || !AG.realHome) return;
-  const src = path.join(AG.realHome, AG.credentialFile);
-  const dst = path.join(WORKER_CONFIG_DIR, AG.credentialFile);
+/** 同 brain：把凭据文件（如 DSH 的 `.credentials.yaml`、Qoder 的 `.auth/user`）同步进 worker 沙箱。
+ *  `newer`=新者胜；`always`=内容不同即覆盖（标识类文件必须与真实目录一致，见 mcp-sandbox.ts）。 */
+function syncCredentialFile(file: string, mode: "newer" | "always"): void {
+  if (!AG.realHome) return;
+  const src = path.join(AG.realHome, file);
+  const dst = path.join(WORKER_CONFIG_DIR, file);
   try {
     if (!fs.existsSync(src)) return;
     fs.mkdirSync(path.dirname(dst), { recursive: true });
+    if (mode === "always") {
+      const same = fs.existsSync(dst) && fs.readFileSync(src).equals(fs.readFileSync(dst));
+      if (!same) fs.copyFileSync(src, dst);
+      return;
+    }
     const s = fs.statSync(src);
     const d = fs.existsSync(dst) ? fs.statSync(dst) : null;
     if (!d || s.mtimeMs > d.mtimeMs + 1000) fs.copyFileSync(src, dst);
   } catch {
     /* best-effort */
   }
+}
+
+function syncCredentials(): void {
+  for (const f of AG.credentialFiles) syncCredentialFile(f, "newer");
+  for (const f of AG.identityFiles) syncCredentialFile(f, "always");
 }
 
 function loadCatalog(): Record<string, unknown> {
@@ -104,7 +115,8 @@ export function workerMcpServers() {
   const picked: Record<string, unknown> = {};
   for (const [name, def] of Object.entries(cat)) {
     if (ex.has(name)) continue;
-    if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true) continue;
+    if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true)
+      continue;
     picked[name] = def;
   }
   const { servers, skipped } = toAcpMcpServers(picked, { exclude: ex });
@@ -161,8 +173,43 @@ function syncOpencodeBase(): void {
   fs.writeFileSync(WORKER_MCP_JSON, JSON.stringify(parsed, null, 2), "utf-8");
 }
 
+/** Qoder 这类「设置与 MCP 同文件」的 agent：与 brain 相同的基底疗法（剥离 MCP/插件/自定义供应商 + 关自动更新）。 */
+function settingsBase(): Record<string, unknown> {
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(fs.readFileSync(path.join(AG.realHome!, AG.settingsBase!), "utf-8"));
+  } catch {
+    /* 缺失/损坏 → 空基底 */
+  }
+  const base =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? { ...(parsed as Record<string, unknown>) }
+      : {};
+  delete base.mcpServers;
+  delete base.enabledPlugins;
+  delete base.providers;
+  delete base.model;
+  const general = base.general;
+  base.general = {
+    ...(general && typeof general === "object" && !Array.isArray(general)
+      ? (general as Record<string, unknown>)
+      : {}),
+    enableAutoUpdate: false,
+  };
+  return base;
+}
+
+function syncSettingsBase(): void {
+  fs.mkdirSync(WORKER_CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(WORKER_MCP_JSON, JSON.stringify(settingsBase(), null, 2), "utf-8");
+}
+
 function syncSettings(): void {
   if (AG.mcpViaAcp) return; // 无文件式 settings/MCP 可继承；模型走 preset.model
+  if (AG.settingsBase && AG.realHome) {
+    syncSettingsBase(); // 不依赖 inherit：沙箱硬化（关自动更新）与隔离始终生效
+    return;
+  }
   if (!AG.inherit || !AG.realHome) return;
   if (AG.mcpFormat === "opencode") syncOpencodeBase();
   else syncKiroSettings();
@@ -235,5 +282,5 @@ export function ensureWorkerHome(): void {
   syncSettings(); // 先同步「非 MCP」设置（模型/免确认等）
   applyWorkerSandbox(); // 再写全量 MCP（除 wechat 等排除集）
   mirrorRealKiro(); // 链入记忆/steering/skills（sessions 仍隔离）
-  syncCredentialFile(); // 凭据（如 DSH 的 .credentials.yaml）
+  syncCredentials(); // 凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
 }

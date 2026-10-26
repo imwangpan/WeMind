@@ -96,7 +96,7 @@ poller（长轮询，不被大脑阻塞）
 | **反向请求** | agent 发给 client 的请求（`session/request_permission`、`fs/*`、`terminal/*`）；不应答会挂起 |
 | **committed-only** | agent 只在消息提交后发正文（非逐 token），如 DSH 官方 ACP |
 | **brain.json** | 账号级大脑选择，`<数据目录>/brain.json`；`wemind brain set` 写入 |
-| **auto** | 未配置时的探测顺序：`kiro → opencode → gemini → deepseek` |
+| **auto** | 未配置时的探测顺序：`kiro → opencode → gemini → deepseek → qoder` |
 
 ---
 
@@ -112,6 +112,9 @@ poller（长轮询，不被大脑阻塞）
 | 仓库存在 `Brain` 接口 | ⚪ **不存在** | `acp-brain.ts` 直接导出 `askBrain`/`newSession`/`restart` |
 | `wemind brain check` 默认 60s | ✅ 代码 | 冷启动慢的 agent 仍可能误报 |
 | `deepseek` 预设已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验 |
+| `qoder` 预设已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0 探针与 M1 沙箱/单测/`brain check` 已验，M3 真机 E2E 待做 |
+| Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |
+| Qoder 可免 `--bin` 绝对路径 | ✅ 代码 | `fallbackBinPaths` 兜底 `~/.qoder/bin/qodercli/qodercli.exe`；auto 探测仍只看 PATH |
 | `onPath()` 会补试 `.cmd` | ⚪ **不会** | 只有 `dsh.cmd` 时 `binWin` 必须写 `dsh.cmd` |
 | DSH `0.2.1-rc.2` 有 resume/list/close | ✅ 实测 | `docs/接入-DeepSeek.md` 附录 |
 | DSH `0.2.1-rc.2` 有 `session/load` | ❌ 实测 | `-32601 Method not found` |

@@ -78,6 +78,10 @@ acme: {
   // firstFrameMs: 90_000,
   // heartbeatMs: 60_000,
   // mcpViaAcp: true,
+  // fallbackBinPaths: [path.join(os.homedir(), ".acme", "bin", "acme-agent")], // 官方安装不在 PATH
+  // settingsBase: "settings.json",       // 以真实配置为基底（剥离 MCP/插件/providers/model、关自动更新）
+  // credentialFiles: [".auth/user"],     // 登录态（新者胜）
+  // identityFiles: [".auth/machine_id"], // 必须与真实目录一致（内容不同即覆盖）
 },
 ```
 
@@ -95,6 +99,8 @@ acme: {
 - `homeEnvVar` 指向 `BRAIN_HOME`；`configSubdir` 决定配置目录在沙箱内的位置。
 - `mcpFormat`：`kiro`（`mcpServers`）或 `opencode`（`mcp.servers`）；DSH 这类走 ACP 的用 `mcpViaAcp`，不要写文件。
 - 记忆继承：`realHome` + `inheritDirs` / `inheritFiles`；单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
+- 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时沙箱。
+- 设置继承：`settingsBase` 会在 brain/worker 两个沙箱生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）。
 - 默认空 MCP；`wechat` 永久禁止（防回环）。
 - **每个 agent 只读自己的 catalog**；不要把 kiro 的文件指给 DSH。
 
