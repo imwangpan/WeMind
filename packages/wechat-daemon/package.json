@@ -1,8 +1,18 @@
 {
   "name": "wemind",
-  "version": "1.0.1",
-  "description": "WeMind — your AI mind, reachable on WeChat. 常驻微信 AI 助手：自动收发 + 远程任务 + 多账号，自带 AI 大脑（默认 kiro-cli，任意 ACP agent 可接）。",
+  "version": "1.1.0",
+  "description": "WeMind — your AI mind, reachable on WeChat. 常驻微信 AI 助手：自动收发 + 远程任务 + 多账号，自带 AI 大脑（任意 ACP agent 可接，默认自动探测）。",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imwangpan/WeMind.git",
+    "directory": "packages/wechat-daemon"
+  },
+  "homepage": "https://github.com/imwangpan/WeMind/tree/main/packages/wechat-daemon#readme",
+  "bugs": {
+    "url": "https://github.com/imwangpan/WeMind/issues"
+  },
+  "author": "imwangpan",
   "bin": {
     "wemind": "dist/cli.js"
   },
@@ -12,16 +22,20 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "start": "node dist/cli.js"
+    "start": "node dist/cli.js",
+    "prepack": "node ../../scripts/prepack-guard.mjs ."
   },
   "keywords": [
+    "wemind",
     "wechat",
     "weixin",
     "ai",
     "agent",
     "bot",
     "acp",
-    "assistant"
+    "assistant",
+    "daemon",
+    "cli"
   ],
   "license": "MIT",
   "engines": {

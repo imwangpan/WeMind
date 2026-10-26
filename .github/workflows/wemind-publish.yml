@@ -1,0 +1,82 @@
+name: Publish wemind
+
+on:
+  push:
+    branches: [main]
+    # 发布包 wemind 及其内联依赖（core）或构建配置变更时运行检查。
+    paths:
+      - "packages/wechat-daemon/**"
+      - "packages/wechat-ilink-core/**"
+      - "scripts/prepack-guard.mjs"
+      - "scripts/check-version.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/wemind-publish.yml"
+  # 也可以在 GitHub Actions 页面手动运行。
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-wemind
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing（OIDC）+ provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: 校验版本号在三处一致（package.json / version.ts / package-lock.json）
+        run: node scripts/check-version.mjs
+      - name: Ensure npm supports trusted publishing
+        run: npm install --global "npm@^11.5.1"
+      - run: npm ci
+      - name: Install Rolldown Linux binding
+        run: |
+          binding_version="$(node -p "require('./node_modules/rolldown/package.json').optionalDependencies['@rolldown/binding-linux-x64-gnu']")"
+          npm install --no-save --ignore-scripts "@rolldown/binding-linux-x64-gnu@$binding_version"
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      # prepack 守卫会拒绝「忘了 build / bin 缺失」的空壳包。
+      - name: Verify npm package contents
+        run: npm pack --dry-run --workspace wemind
+      - name: Smoke test the packed CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --workspace wemind --pack-destination "$RUNNER_TEMP"
+          tgz="$(ls "$RUNNER_TEMP"/wemind-*.tgz | head -n1)"
+          mkdir -p "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$tgz" >/dev/null
+          ./node_modules/.bin/wemind version
+          ./node_modules/.bin/wemind help | head -n 2
+      # 只有当前版本尚未发布到 npm 时才会发布；代码变更后需提升版本号，否则只运行检查并跳过发布。
+      - name: Check whether this version is already published
+        id: version
+        shell: bash
+        run: |
+          package_name="$(node -p "require('./packages/wechat-daemon/package.json').name")"
+          package_version="$(node -p "require('./packages/wechat-daemon/package.json').version")"
+          if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${package_name}@${package_version} is already published; skipping publish."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish to npm
+        if: steps.version.outputs.publish == 'true'
+        run: npm publish --workspace wemind --provenance --access public

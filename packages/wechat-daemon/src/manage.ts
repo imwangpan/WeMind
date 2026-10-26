@@ -51,6 +51,7 @@ import {
   type BrainConfig,
 } from "./brain-config.js";
 import { checkAgent } from "./brain-check.js";
+import { CLI_VERSION, versionLine } from "./version.js";
 
 /**
  * WeMind 多账号管理 CLI。
@@ -133,7 +134,11 @@ function resolveKey(arg: string): string {
 
 /** 启动某账号的 daemon（方案 a：委托 pm2 常驻，跑 `wemind daemon`，注入 WECHAT_ACCOUNT）。 */
 function startDaemon(key: string, runner?: string): void {
-  const cliPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
+  // 用 process.argv[1]（即正在执行的 cli.js 绝对路径），而不是 dirname(import.meta.url)：
+  // 发布后 tsdown 把 manage.ts 内联进 dist/cli.js，两者恰好相同；但若将来拆成多 chunk，
+  // argv[1] 才是「用户装的那个 bin」，dirname(import.meta.url) 可能是 dist/chunks/ 下。
+  const cliPath =
+    process.argv[1] || path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
   // start 前先停现有任何 runner（pm2 app / builtin 看门狗），避免同账号双跑抢 token
   stopDaemon(key);
   const useRunner = (runner || process.env.WEMIND_RUNNER || "builtin").toLowerCase();
@@ -544,7 +549,7 @@ function requireDaemonAlive(key: string): void {
   const pid = readPid(accountDir(key), "daemon.pid");
   if (!aliveOurs(pid))
     throw new Error(
-      `账号 ${key} 的 daemon 未运行。先启动：node packages/wechat-daemon/dist/manage.js start ${key}`,
+      `账号 ${key} 的 daemon 未运行。先启动：wemind start ${key}（用 wemind list 查看状态）`,
     );
 }
 
@@ -630,6 +635,11 @@ export async function runManage(argv: string[]): Promise<void> {
   }
 
   switch (cmd) {
+    case "version":
+    case "--version":
+    case "-v":
+      console.log(versionLine());
+      break;
     case "login":
       await cmdLogin(label, autoStart, runner);
       break;
@@ -710,8 +720,8 @@ export async function runManage(argv: string[]): Promise<void> {
       break;
     }
     default:
-      console.log(`WeMind 多账号管理
-用法: node packages/wechat-daemon/dist/manage.js <command>
+      console.log(`WeMind 多账号管理（wemind v${CLI_VERSION}）
+用法: wemind <command>            其余：wemind version | help
 
   login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动归档（--start 顺带启动 daemon）
   list                           列出账号、别名、运行状态
