@@ -96,7 +96,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 
 本包（包名 `@wemind/cli`，命令 `wemind`）通过 GitHub Actions（[`.github/workflows/wemind-publish.yml`](../../.github/workflows/wemind-publish.yml)）发布到 npm。**下面的命令都在 WeMind 仓库根目录运行**，不是在 `packages/wechat-daemon` 子目录。
 
-> ⚠️ **本包比 `@wemind/wechat-mcp` 多一处要改**：版本号除了 `package.json` 和 `package-lock.json`，还有源码常量 `src/version.ts` 的 `CLI_VERSION`（`wemind version` 的输出就来自它）。漏改会让单测与 CI 直接失败——仓库自带 `npm run check:version` 专门挡这个。
+> ℹ️ **版本号只有一处来源**：`packages/wechat-daemon/package.json` 的 `version`。`src/version.ts` 在**运行时**读它（不再手写常量），所以改版本不会漏改源码。仓库提供 `npm run release:*` 一步到位，并自动跑一致性自检。
 
 ### 第一步：判断要不要发版
 
@@ -116,41 +116,32 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 | `minor` | `1.0.0` → `1.1.0` | 新增向后兼容的能力（如新增内置大脑预设、新增子命令） |
 | `major` | `1.0.0` → `2.0.0` | 不兼容改动（如删子命令、改数据目录布局、改 CLI 参数） |
 
-### 第三步：升版本号（三处必须同步）
-
-**方式 A：用 npm 改 `package.json` + lock，再手改 `version.ts`（推荐）**
+### 第三步：升版本号（一条命令）
 
 ```powershell
-# ① 改 package.json 与 package-lock.json
-npm version patch --workspace @wemind/cli --no-git-tag-version
+npm run release:patch    # 1.1.0 → 1.1.1（Bug 修复）
+npm run release:minor    # 1.1.0 → 1.2.0（向后兼容的新功能）
+npm run release:major    # 1.1.0 → 2.0.0（不兼容改动）
 
-# ② 手工同步源码常量（npm 不会帮你改这个）
-#    编辑 packages/wechat-daemon/src/version.ts：
-#    export const CLI_VERSION = "1.0.1";   ← 与上一步的版本一致
-
-# ③ 自检三处是否一致（不一致会 exit 1）
-npm run check:version
+# 也可以直接指定版本，或先演练（不改任何文件）
+npm run release:minor -- --dry-run
+node scripts/bump-version.mjs 1.4.2
 ```
 
-- `--workspace @wemind/cli`：只动本包，不改根项目、mcp、core 的版本；
-- `--no-git-tag-version`：不自动创建 commit 或 tag，改完由你自己检查提交。
+脚本（`scripts/bump-version.mjs`）内部做三件事：
 
-**方式 B：全部手动**
+1. `npm version <type> --workspace @wemind/cli --no-git-tag-version` —— 改 `package.json` 与 `package-lock.json`，且**不**自动 commit / tag；
+2. 跑 `scripts/check-version.mjs` 自检：包名对不对、`bin` 是否仍叫 `wemind`、lock 是否同步、**`src/version.ts` 有没有被改回硬编码版本号**（改回去会让版本重新分裂成两处）；
+3. 打印下一步该执行什么。
 
-1. 编辑 `packages/wechat-daemon/package.json` 的 `"version"`；
-2. 编辑 `packages/wechat-daemon/src/version.ts` 的 `CLI_VERSION`；
-3. 回到仓库根目录刷新锁文件：
-
-```powershell
-npm install --package-lock-only --ignore-scripts
-```
-
-> 不要手动编辑 `package-lock.json`。上面这条只重算 lockfile 元数据，不重装 `node_modules`、不跑依赖的安装脚本。
+> 想手动改也可以：只改 `packages/wechat-daemon/package.json` 的 `"version"`，然后
+> `npm install --package-lock-only --ignore-scripts` 刷新 lock。
+> **不需要**改 `src/version.ts`——它运行时读 package.json。不要手动编辑 `package-lock.json`。
 
 ### 第四步：本地校验
 
 ```powershell
-npm run check:version    # 包名 + 三处版本一致（package.json / version.ts / lock）
+npm run check:version    # 包名 / bin / lock / 无硬编码版本号
 npm run lint && npm run typecheck && npm run build && npm test
 npm pack --dry-run --workspace @wemind/cli    # 应看到 4 个文件：cli.js / cli.js.map / README.md / package.json
 ```
@@ -162,16 +153,16 @@ npm pack --dry-run --workspace @wemind/cli    # 应看到 4 个文件：cli.js /
 ### 第五步：提交并推送
 
 ```powershell
-git add packages/wechat-daemon/package.json packages/wechat-daemon/src/version.ts package-lock.json
+git add packages/wechat-daemon/package.json package-lock.json
 git add packages/wechat-daemon/src packages/wechat-ilink-core/src   # 有源码改动时
-git commit -m "chore: release @wemind/cli 1.0.1"
+git commit -m "chore: release @wemind/cli 1.1.1"
 git push origin main
 ```
 
 推送到 `main` 后，工作流依次执行：
 
 ```
-check-version（三处一致）→ npm ci → lint → format:check → typecheck → build → test
+check-version（包名 / bin / lock / 无硬编码版本号）→ npm ci → lint → format:check → typecheck → build → test
 → npm pack --dry-run（prepack 守卫确认包内容）
 → 把 tarball 真装到临时目录跑 wemind version / help（装包冒烟）
 → 检查 npm 上是否已存在该版本
@@ -194,9 +185,9 @@ wemind list                                         # 应能正确识别在跑�
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| CI 在 `check-version` 就红了 | 只改了 `package.json`，没同步 `version.ts` | 改 `CLI_VERSION` 后重推 |
-| CI 绿了但 npm 上没新版本 | 版本号没升，被跳过 | 升版本号后再推 |
-| CI 报 lock 版本不一致 | 没跑 `npm install --package-lock-only` | 补跑第三步 |
+| `check-version` 报「lock 版本不一致」 | 手改了 `package.json` 没刷新 lock | `npm install --package-lock-only --ignore-scripts`（或改用 `npm run release:*`） |
+| `check-version` 报「硬编码 CLI_VERSION 字面量」 | 有人把 `src/version.ts` 改回了常量写法 | 还原为 `readOwnVersion(...)`（版本号必须只来自 package.json） |
+| CI 绿了但 npm 上没新版本 | 版本号没升，被跳过 | `npm run release:patch` 后再推 |
 | `npm pack` 出来是空壳 | 没先 `npm run build` | 先 build 再 pack |
 | `prepack` 守卫拒绝发布 | 产物为空 / `bin` 缺失 / 声明了 sourcemap 但 `.map` 不在包里 | 按守卫提示补 build 或检查 `files` |
 | `npm publish` 报 403 / EOTP | 本地直发需要交互式 2FA | **不要本地发**，走 CI（Trusted Publisher 已配好） |

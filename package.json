@@ -18,6 +18,9 @@
     "daemon": "node packages/wechat-daemon/dist/cli.js daemon",
     "start": "node packages/wechat-mcp/dist/index.js",
     "check:version": "node scripts/check-version.mjs",
+    "release:patch": "node scripts/bump-version.mjs patch",
+    "release:minor": "node scripts/bump-version.mjs minor",
+    "release:major": "node scripts/bump-version.mjs major",
     "verify:publish": "npm run check:version && npm run build && npm pack --dry-run -w @wemind/cli -w @wemind/wechat-mcp"
   },
   "keywords": [

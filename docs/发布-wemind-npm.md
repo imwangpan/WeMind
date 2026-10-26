@@ -158,23 +158,26 @@ export const CLI_PID_MARKERS: string[][] = [["wemind", "cli.js"], ["run-daemon.p
 - `startDaemon()` 的 cli 路径改用 `process.argv[1]`（`import.meta.url` 目录作兜底）：发布后 tsdown 内联成单文件时两者相同，但将来拆 chunk 时只有 `argv[1]` 是「用户装的那个 bin」。
 - 新增 `version` / `--version` / `-v` 子命令；help 头部带版本号与包名。
 
-### 4.5 新增 `src/version.ts` + `src/version.test.ts`
+### 4.5 `src/version.ts` + `src/version.test.ts`（版本号单一来源）
 
-`CLI_VERSION` / `CLI_PKG_NAME` 常量 + `versionLine()`：
+`src/version.ts` 现在**不写死版本号**，运行时从本包 `package.json` 读：
 
 ```
-wemind 1.0.0 (@wemind/cli, node 24.21.0, win32-x64)
+wemind 1.1.0 (@wemind/cli, node 24.21.0, win32-x64)
 ```
 
-单测校验四个不变量：`CLI_VERSION == package.json.version`、`CLI_PKG_NAME == package.json.name`、**`name` 必须是 `@wemind/cli` 且 `bin` 必须叫 `wemind`**（防止有人「顺手」把 bin 也改成 `@wemind/cli`）、`versionLine()` 含命令名与包名。
+- 查找逻辑在 core 的 `readOwnVersion(import.meta.url, "@wemind/cli")`（与 `@wemind/wechat-mcp` 共用同一份）；必须传**本文件的** `import.meta.url`，否则命中的是 core 自己的 `package.json`。
+- 演进记录：最初 `CLI_VERSION` 是硬编码常量，`npm version` 不会同步它，漏改会造成「发了 1.2.0、`wemind version` 还报 1.1.0」；后来改为运行时读取，版本号**只剩 package.json 一处来源**，`npm version` 一步到位。
+- 单测校验：`CLI_VERSION == package.json.version`、`CLI_VERSION` 是合法 semver、源文件里**没有**硬编码版本号字面量、`CLI_PKG_NAME == package.json.name`、**bin 必须叫 `wemind`**、`versionLine()` 含命令名与包名。
 
 ### 4.6 新增 `scripts/prepack-guard.mjs`
 
 `npm pack`/`publish` 前检查：`files` 里每个目录存在且非空、`bin` 指向的文件存在且带 shebang。不满足 → **exit 1**，从源头杜绝空壳包。
 
-### 4.7 新增 `scripts/check-version.mjs`
+### 4.7 新增 `scripts/check-version.mjs` + `scripts/bump-version.mjs`
 
-校验：包名 = `@wemind/cli`、`bin` 含 `wemind`、`CLI_VERSION`/`CLI_PKG_NAME` 与 `package.json` 一致、lock 里 `packages/wechat-daemon` 的 `name`/`version` 一致。已实测：故意不同步时它会报错，`npm install` 后转绿。
+- `check-version.mjs`：包名 = `@wemind/cli`、`bin` 含 `wemind`、lock 里 `packages/wechat-daemon` 的 `name`/`version` 一致，且 `src/version.ts` **没有**回退成硬编码版本号字面量（回退会让版本重新分裂成两处）。
+- `bump-version.mjs`（`npm run release:patch|minor|major`）：一条命令完成「`npm version` 改 package.json + lock → 自检」，并在结尾打印下一步（build / pack 预演 / 提交 / 推送）。支持 `--dry-run`。
 
 ### 4.8 新增 `.github/workflows/wemind-publish.yml`
 
@@ -198,7 +201,7 @@ check-version（包名+版本一致性）→ npm ci → lint → format:check �
 ## 5. 一致性约束（发布期必须守住）
 
 1. **`dist/` 永不入库**（`.gitignore` 已忽略），产物只由 `npm run build` / CI 生成 → `prepack` 守卫兜底。
-2. **包名与版本同步**：改版本只改 `packages/wechat-daemon/package.json`，然后同步 `src/version.ts` 与 `npm install` 刷新 lock（`check-version` 会卡住 CI）。
+2. **版本号单一来源**：版本号只存在于 `packages/wechat-daemon/package.json`（`src/version.ts` 运行时读它）。升版本用 `npm run release:patch|minor|major`，`check-version` 会校验 lock 同步、并阻止源码回退成硬编码。
 3. **包名与命令名解耦，且都要守**：包名 `@wemind/cli`、命令 `wemind`。改任何一处都要同时看 README、`npx` 示例、CI 的 workspace 参数、`check-version.mjs`、`version.test.ts`。
 4. **内核改动要重新发布 `@wemind/cli`**：内核是内联的，`packages/wechat-ilink-core/**` 变更会触发本 workflow（paths 已包含）。
 5. **`engines.node: ">=20"`** 是承诺：构建 target 也是 `node20`；DSH CLI 这类大脑需要 node ≥22，那是**用户侧大脑**的要求，不写进本包 `engines`。
@@ -208,16 +211,15 @@ check-version（包名+版本一致性）→ npm ci → lint → format:check �
 ---
 ## 6. 每次发版检查清单（后续版本都照这个走）
 
-### 6.1 升版本号（三处必须同步）
+### 6.1 升版本号（一条命令）
 
 ```bash
-# 只改这一个文件里的 version
-#   packages/wechat-daemon/package.json   → "version"
-# 然后同步两处：
-#   packages/wechat-daemon/src/version.ts → CLI_VERSION
-#   npm install（刷新 package-lock.json 里的 packages/wechat-daemon.version）
-npm run check:version      # 不一致会直接 exit 1，挡住发版
+npm run release:patch      # 或 release:minor / release:major，也可 node scripts/bump-version.mjs 1.4.2
+# 脚本内部：npm version -w @wemind/cli（改 package.json + lock）→ 跑 check-version 自检 → 打印下一步
 ```
+
+> 版本号的**唯一来源**是 `packages/wechat-daemon/package.json`。`src/version.ts` 运行时读它，
+> **不需要也不会**手改；`check-version` 会阻止有人把它改回硬编码字面量（那会让版本重新分裂成两处）。
 
 ### 6.2 本地全绿
 

@@ -1,30 +1,13 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { readOwnVersion } from "@wemind/wechat-ilink-core";
 
 /**
- * 读取本包 package.json 的 version，用于 MCP server 上报版本号。
- * 从当前文件位置向上查找最近的 package.json：dev（src/）、tsc 产物（dist/）、
- * tsdown 打包产物（dist/index.js）三种布局下都会命中 mcp-server 自己的 package.json。
+ * 本包版本号，用于 MCP server 上报（`initialize` 握手时告诉客户端 server version）。
+ *
+ * **版本号唯一来源是 `package.json`**，运行时读取，不手写常量。
+ * 查找逻辑在 `@wemind/wechat-ilink-core` 的 `readOwnVersion()`（与 CLI 包共用一份）；
+ * 必须传**本文件的** `import.meta.url`，否则会命中 core 自己的 package.json。
+ *
+ * dev（`src/`）、tsc 产物（`dist/`）、tsdown 单文件产物（`dist/index.js`）三种布局下，
+ * 向上第一个 `name === "@wemind/wechat-mcp"` 的 package.json 都是本包自己的。
  */
-function readVersion(): string {
-  let dir = path.dirname(fileURLToPath(import.meta.url));
-  const { root } = path.parse(dir);
-  while (dir && dir !== root) {
-    const candidate = path.join(dir, "package.json");
-    if (fs.existsSync(candidate)) {
-      try {
-        const p = JSON.parse(fs.readFileSync(candidate, "utf-8")) as {
-          version?: string;
-        };
-        if (p.version) return p.version;
-      } catch {
-        // 格式损坏，继续向上找
-      }
-    }
-    dir = path.dirname(dir);
-  }
-  return "0.0.0";
-}
-
-export const VERSION = readVersion();
+export const VERSION = readOwnVersion(import.meta.url, "@wemind/wechat-mcp") ?? "0.0.0-unknown";

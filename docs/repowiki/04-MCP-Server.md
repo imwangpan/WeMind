@@ -27,7 +27,7 @@ packages/wechat-mcp/src/
 2. 若已登录（`loadAccount()` 有 token），打印连接信息并 `notifyStart` 通知上线；否则提示先调 `login_qrcode`；
 3. 注册 `SIGINT`/`SIGTERM` 优雅关停 —— 退出前 `notifyStop` 通知下线（best-effort）。
 
-`version.ts` 从当前文件位置向上查找最近的 `package.json` 读 version，这样在 dev（`src/`）、tsc 产物（`dist/`）、tsdown 单文件打包三种布局下都能命中正确的版本号。
+`version.ts` 是个 3 行的薄适配层：调 core 的 `readOwnVersion(import.meta.url, "@wemind/wechat-mcp")`，从**本包**的 `package.json` 读 version。查找逻辑与 CLI 包（`@wemind/cli`）共用同一份（都在 core），并且带 `name` 校验——只认自己包的 `package.json`，绝不会静默返回别人的版本。dev（`src/`）、tsc 产物（`dist/`）、tsdown 单文件打包三种布局下都能命中正确的版本号。
 
 ## 4.3 六个 MCP 工具
 

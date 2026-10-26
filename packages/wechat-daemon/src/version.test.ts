@@ -13,11 +13,20 @@ const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf-8
 };
 
 describe("CLI 版本号与包身份", () => {
-  it("version.ts 的 CLI_VERSION 与 package.json 的 version 一致", () => {
+  it("CLI_VERSION 来自 package.json 的 version（版本号只有一处来源）", () => {
+    // version.ts 不再硬编码版本号，而是运行时从 package.json 读。
+    // 这条断言就是那个契约：npm version 改 package.json 后，这里自动跟着变。
     expect(CLI_VERSION).toBe(pkg.version);
+    expect(CLI_VERSION).toMatch(/^\d+\.\d+\.\d+/);
   });
 
-  it("version.ts 的 CLI_PKG_NAME 与 package.json 的 name 一致", () => {
+  it("源文件里不再出现硬编码的版本号字面量", () => {
+    // 防止有人「顺手」把 CLI_VERSION 改回 `= "1.2.3"`：那样版本号又会分裂成两处。
+    const src = fs.readFileSync(path.join(pkgDir, "src", "version.ts"), "utf-8");
+    expect(src).not.toMatch(/export const CLI_VERSION\s*=\s*["']\d+\.\d+\.\d+/);
+  });
+
+  it("CLI_PKG_NAME 与 package.json 的 name 一致", () => {
     expect(CLI_PKG_NAME).toBe(pkg.name);
   });
 

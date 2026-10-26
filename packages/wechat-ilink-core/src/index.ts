@@ -4,6 +4,7 @@
  * MCP server 与 daemon 均依赖本包；自身不依赖任何「消费方」代码。
  */
 export * from "./config.js";
+export * from "./pkg-version.js";
 export * from "./api/types.js";
 export * from "./api/client.js";
 export * from "./api/error-codes.js";
