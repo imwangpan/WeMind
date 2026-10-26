@@ -8,22 +8,22 @@
 
 ## 0. 一句话版本（先看这段，30 秒判断能不能接）
 
-> WeMind 的大脑必须是一个**可启动的命令行程序**（daemon 以子进程方式运行它），并且**实现 ACP 协议**（原生实现，或经由 ACP 适配器桥接），通过**标准输入输出**交换 JSON-RPC 帧；其 ACP 实现至少要支持 `initialize`、`session/new`，以及能流式回包的 `session/prompt`。`session/load`、`session/resume`、图片输入、MCP 传输、反向请求这些是**可降级项**，按预设字段逐项适配。
+> WeMind 的大脑必须是一个**可启动的命令行程序**（executable CLI：daemon 以子进程方式运行它，spawn as a child process），并且**实现 ACP 协议**（implements the ACP protocol：原生实现 built-in，或经由 **ACP 适配器** adapter 桥接 bridged），通过**标准输入输出**（stdin/stdout，即 stdio）交换 **JSON-RPC** 帧；其 ACP 实现至少要支持 `initialize`、`session/new`，以及能**流式**（streaming）回包的 `session/prompt`。`session/load`、`session/resume`、**图片输入**（image input）、**MCP 传输**（MCP transport）、**反向请求**（reverse request）这些是**可降级项**（optional / degradable capabilities），按**预设字段**（preset fields）逐项适配。
 >
-> 反过来说：**没有 CLI 入口的裸 HTTP API**（OpenAI / Anthropic / Ollama 等）目前接不了——那需要抽象 `Brain` 接口并另写一个 HTTP 实现（仓库尚未立项，见 §9）。
+> 反过来说：**没有 CLI 入口的裸 HTTP API**（bare HTTP API，如 OpenAI / Anthropic / Ollama）目前接不了——那需要抽象 `Brain` 接口（`Brain` interface abstraction）并另写一个 HTTP 实现（见 §9）。
 
-拆成可判断的四个必要条件：
+拆成可判断的四个必要条件（four prerequisites）：
 
 | # | 条件 | 怎么判断 | 不满足怎么办 |
 |---|---|---|---|
-| 1 | 有**可执行入口**（CLI 或可被 `spawn` 的程序） | 终端里能直接跑起来 | 没有进程可启动 → 只能走 §9 的「第二档：裸 API 适配器」（未实现） |
-| 2 | **实现 ACP**，或有 **ACP 适配器** | 官方文档的 ACP / 「agent client protocol」章节；或社区适配器项目 | 有 CLI 但无 ACP → 找/写适配器（如 `claude-code-acp`、`codex-acp`）；见 §5 预设分类 |
-| 3 | ACP 实现覆盖**最小方法集** | 跑 [`scripts/acp-probe.mjs`](../scripts/acp-probe.mjs) 看 `initialize` + `session/new`；跑 `wemind brain check` 做真握手 | `session/new` 或流式 `session/update` 缺失 → 不可用，放弃 |
-| 4 | 能**完成自身认证**并在 daemon 环境里可解析 | 二进制在 `PATH` 上（或 `--bin` 给绝对路径）、模型/登录态已就绪 | 配 `--bin` 绝对路径、`homeEnvVar`、凭据同步；见 §7 平台注意 |
+| 1 | 有**可执行入口**（executable entry point：CLI 或可被 `spawn` 的程序） | 终端里能直接跑起来 | 没有进程可启动 → 只能走 §9 的「第二档：裸 API 适配器」（未实现） |
+| 2 | **实现 ACP**（implements ACP），或有 **ACP 适配器**（ACP adapter） | 官方文档的 ACP / 「agent client protocol」章节；或社区适配器项目 | 有 CLI 但无 ACP → 找/写适配器（如 `claude-code-acp`、`codex-acp`）；见 §5 |
+| 3 | ACP 实现覆盖**最小方法集**（minimal method set） | 跑 [`scripts/acp-probe.mjs`](../scripts/acp-probe.mjs) 看 `initialize` + `session/new`；跑 `wemind brain check` 做真握手 | `session/new` 或流式 `session/update` 缺失 → 不可用，放弃 |
+| 4 | 能**完成自身认证**（agent's own authentication）并在 daemon 环境里可解析（resolvable on PATH / by absolute path） | 二进制在 `PATH` 上（或 `--bin` 给绝对路径）、模型/登录态已就绪 | 配 `--bin` 绝对路径、`homeEnvVar`、凭据同步；见 §7 平台注意 |
 
-> 「支持 ACP」这四个字**不足以**说明可用：同一协议的不同实现，能力差别很大。第 3 项才是真正决定能不能接入的那一步。
+> 「支持 ACP」这四个字**不足以**说明可用：同一**协议**（protocol）的不同**实现**（implementation），能力差别很大。第 3 项才是真正决定能不能接入的那一步。
 >
-> **术语约定**：本文用「**实现/支持 ACP**」而不是口语化的「说 ACP」——ACP 是协议（规范），实现才是一个程序；完整中英对照见 [`docs/ai/README.md`](ai/README.md) §4 术语表。
+> **术语约定**：本文用「**实现/支持 ACP**」而不是口语化的「说 ACP」——ACP 是协议（规范），实现才是一个程序；完整中英对照见 [`docs/ai/README.md`](ai/README.md) §4.1。
 
 ---
 

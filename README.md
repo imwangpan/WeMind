@@ -2,39 +2,65 @@
 
 > _Your AI mind, reachable on WeChat. —— 你的 AI 大脑，在微信上随时可达。_
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-27 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。
 
-WeMind 让 AI Agent 通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态（**两者都已发布到 npm**）：一个 MCP Server 包（`@wemind/wechat-mcp`），和一个常驻守护进程包（`@wemind/cli`，命令 `wemind`）。详见 [安装](#安装两种形态二选一) 与 [`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)。
+WeMind 让你的 AI 通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种用法（**两个包都已发布到 npm**）：
 
-### 「AI Agent」在 WeMind 里指什么
+| 你想做的事 | 安装 | 用到什么 |
+| --- | --- | --- |
+| 在 **Claude Desktop / Cursor / OpenCode / Kiro** 里让 AI 收发你的微信 | `npx -y @wemind/wechat-mcp` | MCP Server（`wemind-mcp`） |
+| 要一个**自己常驻、7×24 自动回复**的微信 AI 助手（还能远程派任务） | `npm i -g @wemind/cli` | 常驻 CLI（命令 `wemind`）+ 一个 AI 大脑 |
 
-本文多处出现「AI Agent」，共有三种角色，别混：
+```bash
+# 第二种用法的典型三步
+npm i -g @wemind/cli
+wemind login --label 主号 --start    # 微信扫码登录 + 启动常驻
+wemind list                          # 查看运行状态
+```
 
-| 角色 | 指什么 | 在哪出现 | 接入方式 |
-| --- | --- | --- | --- |
-| ① **MCP 客户端 agent** | 你已有的 AI 客户端（Claude Desktop / Cursor / OpenCode / Kiro 等） | 形态①：它自己调 `@wemind/wechat-mcp` 的工具、自己长轮询、自己生成回复 | 把 MCP server 配进它的配置即可，**不需要改 WeMind** |
-| ② **ACP 大脑 agent** | 一个**实现 ACP 协议**的命令行程序（`kiro-cli` / `opencode` / `gemini` / 桌面端 `dsh` …） | 形态②：daemon 把它**启动为子进程**，通过标准输入输出用 ACP 通信 | `wemind brain set <预设>` + `wemind brain check`；见 [切换大脑 Agent](#切换大脑-agent通用化) |
-| ③ **AI 编码助手（也就是你）** | 帮你改这个仓库的 coding agent（或人） | 开发本仓库时 | 先读 [AGENTS.md](AGENTS.md) → [docs/ai/README.md](docs/ai/README.md) |
+> ⚠️ **一个 bot token 只能有一个消费者**：两种用法别同时跑，否则互相抢消息。
+> ⚠️ **包名 ≠ 命令名**：装 `@wemind/cli`，敲 `wemind`；`npx` 必须写全包名（`npx -y @wemind/cli`）。
 
-**能接什么、不能接什么**（形态②最关键的一条）：
+**下一步**：**[新手教程](docs/新手教程.md)**（从零开始，含扫码、开机自启、常见问题）｜ **[安装详解](#安装两种形态二选一)** ｜ 遇到问题看 [常见问题](#常见问题)
 
-- ✅ **实现 ACP 的命令行程序**，或**有 ACP 适配器**的 CLI（如 Claude Code → `claude-code-acp`、Codex → `codex-acp`）——后者无需改 WeMind；
-- ✅ 判断标准是**四个必要条件**：有可执行入口、实现 ACP、覆盖最小方法集（`initialize`/`session/new`/流式 `prompt`）、能完成认证。`session/load`、`resume`、图片、MCP 传输、反向请求都是**可降级项**；
-- ❌ **没有 CLI 入口的裸 HTTP API**（OpenAI / Anthropic / Ollama 等）——目前接不了，需要另写「裸 API 大脑」实现（未立项）。若只是想让某个客户端用微信，走形态①更省事。
+### AI 大脑：能接什么 agent
 
-> 📖 完整判断流程与各 agent 实测结论：[`docs/接入其它-ACP-Agent.md`](docs/接入其它-ACP-Agent.md) §0 一句话版本 ｜ 中英术语口径：[`docs/ai/README.md`](docs/ai/README.md) §4.1
+常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置预设已覆盖 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder`，未配置时按此顺序自动探测。判断某个 agent 能不能用：
 
-> 🚀 **第一次用？** 看 **[新手教程](docs/新手教程.md)** —— 从零一步步搭起你的微信 AI（两种用法：接入现有 AI 客户端 / 常驻自动助手）。
->
-> 🤖 **AI agent / 新协作者**：先读 **[AGENTS.md](AGENTS.md)**，再按需看 **[docs/ai/README.md](docs/ai/README.md)**（压缩上下文 + 任务配方）。
+| 必要条件 | 说明 | 不满足怎么办 |
+| --- | --- | --- |
+| 有**可执行入口** | 终端里能直接跑起来，daemon 才能把它启动为子进程 | 纯 HTTP API（OpenAI / Anthropic / Ollama）没有进程可启动，**目前接不了** |
+| **实现 ACP**，或有 **ACP 适配器** | 原生：kiro / opencode / gemini / DSH / Qoder；需适配器：Claude Code、Codex | 找一个适配器（如 `claude-code-acp`）即可，无需改 WeMind |
+| 覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt` | 跑 `wemind brain check` 实测；缺失即不可用 |
+| 能**完成认证** | 模型/登录态就绪，二进制在 PATH 上或用 `--bin` 指定 | 配 `wemind brain set <预设> --bin "<绝对路径>"` |
 
-## 📖 文档 / RepoWiki
+```bash
+wemind brain                 # 看当前用的是哪个大脑
+wemind brain check           # 真起一次 ACP 握手，验证能不能用
+wemind brain set qoder       # 换大脑（按账号落盘，重启仍生效）
+```
 
-想深入理解架构、协议与运行机制，请看 **[docs/repowiki/](docs/repowiki/README.md)** —— 一份依据源码整理的完整技术 wiki（含 Mermaid 架构图）：
+> **「支持 ACP」不等于能用**：`session/load`、`session/resume`、图片输入、MCP 传输、反向请求都是**可降级项**，各家实现差别很大。完整判断流程、各 agent 实测结论见 **[docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)**。
+
+## 📖 文档导航
+
+按你的身份选入口：
+
+| 你是 | 从这里开始 |
+| --- | --- |
+| **第一次用** | [新手教程](docs/新手教程.md) —— 一步步搭起你的微信 AI |
+| **想直接上手配置** | [安装（两种形态）](#安装两种形态二选一) · [MCP 客户端配置](#快速开始) · [挂到 Claude Desktop](#claude-desktop) · [挂到 Cursor](#cursor--其他-mcp-客户端) |
+| **想换 AI 大脑** | [切换大脑 Agent](#切换大脑-agent通用化) · [接入其它 ACP Agent](docs/接入其它-ACP-Agent.md) · [OpenCode](docs/接入-OpenCode.md) · [DeepSeek](docs/接入-DeepSeek.md) · [Qoder](docs/接入-Qoder.md) |
+| **想用远程任务** | [使用指南-远程任务](docs/使用指南-远程任务（worker）.md) · [本地双入口](docs/本地双入口-命令派发与看敲.md) |
+| **运维 / 部署** | [部署与运维](docs/repowiki/10-部署与运维.md) · [跨平台常驻（pm2）](docs/跨平台常驻-pm2.md) · [数据目录与环境变量速查](docs/速查-数据目录与环境变量.md) |
+| **想改这个仓库 / 贡献代码** | [开发指南](docs/repowiki/11-开发指南.md) · [系统架构](docs/repowiki/02-系统架构.md) · [发布流程](docs/发布-wemind-npm.md) |
+| **AI 编码助手**（帮我改这个仓库的 agent） | 先读 [AGENTS.md](AGENTS.md) → [docs/ai/README.md](docs/ai/README.md)（含术语表与任务配方） |
+
+深入架构、协议与运行机制：[docs/repowiki/](docs/repowiki/README.md) —— 依据源码整理的完整技术 wiki（含 Mermaid 图）。
 
 | 入口                                                     | 内容                                                    |
 | -------------------------------------------------------- | ------------------------------------------------------- |
-| [AGENTS.md](AGENTS.md)                                   | **AI 首轮入口**：30 秒定位、硬约束、改哪里、已知坑     |
+| [AGENTS.md](AGENTS.md)                                   | **AI 编码助手入口**：30 秒定位、硬约束、改哪里、已知坑 |
 | [docs/ai/README.md](docs/ai/README.md)                   | AI 上下文包：术语、数据流、事实状态表、任务配方         |
 | [RepoWiki 首页](docs/repowiki/README.md)                 | 按角色的阅读导航 + 章节目录                             |
 | [系统架构](docs/repowiki/02-系统架构.md)                 | 三包协作、两种接入形态、poller/worker 解耦、双 ACP 进程 |
@@ -437,6 +463,37 @@ wemind login --label 工作号 --start
 | `revoke <key\|label> <userId>` | 撤销某用户的授权                                                        |
 
 **自启全部账号**：`scripts/run-all-daemons.ps1` 读注册表为每个账号起一个 daemon（各账号单实例守卫，重复运行安全）。Windows 启动文件夹的 VBS 已指向它，开机自动拉起所有已登记账号。
+
+## 常见问题
+
+**装完打不开 / 提示命令不存在**
+```bash
+wemind version                      # 确认装上且版本正确
+npm i -g @wemind/cli@latest         # 升级
+npx -y @wemind/cli version          # 不想全局装：注意写全包名，npx wemind 不行
+```
+
+**扫码后一直卡在加载**
+切到手机流量（关掉 WiFi）再扫一次；二维码过期会自动刷新（15 分钟内有效）。
+
+**登录成功但发给它没反应**
+1. `wemind list` 看是否「运行中」，`wemind brain check` 看大脑是否可用；
+2. 看日志：`~/.wemind/<账号>/daemon.log`，搜 `prompt ok`（有 = 大脑回了）或 `prompt FAIL`（有 = 大脑出错）；
+3. 大脑不可用会以致 **78** 退出并**停止自动重启**——先修大脑再 `wemind start <账号>`。
+
+**回复到一半停了 / 让我回「继续」**
+这是微信**连续发送上限（约 10 条）**的保护：进度消息也占额度。回复「继续」即可接着来；长任务建议拆小。
+
+**两个 bot 抢消息 / 同一条消息回两遍**
+同一 bot token **只能有一个消费者**。检查是否同时跑了 `wemind` 守护进程和 `@wemind/wechat-mcp`，或同一账号被启用了两套常驻（pm2 + 内置看门狗），二选一。
+
+**改了代码/升级后行为没变**
+正在运行的 daemon 不会自动换代码：`wemind stop <账号> && wemind start <账号>`。
+
+**安全提示**
+守护进程用 `--trust-all-tools`（kiro 预设），能给这个 bot 发消息的人即可让 AI 在本机执行工具。**唯一安全闸是发件人授权（allowFrom），扫码登录者自动授权，请勿清空**。详见 [安全说明](#安全说明)。
+
+更多排障：[docs/ai/recipes/debug-daemon.md](docs/ai/recipes/debug-daemon.md) ｜ 面向新手的完整 FAQ：[docs/新手教程.md](docs/新手教程.md) §常见问题
 
 ## 致谢
 

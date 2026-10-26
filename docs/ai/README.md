@@ -100,26 +100,64 @@ poller（长轮询，不被大脑阻塞）
 
 ### 4.1 中英术语对照（写作口径）
 
-写文档/回答问题时统一用「推荐中文」，英文原文只在首次出现时括注即可。
+**用法**：写文档/回答问题时用「推荐译法」；**英文原词只在首次出现时括注**（如「启动为子进程（spawn）」），之后不必重复。
+**原则**：① 有公认中文译名且不产生歧义的，一律用中文；② 是缩写、字面值或生态专名的（`stdio`、`CLI`、`ACP`、`brain`），保留原文；③ 代码、命令、API 名**永远**不翻译。
 
-| 英文 | 推荐中文 | 说明 / 别译成 |
+#### A. 进程与 I/O（最常被译错的一组）
+
+| 英文 | 推荐译法 | 详细说明（含义 · 为什么这样译 · 常见误译） |
 |---|---|---|
-| **spawn** | **启动（子进程）** / 派生 | `spawn` 是进程创建原语，Node 里是 `child_process.spawn()`。别译「生成」（易与数据生成混淆） |
-| **stdio** | **标准输入输出**（首次出现写全称，之后可保留 `stdio`） | `st`andar**d** **i**nput/**o**utput 的缩写，不是普通英文词；命令行参数/API 名里保持原文 |
-| **stdin / stdout / stderr** | 标准输入 / 标准输出 / 标准错误 | 同上，代码里保留原文 |
-| **CLI** | **命令行工具**（指程序）/ **命令行界面**（指形态） | 别译「客户端」；`kiro-cli`、`claude-code` 这类名字里的 CLI 不翻 |
-| **agent** | **agent** / 智能体 | 本文统一保留 `agent`（大量专名如 ACP agent、brain agent 依赖它） |
-| **ACP** | **ACP（Agent Client Protocol）** | 首次出现给全称，之后直接用 ACP |
-| **implement / support ACP** | **实现 / 支持 ACP** | **不要**写「说 ACP」——ACP 是协议（规范），程序是「实现」它。二元化的「会说/不会说」会掩盖「实现完备度不同」这个事实 |
-| **protocol / implementation** | **协议**（规范）/ **实现**（具体程序） | 混用是常见错误来源：`session/load` 是协议里可选的，不是「协议不支持」 |
-| **reverse request** | **反向请求** | ACP 允许 agent 向 client 发起请求（`session/request_permission`、`fs/*`、`terminal/*`） |
-| **capability** | **能力**（`agentCapabilities` 保留原文） | 指「这个实现支持哪些可选特性」，不是权限 |
-| **preset** | **预设** | `ACP_AGENT_PRESETS` 的一条 |
-| **fallback / degrade** | **降级 / 退化** | 如「缺 `session/load` 时退化为 `session/new`」 |
-| **sandbox** | **沙箱** | `BRAIN_HOME` / `WORKER_HOME` |
-| **watchdog** | **看门狗** | 崩溃重拉的外层循环 |
-| **idempotent** | **幂等** | — |
-| **daemon** | **守护进程** | 本文也直接用 daemon / 「常驻进程」 |
+| **spawn** | **启动（子进程）**；需强调父子关系时用「**派生**」 | 原义「产卵」，在操作系统语境是**创建并执行一个新进程**的通用说法（与 `fork`/`exec` 同族）。Node 里对应 `child_process.spawn()`：创建子进程、**立即执行**指定程序、把它的标准流交给父进程读写。<br>**为什么用「启动」**：中文技术语境里「启动一个进程/子进程」最自然、读者零成本理解；需要体现「它是我派生的、生命周期依附于我」时用「派生」。<br>**别译**：❌「生成」（与数据生成混淆）、❌「孵化」（无对应技术含义）、❌「唤起」（指唤醒休眠，不是创建）。 |
+| **stdio** | **标准输入输出**（首次写全称，之后可保留 `stdio`） | `st`andar**d** **i**nput / **o**utput 的缩写，指进程自带的三个流：标准输入（stdin）、标准输出（stdout）、标准错误（stderr）。<br>**为什么保留原文**：它不是普通英文单词，而是 Node API 名（`spawn(..., { stdio: "inherit" })`）和 CLI 参数的字面值，翻译后反而无法对应代码。<br>**别译**：❌「标准IO」（半中半英，不如写全称）、❌「控制台输出」（错，`stdio` 不等于终端）。 |
+| **stdin / stdout / stderr** | 标准输入 / 标准输出 / 标准错误 | 说明语境时用中文，引用代码/参数时保留原文（`stdio: ["ignore", logFd, logFd]`）。 |
+| **CLI** | 指**程序**时译「**命令行工具**」；指**形态/界面**时译「**命令行界面**」 | command-line interface 的首字母缩写。<br>**判断方法**：能「安装、运行」（如 `wemind` 是 CLI）→ 命令行工具；说「相比 GUI」（图形界面）这种对比 → 命令行界面。中文技术写作里**保留 CLI** 也完全可接受，尤其 `kiro-cli`、`claude-code` 这类名字里的 CLI 绝不能翻。<br>**别译**：❌「客户端」（CLI 与 client 是两回事：`@wemind/cli` 是命令行工具，MCP 客户端才是 client）、❌「命令行程序包」。 |
+| **daemon** | **守护进程** / 常驻进程 | 后台长期运行、无人值守的进程。本文也直接用 `daemon`（因为大量专名如 daemon 形态、`wechat-daemon` 目录依赖它）。 |
+| **watchdog** | **看门狗** | 外层监督循环：子进程退出后自动重拉。本文有 `runWatchdog()`、`wrapper.pid`。<br>**别译**：❌「监视器」（过泛）。 |
+| **wrapper** | **包装进程** / 外层 | 包在真正业务进程外面、负责保活/传参的那一层（`wrapper.pid`）。 |
+
+#### B. 协议与协议实现（最容易混淆的一组）
+
+| 英文 | 推荐译法 | 详细说明 |
+|---|---|---|
+| **ACP** | **ACP（Agent Client Protocol）** | 首次出现给全称，之后直接用 `ACP`。ACP 是**协议**：规定 client（WeMind daemon）与 agent 之间如何交换 JSON-RPC 消息。 |
+| **protocol** | **协议**（规范） | ⚠️ **协议是可选的，实现是可变的**：`session/load` 在 ACP 里是**可选方法**，写「协议不支持 load」是错的，正确说法是「这个 agent 的实现没有提供 `session/load`」。 |
+| **implementation** | **实现**（具体程序） | 一个程序对某协议的具体落地。同一协议的不同实现，完备度差别很大——这正是 WeMind 要给每个 agent 配 preset 的原因。 |
+| **implement / support ACP** | **实现 ACP** / **支持 ACP** | **不要写「说 ACP」**。理由：「会说/不会说」是二元判断，会掩盖「实现完备度不同」这个事实（有的实现支持 load、有的只有 resume、有的不发流式帧）。而「实现/支持」天然可分级。<br>更精确时用可验证的事实：「它以 ACP server 身份响应 `initialize`/`session/new`/`session/prompt`」。 |
+| **minimal method set** | **最小方法集** | WeMind 实际用到的 ACP 方法子集：`initialize` → `session/new` → `session/prompt` + 流式 `session/update`。缺任一即不可用。 |
+| **capability** | **能力**（保留 `agentCapabilities` 原文） | 指「这个实现支持哪些**可选特性**」（load/resume/image/mcp），**不是权限**。别译「权限」——权限是 permission，见下条。 |
+| **permission** | **权限** | 与 capability 区分：`agentCapabilities` 是能力声明；`session/request_permission` 是运行时**请求授权**。 |
+| **reverse request** | **反向请求** | ACP 的反向通道：**agent → client** 的请求（`session/request_permission`、`fs/read_text_file`、`terminal/create` 等）。与正常方向（client → agent）相反，故称「反向」。<br>⚠️ 关键：**不应答会挂起**。WeMind 内置应答器：权限默认拒绝、未知方法回 `-32601`。 |
+| **streaming** | **流式** | agent 边生成边推送增量（`session/update` 的 `agent_message_chunk`），而不是一次性返回完整答案。 |
+| **handshake** | **握手** | 连接建立时的协商：`initialize` 交换版本与 `agentCapabilities`。 |
+| **session** | **会话** | 一段带上下文的多轮对话。ACP 里由 `session/new`（新建）、`session/load` / `session/resume`（恢复）管理。 |
+| **handshake / probe** | **握手 / 探针** | 探针 = 主动探测能力的小脚本（本仓库 `scripts/acp-probe.mjs`、`wemind brain check`）。 |
+
+#### C. WeMind 内部概念
+
+| 英文 | 推荐译法 | 详细说明 |
+|---|---|---|
+| **brain** | **对话大脑** / `brain` | 常驻 ACP 进程，负责日常聊天问答（每用户一个 session）。因为大量代码/路径名含 brain，正文也直接写 `brain`。 |
+| **worker** | **任务工作机** / `worker` | 独立 ACP 进程，跑漫长任务，单 session，可「继续」续跑。 |
+| **preset** | **预设** | `ACP_AGENT_PRESETS` 里的一条配置：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承、能力覆盖等。 |
+| **sandbox** | **沙箱** | 隔离目录（`BRAIN_HOME` / `WORKER_HOME`），让 agent 读到的是干净配置而非你的真实配置。 |
+| **fallback / degrade** | **回退 / 降级（退化）** | 如「agent 缺 `session/load` 时**退化为** `session/new`（上下文丢失但能继续用）」。 |
+| **activation set** | **激活集** | 当前 brain 实际加载的 MCP 名单（`brain-mcps.json`），默认空。 |
+| **curated MCP** | **WeMind 写入的 MCP 配置** | 沙箱里由 WeMind 生成的 MCP 定义；`wechat` 永久禁止（防回环）。 |
+| **committed-only** | **仅提交后发正文** | 指 agent 不逐 token 推流、只在生成完成后一次性发正文（如 DSH 官方 ACP），需靠心跳兜底。 |
+| **idempotent** | **幂等** | 同一操作重复执行结果一致。 |
+| **atomic write** | **原子写** | 先写临时文件再 `rename` 覆盖，避免写一半被读到半截 JSON。 |
+
+#### D. 通用工程词（本项目高频）
+
+| 英文 | 推荐译法 | 说明 |
+|---|---|---|
+| **agent** | `agent`（保留英文）或「智能体」 | 本文保留 `agent`：大量专名依赖它（ACP agent、brain agent、coding agent），翻译反而更绕。**注意「AI Agent」在本文有三重含义**（MCP 客户端 / ACP 大脑 / 编码助手），见根 README 的区分。 |
+| **root cause / triage** | **根因 / 定位分类** | 排障时先说清属于哪层（poller / brain / worker / wrapper）。 |
+| **regression** | **回归** | 已修好的问题又出现；CI 里也指「跑全部测试」。 |
+| **provenance** | **来源证明** | npm 发布时的构建来源证明（`--provenance`），把包与某次 CI 构建绑定。 |
+| **prepack** | `prepack`（保留，npm 生命周期名） | `npm pack`/`publish` 前自动执行的钩子；本项目用它跑产物守卫。 |
+| **guard** | **守卫** | 如 `prepack-guard.mjs`：不满足条件就拒绝打包。 |
+| **smoke test** | **冒烟测试** | 最小可用性验证（本仓库：真装 tarball 跑 `wemind version`）。 |
 
 ---
 
