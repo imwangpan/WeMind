@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import QRCode from "qrcode";
 import {
   WEMIND_ROOT,
   accountDir,
@@ -220,12 +219,35 @@ function finalizeStaging(label?: string): { key: string; msg: string } {
   return { key, msg: `已归档：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}` };
 }
 
+/**
+ * 懒加载 `qrcode`：只有扫码登录要画二维码，`list` / `brain` / `task` / `daemon` 全用不上。
+ * 顶层 `import` 会让**每次**启动都付约 36ms（实测）解析 qrcode + yargs 依赖树；
+ * 这里在第一次画码时才加载，之后同进程内复用（登录过程会因过期刷新多次）。
+ * 用函数声明而非 `const QRCode = await import(...)`：后者在 ESM 顶层要多一层 TDZ 心智负担。
+ */
+let qrcodeMod: typeof import("qrcode") | undefined;
+
+async function loadQrCode(): Promise<typeof import("qrcode")> {
+  if (!qrcodeMod) {
+    try {
+      qrcodeMod = await import("qrcode");
+    } catch (e) {
+      throw new Error(
+        `无法加载二维码库 qrcode（依赖缺失或安装损坏）：${e instanceof Error ? e.message : String(e)}\n` +
+          "请重试安装：npm i -g @wemind/cli",
+      );
+    }
+  }
+  return qrcodeMod;
+}
+
 /** 一条命令完成扫码登录：自刷新二维码 + 终端码 + 自动开图 + 自动归档（→ 可选自动启动）。 */
 async function cmdLogin(
   label: string | undefined,
   autoStart: boolean,
   runner?: string,
 ): Promise<void> {
+  const QRCode = await loadQrCode(); // 只有登录路径才加载 qrcode
   fs.rmSync(STAGING, { recursive: true, force: true });
   fs.mkdirSync(STAGING, { recursive: true });
   const png = path.join(STAGING, "qrcode.png");
