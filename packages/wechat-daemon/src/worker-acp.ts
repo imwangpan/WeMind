@@ -363,11 +363,9 @@ async function ensureSession(key: string): Promise<string> {
       }
     }
   }
-  const res = (await request(
-    "session/new",
-    { cwd: effectiveCwd(), mcpServers },
-    REQ_TIMEOUT,
-  )) as { sessionId?: string };
+  const res = (await request("session/new", { cwd: effectiveCwd(), mcpServers }, REQ_TIMEOUT)) as {
+    sessionId?: string;
+  };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   await applyModel(res.sessionId);
   taskSessions.set(key, res.sessionId);

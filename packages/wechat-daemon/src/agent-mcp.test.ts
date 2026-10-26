@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 
-import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers, isConvertibleToAcp } from "./agent-mcp.js";
+import {
+  readMcpServers,
+  withMcpServers,
+  parseJsonc,
+  toAcpMcpServers,
+  isConvertibleToAcp,
+} from "./agent-mcp.js";
 
 describe("readMcpServers", () => {
   it("kiro：读 mcpServers", () => {
@@ -74,7 +80,15 @@ describe("toAcpMcpServers（mcpViaAcp 传输转换）", () => {
     });
     expect(skipped).toEqual([]);
     expect(servers).toEqual([
-      { name: "a", command: "node", args: ["s.js"], env: [{ name: "T", value: "1" }, { name: "U", value: "2" }] },
+      {
+        name: "a",
+        command: "node",
+        args: ["s.js"],
+        env: [
+          { name: "T", value: "1" },
+          { name: "U", value: "2" },
+        ],
+      },
     ]);
   });
 
@@ -94,8 +108,18 @@ describe("toAcpMcpServers（mcpViaAcp 传输转换）", () => {
       h3: { url: "https://w", headers: [{ name: "B", value: "2" }] },
     });
     expect(servers).toContainEqual({ name: "h1", type: "http", url: "https://x/y", headers: [] });
-    expect(servers).toContainEqual({ name: "h2", type: "http", url: "https://z", headers: [{ name: "A", value: "1" }] });
-    expect(servers).toContainEqual({ name: "h3", type: "http", url: "https://w", headers: [{ name: "B", value: "2" }] });
+    expect(servers).toContainEqual({
+      name: "h2",
+      type: "http",
+      url: "https://z",
+      headers: [{ name: "A", value: "1" }],
+    });
+    expect(servers).toContainEqual({
+      name: "h3",
+      type: "http",
+      url: "https://w",
+      headers: [{ name: "B", value: "2" }],
+    });
   });
 
   it("坏条目进 skipped（不抛），exclude 名单跳过", () => {

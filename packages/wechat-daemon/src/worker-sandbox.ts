@@ -104,7 +104,8 @@ export function workerMcpServers() {
   const picked: Record<string, unknown> = {};
   for (const [name, def] of Object.entries(cat)) {
     if (ex.has(name)) continue;
-    if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true) continue;
+    if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true)
+      continue;
     picked[name] = def;
   }
   const { servers, skipped } = toAcpMcpServers(picked, { exclude: ex });
