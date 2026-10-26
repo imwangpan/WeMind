@@ -69,7 +69,7 @@ poller（长轮询，不被大脑阻塞）
 
 关键点：
 
-- **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`；
+- **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`（键 `<agent>:<userId>`，换大脑不丢各自上下文）；
 - **worker 是第二个独立 ACP 进程**，单任务 session，映射在 `worker-sessions.json`；
 - **自愈**：prompt 超时/失败 → `reset()` 杀进程树 → 下条消息重建并尝试恢复会话；
 - **进度**：`tool_call` → 「步骤 N」；`agent_message_chunk` → 「正在整理回复」；任意 `session/update` → 刷新心跳基线；

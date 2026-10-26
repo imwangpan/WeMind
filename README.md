@@ -168,10 +168,10 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `account.json`                                | Bot Token、botId、userId、baseUrl（POSIX 下权限 600；**Windows 下为明文**，见「安全说明」）                 |
 | `state.json`                                  | 长轮询游标（`updatesBuf`）、各会话 `context_token`、`lastMessageId`（去重）                                 |
 | `qr_login.json` / `qrcode.png` / `qrcode.txt` | 扫码登录临时态与二维码（登录后即失效）                                                                      |
-| `brain-sessions.json`                         | `userId → ACP sessionId` 映射；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建） |
+| `brain-sessions.json`                         | `<agent>:<userId> → ACP sessionId` 映射（按大脑分命名空间，切换 agent 互不覆盖）；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建） |
 | `brain-mcps.json`                             | brain 当前激活的 MCP 集（默认空）                                                                           |
 | `brain-home/`                                 | brain 沙箱（由预设的 `homeEnvVar` 指向它；kiro 是 `KIRO_HOME`，opencode 是 `XDG_CONFIG_HOME`），含 agent 配置与 ACP 会话 |
-| `worker-sessions.json`                        | worker（远程任务）单任务 `ACP sessionId` 映射，daemon 重启后据此 `load`/`resume` 续传                      |
+| `worker-sessions.json`                        | worker（远程任务）单任务 `ACP sessionId` 映射（键 `<agent>:task`），daemon 重启后据此 `load`/`resume` 续传 |
 | `worker-home/`                                | worker 沙箱（同 brain 机制；MCP 继承**全量除 `wechat`** ＋ 记忆/技能/settings）                              |
 | `worker.pid`                                  | worker 大脑进程 pid（与 brain/用户会话区分、便于精确清理）                                                  |
 

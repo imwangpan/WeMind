@@ -62,7 +62,7 @@ graph TD
 
 ### 会话管理
 
-- **每用户一个 ACP session**，映射持久化到 `brain-sessions.json`（`userId → sessionId`），跨进程重建保上下文。
+- **每用户一个 ACP session**，映射持久化到 `brain-sessions.json`（键 `<agent>:<userId>`，按大脑分命名空间：切换 agent 后各自的会话互不覆盖，切回去仍能恢复），跨进程重建保上下文。
 - `newSession(userId)`：丢弃旧 session（含磁盘映射），重建全新会话（对应微信指令「新会话」）。
 - `restart()`：重启 ACP 进程（MCP 激活集变更后调用，重建后 `load`/`resume` 恢复）。
 

@@ -56,7 +56,7 @@ wemind brain check <key|label>
 |---|---|
 | `daemon.log` | daemon / acp / worker / task / watchdog 日志 |
 | `brain.json` | 账号级大脑选择 |
-| `brain-sessions.json` | `userId → sessionId` |
+| `brain-sessions.json` | `<agent>:userId → sessionId`（按大脑分命名空间） |
 | `brain-mcps.json` | 当前激活的 MCP |
 | `brain-home/` | brain 沙箱（agent 配置/会话） |
 | `worker-home/` | worker 沙箱 |

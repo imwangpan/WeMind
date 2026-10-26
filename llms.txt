@@ -67,6 +67,7 @@
 
 - Default brain selection is `auto`: `kiro → opencode → gemini → deepseek → qoder`; persisted in `<data>/brain.json`.
 - `session/load` is not universal. DSH 0.2.1-rc.2 returns `-32601`; it has `session/resume` instead.
+- Session maps are namespaced per brain: `brain-sessions.json` keyed `<agent>:<userId>`, `worker-sessions.json` keyed `<agent>:task`; legacy bare keys migrate to the current brain on first read (`session-map.ts`).
 - DSH 0.2.1-rc.2 advertises `promptCapabilities.image:false`; image prompts fail with `-32602`.
 - Qoder CLI 1.1.78 has load/resume/images/MCP and needs `.auth/user` + `.auth/machine_id` synced into the sandbox; its sandbox MCP lives in `settings.json.mcpServers`.
 - The repo has no `Brain` interface; `acp-brain.ts` exports `askBrain`/`newSession`/`restart`.

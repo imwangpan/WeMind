@@ -138,7 +138,13 @@ syncSettings():
 
 ### 4.4 协议层（`acp-brain.ts` + `worker-acp.ts`）
 
-**不改**。现有 load → resume → new 兜底、权限默认拒绝、未知方法回 `-32601`、图片透传都直接适用。
+协议方法层**不改**：现有 load → resume → new 兜底、权限默认拒绝、未知方法回 `-32601`、图片透传都直接适用。
+
+唯一落地改动是 **session 映射按 agent 分命名空间**（`brain-sessions.json` 的键 `userId` → `<agent>:<userId>`，`worker-sessions.json` 的键 `task` → `<agent>:task`）：
+
+- 起因：E2E 时账号 `brain.json` 仍是 deepseek，靠 `WEMIND_BRAIN=qoder` 临时切换；旧映射里的 DSH sessionId 被拿去 `session/load`，Qoder 回 `-32602 INVALID_SESSION_IDENTIFIER`，连试 load/resume 失败后才 `session/new`。功能能自愈，但白丢一轮上下文且日志噪音。
+- 现在：换大脑后各 agent 各自保留一条会话记录，切回去仍能 `load` 回原上下文；微信「新会话」只清当前 agent 的那条。
+- 兼容：读到旧格式（裸 `userId` / `task`）时归给当前 agent 并立即回写，无需手工迁移。
 
 ### 4.5 测试与文档
 
