@@ -28,6 +28,12 @@ try {
 const problems = [];
 const name = pkg.name ?? path.basename(pkgDir);
 
+/** child 是否就是 parent 或位于其内部（用于判断某产物是否被 files 覆盖）。 */
+function isUnder(parent, child) {
+  const rel = path.relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
 /** 目录非空 / 文件存在。 */
 function existsNonEmpty(p) {
   let st;
@@ -62,9 +68,20 @@ for (const [binName, target] of Object.entries(bins)) {
     problems.push(`bin「${binName}」指向的文件不存在：${target}（先跑 npm run build）`);
     continue;
   }
-  const head = fs.readFileSync(p, "utf-8").slice(0, 200);
-  if (!head.startsWith("#!")) {
+  const text = fs.readFileSync(p, "utf-8");
+  if (!text.startsWith("#!")) {
     problems.push(`bin「${binName}」缺少 shebang（#!）：${target}`);
+  }
+  // 引用了 sourcemap 就必须把 .map 一起带进包：否则用户报错时的行号指向一个不存在的映射，
+  // 等于「假装有 sourcemap」，比没有更误导。
+  const ref = text.match(/\/\/# sourceMappingURL=(\S+)\s*$/m);
+  if (ref) {
+    const mapPath = path.join(path.dirname(p), ref[1]);
+    if (!fs.existsSync(mapPath)) {
+      problems.push(`bin「${binName}」声明了 sourcemap（${ref[1]}）但该文件不存在`);
+    } else if (!(pkg.files ?? []).some((f) => isUnder(path.join(pkgDir, f), mapPath))) {
+      problems.push(`sourcemap ${path.relative(pkgDir, mapPath)} 不在 files 里，不会随包发布`);
+    }
   }
 }
 
