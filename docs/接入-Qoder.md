@@ -1,8 +1,8 @@
 # 接入 Qoder CLI（设计文档）
 
-> **状态**：M0 能力探针 **已完成 ✅** ｜ M1 预设 + 沙箱隔离 **已完成 ✅** ｜ M2 按 M0 结果为空 ｜ M3 真机 E2E 待做（2026-10-26）。
+> **状态**：M0 能力探针 **已完成 ✅** ｜ M1 预设 + 沙箱隔离 **已完成 ✅** ｜ M2 按 M0 结果为空 ｜ M3 真机 E2E **已完成 ✅**（2026-10-27）。
 > **实测环境**：Windows 11 / Node 24 / **Qoder CLI 1.1.78**（官方原生安装）/ WeMind 1.0.1。
-> **最后核对**：2026-10-26 ｜ **分支**：`feat/qoder-brain` ｜ 结论**仅适用于 qodercli 1.1.78**。
+> **最后核对**：2026-10-27 ｜ **分支**：`feat/qoder-brain` ｜ 结论**仅适用于 qodercli 1.1.78**。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](ai/recipes/add-acp-agent.md) · [接入-OpenCode.md](接入-OpenCode.md)（文件式 MCP 样板）· [接入-DeepSeek.md](接入-DeepSeek.md)（凭据同步样板）
 
 ---
@@ -17,7 +17,8 @@
   3. **登录态要同步两个文件**：`.auth/user` + `.auth/machine_id`（缺一个就报 `Authentication required`）；
   4. 设置继承：复制 `~/.qoder/settings.json` 作为基底（去掉 MCP/插件/自定义供应商键），并强制关闭自动更新。
 - 已定：用 `--yolo`；官方原生安装；**不复制 `providers`**（BYOK 含明文 `apiKey`，内置模型只需账号登录；`model` 一并剥离，避免指向已剥离的供应商）。
-- M1 状态：预设 + 沙箱已在 `feat/qoder-brain` 实现；typecheck / lint / format:check / 144 项单测全绿；`wemind brain check` 真机握手通过（约 2.4 s）。
+- M1 状态：预设 + 沙箱已在 `feat/qoder-brain` 实现；typecheck / lint / format:check / 155 项单测全绿；`wemind brain check` 真机握手通过（约 2.4 s）。
+- **M3 真机 E2E 全通过**：文字对话、发图识别、动态 `加载/卸载` MCP（真实调用并回环拒绝 `wechat`）、冷重启与换脑切换后 `session/load` 恢复、worker 派发 → 强杀中断 →「继续」续跑、`memory/` 继承生效；细节见 §2.1。
 
 ---
 
@@ -65,6 +66,19 @@ M1 期间补测（2026-10-26）：
 | Q9 | worker 的项目级 `.mcp.json` 会被自动加载吗 | **不会**（`--yolo` 也不加载）→ worker 不会被项目里的 `wechat` MCP 抢消息；仍建议项目侧不要放 `.qoder/` 配置（未单独实测） |
 | Q10 | `--setting-sources user` 能否简化继承 | ❌ 会直接 `Authentication required`，放弃；改用复制 `settings.json` 做基底 |
 
+### 2.1 M3 真机 E2E（2026-10-26 / 27）
+
+环境：daemon 跑在真实微信账号上，`WEMIND_BRAIN=qoder` 临时覆盖（`brain.json` 保持 deepseek，用于顺带验证切换隔离）。
+
+| # | 场景 | 结果 |
+|---|---|---|
+| M3-1 | 发图片（真实照片） | ✅ 回复准确描述画面（「大红苹果…巨型苹果雕塑」），`prompt ok 5650ms chunks=73`；`image:true` 落实到端到端 |
+| M3-2 | 动态 MCP：`列出 MCP` → `加载 wemind-test` → 让 agent 调工具 → `卸载` | ✅ 目录列出临时 MCP；加载后沙箱 `settings.json.mcpServers` 写入、`brain-mcps.json` 记录、ACP 自动重启；agent 真实调用并回 `pong from wemind-mcp-test`（临时 server 日志可见握手）；`加载 wechat` 被拒（防回环）；卸载后清理；真实 `~/.qoder/settings.json` 已按备份还原 |
+| M3-3 | worker：派发约 25 s 任务 → `taskkill /T /F` 强杀 worker → 微信「继续」 | ✅ 强杀后 `prompt FAIL → rebuild`，任务进入 waiting；「继续」触发重拉 + `session/load ok`，工具调用续跑，两步产物 `STEP-A-DONE` / `STEP-B-DONE` 齐全；`worker-sessions.json` 新增 `qoder:task` |
+| M3-4 | 冷重启后追问 | ✅ daemon 重启后首轮 `session/load ok`，上下文保留（配合 M3-3 的硬杀恢复，覆盖两种重启路径） |
+| M3-5 | 记忆/技能继承 | ✅ `memory/` junction 生效：大脑能读到日常 Qoder 写入的用户偏好（实测答出真实记忆里的内容）；`skills`/`agents`/`commands`/`AGENTS.md` 在 1.1.78 不存在，保持空操作 |
+| — | 切换隔离（会话映射分命名空间） | ✅ qoder 与 deepseek 各自 `session/load` 自己的 sessionId；来回切换不再出现 `-32602 INVALID_SESSION_IDENTIFIER`，切回时原上下文仍在 |
+| — | 日常 Qoder 登录态 | ✅ E2E 全程未被登出（token 轮换暂未观察到，见 §6） |
 
 ---
 
@@ -81,7 +95,7 @@ qoder: {
   env: { QODER_CONFIG_DIR: `%HOME%${path.sep}qoder` },  // 替换 global 配置目录 → 真正隔离
   configSubdir: "qoder",
   realHome: path.join(os.homedir(), ".qoder"),
-  inheritDirs: ["skills", "agents", "commands"],
+  inheritDirs: ["memory", "skills", "agents", "commands"],
   inheritFiles: ["AGENTS.md"],
   mcpFormat: "kiro",                   // 键名同为 mcpServers
   mcpConfigFile: "settings.json",
@@ -94,7 +108,7 @@ qoder: {
 
 - **不用 `homeEnvVar`**：大脑 `cwd` 就是沙箱根（[acp-brain.ts:287](../packages/wechat-daemon/src/acp-brain.ts)）。若配置目录也是沙箱根，`<cwd>/AGENTS.md` 会被当作用户级和项目级各读一次；放到 `<沙箱>/qoder` 避开。`%HOME%` 替换在 brain / worker / brain check 三处都已支持。
 - **不需要** `restore` / `firstFrameMs` / `heartbeatMs` / `images:false`——Q1/Q4/Q5 证明默认值适用。
-- ⚠️ **记忆/技能继承待核对**：`inheritDirs`/`inheritFiles` 按 opencode 惯例填了 `skills/agents/commands` + `AGENTS.md`，但本机 `~/.qoder` 下并没有这些（实际是 `memory/`、`external-commands/`、`qoder-knowledge/`），当前是空操作。Qoder 全局技能/规则的真实落点 M3 实测后再调整。
+- **记忆/技能继承（M3-5 已核对）**：Qoder 1.1.78 的用户级记忆落在 `~/.qoder/memory/`（agent 的用户画像/偏好），已加入 `inheritDirs` 并以 **junction 共享**——大脑与日常 Qoder 读写同一份记忆（写入会落到真实目录，与 kiro 的 `memories/` 一致）。`skills/agents/commands` 与 `AGENTS.md` 在本机不存在，当前是空操作，保留以便上游新增后自动生效。
 - `AUTO_PROBE_ORDER` 末尾追加 `qoder`，不影响老用户。
 
 ---
@@ -170,9 +184,10 @@ syncSettings():
 
 ## 6. 风险
 
-- **令牌轮换**：真实目录、brain 沙箱、worker 沙箱持有同一份 token。如果 Qoder 刷新时轮换 refresh token，某一份刷新后，另外几份可能失效（表现为日常 CLI/Desktop 或大脑被登出）。M3 需要观察；若出现，daemon 改用 PAT。
-- **共用 `~/.qoder`**：若将来把 skills/agents/commands 补进继承清单并以 junction 链入，大脑的写入会落到真实目录（与 kiro 现状一致）；其余一律只读复制。当前清单在本机是空操作（§3）。
-- **worker 的项目级 MCP**：worker `cwd` 是任务项目目录。Q9 实测项目根 `.mcp.json` **不会**被自动加载（`--yolo` 也不加载），回环风险大降；项目内 `.qoder/` 配置未单独实测，M3 观察。若发现问题，worker 追加 `--strict-mcp-config --mcp-config <worker 沙箱>/settings.json`。
+- **令牌轮换**：真实目录、brain 沙箱、worker 沙箱持有同一份 token。如果 Qoder 刷新时轮换 refresh token，某一份刷新后，另外几份可能失效（表现为日常 CLI/Desktop 或大脑被登出）。**M3 全程（含多次重启、换脑、worker 重建）未观察到登出**；仍建议在出现时改用 daemon 环境里的 `QODER_PERSONAL_ACCESS_TOKEN`。
+- **共用 `~/.qoder`**：`memory/` 以 junction 链入沙箱，**大脑的写入会落到真实目录**（与 kiro `memories/` 现状一致，已按此预期验证）；其余目录一律只读复制，不会回流。若将来 `skills/agents/commands` 真的出现，也会沿用同一机制。
+- **Qoder Desktop 的 MCP 可能不在 `settings.json`**：本机发现 `~/.qoder/mcp-router.json`（本地路由，端口由 Desktop 分配），Desktop 侧管理的 MCP 有机会只登记在路由里而不写 `mcpServers`。此时 `列出 MCP` 看不到它们——**这是预期行为**（沙箱只认 `settings.json`，也避免了 Desktop 配置被动继承）。
+- **worker 的项目级 MCP**：worker `cwd` 是任务项目目录。Q9 实测项目根 `.mcp.json` **不会**被自动加载（`--yolo` 也不加载），回环风险大降；项目内 `.qoder/` 配置**仍未单独实测**（M3 worker 跑在无 `.qoder/` 的临时目录）。若将来发现问题，worker 追加 `--strict-mcp-config --mcp-config <worker 沙箱>/settings.json`。
 - **CLI 升级**：结论只对 1.1.78 成立；沙箱关闭了自动更新，但真实目录的 CLI 会升级。升级后跑一次 `wemind brain check`。
 
 ---
@@ -184,5 +199,5 @@ syncSettings():
 | M0 ✅ | 安装 + 登录 + 探针 | 本文 §1/§2 |
 | M1 ✅ | 预设 + `settingsBase` + `credentialFiles` / `identityFiles` + 单测 | `npm run typecheck && npm test && npm run lint && npm run format:check` 全绿；`wemind brain check` 真机握手通过（临时数据目录，未动正在运行的 daemon） |
 | M2 ✅（空） | 协议适配 | 按 M0 结果为空，跳过 |
-| M3 | 真机 E2E：对话、发图、`加载 <MCP>`、重启后追问、worker 派发 → 中断 →「继续」 | `daemon.log` 出现 `prompt ok`；`wechat` 始终未加载；日常 Qoder 未被登出 |
-| M4 | 文档同步（§4.5）+ `check-docs.ps1` | 链接检查通过 |
+| M3 ✅ | 真机 E2E：对话、发图、`加载 <MCP>`、重启后追问、worker 派发 → 中断 →「继续」、记忆继承 | 全部通过，见 §2.1；`wechat` 始终未加载；日常 Qoder 未被登出 |
+| M4 ✅ | 文档同步（§4.5）+ `check-docs.ps1` | 链接检查通过 |

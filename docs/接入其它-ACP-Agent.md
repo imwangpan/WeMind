@@ -184,7 +184,7 @@ ACP agent 分两类，接入方式不同：
 | `kiro` | kiro-cli | 原生 | ✅ **已实测** | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
 | `opencode` | OpenCode | 原生 | ✅ **已实测** | `opencode acp`，`XDG_CONFIG_HOME`（详见 [接入-OpenCode.md](接入-OpenCode.md)） |
 | `deepseek` | DeepSeek Harness `dsh` | 原生（官方 ACP profile） | ✅ **已内置/已实测**：prompt / 工具 / resume 上下文 / stdio MCP；`load` ❌、`image:false`（收图友好拒绝） | `dsh --profile acp`，`DSH_HOME`；建议 `--bin` 绝对路径（详见 [接入-DeepSeek.md](接入-DeepSeek.md)） |
-| `qoder` | Qoder CLI `qodercli` | 原生（`--acp`） | ✅ **已内置/已实测**：`load`/`resume`、图片、stdio/HTTP/SSE MCP、`--yolo` 下 0 反向请求；M1 沙箱已验（详见 [接入-Qoder.md](接入-Qoder.md)） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`；直接起本体，**不要**走 `qoder` 分发器；需同步 `.auth/user` + `.auth/machine_id` |
+| `qoder` | Qoder CLI `qodercli` | 原生（`--acp`） | ✅ **已内置/已实测**：`load`/`resume`、图片、stdio/HTTP/SSE MCP、`--yolo` 下 0 反向请求；M1 沙箱 + M3 真机 E2E 均通过（详见 [接入-Qoder.md](接入-Qoder.md)） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`；直接起本体，**不要**走 `qoder` 分发器；需同步 `.auth/user` + `.auth/machine_id` |
 | `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --experimental-acp`，`GEMINI_CLI_HOME`（flag 以官方为准） |
 | `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @zed-industries/claude-code-acp`（Zed 官方适配器；需 Claude Code 登录或 `ANTHROPIC_API_KEY`） |
 | `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，需自行安装其二进制；Codex 本身暂不原生支持 ACP） |
@@ -236,7 +236,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 | `WEMIND_BRAIN_INHERIT=0` | 关闭继承 |
 
 - **kiro 已预置**：`realHome=~/.kiro`，`inheritDirs=steering,memories,skills,agents,powers,tasks,extensions`。
-- **qoder 已预置**：`realHome=~/.qoder`，`inheritDirs=skills,agents,commands`，`inheritFiles=AGENTS.md`。⚠️ 假设/待实测：本机 `~/.qoder` 目前**没有**这三个子目录与 `AGENTS.md`（实际是 `memory/`、`external-commands/`、`qoder-knowledge/`），所以当前是空操作；Qoder 全局技能/规则的落点需在 M3 核对后调整清单。
+- **qoder 已预置**：`realHome=~/.qoder`，`inheritDirs=memory,skills,agents,commands`，`inheritFiles=AGENTS.md`。M3 实测：`memory/`（用户画像/偏好）存在并以 junction 与日常使用共享，大脑可读到真实记忆；`skills/agents/commands` 与 `AGENTS.md` 在 Qoder 1.1.78 不存在，当前是空操作，保留以便上游新增后自动生效。
 - **其它 agent 默认不继承**：因为记忆机制差异大——例如 Gemini CLI / Claude Code 的「记忆」是**单个文件**（`GEMINI.md` / `CLAUDE.md`）而非目录，本机制（按目录 junction）不适用；需要时给预设填 `realHome`/`inheritDirs`，或用上面的环境变量。**单文件式记忆需另行处理**（本机制只链目录）。
 - 仅当目标 agent 用「配置目录 + 目录式记忆」模型时此继承才直接可用。
 

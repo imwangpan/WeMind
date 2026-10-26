@@ -342,7 +342,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC over stdio）** 
 >
 > **DeepSeek 已接入（官方 DSH，微信 brain + worker E2E 已通）**：`wemind brain set deepseek --bin "<...>\dsh.cmd"` 即用 `dsh --profile acp` 当大脑；预设已处理 `DSH_HOME` 沙箱、`.credentials.yaml`、`model=deepseek-account/deepseek-flash`、`session/resume`、**动态 MCP（`加载/卸载` 经 ACP `mcpServers` 生效）**、图片拦截。实测与限制见 **[docs/接入-DeepSeek.md](docs/接入-DeepSeek.md)**，M3–M5 结果见 **[docs/待办-DeepSeek-M3-M5.md](docs/待办-DeepSeek-M3-M5.md)**。
 
-> **Qoder 已内置预设（M1 已完成）**：`wemind brain set qoder` 即用 `qodercli --acp --yolo` 当大脑；预设处理 `QODER_CONFIG_DIR` 沙箱、`.auth/user` + `.auth/machine_id` 登录态同步、`settings.json` 基底（剥离 `providers`/`model`、关自动更新）、文件式 MCP。需先 `qoder login`。实测与限制见 **[docs/接入-Qoder.md](docs/接入-Qoder.md)**。
+> **Qoder 已内置预设（M0–M3 已完成）**：`wemind brain set qoder` 即用 `qodercli --acp --yolo` 当大脑；预设处理 `QODER_CONFIG_DIR` 沙箱、`.auth/user` + `.auth/machine_id` 登录态同步、`settings.json` 基底（剥离 `providers`/`model`、关自动更新）、文件式 MCP、`memory/` 记忆继承。需先 `qoder login`。实测与限制见 **[docs/接入-Qoder.md](docs/接入-Qoder.md)**。
 
 ### 收发图片
 

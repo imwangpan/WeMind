@@ -99,6 +99,7 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 为了让微信里的大脑和你日常使用读到**同样的记忆、规则、技能**，沙箱用目录 junction（Windows）/ symlink 把 agent 真实配置目录里的「知识/记忆」类子目录链进沙箱。
 
 - kiro 预置继承：`steering` / `memories` / `skills` / `agents` / `powers` / `tasks` / `extensions`；
+- qoder 预置继承：`memory`（用户画像/偏好，实测存在并已验读写共享）、`skills` / `agents` / `commands` + `AGENTS.md`（1.1.78 不存在，当前空操作）；settings 走 `settingsBase` 复制而非 junction；
 - 已是链接 → 不动；空的真实目录 → 删掉改建 junction；**非空真实目录（如 kiro 自建脚手架）→ 补拷缺失文件**（不删已有）。
 
 ### settings 继承（syncSettings）
