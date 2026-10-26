@@ -2,7 +2,7 @@
 
 > 上一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md) ｜ 下一页：[8. 数据存储与多账号](08-数据存储与多账号.md)
 >
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-27
 
 除了「对话大脑」，daemon 还能把**漫长任务**交给一个**受控的 ACP worker 进程**跑 —— 你在电脑上派发任务后离开，它在「需要你决策」（列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑。这就是**远程 human-in-the-loop（人在回路）**。
 
@@ -80,8 +80,8 @@ stateDiagram-v2
 | 项 | brain | worker |
 |---|-------|--------|
 | 进程 | 全局单例 1 个 | 独立单例 1 个（与 brain 并存） |
-| 会话 | 每用户一 session | 单任务一 session（固定 key=`task`） |
-| 持久化 | `brain-sessions.json` | `worker-sessions.json` |
+| 会话 | 每用户一 session | 单任务一 session（键 `<agent>:task`） |
+| 持久化 | `brain-sessions.json`（键 `<agent>:userId`） | `worker-sessions.json`（键 `<agent>:task`） |
 | cwd | `BRAIN_HOME` 沙箱 | **任务工作目录**（`WEMIND_WORKER_CWD`，默认主目录） |
 | 沙箱 home | `BRAIN_HOME`（默认空 MCP） | `WORKER_HOME`（继承全量 MCP 除 wechat） |
 | 超时 | idle 120s / cap 15min / 首帧 25s | idle 180s / cap 30min / 首帧 30s（更宽松） |
