@@ -47,13 +47,16 @@ npm test
 pwsh -NoProfile -File scripts/doctor.ps1
 
 # 3) 账号
-node packages/wechat-daemon/dist/cli.js list
+wemind list
 ```
+
+> 下文的 `wemind` 指已发布的 CLI（`npm i -g @wemind/cli`，安装后用 `wemind version` 验证）。
+> 在仓库里跑源码版时等价于 `node packages/wechat-daemon/dist/cli.js <子命令>`；两种方式操作同一份 `~/.wemind/` 数据。
 
 如果还没有账号：
 
 ```powershell
-node packages/wechat-daemon/dist/cli.js login --label 我的bot --start
+wemind login --label 我的bot --start
 ```
 
 > 登录会出二维码，需要你本人扫码；这一步无法由 CI 代跑。
@@ -63,8 +66,8 @@ node packages/wechat-daemon/dist/cli.js login --label 我的bot --start
 ## 2. 选大脑 & 自检
 
 ```powershell
-node packages/wechat-daemon/dist/cli.js brain <key>
-node packages/wechat-daemon/dist/cli.js brain check <key>
+wemind brain <key>
+wemind brain check <key>
 ```
 
 期望：`可用：✅ ...`，且 `brain check` 打印 `ACP 握手成功（initialize + session/new）`。
@@ -76,8 +79,8 @@ node packages/wechat-daemon/dist/cli.js brain check <key>
 ## 3. 启动
 
 ```powershell
-node packages/wechat-daemon/dist/cli.js start <key>
-node packages/wechat-daemon/dist/cli.js list
+wemind start <key>
+wemind list
 ```
 
 期望：`运行中(pid ...) brain(pid ...)`（brain 是懒启动，第一条消息后才有 pid）。
@@ -125,9 +128,9 @@ Get-Content "$env:USERPROFILE\.wemind\<key>\daemon.log" -Tail 80
 ### worker
 
 ```powershell
-node packages/wechat-daemon/dist/cli.js task "在任务目录创建一个 hello.txt，内容为 hello"
-node packages/wechat-daemon/dist/cli.js task-status <key>
-node packages/wechat-daemon/dist/cli.js task-reply "继续" <key>
+wemind task "在任务目录创建一个 hello.txt，内容为 hello"
+wemind task-status <key>
+wemind task-reply "继续" <key>
 ```
 
 微信端也可发 `任务：xxx` / `继续`。期望：`task-status` 有输出，任务目录出现文件。
@@ -172,11 +175,11 @@ MCP
 ## 8. 清理 / 回滚
 
 ```powershell
-node packages/wechat-daemon/dist/cli.js stop <key>
+wemind stop <key>
 # 清空 DeepSeek/某 agent 的对话记忆：
 #   删 <数据目录>/brain-sessions.json + brain-home/sessions/
 # 回退大脑：
-node packages/wechat-daemon/dist/cli.js brain set kiro --restart <key>
+wemind brain set kiro --restart <key>
 ```
 
 不要删 `account.json`，除非你要重新扫码登录。

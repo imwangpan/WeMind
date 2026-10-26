@@ -1,6 +1,6 @@
 # AGENTS.md — WeMind 的 AI 协作者入口
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24 ｜ **维护约定**：改代码时同步本文件；不确定的结论标注「假设/待实测」。
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26（`@wemind/cli@1.0.0` 已发布） ｜ **维护约定**：改代码时同步本文件；不确定的结论标注「假设/待实测」。
 >
 > 这份文件写给 AI agent，也写给人。**先读这里，再按链接深入**；不要一上来通读整个 `docs/repowiki/`。
 
@@ -8,16 +8,18 @@
 
 ## 0. 30 秒认识项目
 
-WeMind 把**个人微信**变成 AI agent 的输入输出通道，对外有两种形态：
+WeMind 把**个人微信**变成 AI agent 的输入输出通道，对外有两种形态（**两个包都已发布到 npm**）：
 
 | 形态 | 入口 | 谁长轮询 | 谁生成回复 | 协议 |
 |---|---|---|---|---|
-| ① MCP Server | `@wemind/wechat-mcp`（bin `wemind-mcp`） | MCP 客户端（Claude Desktop / Cursor / OpenCode / kiro…） | 客户端 agent | MCP over stdio |
-| ② daemon | `wemind`（`packages/wechat-daemon`） | daemon 自己 | daemon 调常驻 **ACP agent**（大脑） | ACP over stdio |
+| ① MCP Server | `npx -y @wemind/wechat-mcp`（bin `wemind-mcp`） | MCP 客户端（Claude Desktop / Cursor / OpenCode / kiro…） | 客户端 agent | MCP over stdio |
+| ② daemon | `npm i -g @wemind/cli` → 命令 **`wemind`**（源码 `packages/wechat-daemon`） | daemon 自己 | daemon 调常驻 **ACP agent**（大脑） | ACP over stdio |
 
-两种形态共享 `@wemind/wechat-ilink-core`（iLink 协议内核）。
+两种形态共享 `@wemind/wechat-ilink-core`（iLink 协议内核，`private`，构建时内联进上面两个包）。
 
 > **硬约束**：同一个 bot token **只能有一个消费者**。形态①和形态②不能同时跑，否则互相抢消息/回环。
+>
+> **命名硬约束**：包名 `@wemind/cli` ≠ 命令名 `wemind`（`bin` 字段决定命令）。`npx` 按包名解析，所以只能 `npx -y @wemind/cli`，不能 `npx wemind`。
 
 ---
 
@@ -74,10 +76,13 @@ npm run build        # core → daemon/mcp
 npm run typecheck
 npm test             # vitest
 npm run lint
+npm run check:version    # 包名+版本一致性（发布前必跑）
 npm run daemon       # 直接起 daemon（需已构建）
-node packages/wechat-daemon/dist/cli.js brain        # 查看当前大脑
-node packages/wechat-daemon/dist/cli.js brain check  # 真机 ACP 握手
-pwsh -NoProfile -File scripts/check-docs.ps1         # 检查 Markdown 相对链接
+wemind version       # 已安装的 CLI 版本（npm i -g @wemind/cli）
+wemind brain         # 查看当前大脑
+wemind brain check   # 真机 ACP 握手
+node packages/wechat-daemon/dist/cli.js brain   # 从源码跑等价命令
+pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 ```
 
 > 首次使用/环境不确定：先跑 [`scripts/doctor.ps1`](scripts/doctor.ps1)。
@@ -127,6 +132,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1         # 检查 Markdown 相对链
 - **DSH 0.2.1-rc.2 实测**：无 `session/load`（`-32601`）、`image:false`（带图 `-32602`）、有 `session/resume`；**resume 后多轮上下文保留**（PINEAPPLE，含 `taskkill /T /F` 强杀）；stdio/HTTP MCP 可用；会发 `agent_thought_chunk`/`tool_call`/`usage_update`；stdout 会混入非 JSON 日志行（解析器要容错）。
 - **DSH 模型路由是坑**：`session/new` 默认 `deepseek-official`（需 `DEEPSEEK_API_KEY`）；桌面登录态对应 `deepseek-account`，必须用 `session/set_config_option { configId:"model", value:'["deepseek-account","deepseek-flash"]' }` 显式切换，否则报 `no API key`。
 - **节点版本**：仓库声明 Node ≥20；DSH CLI 需要 ≥22（本机 Node 24 可用）。
+- **发布相关（2026-10-26 新）**：包已发布为 `@wemind/cli`（命令 `wemind`）；**包名 ≠ 命令名**，`npx` 只能写 `npx -y @wemind/cli`。改版本要同步三处（`package.json` / `src/version.ts` / lock），`npm run check:version` 会卡住不一致。`npm publish` **不会**自动 build，发前必须 `npm run build`。进程身份特征用 `wemind` + `cli.js`，**不是**源码目录名 `wechat-daemon`（否则发布版认不出自己）。详见 [`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)。
 
 ---
 
@@ -149,6 +155,8 @@ pwsh -NoProfile -File scripts/check-docs.ps1         # 检查 Markdown 相对链
 
 - AI 上下文包：[`docs/ai/README.md`](docs/ai/README.md)
 - 任务配方：[`docs/ai/recipes/`](docs/ai/recipes/)
+- **发布方案与检查清单（已发布 1.0.0）**：[`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)
+- 面向用户的新手教程：[`docs/新手教程.md`](docs/新手教程.md)
 - 项目概览：[`docs/repowiki/01-项目概览.md`](docs/repowiki/01-项目概览.md)
 - 系统架构：[`docs/repowiki/02-系统架构.md`](docs/repowiki/02-系统架构.md)
 - ACP 大脑与沙箱：[`docs/repowiki/06-ACP-大脑与沙箱.md`](docs/repowiki/06-ACP-大脑与沙箱.md)
