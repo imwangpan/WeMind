@@ -1,5 +1,7 @@
 # Daemon 后台常驻原理（详解）
 
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
+
 本文详细说明 WeMind 守护进程（daemon）如何做到「开机自启 + 一直在后台收发微信 + 崩了自动恢复」。常驻不是单一机制，而是**三层进程 + 一个看门狗循环 + 一套保活/隔离细节**的组合。
 
 > 相关文件：
@@ -114,7 +116,7 @@ if (-not $createdNew) { 记日志「已有实例在跑」; exit 0 }   # 抢不�
 
 大脑不是随 daemon 一起起的，而是**懒启动**：第一条消息到来、worker 调用 `askBrain` 时才 `spawn` 一个 ACP agent 进程（用哪个 agent 由账号 `brain.json` / `WEMIND_BRAIN` 决定，未配置则 `auto` 探测；见 [`接入其它-ACP-Agent.md`](接入其它-ACP-Agent.md)），之后**常驻复用**（每用户一个 ACP session，原生多轮记忆）。
 
-自愈：`session/prompt` 超时或失败 → 杀掉可能假死的 agent 进程 → 下一条消息重建，并用 `session/load` 按持久化的 sessionId 恢复上下文。所以大脑这层也有自己的「崩了重建」，且不丢对话历史。
+自愈：`session/prompt` 超时或失败 → 杀掉可能假死的 agent 进程 → 下一条消息重建，并用 `session/load`（不支持时 `session/resume`）按持久化的 sessionId 恢复上下文。agent 两者都不支持时只能新建会话；这不是「模型记性差」，是能力缺口。
 
 ---
 
@@ -185,7 +187,7 @@ foreach ($key in $accounts) {
 | 现象 | 机制层 | 表现 / 恢复 |
 |------|--------|------------|
 | daemon 崩溃（含旧的静默 `code=1`） | ① wrapper | 日志 `daemon exited (code=...)` → 5s 后重拉；已加全局异常处理器从源头减少崩溃 |
-| 大脑（agent）假死/超时 | ③ acp-brain | 杀进程 → 下条消息重建 + `session/load` 恢复上下文 |
+| 大脑（agent）假死/超时 | ③ acp-brain | 杀进程 → 下条消息重建 + `session/load`/`resume` 恢复上下文 |
 | 网络抖动 `getUpdates fetch failed` | ② poller | try/catch + 2s 后重试，不崩 |
 | 登录会话过期 `-14` | ② daemon | 暂停 1 小时，等重新登录后自动恢复 |
 | 重复启动 / 多实例 | ① Mutex | 抢不到锁的 wrapper 直接退出 |

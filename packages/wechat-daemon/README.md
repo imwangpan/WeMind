@@ -1,12 +1,12 @@
 # wemind
 
-> 脱离 kiro-cli 会话的**常驻微信 Bot 守护进程**：自己长轮询 iLink 收消息 → 调常驻 ACP 大脑生成回复 → 自动回发。支持**远程任务（worker）**与**多账号**。
+> 脱离 IDE/终端会话的**常驻微信 Bot 守护进程**：自己长轮询 iLink 收消息 → 调常驻 ACP 大脑生成回复 → 自动回发。支持**远程任务（worker）**与**多账号**。
 
 [WeMind](https://github.com/imwangpan/WeMind) monorepo 的常驻包；只依赖内核 `@wemind/wechat-ilink-core`，不碰 MCP 层，可独立运行。
 
 ## 能力
 
-- **对话大脑**：常驻 `kiro-cli acp`（或任意兼容 ACP 的 agent，见 `docs/接入其它-ACP-Agent.md`）当大脑，原生多轮记忆、流式拼接、存活检测自愈。
+- **对话大脑**：常驻 ACP agent（未配置时 `auto`：kiro → opencode → gemini → deepseek；见 `docs/接入其它-ACP-Agent.md`）当大脑，原生多轮记忆、流式拼接、存活检测自愈。**能力差异**（load/resume、image、MCP）按 agent 适配。
 - **远程任务（worker）**：把漫长任务交给受控 ACP worker，在「需要决策 / 中断」时推微信、回复注入续跑。两个入口管同一任务——微信 `任务：…`，或本地终端 `wemind task`。
 - **多账号**：每账号独立目录 / daemon / 会话；`wemind` 统一管理。
 - **健壮性**：typing 续命、连续发送上限治理、iLink 错误码分类、收发图/文件、收语音。

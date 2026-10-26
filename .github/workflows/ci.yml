@@ -21,6 +21,9 @@ jobs:
           npm install --no-save --ignore-scripts "@rolldown/binding-linux-x64-gnu@$binding_version"
       - run: npm run lint
       - run: npm run format:check
+      - name: Check docs links
+        shell: pwsh
+        run: ./scripts/check-docs.ps1
       - run: npm run typecheck
       - run: npm run build
       - run: npm test

@@ -4,6 +4,23 @@
 
 ## [Unreleased] — fork
 
+### Added
+
+- **微信派发 worker + 权限应答实测（2026-10-24）**：`任务：…` 微信入口派发 DSH worker 正常；越界写被沙箱拒后模型发起 `session/request_permission`，应答器默认拒绝且**不卡死**。顺带修复：daemon 重启后 `task-stop` 不清 `task-state.json` 的幽灵 waiting 状态（无活跃任务时也落盘 idle）。
+- **「正在输入」指示修复（2026-10-24）**：进度文本消息会把客户端刚显示的 typing 顶掉、旧 8s 续发间隔又赶不上快回合——现在**每条进度消息送达后立刻补发一次 typing**，续发间隔 8s→5s（小于客户端自动过期，防闪烁；brain 与 worker 一致），`setTyping` 失败记日志（区分偶发网络失败与 ticket 获取失败）。
+- **DeepSeek 官方 DSH 大脑（M1/M2，2026-10-24）**：新增 `deepseek` 预设（`dsh --profile acp`，`binWin: "dsh.cmd"`，`DSH_HOME` 沙箱，`.credentials.yaml` 从真实 `~/.dsh` 新者胜同步）；`session/set_config_option` 选 `deepseek-account/deepseek-flash`（桌面登录；默认 `deepseek-official` 需 API key）；`session/resume` 兜底（DSH 无 `load`）；反向请求应答器；预设级 `firstFrameMs`/`heartbeatMs`/`images`；图片在 `image:false` 时友好拒绝。真机验证：prompt、工具调用、强杀后 resume 上下文保留；代码级 `A1=STORED` / `A2=PINEAPPLE`；微信 brain E2E 与 worker E2E（`task` 写文件/`task-reply`/`task-stop`）均通过。详见 `docs/接入-DeepSeek.md`。
+- **DeepSeek 动态 MCP 注入（M3，2026-10-24）**：预设 `mcpViaAcp: true`——不写 MCP 配置文件；`agent-mcp.ts` 新增 `toAcpMcpServers()`（kiro/opencode/remote → ACP stdio/HTTP 声明，坏条目进 skipped，`isConvertibleToAcp` 供预校验）；`activeMcpServers()`/`workerMcpServers()` 把 brain 激活集 / worker 全量（除排除集）转换后随 `session/new|resume` 下发；`addMcp` 拒绝无法转换的定义（官方 DSH 遇起不来的 MCP 会回滚整会话）。真机验证：假 stdio MCP 在 new/resume 两轮都被模型真实调用（marker 两次），坏 MCP 回滚复现。
+- **DeepSeek M4/M5 验收（2026-10-24）**：记忆/技能继承真机验收（测试 skill + `AGENTS.md` 规则在 brain/worker 双沙箱生效，现场已还原）；多账号隔离机制验证（双数据目录各自沙箱/凭据/session）；`doctor.ps1` 升级守卫（dsh 版本 ≠ 0.2.1-rc.2 提示跑 `acp-probe` 回归）；`set_config_option` 失败路径验证；**微信侧动态 MCP 全链路 + 图片友好拒绝用户实测通过**（`session/resume ok ... mcp=[test-echo]`，工具真实调用返回 `MCP-OK`）。剩余开放项：图片输入（上游 `image:false`）、HTTP MCP 实测、双真机微信账号。
+
+### Docs
+
+- **AI 上手材料 + 文档漂移修正（2026-10-24）**：
+  - 新增根 `AGENTS.md`、`docs/ai/README.md`、`docs/ai/recipes/{add-acp-agent,add-mcp,debug-daemon,run-e2e}.md`、`scripts/doctor.ps1`、`scripts/acp-probe.mjs`、`scripts/check-docs.ps1`、`llms.txt`；CI 增加 Markdown 链接检查；
+  - 修正「任意兼容 ACP 的 agent 无需改代码」的绝对说法：`session/load` 并非通用能力（DSH 只有 `session/resume`），反向请求、首帧/心跳、`image:false`、MCP 传输都需按 agent 适配；
+  - 修正「默认大脑是 kiro」为 `auto`（`kiro → opencode → gemini → deepseek`）；
+  - 修正「仓库有 `Brain` 接口」的表述：当前只有 `acp-brain.ts` 的函数导出，API 适配档尚未实现；
+  - 给 README / repowiki / 接入指南补「适用版本 + 最后核对」与「实测/假设」标注；DeepSeek 0.2.1-rc.2 的实测见 `docs/接入-DeepSeek.md`。
+
 ### Changed
 
 - **命名收口：分清「项目 / 子包」（清掉上游遗留前缀）**：日志前缀由上游的 `[mcp-wechat]` 改为「按子包自报家门」——MCP server 用 `[wemind/wechat-mcp]`、内核提示用 `[wemind/wechat-ilink-core]`；MCP 消息的 `client_id` 前缀同步为 `wemind/wechat-mcp`、守护进程侧为 `wemind/wechat-daemon`。文档与 README 里凡「已发布」一律明确为**子包** `@wemind/wechat-mcp`——它只是本项目的 `packages/wechat-mcp` 一部分，目前也是**唯一**对外发布的包，不代表整个项目（包表格已补总说明）。守护进程计划任务名 `mcp-wechat-daemon` → `wemind-daemon`；daemon 侧日志标签由短标签（`[daemon]`/`[acp]`/`[worker]`/`[task]`/`[watchdog]`/`[wrapper]`）统一为命名空间式 `[wemind/wechat-daemon]`（子系统加 `/acp`、`/worker`、`/task`、`/watchdog`、`/wrapper` 后缀），内核侧由 `[ilink]`/`[store]`/`[accounts]`/`[allow-from]` 统一为 `[wemind/wechat-ilink-core]`（子系统加 `/ilink`、`/store`、`/accounts`、`/allow-from` 后缀）。`packages/wechat-mcp` 的 npm 元数据补 `repository`（`directory: packages/wechat-mcp`）/`homepage`（指向子包目录）/`bugs`/`author`，并加 MIT `LICENSE`（仓库根 + 子包各一份，含上游与本 Fork 版权行）。

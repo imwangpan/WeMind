@@ -47,6 +47,14 @@ export type AcpAgentPreset = {
   mcpConfigFile?: string; // MCP 配置文件相对「配置目录」的路径（默认 settings/mcp.json）
   catalogFile?: string; // 可选 MCP 目录来源文件相对 realHome 的路径（默认 settings/mcp.json）
   env?: Record<string, string>; // 额外注入的环境变量；值里 %HOME% → 沙箱根目录
+  // —— 协议/能力差异（按 agent 覆盖；默认保持 kiro/opencode 旧行为）——
+  restore?: "load" | "resume"; // 恢复会话的方式：load（默认）或 resume（如 DSH）
+  firstFrameMs?: number; // 首帧超时覆盖（默认 25s；慢启动/committed-only agent 可放宽）
+  heartbeatMs?: number; // 静默期心跳间隔覆盖（默认 15s；有 thought/tool/usage 帧的 agent 通常不需要）
+  images?: boolean; // 是否接受图片输入（默认 true；DSH 官方 0.2.1-rc.2 为 false）
+  credentialFile?: string; // 需要从 realHome 同步进沙箱的凭据文件（相对路径；如 DSH 的 .credentials.yaml）
+  model?: string; // 需要 session/set_config_option 选择的模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）
+  mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
 };
 
 /**
@@ -100,6 +108,30 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     catalogFile: "opencode.json",
     env: { OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, // 不从 cwd 祖先目录发现用户 opencode.json
   },
+  // DeepSeek Harness（官方 ACP profile）。
+  // - 桌面端自带 `dsh.cmd`（只有 .cmd，没有无扩展名 dsh），故 binWin 必须写全；
+  // - DSH_HOME 指向 brain 沙箱；`.credentials.yaml` 由沙箱同步（桌面登录态，对应 deepseek-account 路由）；
+  // - 无 session/load，用 session/resume；image:false（收图需上层拦截）；
+  // - 默认模型路由是 deepseek-official（需 API key），这里显式选 deepseek-account 才能复用桌面登录。
+  // 详见 docs/接入-DeepSeek.md（含 0.2.1-rc.2 真机实测）。
+  deepseek: {
+    name: "deepseek",
+    bin: "dsh",
+    binWin: "dsh.cmd",
+    args: ["--profile", "acp"],
+    shell: true,
+    homeEnvVar: "DSH_HOME",
+    realHome: path.join(os.homedir(), ".dsh"),
+    inheritDirs: ["skills"],
+    inheritFiles: ["AGENTS.md"],
+    credentialFile: ".credentials.yaml",
+    restore: "resume",
+    firstFrameMs: 60_000,
+    heartbeatMs: 60_000,
+    images: false,
+    model: '["deepseek-account","deepseek-flash"]',
+    mcpViaAcp: true, // 不写 mcp.json；激活集转成 ACP mcpServers 传给 session/new|resume
+  },
 
   // —— 需适配器（CLI 不原生支持 ACP，经第三方适配器桥接；未实测）——
   // Claude Code：Zed 官方适配器 @zed-industries/claude-code-acp（npx 运行；需 Claude Code 登录/ANTHROPIC_API_KEY）
@@ -126,7 +158,7 @@ function onPath(exe: string): string | null {
  * 只收纳**原生 ACP 且二进制可直接判定**的预设——适配器类（`claude-code` 走 `npx`、
  * `codex` 走 `codex-acp`）不参与自动探测（`npx` 几乎总在 PATH 上，会把它们误选出来）。
  */
-export const AUTO_PROBE_ORDER = ["kiro", "opencode", "gemini"] as const;
+export const AUTO_PROBE_ORDER = ["kiro", "opencode", "gemini", "deepseek"] as const;
 
 /** 预设在该平台的「可执行文件名」（用于 PATH 探测）。 */
 function presetExe(preset: AcpAgentPreset): string {
@@ -174,6 +206,13 @@ export type ResolvedAgent = {
   mcpConfigFile: string;
   catalogFile: string;
   env: Record<string, string>;
+  restore?: "load" | "resume";
+  firstFrameMs?: number;
+  heartbeatMs?: number;
+  images: boolean;
+  credentialFile?: string;
+  model?: string;
+  mcpViaAcp: boolean;
   /** 请求的原始值（来自 env / brain.json / 缺省 `auto`）。 */
   requestedKey: string;
   /** `requestedKey` 的来源。 */
@@ -261,6 +300,13 @@ export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
     mcpConfigFile: preset.mcpConfigFile ?? "settings/mcp.json",
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},
+    restore: preset.restore,
+    firstFrameMs: preset.firstFrameMs,
+    heartbeatMs: preset.heartbeatMs,
+    images: preset.images ?? true,
+    credentialFile: preset.credentialFile,
+    model: preset.model,
+    mcpViaAcp: preset.mcpViaAcp ?? false,
     requestedKey,
     source,
     known,
@@ -279,6 +325,8 @@ export function agentProblem(ag: ResolvedAgent): string | null {
   if (ag.requestedKey === "auto" && !ag.available)
     return `自动探测未找到可用的大脑（已试：${AUTO_PROBE_ORDER.join("、")}）。请安装其中之一，或运行 \`wemind brain set <预设>\``;
   if (!ag.available)
-    return `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <预设>\` 切换`;
+    return ag.name === "deepseek"
+      ? `找不到 DeepSeek 的「${ag.bin}」。桌面端通常有 dsh.cmd；把它的绝对路径传给 \`wemind brain set deepseek --bin "<...>\\dsh.cmd"\``
+      : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <预设>\` 切换`;
   return null;
 }

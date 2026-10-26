@@ -35,7 +35,7 @@ import type {
   SendMessageReq,
   ImageItem,
 } from "@wemind/wechat-ilink-core";
-import { askBrain, newSession, restart } from "./acp-brain.js";
+import { askBrain, newSession, restart, supportsImages, heartbeatMs } from "./acp-brain.js";
 import { resolveAgent, agentProblem, BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
 import { loadBrainConfig } from "./brain-config.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
@@ -195,8 +195,9 @@ async function setTyping(
       token: account.botToken,
       body: { ilink_user_id: to, typing_ticket: cfg.typing_ticket, status },
     });
-  } catch {
-    /* best-effort */
+  } catch (e) {
+    // typing 是体验增强（best-effort 不阻断），但失败要留痕：区分「偶发网络失败」与「ticket 拿不到」
+    log(`setTyping(${status}) failed:`, String(e));
   }
 }
 
@@ -270,6 +271,8 @@ const MIN_SEND_GAP_MS = Number(process.env.WECHAT_MIN_SEND_GAP_MS) || 1500;
 
 // iLink 在用户回复前能连续发送的消息数上限（实测约 10，可调）。
 const CONSEC_SEND_LIMIT = Number(process.env.WECHAT_CONSEC_SEND_LIMIT) || 10;
+// 静默期心跳：默认 15s；预设可放宽（如 DSH committed-only，但仍会发 thought/usage 帧）。
+const HEARTBEAT_MS = Number(process.env.WECHAT_BRAIN_HEARTBEAT_MS) || heartbeatMs() || 15_000;
 // 「距该用户上一条消息以来」bot 已连续发送的条数 + 是否处于"等待继续"段。按用户(to)维护、**跨回合持续**，
 // 仅在该用户发来任何消息时重置（镜像服务端"任何用户消息都重置连续发送配额"的规则）。
 // 这样即使 A 任务期间你发了 B、A 又继续发了几条，B 任务接手时计数是延续的，不会误以为"还能再发10条"而撞上限。
@@ -361,10 +364,11 @@ async function handleMessage(
   activeTurn = { from: to, token: ctx };
   const cx = () => activeTurn?.token ?? ctx;
   await setTyping(account, to, cx(), 1);
-  // 处理期间每 8s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了
+  // 处理期间每 5s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了。
+  // 间隔需小于客户端对 typing 的自动过期（约 5–8s），否则中间会出现指示闪烁的空洞。
   const keepAlive = setInterval(() => {
     void setTyping(account, to, cx(), 1).catch(() => {});
-  }, 8000);
+  }, 5000);
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
@@ -375,20 +379,23 @@ async function handleMessage(
     lastProgressAt = Date.now();
     const b = budgetOf(to);
     if (b.awaiting) return; // 等待「继续」期间不发任何进度
+    // 发出一条文本会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，
+    // 否则快回合（回复 < 旧 8s 续发间隔）全程看不到指示。
+    const sendWithTyping = (text: string) => {
+      void sendOrdered(account, to, cx(), text, MessageState.GENERATING)
+        .then(() => setTyping(account, to, cx(), 1))
+        .catch(() => {});
+    };
     if (b.count >= CONSEC_SEND_LIMIT - 2) {
       b.count += 1;
       b.awaiting = true;
-      void sendOrdered(
-        account,
-        to,
-        cx(),
+      sendWithTyping(
         "⚠️ 接近微信连续消息上限，我先暂停进度提示、继续在后台处理；完成后会把结果直接发给你。想立刻恢复进度可回复「继续」。",
-        MessageState.GENERATING,
       );
       return;
     }
     b.count += 1;
-    void sendOrdered(account, to, cx(), msg, MessageState.GENERATING);
+    sendWithTyping(msg);
   };
   // 即时回执：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
   // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时回执，不再重复发）
@@ -397,11 +404,11 @@ async function handleMessage(
     log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
     sendProgress("🤖 收到，正在处理…");
   }
-  // 心跳：仅当 brain 真正静默(无任何帧)超过 15s 才提示——首条用友好措辞，后续才带计时
+  // 心跳：仅当 brain 真正静默(无任何帧)超过 HEARTBEAT_MS 才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
   let answerNoticeSent = false; // "正在整理回复"只发一次
   const heartbeat = setInterval(() => {
-    if (Date.now() - lastProgressAt >= 15000) {
+    if (Date.now() - lastProgressAt >= HEARTBEAT_MS) {
       hbCount += 1;
       sendProgress(
         hbCount === 1
@@ -409,7 +416,7 @@ async function handleMessage(
           : `⏳ 仍在处理中…（已 ${Math.round((Date.now() - t0) / 1000)} 秒）`,
       );
     }
-  }, 15000);
+  }, HEARTBEAT_MS);
 
   // 收图：下载并解密（失败的跳过）
   const images: Array<{ data: string; mimeType: string }> = [];
@@ -423,6 +430,27 @@ async function handleMessage(
         log("image download failed:", String(e));
       }
     }
+  }
+
+  // 当前大脑不接受图片（如 DSH 0.2.1-rc.2 image:false）：不要让它以 -32602 失败重试
+  if (images.length > 0 && !supportsImages()) {
+    clearInterval(keepAlive);
+    clearInterval(heartbeat);
+    await setTyping(account, to, cx(), 2);
+    budgetOf(to).count += 1;
+    try {
+      await sendOrdered(
+        account,
+        to,
+        cx(),
+        "🖼️ 当前大脑暂不支持看图，请改用文字描述，或切换到支持图片的大脑。",
+        MessageState.FINISH,
+      );
+      log("image unsupported by current brain; rejected gracefully");
+    } finally {
+      activeTurn = null;
+    }
+    return;
   }
 
   // 一次尝试：带进度（步骤编号每次尝试重置）。进度消息节流：避免一回合刷十几条触发 iLink 发送限流（疑似 ret=-2 主因）
