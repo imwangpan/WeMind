@@ -92,6 +92,115 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 - Qoder 接入：[docs/接入-Qoder.md](https://github.com/imwangpan/WeMind/blob/main/docs/接入-Qoder.md)
 - Daemon 常驻原理：[docs/repowiki/10-部署与运维.md](https://github.com/imwangpan/WeMind/blob/main/docs/repowiki/10-部署与运维.md)
 
+## 维护者：发布新版本
+
+本包（包名 `@wemind/cli`，命令 `wemind`）通过 GitHub Actions（[`.github/workflows/wemind-publish.yml`](../../.github/workflows/wemind-publish.yml)）发布到 npm。**下面的命令都在 WeMind 仓库根目录运行**，不是在 `packages/wechat-daemon` 子目录。
+
+> ⚠️ **本包比 `@wemind/wechat-mcp` 多一处要改**：版本号除了 `package.json` 和 `package-lock.json`，还有源码常量 `src/version.ts` 的 `CLI_VERSION`（`wemind version` 的输出就来自它）。漏改会让单测与 CI 直接失败——仓库自带 `npm run check:version` 专门挡这个。
+
+### 第一步：判断要不要发版
+
+| 你改了什么 | 需要发版吗 |
+| --- | --- |
+| `packages/wechat-daemon/src/**` 或 `packages/wechat-ilink-core/src/**`（内核会内联进来） | ✅ 要 |
+| 只改了 `*.md` 文档 | ❌ 不用（CI 仍跑检查，但版本没变会跳过发布） |
+| 只改了 `packages/wechat-mcp/**` | ❌ 与本包无关，发的是另一个包 |
+
+> 同一个版本号**不能重复发布**。所以「有没有改代码」不是关键，「有没有升版本号」才是——没升就只会跑检查、不发布。
+
+### 第二步：选版本号
+
+| 参数 | 示例 | 什么时候用 |
+| --- | --- | --- |
+| `patch` | `1.0.0` → `1.0.1` | Bug 修复、兼容性改动（**最常用**） |
+| `minor` | `1.0.0` → `1.1.0` | 新增向后兼容的能力（如新增内置大脑预设、新增子命令） |
+| `major` | `1.0.0` → `2.0.0` | 不兼容改动（如删子命令、改数据目录布局、改 CLI 参数） |
+
+### 第三步：升版本号（三处必须同步）
+
+**方式 A：用 npm 改 `package.json` + lock，再手改 `version.ts`（推荐）**
+
+```powershell
+# ① 改 package.json 与 package-lock.json
+npm version patch --workspace @wemind/cli --no-git-tag-version
+
+# ② 手工同步源码常量（npm 不会帮你改这个）
+#    编辑 packages/wechat-daemon/src/version.ts：
+#    export const CLI_VERSION = "1.0.1";   ← 与上一步的版本一致
+
+# ③ 自检三处是否一致（不一致会 exit 1）
+npm run check:version
+```
+
+- `--workspace @wemind/cli`：只动本包，不改根项目、mcp、core 的版本；
+- `--no-git-tag-version`：不自动创建 commit 或 tag，改完由你自己检查提交。
+
+**方式 B：全部手动**
+
+1. 编辑 `packages/wechat-daemon/package.json` 的 `"version"`；
+2. 编辑 `packages/wechat-daemon/src/version.ts` 的 `CLI_VERSION`；
+3. 回到仓库根目录刷新锁文件：
+
+```powershell
+npm install --package-lock-only --ignore-scripts
+```
+
+> 不要手动编辑 `package-lock.json`。上面这条只重算 lockfile 元数据，不重装 `node_modules`、不跑依赖的安装脚本。
+
+### 第四步：本地校验
+
+```powershell
+npm run check:version    # 包名 + 三处版本一致（package.json / version.ts / lock）
+npm run lint && npm run typecheck && npm run build && npm test
+npm pack --dry-run --workspace @wemind/cli    # 应看到 4 个文件：cli.js / cli.js.map / README.md / package.json
+```
+
+> ⚠️ **`npm publish` 不会自动 build**。CI 会 build，但本地 `npm pack` 前必须先 `npm run build`，否则打出来是旧产物（`dist/` 在 `.gitignore` 里）。
+>
+> `prepack` 守卫（`scripts/prepack-guard.mjs`）会兜底拒绝：产物目录为空、`bin` 缺失、或声明了 sourcemap 却没把 `.map` 带进包。
+
+### 第五步：提交并推送
+
+```powershell
+git add packages/wechat-daemon/package.json packages/wechat-daemon/src/version.ts package-lock.json
+git add packages/wechat-daemon/src packages/wechat-ilink-core/src   # 有源码改动时
+git commit -m "chore: release @wemind/cli 1.0.1"
+git push origin main
+```
+
+推送到 `main` 后，工作流依次执行：
+
+```
+check-version（三处一致）→ npm ci → lint → format:check → typecheck → build → test
+→ npm pack --dry-run（prepack 守卫确认包内容）
+→ 把 tarball 真装到临时目录跑 wemind version / help（装包冒烟）
+→ 检查 npm 上是否已存在该版本
+→ 不存在则 npm publish（带 provenance 来源证明）；已存在则跳过并输出 notice
+```
+
+**看到 `Publish to npm` 显示 skipped 是正常的**：说明这个版本已发过（比如你只改了文档、没升版本）。想真正发版，回到第二步升版本号。
+
+### 第六步：发布后验收
+
+```powershell
+npm view @wemind/cli version                        # 应显示新版本号
+npm i -g @wemind/cli@latest && wemind version       # → wemind <新版本> (@wemind/cli, node …, <platform>-<arch>)
+wemind list                                         # 应能正确识别在跑的账号与进程
+```
+
+已装用户升级：`npm i -g @wemind/cli@latest`，然后 `wemind stop <账号> && wemind start <账号>` ——**正在运行的 daemon 不会自动加载新代码**。
+
+### 常见坑
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| CI 在 `check-version` 就红了 | 只改了 `package.json`，没同步 `version.ts` | 改 `CLI_VERSION` 后重推 |
+| CI 绿了但 npm 上没新版本 | 版本号没升，被跳过 | 升版本号后再推 |
+| CI 报 lock 版本不一致 | 没跑 `npm install --package-lock-only` | 补跑第三步 |
+| `npm pack` 出来是空壳 | 没先 `npm run build` | 先 build 再 pack |
+| `prepack` 守卫拒绝发布 | 产物为空 / `bin` 缺失 / 声明了 sourcemap 但 `.map` 不在包里 | 按守卫提示补 build 或检查 `files` |
+| `npm publish` 报 403 / EOTP | 本地直发需要交互式 2FA | **不要本地发**，走 CI（Trusted Publisher 已配好） |
+
 ## License
 
 MIT

@@ -64,56 +64,96 @@
 
 ## 维护者：发布新版本
 
-本包通过 GitHub Actions 发布到 npm。新版本必须使用从未发布过的版本号；推送到 `main` 后，工作流会检查、构建并发布。下面的命令都要在 **WeMind 仓库根目录**运行，而不是在 `packages/wechat-mcp` 子目录运行。
+本包通过 GitHub Actions（[`.github/workflows/wechat-mcp-publish.yml`](../../.github/workflows/wechat-mcp-publish.yml)）发布到 npm。**下面的命令都在 WeMind 仓库根目录运行**，不是在 `packages/wechat-mcp` 子目录。
 
-### 推荐：用 npm 自动提升版本
+### 第一步：判断要不要发版
 
-运行 `npm version`，让 npm 同时更新包的 `package.json` 和根目录 `package-lock.json` 中对应的 workspace 版本记录：
+| 你改了什么 | 需要发版吗 |
+| --- | --- |
+| `packages/wechat-mcp/src/**` 或 `packages/wechat-ilink-core/src/**`（内核会内联进来） | ✅ 要 |
+| 只改了 `*.md` 文档 | ❌ 不用（CI 会跑检查，但版本没变会跳过发布） |
+| 只改了 `packages/wechat-daemon/**` | ❌ 与本包无关，发的是另一个包 |
+
+> 同一个版本号**不能重复发布**。所以「有没有改代码」不是关键，「有没有升版本号」才是——没升就只会跑检查、不发布。
+
+### 第二步：选版本号
+
+| 参数 | 示例 | 什么时候用 |
+| --- | --- | --- |
+| `patch` | `1.0.4` → `1.0.5` | Bug 修复、兼容性改动（**最常用**） |
+| `minor` | `1.0.4` → `1.1.0` | 新增向后兼容的功能（如新增一个 MCP 工具） |
+| `major` | `1.0.4` → `2.0.0` | 不兼容改动（如删工具、改工具参数、升级 MCP 协议版本） |
+
+### 第三步：升版本号（两种方式二选一）
+
+**方式 A：用 npm 自动提升（推荐）**
 
 ```powershell
 npm version patch --workspace @wemind/wechat-mcp --no-git-tag-version
 ```
 
-例如当前版本是 `1.0.2`，运行后会变成 `1.0.3`。这里的 `patch` 表示修复或兼容性改动时递增第三段版本号。其他常见选择：
+它会同时更新**两处**：`packages/wechat-mcp/package.json` 的 `version`，以及根 `package-lock.json` 里该 workspace 的版本记录。
 
-| 命令参数 | 示例变化          | 常见用途             |
-| -------- | ----------------- | -------------------- |
-| `patch`  | `1.0.2` → `1.0.3` | Bug 修复、兼容性改动 |
-| `minor`  | `1.0.2` → `1.1.0` | 向后兼容的新功能     |
-| `major`  | `1.0.2` → `2.0.0` | 不兼容的重大改动     |
+- `--workspace @wemind/wechat-mcp`：只动本包，不改根项目、daemon、core 的版本；
+- `--no-git-tag-version`：不自动创建 commit 或 tag，改完由你自己检查提交。
 
-`--workspace @wemind/wechat-mcp` 表示只提升 MCP 包，不改根项目、daemon 或 core 的版本。`--no-git-tag-version` 表示不自动创建 Git commit 或 tag；文件仍会更新，需要你自行检查并提交。
+**方式 B：手动改两处**
 
-### 手动改版本后同步锁文件
-
-如果直接编辑 `packages/wechat-mcp/package.json`，例如把 `"version": "1.0.2"` 改为 `"version": "1.0.3"`，保存后在仓库根目录运行：
+1. 编辑 `packages/wechat-mcp/package.json` 的 `"version"`；
+2. 回到仓库根目录刷新锁文件：
 
 ```powershell
 npm install --package-lock-only --ignore-scripts
 ```
 
-这会重新生成 lockfile 元数据，不会重新安装 `node_modules`，也不会运行依赖的安装脚本。不要手动编辑 `package-lock.json`；只需更新其中 `packages/wechat-mcp` 对应的版本记录。根项目及其他 workspace 的版本号不需要随之修改。
+> 不要手动编辑 `package-lock.json`。上面这条只重算 lockfile 元数据，不重装 `node_modules`、不跑依赖的安装脚本。
 
-### 检查并触发发布
-
-确认包清单和锁文件中的版本一致，再检查安装与打包：
+### 第四步：本地校验
 
 ```powershell
-npm pkg get version --workspace @wemind/wechat-mcp
-npm ci --dry-run
-npm pack --dry-run --workspace @wemind/wechat-mcp
+npm run check:version          # 本包不在其校验范围时以第五步为准
+npm pkg get version --workspace @wemind/wechat-mcp   # 确认版本号已改
+npm run lint && npm run typecheck && npm run build && npm test
+npm pack --dry-run --workspace @wemind/wechat-mcp    # 看一眼打进去的文件清单
 ```
 
-确认后，把版本、锁文件以及本次要发布的源码改动一起提交并推送到 `main`：
+> ⚠️ **`npm publish` 不会自动 build**。CI 会 build，但如果你想在本地 `npm pack` 出可用的包，必须先 `npm run build`。
+
+### 第五步：提交并推送
 
 ```powershell
 git add packages/wechat-mcp/package.json package-lock.json
-git add packages/wechat-mcp/src packages/wechat-ilink-core/src
-git commit -m "chore: release @wemind/wechat-mcp 1.0.3"
+git add packages/wechat-mcp/src packages/wechat-ilink-core/src   # 有源码改动时
+git commit -m "chore: release @wemind/wechat-mcp 1.0.5"
 git push origin main
 ```
 
-如果本次不涉及源码变化，第二条 `git add` 可以省略。推送后，GitHub Actions 会运行检查；只有 npm 上尚不存在当前版本时才会发布。同一版本不能重复发布，因此每次发布新代码都要先提升版本号。
+推送到 `main` 后，工作流依次执行：
+
+```
+校验版本与锁文件一致 → npm ci → lint → format:check → typecheck → build → test
+→ npm pack --dry-run（确认包内容）
+→ 检查 npm 上是否已存在该版本
+→ 不存在则 npm publish（带 provenance 来源证明）；已存在则跳过并输出 notice
+```
+
+**看到 `Publish to npm` 显示 skipped 是正常的**：说明这个版本已经发过了（比如你只改了文档没升版本）。想真正发版，回到第二步升版本号。
+
+### 第六步：发布后验收
+
+```powershell
+npm view @wemind/wechat-mcp version           # 应显示新版本号
+npx -y @wemind/wechat-mcp --help             # 新装一次，确认能拉起
+```
+
+### 常见坑
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| CI 绿了但 npm 上没新版本 | 版本号没升，被跳过 | 升版本号后再推 |
+| CI 报「版本不一致」 | 只改了 `package.json`，没跑 `npm install --package-lock-only` | 补跑第三步方式 B 的第 2 条 |
+| `npm pack` 出来的包是空壳 | 没先 `npm run build`（`dist/` 在 `.gitignore` 里） | 先 build 再 pack |
+| `npm publish` 报 403 / EOTP | 本地直发需要交互式 2FA | **不要本地发**，走 CI（Trusted Publisher 已配好） |
 
 ## License
 
