@@ -149,8 +149,14 @@ export function toAcpMcpServers(
         ? envEntries(rawHeaders)
         : Array.isArray(rawHeaders)
           ? rawHeaders
-              .filter((h): h is { name: string; value: string } => isObj(h) && typeof (h as any).name === "string")
-              .map((h) => ({ name: String((h as any).name), value: String((h as any).value ?? "") }))
+              .filter(
+                (h): h is { name: string; value: string } =>
+                  isObj(h) && typeof (h as any).name === "string",
+              )
+              .map((h) => ({
+                name: String((h as any).name),
+                value: String((h as any).value ?? ""),
+              }))
           : [];
       out.push({ name, type: "http", url: entry.url, headers });
       continue;
