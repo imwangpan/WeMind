@@ -7,6 +7,14 @@ import { buildShellLine, quoteCmdArg, quoteShArg, spawnAgent } from "./spawn-age
 // 子进程」，放宽超时不是掩盖问题；纯字符串拼接的用例仍走默认超时。
 const SPAWN_TEST_TIMEOUT_MS = 20_000;
 
+/*
+ * 子进程会**继承 NODE_OPTIONS**。在 VS Code 里调试/集成终端下跑时，它带着 js-debug 的
+ * `--require …/bootloader.js`，子 node 启动后会停在「Waiting for the debugger to disconnect…」
+ * 直到 20s 超时——本用例只想验「引号拼装后参数原样到达」，不该被调试器环境拖死。
+ * 故 spawn 时把 NODE_OPTIONS 去掉（只影响本用例起的子进程，不动测试进程自身）。
+ */
+const CLEAN_ENV = { ...process.env, NODE_OPTIONS: "" };
+
 describe("quoteCmdArg", () => {
   it("裸名不加引号", () => {
     expect(quoteCmdArg("opencode")).toBe("opencode");
@@ -74,11 +82,14 @@ describe("spawnAgent", () => {
       };
       process.on("warning", onWarning);
       try {
-        const proc = spawnAgent({
-          bin: process.execPath,
-          args: ["-e", "process.stdout.write('ok ' + (1 + 1))"],
-          shell: true,
-        });
+        const proc = spawnAgent(
+          {
+            bin: process.execPath,
+            args: ["-e", "process.stdout.write('ok ' + (1 + 1))"],
+            shell: true,
+          },
+          { env: CLEAN_ENV },
+        );
         const out = await new Promise<string>((resolve, reject) => {
           let buf = "";
           proc.stdout.on("data", (d) => (buf += d.toString()));
@@ -106,11 +117,14 @@ describe("spawnAgent", () => {
       };
       process.on("warning", onWarning);
       try {
-        const proc = spawnAgent({
-          bin: process.execPath,
-          args: ["-e", "process.stdout.write('direct')"],
-          shell: false,
-        });
+        const proc = spawnAgent(
+          {
+            bin: process.execPath,
+            args: ["-e", "process.stdout.write('direct')"],
+            shell: false,
+          },
+          { env: CLEAN_ENV },
+        );
         const out = await new Promise<string>((resolve, reject) => {
           let buf = "";
           proc.stdout.on("data", (d) => (buf += d.toString()));

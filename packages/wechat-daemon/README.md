@@ -53,7 +53,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 
 ## 常驻怎么跑
 
-`wemind start` 默认用**自带的跨平台看门狗**（builtin）：detached 拉起 `wemind _watchdog`，它循环执行 `wemind daemon`，进程退出 5 秒后自动重拉；单实例靠 `wrapper.pid` + 进程身份校验。也可以用 `--runner pm2`（或 `WEMIND_RUNNER=pm2`）交给 pm2。
+`wemind start` 默认用**自带的跨平台看门狗**（builtin）：detached 拉起 `wemind _watchdog`，它循环执行 `wemind daemon`，进程退出 5 秒后自动重拉；单实例靠 `wrapper.pid` + 进程身份校验。也可以用 `--runner pm2`（或 `WEMIND_RUNNER=pm2`）交给 pm2——`wemind` 会在账号目录生成 `pm2.app.json`（5s 重拉、最多 50 次、退出码 78 停手、日志合并到 `daemon.log`，与 builtin 语义一致），再 `pm2 start` 它。
 
 开机自启：让系统在登录时执行一次 `wemind start <账号>` 即可（Windows 计划任务/启动文件夹、Linux systemd user service、macOS launchd）。**同一账号只用一套常驻方案**——两种 runner 同时跑会抢同一个 bot token。
 
