@@ -44,7 +44,7 @@ wemind brain <key|label>
 wemind brain check <key|label>
 ```
 
-> `brain check` 默认 20s；冷启动慢的 agent 可能超时。先看它打印的 stderr，再判定「不可用」。
+> `brain check` 默认 60s（`brain-check.ts`）；冷启动慢的 agent 仍可能超时。先看它打印的 stderr，再判定「不可用」。
 
 ---
 

@@ -153,7 +153,7 @@ wemind brain check
 
 - **`onPath()` 按精确文件名**：只有 `.cmd` 时，`binWin` 写 `dsh.cmd` 而不是 `dsh`。
 - **不要用 `spawn(bin, args, { shell: true })`**：用 `spawnAgent()`（DEP0190 + 引号）。
-- **`wemind brain check` 默认 20s**：冷启动慢的 agent 可能误报；先看日志再判定不可用。
+- **`wemind brain check` 默认 60s**：冷启动慢的 agent 仍可能误报；先看日志再判定不可用。
 - **`session/load` 不是通用能力**：没有就退 `resume`，再没有就 `new`，并在日志里说清楚。
 - **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。
 - **committed-only + 15s 心跳 = 烧连发额度**：先调心跳，再考虑首帧。

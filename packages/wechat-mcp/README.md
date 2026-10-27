@@ -143,7 +143,7 @@ git push origin main
 
 ```powershell
 npm view @wemind/wechat-mcp version           # 应显示新版本号
-npx -y @wemind/wechat-mcp --help             # 新装一次，确认能拉起
+npx -y @wemind/wechat-mcp                    # 应打印 Connected / Not logged in 后挂在 stdio（Ctrl+C 退出）
 ```
 
 ### 常见坑

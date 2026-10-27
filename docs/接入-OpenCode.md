@@ -242,7 +242,7 @@ npm run build; npm run daemon
 | `packages/wechat-daemon/src/worker-sandbox.ts` | 同上（worker 策略：继承全量 MCP 除 wechat） |
 | `packages/wechat-daemon/src/acp-brain.ts` / `worker-acp.ts` | 注入预设 `env`（`%HOME%` → 沙箱） |
 | `packages/wechat-daemon/src/agent-mcp.test.ts` / `brain-agents.test.ts`（新） | 单测 |
-| `scripts/acp-smoke.mjs` / `acp-smoke2.mjs`（新） | M1 回归 harness |
+| `scripts/acp-probe.mjs` | M1 回归 harness（当时的 `acp-smoke.mjs`/`acp-smoke2.mjs` 只硬编码 `opencode acp`，已并入通用探针后删除） |
 | `README.md` / `docs/接入其它-ACP-Agent.md` | 文档更新 |
 
 ---
@@ -257,12 +257,15 @@ $exe = "<...>\node_modules\@opencode\cli\bin\opencode.exe"   # 或让 shell 解�
 & $exe --version          # 记录版本（实测 v2.0.29）
 & $exe debug paths        # 确认 config/data 目录分离
 
-# 2) 运行 harness（见下），逐帧观察 ACP 交互与反向请求
-$env:OPENCODE_EXE = $exe
-node acp-smoke.mjs
+# 2) 运行通用探针（见下），逐帧观察 ACP 交互与反向请求
+$env:ACP_BIN = $exe
+$env:ACP_ARGS = '["acp"]'
+node scripts/acp-probe.mjs
 ```
 
-**harness 要点**（完整脚本见临时目录 `acp-smoke.mjs` / `acp-smoke2.mjs`，可移入 `scripts/` 作回归）：
+> 早期 M1 用的 `acp-smoke.mjs` / `acp-smoke2.mjs` 只硬编码 `opencode acp`、与 `acp-probe.mjs` 重叠，已删除；`acp-probe.mjs` 用 `ACP_BIN`/`ACP_ARGS` 指定 agent，覆盖同样的检查项（`ACP_TEST_IMAGE=1`、`ACP_TEST_MCP=…`、`ACP_HARD_KILL=1` 分别测图片、ACP MCP、强杀后 resume）。
+
+**harness 要点**：
 - 用 `spawn(exe, ["acp"], { stdio: ["pipe","pipe","pipe"] })`，按 `\n` 切帧解析 JSON。
 - 发 `initialize {protocolVersion:1, clientCapabilities:{}}` → `session/new {cwd, mcpServers:[]}` → `session/prompt`。
 - 对「有 `method` 且有 `id` 但不在 pending」的帧判定为**反向请求**并记录（这是本方案最关键的可观测点）。

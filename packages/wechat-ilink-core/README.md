@@ -20,8 +20,13 @@
 
 ## 安装
 
+> ⚠️ **本包不发布到 npm**（`private: true`，`npm view` 会 404）。它只有两个消费方，且都在本仓库里：
+> [`@wemind/wechat-mcp`](../wechat-mcp) 与 [`@wemind/cli`](../wechat-daemon) 用 tsdown 把它**内联**进各自单文件产物。
+> 想用这套 iLink 内核请 clone 仓库：`npm install` 后 workspace 会自动链接本包（`@wemind/wechat-ilink-core: "*"`）。
+
 ```bash
-npm install @wemind/wechat-ilink-core
+git clone https://github.com/imwangpan/WeMind.git
+cd WeMind && npm install && npm run build   # core → daemon/mcp
 ```
 
 ## 用法

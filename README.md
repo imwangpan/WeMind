@@ -73,7 +73,7 @@ wemind brain set qoder       # 换大脑（按账号落盘，重启仍生效）
 
 ## 功能
 
-- **6 个 MCP 工具**：登录、消息轮询、文本发送、打字状态
+- **6 个 MCP 工具**：`login_qrcode` / `check_qrcode_status` / `logout`（登录）· `get_messages`（长轮询）· `send_text_message`（发文本）· `send_typing`（打字状态）
 - **扫码登录**：生成终端文本二维码、PNG 图片、URL 链接三种方式
 - **长轮询监听**：阻塞等待新消息，最长可等待 7 天
 - **打字状态**：Agent 处理消息时自动显示"对方正在输入..."

@@ -1,6 +1,6 @@
 # @wemind/cli（命令 `wemind`）发布方案与运维手册
 
-> 包：**`@wemind/cli`**（源码 `packages/wechat-daemon/`，命令 `wemind`）｜ 当前线上版本：**1.0.0**（2026-10-26 发布）｜ 状态：**✅ 已发布**
+> 包：**`@wemind/cli`**（源码 `packages/wechat-daemon/`，命令 `wemind`）｜ 当前线上版本：**1.1.0**（2026-10-27 发布）｜ 状态：**✅ 已发布**
 >
 > <https://www.npmjs.com/package/@wemind/cli>
 >
@@ -23,7 +23,7 @@
 
 ```bash
 npm i -g @wemind/cli     # 安装后得到 wemind 命令
-wemind version           # → wemind 1.0.0 (@wemind/cli, node …, <platform>-<arch>)
+wemind version           # → wemind 1.1.0 (@wemind/cli, node …, <platform>-<arch>)
 npx -y @wemind/cli list  # 不安装临时用：必须写全包名
 ```
 

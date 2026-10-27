@@ -10,7 +10,7 @@
 
 ```bash
 npm i -g @wemind/cli     # 安装后得到 wemind 命令
-wemind version           # → wemind 1.0.0 (@wemind/cli, node 24.x, win32-x64)
+wemind version           # → wemind 1.1.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
 
 # 不安装、一次性运行（注意是包名 @wemind/cli，不是 wemind）
 npx -y @wemind/cli list

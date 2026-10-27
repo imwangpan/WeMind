@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26（`@wemind/cli@1.0.0` 与 `@wemind/wechat-mcp@1.0.4` 均已发布到 npm）
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26（`@wemind/cli@1.1.0` 与 `@wemind/wechat-mcp@1.0.4` 均已发布到 npm）
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -55,7 +55,7 @@ wechat-ilink-core  ◄──  wechat-mcp      （tsdown 内联 core，发布单�
 
 ```text
 poller（长轮询，不被大脑阻塞）
-  → 收到消息 / 合并同用户连发
+  → 收到消息 / 逐条入队（**不合并**：一条消息 = 一次 prompt）
   → 指令拦截（新会话 / MCP / 任务 / 问大脑 …）
   → 选择 brain 或 worker
   → askBrain(userId, text, onProgress, images)
@@ -124,7 +124,7 @@ poller（长轮询，不被大脑阻塞）
 | **implementation** | **实现**（具体程序） | 一个程序对某协议的具体落地。同一协议的不同实现，完备度差别很大——这正是 WeMind 要给每个 agent 配 preset 的原因。 |
 | **implement / support ACP** | **实现 ACP** / **支持 ACP** | **不要写「说 ACP」**。理由：「会说/不会说」是二元判断，会掩盖「实现完备度不同」这个事实（有的实现支持 load、有的只有 resume、有的不发流式帧）。而「实现/支持」天然可分级。<br>更精确时用可验证的事实：「它以 ACP server 身份响应 `initialize`/`session/new`/`session/prompt`」。 |
 | **minimal method set** | **最小方法集** | WeMind 实际用到的 ACP 方法子集：`initialize` → `session/new` → `session/prompt` + 流式 `session/update`。缺任一即不可用。 |
-| **capability** | **能力**（保留 `agentCapabilities` 原文） | 指「这个实现支持哪些**可选特性**」（load/resume/image/mcp），**不是权限**。别译「权限」——权限是 permission，见下条。 |
+| **capability** | **能力**（保留 `agentCapabilities` 原文） | 指「这个实现支持哪些**可选特性**」（load/resume/image/mcp），**不是权限**。别译「权限」——权限是 permission，见下条。注意：本仓库当前**不消费** `initialize` 回包，能力全部来自预设字段，见事实表。 |
 | **permission** | **权限** | 与 capability 区分：`agentCapabilities` 是能力声明；`session/request_permission` 是运行时**请求授权**。 |
 | **reverse request** | **反向请求** | ACP 的反向通道：**agent → client** 的请求（`session/request_permission`、`fs/read_text_file`、`terminal/create` 等）。与正常方向（client → agent）相反，故称「反向」。<br>⚠️ 关键：**不应答会挂起**。WeMind 内置应答器：权限默认拒绝、未知方法回 `-32601`。 |
 | **streaming** | **流式** | agent 边生成边推送增量（`session/update` 的 `agent_message_chunk`），而不是一次性返回完整答案。 |
@@ -170,6 +170,7 @@ poller（长轮询，不被大脑阻塞）
 | opencode 预设可用（`session/load`、无反向请求） | ✅ 实测 | `docs/接入-OpenCode.md` §3.3 |
 | 任意兼容 ACP 的 agent 都「无需改代码」 | ⚪ **不成立** | 需要 load/resume、反向请求、首帧/心跳、image 能力适配 |
 | `session/load` 是 ACP 通用能力 | ⚪ **不成立** | DSH 只有 `session/resume`；`load` 返回 `-32601` |
+| 代码按 `initialize` 回包自动适配能力 | ⚪ **不成立** | `acp-brain.ts` / `worker-acp.ts` 发出 `initialize` 后只置 `initialized = true`，**不解析** `agentCapabilities`；image/restore/mcpViaAcp 全部来自 `brain-agents.ts` 预设字段 |
 | 仓库存在 `Brain` 接口 | ⚪ **不存在** | `acp-brain.ts` 直接导出 `askBrain`/`newSession`/`restart` |
 | `wemind brain check` 默认 60s | ✅ 代码 | 冷启动慢的 agent 仍可能误报 |
 | `deepseek` 预设已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验 |
