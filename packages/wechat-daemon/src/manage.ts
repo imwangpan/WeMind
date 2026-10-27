@@ -145,7 +145,7 @@ export function descendantPids(pid: number): number[] {
  *
  * Windows：`taskkill /T /F` 本来就连带子树。
  * POSIX：`process.kill(pid)` **只**结束该进程，不动它的子进程——daemon 被停后，它拉起的
- * ACP 大脑 / worker 会留下来继续占着会话与文件句柄（实测只有 Windows 因为 /T 而看不出来）。
+ * ACP 大脑 / worker 会留下来继续占着会话与文件句柄（Windows 的 `taskkill /T` 会连带子树，所以这个缺陷只在 POSIX 暴露）。
  * 所以这里先收集后代、由叶子往根 SIGTERM（daemon 的 SIGTERM 处理器会自己清 pid 文件），
  * 等一小会儿再对仍存活的补 SIGKILL。
  */

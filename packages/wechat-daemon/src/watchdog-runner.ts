@@ -1,7 +1,7 @@
 // 自带看门狗（方案 b）：`wemind start --runner builtin` 用它常驻，不依赖 pm2。
 // - runWatchdog：看门狗循环本体（由 `cli.js _watchdog` 调用），单实例守卫 + 循环 spawn daemon、崩溃 5s 重拉。
 // - watchdogStart：从 manage 脱离式启动看门狗进程。
-// 单实例用 wrapper.pid + 存活检查（零依赖、复用现有停止句柄）；竞态由「start 前先 stop」进一步压低。
+// 单实例用 wrapper.pid + isOurProcess() 身份校验（不只看 pid 存活，防重启后 pid 复用误判）；竞态由「start 前先 stop」进一步压低。
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";

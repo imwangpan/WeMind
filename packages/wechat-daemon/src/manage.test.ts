@@ -7,9 +7,10 @@ import { isAlive } from "./proc-identity.js";
 /*
  * 只测 POSIX 的后代收集：Windows 走 `taskkill /T`，没有对应逻辑。
  *
- * 为什么要测：`stopDaemon` 以前只 `process.kill(pid)`，daemon 拉起的 ACP 大脑/worker 会留下来
- * 继续占着会话与文件句柄（Windows 因为 /T 连带，问题一直没暴露）。`descendantPids` 是这条
- * 「停整条链」路径的地基，必须证明真能查到孙进程。
+ * 为什么要测：`stopDaemon` 以前逐个 `process.kill(pid)`——只结束候选 pid 本身，且候选里没有
+ * `worker.pid`，daemon 拉起的 ACP 任务 worker 会留下来继续占着会话与文件句柄（Windows 因为
+ * `/T` 连带子树，问题一直没暴露）。`descendantPids` 是这条「停整条链」路径的地基，必须证明真能
+ * 查到孙进程。
  */
 const isPosix = process.platform !== "win32";
 const spawned: number[] = [];

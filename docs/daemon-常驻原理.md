@@ -52,8 +52,8 @@
 >
 > ⚠️ 这里**不能**用源码目录名 `wechat-daemon` 做特征：发布到 npm 后包目录叫 `@wemind/cli`，用目录名匹配会让「装出来的 wemind」永远认不出自己（`list` 恒显示「已停止」、`stop` 杀不掉、看门狗单实例守卫失效）。详见 CHANGELOG 的 P2 条。
 
-> 停止顺序必须自上而下：**先停看门狗（断掉重拉），再停 daemon，最后清大脑/worker**——否则先杀 daemon 只会被看门狗在 5 秒后重新拉起。
-> 实现上 `manage.ts` 的 `stopDaemon()` 一次做完全部：按 pid 文件逐个**校验身份**后调 `killProcessTrees()`——Windows 走 `taskkill /T /F`，POSIX 先收集后代进程再 SIGTERM→SIGKILL（`process.kill` 单 pid 不会杀子树，这是 2026-10-27 修掉的跨平台缺陷）。
+> 停止时**必须把看门狗一起停掉**（断掉重拉）：只杀 daemon，它会在 5 秒后被看门狗重新拉起。
+> 实现上 `manage.ts` 的 `stopDaemon()` 一次做完全部：把 `wrapper`/`daemon`/`brain`/`worker` 四个 pid 文件一起读出来、逐个**校验身份**后交给 `killProcessTrees()` 统一终止（同一批里看门狗在它的 5 秒重拉延时结束前就已被杀掉，所以不必分先后）——Windows 走 `taskkill /T /F`，POSIX 先收集后代进程再 SIGTERM→SIGKILL（`process.kill` 单 pid 不会杀子树，这是 2026-10-27 修掉的跨平台缺陷）。
 
 ---
 
@@ -66,7 +66,7 @@ wemind start <账号>            # 默认 WEMIND_RUNNER=builtin
 wemind start <账号> --runner pm2   # 或 WEMIND_RUNNER=pm2 切到 pm2
 ```
 
-`watchdogStart()` 用 `spawn(process.execPath, [cliPath, "_watchdog"], { detached: true, stdio: "ignore", env: { WECHAT_ACCOUNT: key } })` 脱离拉起一个看门狗进程；`runWatchdog()` 是它的循环本体：
+`watchdogStart()` 用 `spawn(process.execPath, [cliPath, "_watchdog"], { detached: true, stdio: "ignore", windowsHide: true, env: { ...process.env, WECHAT_ACCOUNT: key } })` 脱离拉起一个看门狗进程；`runWatchdog()` 是它的循环本体：
 
 ```
 单实例守卫（wrapper.pid 存在且 isOurProcess → 直接退出）
@@ -86,7 +86,9 @@ for (;;) {
 - **跨平台**：不依赖 shell / Mutex / pm2，Windows 用 `windowsHide` 防闪窗；
 - **日志**：stdout/stderr 一并写 `<数据目录>/daemon.log`，与 PowerShell 路线一致。
 
-> pm2 路线（`pm2-runner.ts`）把同样的职责交给 pm2：app 名 `wemind-<key>`、`restart_delay: 5000`、`stop_exit_codes: [78]`、日志同样归一到 `daemon.log`。
+> pm2 有**两条**路线，别混：
+> - `wemind start --runner pm2` 走 `pm2-runner.ts`：`pm2 start "<cli.js>" --name wemind-<key> --interpreter node --output/--error <daemon.log> --merge-logs -- daemon`——app 名 `wemind-<key>`、日志归一到 `daemon.log`；**不设** `restart_delay`/`stop_exit_codes`（重启延迟用 pm2 默认值，退出码 78 也不会停手）。
+> - 源码开发者的 `pm2 start ecosystem.config.cjs` 才有 app 级设置：`restart_delay: 5000`、`max_restarts: 50`、`stop_exit_codes: [78]`（与 builtin 看门狗的 5s 重拉 + 78 特判对齐）。
 
 ---
 

@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 
 import { buildShellLine, quoteCmdArg, quoteShArg, spawnAgent } from "./spawn-agent.js";
 
-// 下面两个 spawnAgent 用例会真起一个 node 子进程（Windows 上单跑 0.5–0.7s）。全量跑时 20 个
-// 测试文件并行、各自都在起进程，实测会超过 vitest 默认的 5s 而偶发失败。这里是「等确定会退出的
+// 下面两个 spawnAgent 用例会真起一个 node 子进程（Windows 上单跑 0.5–0.7s）。全量跑时多个
+// 测试文件并发、各自都在起进程，实测会超过 vitest 默认的 5s 而偶发失败。这里是「等确定会退出的
 // 子进程」，放宽超时不是掩盖问题；纯字符串拼接的用例仍走默认超时。
 const SPAWN_TEST_TIMEOUT_MS = 20_000;
 
