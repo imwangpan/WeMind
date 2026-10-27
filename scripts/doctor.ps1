@@ -1,7 +1,6 @@
 # WeMind 环境诊断（只读）
 #
-# 用途：给人和 AI 一份「当前机器上 WeMind 能不能跑、大脑是谁、agent 在哪」的事实，
-# 避免靠猜。不会修改任何文件，不会打印 token / API key 的内容。
+# 用途：给人和 AI 一份「当前机器上 WeMind 能不能跑、大脑是谁、agent 在哪」的事实，避免靠猜。不会修改任何文件，不会打印 token / API key 的内容。
 #
 # 用法：
 #   pwsh -NoProfile -File scripts/doctor.ps1

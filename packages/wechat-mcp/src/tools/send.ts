@@ -26,7 +26,7 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
   if (!account?.botToken) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
-      "Not logged in. Call login_qrcode first.",
+      "尚未登录，请先调用 login_qrcode 完成登录。",
     );
   }
   if (isSessionPaused(account.botId)) {
@@ -38,7 +38,7 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
   if (!contextToken) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
-      `No conversation found with user ${input.to}. iLink bots cannot initiate; receive a message from them first.`,
+      `与用户 ${input.to} 之间没有会话记录。iLink 机器人不能主动发起对话，需要先收到该用户的消息。`,
     );
   }
 
@@ -62,7 +62,7 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
 
   return jsonResult({
     status: "sent",
-    message: "Message sent successfully.",
+    message: "消息已发送。",
     to: input.to,
     text: input.text,
     client_id: req.msg?.client_id,

@@ -34,8 +34,7 @@ const BRAIN_MCP_JSON = path.join(BRAIN_CONFIG_DIR, AG.mcpConfigFile);
 const ACTIVE_FILE = path.join(DATA_DIR, "brain-mcps.json");
 
 /** 「目录」：可选 MCP 的定义来源。默认取所用 agent 真实配置目录（realHome）下的
- *  catalogFile（kiro: settings/mcp.json / opencode: opencode.json）；可用
- *  `WEMIND_MCP_CATALOG` / `WECHAT_MCP_CATALOG` 覆盖为任意路径。 */
+ *  catalogFile（kiro: settings/mcp.json / opencode: opencode.json）；可用 `WEMIND_MCP_CATALOG` / `WECHAT_MCP_CATALOG` 覆盖为任意路径。 */
 const CATALOG =
   process.env.WEMIND_MCP_CATALOG?.trim() ||
   process.env.WECHAT_MCP_CATALOG?.trim() ||
@@ -46,8 +45,7 @@ const FORBIDDEN = new Set(["wechat"]);
 
 /**
  * 让 brain 继承所用 agent 真实配置目录的「知识/记忆/技能」：
- * - 目录式（inheritDirs，如 kiro 的 steering/memories/skills、opencode 的 skills/agents/commands）用
- *   目录 junction（Windows）/ symlink 指向真实目录；
+ * - 目录式（inheritDirs，如 kiro 的 steering/memories/skills、opencode 的 skills/agents/commands）用目录 junction（Windows）/ symlink 指向真实目录；
  * - 单文件式（inheritFiles，如 opencode 的 AGENTS.md）直接拷入配置目录。
  * 使微信里的大脑和你日常使用读到同样的记忆、规则、技能。
  * **MCP（settings/opencode.json 的 mcp 段）与 brain 自有会话（sessions）不镜像**：MCP 必须走沙箱（排除 wechat 防回环），会话不能混。
@@ -126,8 +124,7 @@ function readJson(file: string): Record<string, unknown> | null {
 /**
  * 把 agent 的凭据文件同步进沙箱（如 DSH 的 `.credentials.yaml`、Qoder 的 `.auth/user`）。
  * - `newer`：首次复制；真实 home 的 token 刷新后覆盖沙箱；沙箱自己刷新过则保留沙箱版本。
- * - `always`：内容不同即覆盖（标识类文件，如 Qoder 的 `.auth/machine_id`——agent 在缺凭据时会自造一个，
- *   它比真实文件新，「新者胜」会把错的留下，导致永远认证失败）。
+ * - `always`：内容不同即覆盖（标识类文件，如 Qoder 的 `.auth/machine_id`——agent 在缺凭据时会自造一个，它比真实文件新，「新者胜」会把错的留下，导致永远认证失败）。
  * 这是敏感文件，仅放在账号沙箱内；Windows 无 POSIX 600，建议专用账号 + 目录 ACL。
  */
 function syncCredentialFile(file: string, mode: "newer" | "always"): void {

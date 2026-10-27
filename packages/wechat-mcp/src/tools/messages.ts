@@ -44,7 +44,7 @@ export async function getMessages(
   if (!account?.botToken) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
-      "Not logged in. Call login_qrcode first.",
+      "尚未登录，请先调用 login_qrcode 完成登录。",
     );
   }
 
@@ -96,7 +96,7 @@ export async function getMessages(
     if (resp.errcode) {
       throw new ProtocolError(
         ProtocolErrorCode.InternalError,
-        `Server error: errcode=${resp.errcode} errmsg=${resp.errmsg ?? "unknown"}`,
+        `服务端错误：errcode=${resp.errcode} errmsg=${resp.errmsg ?? "未知"}`,
       );
     }
 

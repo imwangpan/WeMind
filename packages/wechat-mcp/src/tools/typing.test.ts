@@ -44,7 +44,7 @@ beforeEach(() => {
 describe("sendTypingIndicator 前置校验", () => {
   it("未登录 → 抛错并指路 login_qrcode", async () => {
     m.loadAccount.mockReturnValue(null);
-    await expect(sendTypingIndicator({ to: "u1" })).rejects.toThrow(/Not logged in/);
+    await expect(sendTypingIndicator({ to: "u1" })).rejects.toThrow(/尚未登录/);
     expect(m.sendTyping).not.toHaveBeenCalled();
   });
 
@@ -59,7 +59,7 @@ describe("sendTypingIndicator 前置校验", () => {
 
   it("没有该用户的 context_token → 抛错，不打接口", async () => {
     await expect(sendTypingIndicator({ to: "stranger" })).rejects.toThrow(
-      /No conversation found with user stranger/,
+      /与用户 stranger 之间没有会话记录/,
     );
     expect(m.getConfig).not.toHaveBeenCalled();
   });
@@ -70,7 +70,7 @@ describe("sendTypingIndicator 前置校验", () => {
       contextTokens: { "bot2:u1": "other-bot", "bot1:u2": "other-user" },
       lastMessageId: 0,
     });
-    await expect(sendTypingIndicator({ to: "u1" })).rejects.toThrow(/No conversation found/);
+    await expect(sendTypingIndicator({ to: "u1" })).rejects.toThrow(/之间没有会话记录/);
   });
 });
 
@@ -87,7 +87,7 @@ describe("sendTypingIndicator 取 ticket", () => {
 
   it("拿不到 typing_ticket → 抛错且不发 sendTyping（不带空 ticket 硬发）", async () => {
     m.getConfig.mockResolvedValue({ ret: 0 });
-    await expect(sendTypingIndicator({ to: "u1" })).rejects.toThrow(/no typing_ticket/);
+    await expect(sendTypingIndicator({ to: "u1" })).rejects.toThrow(/未返回 typing_ticket/);
     expect(m.sendTyping).not.toHaveBeenCalled();
   });
 

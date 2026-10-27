@@ -30,7 +30,7 @@ export async function sendTypingIndicator(input: SendTypingInput): Promise<ToolR
   if (!account?.botToken) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
-      "Not logged in. Call login_qrcode first.",
+      "尚未登录，请先调用 login_qrcode 完成登录。",
     );
   }
   if (isSessionPaused(account.botId)) {
@@ -41,7 +41,7 @@ export async function sendTypingIndicator(input: SendTypingInput): Promise<ToolR
   if (!contextToken) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
-      `No conversation found with user ${input.to}. Send or receive a message first.`,
+      `与用户 ${input.to} 之间没有会话记录，请先收一条该用户的消息，或先发送一条消息。`,
     );
   }
 
@@ -55,7 +55,7 @@ export async function sendTypingIndicator(input: SendTypingInput): Promise<ToolR
   if (!configResp.typing_ticket) {
     throw new ProtocolError(
       ProtocolErrorCode.InternalError,
-      `getConfig failed: ${configResp.errmsg ?? "no typing_ticket"}`,
+      `获取 typing_ticket 失败：${configResp.errmsg ?? "服务端未返回 typing_ticket"}`,
     );
   }
 
@@ -72,7 +72,7 @@ export async function sendTypingIndicator(input: SendTypingInput): Promise<ToolR
 
   return jsonResult({
     status: cancel ? "typing_cancelled" : "typing",
-    message: cancel ? "Typing indicator stopped." : "Typing indicator sent.",
+    message: cancel ? "已取消「正在输入」状态。" : "已显示「正在输入」状态。",
     to: input.to,
   });
 }

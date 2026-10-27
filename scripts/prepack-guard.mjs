@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * 发布前守卫：`files: ["dist"]` 的包若忘了 build，npm pack/publish 会发出一个**只有 package.json**
- * 的空壳包（bin 指向不存在的 dist/cli.js）——装完 `wemind` 命令直接报「找不到模块」。
+ * 发布前守卫：`files: ["dist"]` 的包若忘了 build，npm pack/publish 会发出一个**只有 package.json** 的空壳包（bin 指向不存在的 dist/cli.js）——装完 `wemind` 命令直接报「找不到模块」。
  *
  * 因此每个要发布的工作区包在 `scripts.prepack` 里调本脚本，检查目标目录：
  *   1. package.json 的 `files` 里列出的每个目录/文件都存在且非空；
@@ -72,8 +71,7 @@ for (const [binName, target] of Object.entries(bins)) {
   if (!text.startsWith("#!")) {
     problems.push(`bin「${binName}」缺少 shebang（#!）：${target}`);
   }
-  // 引用了 sourcemap 就必须把 .map 一起带进包：否则用户报错时的行号指向一个不存在的映射，
-  // 等于「假装有 sourcemap」，比没有更误导。
+  // 引用了 sourcemap 就必须把 .map 一起带进包：否则用户报错时的行号指向一个不存在的映射，等于「假装有 sourcemap」，比没有更误导。
   const ref = text.match(/\/\/# sourceMappingURL=(\S+)\s*$/m);
   if (ref) {
     const mapPath = path.join(path.dirname(p), ref[1]);

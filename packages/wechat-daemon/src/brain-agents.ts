@@ -7,10 +7,7 @@ import type { BrainConfig } from "./brain-config.js";
 /**
  * ACP agent 预设与解析。
  *
- * WeMind 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动一个
- * agent CLI。ACP 是通用协议（kiro-cli、gemini-cli 等都支持），因此接入任意兼容 ACP 的
- * agent 不需要改协议代码——只需告诉我们三件事：① 二进制名；② 进入 ACP 模式的启动参数；
- * ③ 该 agent 读取「配置/数据目录」的环境变量名（我们把它指向 brain 沙箱）。
+ * WeMind 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动一个 agent CLI。ACP 是通用协议（kiro-cli、gemini-cli 等都支持），因此接入任意兼容 ACP 的 agent 不需要改协议代码——只需告诉我们三件事：① 二进制名；② 进入 ACP 模式的启动参数；③ 该 agent 读取「配置/数据目录」的环境变量名（我们把它指向 brain 沙箱）。
  *
  * 选择与覆盖（优先级从高到低）：
  *  ① 环境变量（一次性覆盖；临时试别的 agent 用它，别写进 profile）：
@@ -23,10 +20,8 @@ import type { BrainConfig } from "./brain-config.js";
  *  - `WEMIND_BRAIN_REAL_HOME`  覆盖被继承的真实配置目录（默认取预设 realHome）
  *  - `WEMIND_BRAIN_INHERIT_DIRS` 覆盖继承的子目录清单（逗号/空格分隔）
  *  - `KIRO_CLI_BIN`            旧的 kiro 专用覆盖（仅 kiro 预设、且未设 WEMIND_BRAIN_BIN 时仍生效）
- *  ② 账号级持久配置（`<数据目录>/brain.json`，见 brain-config.ts）：`agent` / `bin` / `args` /
- *     `shell` / `homeEnvVar`。落盘后任何入口重启都能复现，切换用 `wemind brain set <预设>`。
- *  ③ `auto`（未配置时的兜底）：按 AUTO_PROBE_ORDER 取第一个二进制可解析的预设；一个都没有
- *     则标记 unavailable，由启动校验明确报错（不再「静默跑起来、第一条消息才炸」）。
+ *  ② 账号级持久配置（`<数据目录>/brain.json`，见 brain-config.ts）：`agent` / `bin` / `args` / `shell` / `homeEnvVar`。落盘后任何入口重启都能复现，切换用 `wemind brain set <预设>`。
+ *  ③ `auto`（未配置时的兜底）：按 AUTO_PROBE_ORDER 取第一个二进制可解析的预设；一个都没有则标记 unavailable，由启动校验明确报错（不再「静默跑起来、第一条消息才炸」）。
  *  另：未知的 `WEMIND_BRAIN` 值不再静默回退 kiro，而是 `known:false`，交由启动校验报错。
  */
 
@@ -64,8 +59,7 @@ export type AcpAgentPreset = {
  * 已知 ACP agent 预设。
  * - `kiro` 为默认且**已实测**。
  * - 其余均为**示例（未实测）**：参数/包名以各自官方为准，接入前请核对（见 docs/接入其它-ACP-Agent.md）。
- * - 区别两类：① **原生 ACP**（CLI 自带 ACP 模式，直接起，如 kiro、gemini）；
- *   ② **需适配器**（CLI 本身不说 ACP，要起一个适配器进程，如 Claude Code、Codex）。
+ * - 区别两类：① **原生 ACP**（CLI 自带 ACP 模式，直接起，如 kiro、gemini）；② **需适配器**（CLI 本身不说 ACP，要起一个适配器进程，如 Claude Code、Codex）。
  */
 export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // —— 原生 ACP ——
@@ -78,8 +72,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     realHome: path.join(os.homedir(), ".kiro"),
     inheritDirs: ["steering", "memories", "skills", "agents", "powers", "tasks", "extensions"],
   },
-  // Gemini CLI 实验性 ACP（未实测，flag 以官方为准）。注：Gemini 的「记忆」是 ~/.gemini/GEMINI.md 等文件而非目录，
-  // 与 kiro 的目录式不同，故未预置 inheritDirs；需要时按其布局用 WEMIND_BRAIN_REAL_HOME/_INHERIT_DIRS 配置或填此处。
+  // Gemini CLI 实验性 ACP（未实测，flag 以官方为准）。注：Gemini 的「记忆」是 ~/.gemini/GEMINI.md 等文件而非目录，与 kiro 的目录式不同，故未预置 inheritDirs；需要时按其布局用 WEMIND_BRAIN_REAL_HOME/_INHERIT_DIRS 配置或填此处。
   gemini: {
     name: "gemini",
     bin: "gemini",
@@ -90,8 +83,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   },
   // OpenCode：原生 ACP（`opencode acp`）。
   // - Windows 上是 npm shim（PATH 只有 opencode.cmd），故 shell:true + 裸名 binWin。
-  // - 配置目录走 XDG_CONFIG_HOME（指向沙箱 → 配置落在 <沙箱>/opencode/），可真正替换默认 global 目录实现隔离；
-  //   （OPENCODE_CONFIG_DIR 只「追加」不替换 global，无法隔离，故不用它。）
+  // - 配置目录走 XDG_CONFIG_HOME（指向沙箱 → 配置落在 <沙箱>/opencode/），可真正替换默认 global 目录实现隔离；（OPENCODE_CONFIG_DIR 只「追加」不替换 global，无法隔离，故不用它。）
   // - MCP 配置文件是 opencode.json 的 mcp.servers（格式与 kiro 的 settings/mcp.json 不同）。
   // - 记忆/技能为目录式 skills/agents/commands + 单文件 AGENTS.md。
   // 详见 docs/接入-OpenCode.md（含 M1 实测）。
@@ -155,8 +147,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     args: ["--acp", "--yolo"],
     env: { QODER_CONFIG_DIR: `%HOME%${path.sep}qoder` },
     realHome: path.join(os.homedir(), ".qoder"),
-    // memory/ 是 Qoder agent 的用户画像/偏好记忆（实测存在），与日常使用共用一份（junction）；
-    // skills/agents/commands/AGENTS.md 在 Qoder 1.1.78 的本机不存在 → 当前为空操作，保留以便上游新增后自动生效
+    // memory/ 是 Qoder agent 的用户画像/偏好记忆（实测存在），与日常使用共用一份（junction）；skills/agents/commands/AGENTS.md 在 Qoder 1.1.78 的本机不存在 → 当前为空操作，保留以便上游新增后自动生效
     inheritDirs: ["memory", "skills", "agents", "commands"],
     inheritFiles: ["AGENTS.md"],
     configSubdir: "qoder",
@@ -190,8 +181,7 @@ function onPath(exe: string): string | null {
 
 /**
  * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的预设。
- * 只收纳**原生 ACP 且二进制可直接判定**的预设——适配器类（`claude-code` 走 `npx`、
- * `codex` 走 `codex-acp`）不参与自动探测（`npx` 几乎总在 PATH 上，会把它们误选出来）。
+ * 只收纳**原生 ACP 且二进制可直接判定**的预设——适配器类（`claude-code` 走 `npx`、`codex` 走 `codex-acp`）不参与自动探测（`npx` 几乎总在 PATH 上，会把它们误选出来）。
  */
 export const AUTO_PROBE_ORDER = ["kiro", "opencode", "gemini", "deepseek", "qoder"] as const;
 
@@ -280,8 +270,7 @@ export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
   }
   const preset = ACP_AGENT_PRESETS[key];
 
-  // brain.json 的 bin/args/shell/homeEnvVar 是**给落盘那个 agent** 的启动覆盖；
-  // 环境变量临时切到别的预设时不能沿用（否则会拿 deepseek 的 dsh.cmd 去起 qoder）。
+  // brain.json 的 bin/args/shell/homeEnvVar 是**给落盘那个 agent** 的启动覆盖；环境变量临时切到别的预设时不能沿用（否则会拿 deepseek 的 dsh.cmd 去起 qoder）。
   const overrideCfg =
     envKey && cfg?.agent?.trim() && cfg.agent.trim().toLowerCase() !== requestedKey ? null : cfg;
 

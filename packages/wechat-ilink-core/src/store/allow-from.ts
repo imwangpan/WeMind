@@ -4,12 +4,10 @@ import path from "node:path";
 import { DATA_DIR } from "./account.js";
 
 /**
- * 配对授权清单（allowFrom）：每账号一份持久化的「被授权用户 userId 清单」，
- * 取代单一 `WECHAT_OWNER_ID` 环境变量白名单。
+ * 配对授权清单（allowFrom）：每账号一份持久化的「被授权用户 userId 清单」，取代单一 `WECHAT_OWNER_ID` 环境变量白名单。
  * 文件：`<账号数据目录>/allowFrom.json`，格式 `{ version, allowFrom: string[] }`（对齐官方 openclaw-weixin）。
  *
- * 配对(pairing)：扫码登录者的 userId 在归档时自动加入(见 manage finalize)；daemon 启动时也会把账号本人种入，
- * 故现有账号无需手动配置即可继续工作。鉴于大脑 `--trust-all-tools`，本清单是核心安全闸。
+ * 配对(pairing)：扫码登录者的 userId 在归档时自动加入(见 manage finalize)；daemon 启动时也会把账号本人种入，故现有账号无需手动配置即可继续工作。鉴于大脑 `--trust-all-tools`，本清单是核心安全闸。
  *
  * 各函数可传入指定账号的数据目录 dir（默认当前进程 DATA_DIR），便于 manage 操作非当前账号。
  */

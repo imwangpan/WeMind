@@ -1,10 +1,7 @@
-// 进程身份校验：pid 会复用（尤其**重启后**），只凭「pid 还活着」（process.kill(pid, 0)）就杀进程、
-// 或判定「daemon 在跑」，可能**误杀别人的进程**（陈旧 pid 文件 + pid 被复用）或**误判**
-// （自启看似成功、其实压根没起来）。这里改用「命令行里有没有我们自己的特征串」来确认身份。
+// 进程身份校验：pid 会复用（尤其**重启后**），只凭「pid 还活着」（process.kill(pid, 0)）就杀进程、或判定「daemon 在跑」，可能**误杀别人的进程**（陈旧 pid 文件 + pid 被复用）或**误判**（自启看似成功、其实压根没起来）。这里改用「命令行里有没有我们自己的特征串」来确认身份。
 //
 // 原则：查不到命令行 → 一律判否（保守，宁可不杀）。
-// 成本：只有 Windows 需要经 PowerShell 查 CIM（约 1~2s），所以调用方**先 isAlive() 过滤**——
-// 正常路径（陈旧 pid 早就不存在了）零开销，只有「确实有活着的 pid」时才付这笔查询成本。
+// 成本：只有 Windows 需要经 PowerShell 查 CIM（约 1~2s），所以调用方**先 isAlive() 过滤**——正常路径（陈旧 pid 早就不存在了）零开销，只有「确实有活着的 pid」时才付这笔查询成本。
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -26,8 +23,7 @@ function normalize(s: string): string {
 }
 
 /**
- * 取文件名。**不依赖平台**：`/` 与 `\` 都当分隔符——
- * POSIX 的 `path.basename` 不认 `\`，会把 Windows 风格路径整条留下（CI 上踩过）。
+ * 取文件名。**不依赖平台**：`/` 与 `\` 都当分隔符——POSIX 的 `path.basename` 不认 `\`，会把 Windows 风格路径整条留下（CI 上踩过）。
  */
 function baseName(p: string): string {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
@@ -111,22 +107,17 @@ export function isOurProcess(pid: number | null | undefined, markerSets: string[
  * 我们自己的 CLI / wrapper 进程特征：命令行里同时含 `wemind` + `cli.js`。
  *
  * 这串必须同时覆盖**三种**安装方式（少一种 → 对应场景下 stop/list/单实例判断全失效）：
- *  - 源码仓库：`<node> D:\repo\WeMind\packages\wechat-daemon\dist\cli.js daemon`
- *    （由 marker 组合里的 `wemind` 命中仓库名 WeMind；注意大小写不敏感比较在下面已处理）；
- *  - 全局/本地安装：`<node> …/node_modules/@wemind/cli/dist/cli.js daemon`
- *    （npm 的 bin shim 最终 exec 的正是这个路径；Windows 上可能走 `…\@wemind\cli\dist\cli.js` 短路径。
- *     两种形态都命中 marker 里的 `wemind`——它同时是 scope 名与命令名）；
+ *  - 源码仓库：`<node> D:\repo\WeMind\packages\wechat-daemon\dist\cli.js daemon`（由 marker 组合里的 `wemind` 命中仓库名 WeMind；注意大小写不敏感比较在下面已处理）；
+ *  - 全局/本地安装：`<node> …/node_modules/@wemind/cli/dist/cli.js daemon`（npm 的 bin shim 最终 exec 的正是这个路径；Windows 上可能走 `…\@wemind\cli\dist\cli.js` 短路径。两种形态都命中 marker 里的 `wemind`——它同时是 scope 名与命令名）；
  *  - 源码开发期的 PowerShell wrapper：`pwsh -File …\scripts\run-daemon.ps1`。
  *
- * 注意**不能**再用 `wechat-daemon`：那是源码目录名，发布到 npm 后包目录叫 `@wemind/cli`，
- * 用目录名做特征会让「装出来的 wemind」永远匹配不上，从而 list 永远显示「已停止」。
+ * 注意**不能**再用 `wechat-daemon`：那是源码目录名，发布到 npm 后包目录叫 `@wemind/cli`，用目录名做特征会让「装出来的 wemind」永远匹配不上，从而 list 永远显示「已停止」。
  */
 export const CLI_PID_MARKERS: string[][] = [["wemind", "cli.js"], ["run-daemon.ps1"]];
 
 /**
  * 大脑进程特征：`<bin> <args…>`（如 `opencode acp`、`kiro-cli acp`）。
- * 取 bin 的**文件名**并去掉扩展名，兼顾 shell=true（命令行是原始命令）与 `--bin` 绝对路径两种情况；
- * args 是关键区分位——用户自己的 `opencode serve`（本机 OpenCode 服务）不含 `acp`，不会被误判。
+ * 取 bin 的**文件名**并去掉扩展名，兼顾 shell=true（命令行是原始命令）与 `--bin` 绝对路径两种情况；args 是关键区分位——用户自己的 `opencode serve`（本机 OpenCode 服务）不含 `acp`，不会被误判。
  * bin 为空（配置异常）时返回空数组 → matchesMarkers 恒判否，绝不误杀。
  */
 export function brainPidMarkers(bin: string, args: string[]): string[][] {

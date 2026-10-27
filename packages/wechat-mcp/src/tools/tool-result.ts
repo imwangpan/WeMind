@@ -1,9 +1,7 @@
 /**
  * MCP 工具的返回体构造器。
  *
- * 6 个工具都返回同一形状（单条 text content + 结构化 JSON），过去每个分支都手写一遍
- * `{ content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] }`——既啰嗦，也容易
- * 出现「有的分支缩进 2、有的 0」「漏写 null, 2」这类不一致。集中到这里后，改返回格式只需改一处。
+ * 6 个工具都返回同一形状（单条 text content + 结构化 JSON），过去每个分支都手写一遍 `{ content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] }`——既啰嗦，也容易出现「有的分支缩进 2、有的 0」「漏写 null, 2」这类不一致。集中到这里后，改返回格式只需改一处。
  */
 
 export type ToolResult = { content: Array<{ type: "text"; text: string }> };

@@ -9,10 +9,7 @@ import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
 /*
  * 只测「声明怎么生成」——不调 pm2、不需要装 pm2。
  *
- * 为什么值得测：`--runner pm2` 这条路线此前用 `pm2 start … -- daemon` 命令行参数启动，
- * 既不设重启延迟（pm2 默认 0 → 崩溃就立刻重拉，撞上 iLink 限流/重启风暴），也不认退出码 78
- * （大脑配置错误会被重拉到 max_restarts，每 5s 刷一条日志）。声明一旦写错，只有真机装了 pm2
- * 才会暴露；这里把「与 builtin 看门狗 / ecosystem.config.cjs 对齐」的那几个键钉死。
+ * 为什么值得测：`--runner pm2` 这条路线此前用 `pm2 start … -- daemon` 命令行参数启动，既不设重启延迟（pm2 默认 0 → 崩溃就立刻重拉，撞上 iLink 限流/重启风暴），也不认退出码 78（大脑配置错误会被重拉到 max_restarts，每 5s 刷一条日志）。声明一旦写错，只有真机装了 pm2 才会暴露；这里把「与 builtin 看门狗 / ecosystem.config.cjs 对齐」的那几个键钉死。
  */
 describe("pm2 app 声明", () => {
   const tmpDirs: string[] = [];
