@@ -16,6 +16,7 @@ import {
   fetchQRCode,
   pollQRStatus,
   saveQrState,
+  saveAccountTo,
   clearSessionPause,
   notifyStart,
   notifyStop,
@@ -85,15 +86,96 @@ function readPid(dir: string, name: string): number | null {
 function aliveOurs(pid: number | null, markers: string[][] = CLI_PID_MARKERS): boolean {
   return isOurProcess(pid, markers);
 }
-function killPid(pid: number): void {
-  if (process.platform === "win32")
-    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true, // 避免瞬时闪出控制台窗口
-    });
-  else {
+
+/** 阻塞式 sleep（CLI 是同步流程；Atomics.wait 不占 CPU、不比 spawn 一个进程贵）。 */
+function sleepSync(ms: number): void {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 某 pid 的全部后代（POSIX）。Windows 不需要——`taskkill /T` 自己会走进程树。
+ * 用 `ps -A -o pid=,ppid=` 一次取全表再在内存里建树，比逐层 `pgrep -P` 少起进程。
+ * （导出仅供单测；CLI 内部不对外。）
+ */
+export function descendantPids(pid: number): number[] {
+  try {
+    // procps（Linux）与 BSD/macOS 的 ps 都认 `-A`；个别精简环境（BusyBox）只有 `-e`，故兜底一次。
+    const psArgs = [
+      ["-A", "-o", "pid=,ppid="],
+      ["-e", "-o", "pid=,ppid="],
+    ];
+    let stdout = "";
+    for (const args of psArgs) {
+      const r = spawnSync("ps", args, { encoding: "utf8", timeout: 5000 });
+      if (r.status === 0 && r.stdout) {
+        stdout = r.stdout;
+        break;
+      }
+    }
+    const childrenOf = new Map<number, number[]>();
+    for (const line of stdout.split(/\r?\n/)) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)$/);
+      if (!m) continue;
+      const child = Number(m[1]);
+      const parent = Number(m[2]);
+      const bucket = childrenOf.get(parent);
+      if (bucket) bucket.push(child);
+      else childrenOf.set(parent, [child]);
+    }
+    const out: number[] = [];
+    const walk = (p: number): void => {
+      for (const c of childrenOf.get(p) ?? []) {
+        out.push(c);
+        walk(c);
+      }
+    };
+    walk(pid);
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 杀「pid 及其整棵进程树」。
+ *
+ * Windows：`taskkill /T /F` 本来就连带子树。
+ * POSIX：`process.kill(pid)` **只**结束该进程，不动它的子进程——daemon 被停后，它拉起的
+ * ACP 大脑 / worker 会留下来继续占着会话与文件句柄（实测只有 Windows 因为 /T 而看不出来）。
+ * 所以这里先收集后代、由叶子往根 SIGTERM（daemon 的 SIGTERM 处理器会自己清 pid 文件），
+ * 等一小会儿再对仍存活的补 SIGKILL。
+ */
+function killProcessTrees(pids: number[]): void {
+  const unique = [...new Set(pids.filter((p) => isAlive(p)))];
+  if (!unique.length) return;
+  if (process.platform === "win32") {
+    for (const pid of unique)
+      spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true, // 避免瞬时闪出控制台窗口
+      });
+    return;
+  }
+  // 先收集所有后代（按叶子优先排序：后出现的更深，反过来就是叶子先）
+  const targets: number[] = [];
+  for (const pid of unique) targets.push(...descendantPids(pid).reverse(), pid);
+  const all = [...new Set(targets)].filter((p) => isAlive(p));
+  for (const pid of all) {
     try {
-      process.kill(pid);
+      process.kill(pid, "SIGTERM");
+    } catch {
+      /* ignore */
+    }
+  }
+  sleepSync(800); // 给 SIGTERM 处理器一点时间（daemon 会清 pid 文件、关子进程）
+  for (const pid of all) {
+    if (!isAlive(pid)) continue;
+    try {
+      process.kill(pid, "SIGKILL");
     } catch {
       /* ignore */
     }
@@ -144,7 +226,10 @@ function startDaemon(key: string, runner?: string): void {
   console.log((useRunner === "pm2" ? pm2Start(key, cliPath) : watchdogStart(key, cliPath)).msg);
 }
 
-/** 停止某账号的常驻：先 pm2 delete（方案 a），再按 pid 兜底杀 wrapper/daemon/brain（兼容直接启动的）。 */
+/**
+ * 停止某账号的常驻：先 pm2 delete（方案 a），再按 pid 兜底杀 wrapper/daemon/brain/worker
+ * （兼容直接启动的）。停的是**整条链**：除列出的进程外，还连带它们的子进程树。
+ */
 function stopDaemon(key: string): string {
   pm2Stop(key); // best-effort：停掉 pm2 托管的 app（若有）
   const dir = accountDir(key);
@@ -153,22 +238,32 @@ function stopDaemon(key: string): string {
     { pid: readPid(dir, "wrapper.pid"), name: "wrapper", markers: CLI_PID_MARKERS },
     { pid: readPid(dir, "daemon.pid"), name: "daemon", markers: CLI_PID_MARKERS },
     { pid: readPid(dir, "brain.pid"), name: "brain", markers: brainPidMarkers(ag.bin, ag.args) },
+    // worker 也是我们拉起的 ACP agent（worker-acp.ts 写 worker.pid）；漏掉它 → POSIX 上
+    // 停完 daemon 任务进程还活着、stale worker.pid 一直留着（Windows 靠 /T 连带，看不出来）。
+    {
+      pid: readPid(dir, "worker.pid"),
+      name: "worker",
+      markers: brainPidMarkers(ag.bin, ag.args),
+    },
   ];
   // 只杀「活着**且身份确认**」的：pid 会被复用，陈旧 pid 文件可能指向别人的进程 → 绝不误杀。
   // 命令行一次批量查（Windows 下较慢）；正常情况（陈旧 pid 早已不存在）根本不会发起查询。
   const lines = commandLines(cand.map((c) => c.pid));
   const stopped: string[] = [];
   const skipped: string[] = [];
+  const toKill: number[] = [];
   for (const c of cand) {
     if (!c.pid || !isAlive(c.pid)) continue;
     if (matchesMarkers(lines.get(c.pid), c.markers)) {
-      killPid(c.pid);
+      toKill.push(c.pid);
       stopped.push(`${c.name} ${c.pid}`);
     } else {
       skipped.push(`${c.name} ${c.pid}`); // 活着的 pid 但不是我们的（pid 复用）→ 不杀
     }
   }
-  for (const f of ["wrapper.pid", "daemon.pid", "brain.pid"]) {
+  // 身份校验都通过了才动手：一次性杀掉这些进程**及其子进程树**（见 killProcessTrees 注释）。
+  killProcessTrees(toKill);
+  for (const f of ["wrapper.pid", "daemon.pid", "brain.pid", "worker.pid"]) {
     try {
       fs.unlinkSync(path.join(dir, f));
     } catch {
@@ -284,21 +379,15 @@ async function cmdLogin(
     if (s.status === "confirmed") {
       if (!s.bot_token || !s.ilink_bot_id || !s.ilink_user_id)
         throw new Error("confirmed 但数据不全");
-      fs.writeFileSync(
-        path.join(STAGING, "account.json"),
-        JSON.stringify(
-          {
-            botToken: s.bot_token,
-            botId: s.ilink_bot_id,
-            userId: s.ilink_user_id,
-            baseUrl: s.baseurl ?? BASE,
-            savedAt: Date.now(),
-          },
-          null,
-          2,
-        ),
-        "utf-8",
-      );
+      // 走 core 的 saveAccountTo：POSIX 600 + Windows 一次性明文告警。
+      // 之前这里是裸 writeFileSync，导致「凭证受权限保护」的安全承诺在 CLI 登录路径上不成立。
+      saveAccountTo(STAGING, {
+        botToken: s.bot_token,
+        botId: s.ilink_bot_id,
+        userId: s.ilink_user_id,
+        baseUrl: s.baseurl ?? BASE,
+        savedAt: Date.now(),
+      });
       clearSessionPause(s.ilink_bot_id);
       await notifyStart({ baseUrl: s.baseurl ?? BASE, token: s.bot_token }).catch(() => {});
       for (const f of ["qrcode.png", "qr_login.json"]) {
@@ -448,10 +537,15 @@ async function cmdBrainCheck(key: string): Promise<string> {
 /** brain 子命令派发：show（默认）/ set / unset / check。 */
 async function cmdBrain(rest: string[]): Promise<string> {
   const argv = [...rest];
+  const FLAGS = new Set(["--bin", "--args", "--shell", "--no-shell", "--restart"]);
   const takeFlag = (name: string): string | undefined => {
     const i = argv.indexOf(name);
     if (i < 0) return undefined;
     const v = argv[i + 1];
+    // `--bin` 后面没值、或紧跟的是另一个开关（`brain set kiro --bin --restart`）时，
+    // 以前会静默把 `--restart` 当成 bin 的值，看起来「设置成功」但存进去的是错的。
+    // 值本身允许以 `--` 开头（如 `--args "--experimental-acp"`），所以只对已知开关报错。
+    if (v === undefined || FLAGS.has(v)) throw new Error(`${name} 缺少参数值`);
     argv.splice(i, 2);
     return v;
   };
@@ -741,8 +835,23 @@ export async function runManage(argv: string[]): Promise<void> {
       );
       break;
     }
+    case "help":
+    case "--help":
+    case "-h":
+    case undefined:
+      console.log(helpText());
+      break;
     default:
-      console.log(`WeMind 多账号管理（wemind v${CLI_VERSION}）
+      // 拼错命令不能静默成功：脚本里 `wemind strat x` 以前 exit 0，看起来像成功。
+      // 提示与帮助都走 stderr（stdout 保持为空），并以 2 退出（2 = 用法错误，与「运行出错」的 1 区分）。
+      console.error(`未知命令：${cmd}`);
+      console.error(helpText());
+      process.exitCode = 2;
+  }
+}
+
+function helpText(): string {
+  return `WeMind 多账号管理（wemind v${CLI_VERSION}）
 用法: wemind <command>            其余：wemind version | help
 
   login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动归档（--start 顺带启动 daemon）
@@ -765,7 +874,6 @@ export async function runManage(argv: string[]): Promise<void> {
   allow <key|label> <userId>     授权某用户可驱动该账号 bot
   revoke <key|label> <userId>    撤销某用户的授权
 
-说明：key = 由微信 botId 派生的唯一标识（目录名）；label = 人类可读别名。多数命令可用 key 或 label。`);
-  }
+说明：key = 由微信 botId 派生的唯一标识（目录名）；label = 人类可读别名。多数命令可用 key 或 label。`;
 }
 // 入口由 cli.ts 调用 runManage(argv)；此处不再顶层自启。

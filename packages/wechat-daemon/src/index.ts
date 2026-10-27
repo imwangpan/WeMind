@@ -307,6 +307,25 @@ function sendOrdered(
   return replyChain;
 }
 
+/**
+ * 发一条「必须送达」的答复（控制指令回执、任务回执、任务结束确认、出错提示）。
+ *
+ * 与 sendOrdered 的唯一差别：**先计入连发额度**。服务端按「距用户上一条消息」计连续发送数，
+ * 这类答复确实占额度；只发不计数会让 brain 回合的 budgetOf 低估真实值 → 误判「还能发」→
+ * 撞 ret=-2 限流、结果丢失。计数后仍走同一条 replyChain，保证与进度/答案不乱序、遵守最小间隔。
+ * 与 `setTaskPush` 同一套语义：task 推送也是「必须送达、只计数不被 awaiting 暂停」。
+ */
+function sendNotice(
+  account: AccountData,
+  to: string,
+  ctx: string | undefined,
+  text: string,
+  fallbackToken?: string,
+): Promise<void> {
+  budgetOf(to).count += 1;
+  return sendOrdered(account, to, ctx, text, MessageState.FINISH, fallbackToken);
+}
+
 /** 把长回复作为 .md 文件发送（走同一串行链+节流）；发文件失败则兜底回退为文本。 */
 function sendMdOrdered(
   account: AccountData,
@@ -708,9 +727,7 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
         r = "处理指令出错：" + String(e);
       }
       log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
-      await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) =>
-        handleSendError(e, account),
-      );
+      await sendNotice(account, from, token, r, latestToken());
       continue;
     }
 
@@ -720,9 +737,7 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
     if (tcmd?.kind === "stop") {
       const r = stopTask(from);
       log("task: stop ->", r);
-      await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) =>
-        handleSendError(e, account),
-      );
+      await sendNotice(account, from, token, r, latestToken());
       continue;
     }
     if (tcmd?.kind === "toWorker") {
@@ -732,9 +747,7 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
         injectTask(from, tcmd.text);
       } else {
         const r = dispatchTask(from, tcmd.text);
-        await reply(account, from, token, r, MessageState.FINISH, latestToken()).catch((e) =>
-          handleSendError(e, account),
-        );
+        await sendNotice(account, from, token, r, latestToken());
       }
       continue;
     }
@@ -760,14 +773,13 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
       );
     } catch (e) {
       log("handleMessage error:", e instanceof Error ? e.stack || e.message : String(e));
-      await reply(
+      await sendNotice(
         account,
         from,
         token,
         "处理这条消息时出错了，请再发一次试试。",
-        MessageState.FINISH,
         latestToken(),
-      ).catch((e2) => handleSendError(e2, account));
+      );
     }
   }
 }
