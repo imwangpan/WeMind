@@ -116,7 +116,7 @@ function parseJsonResp<T>(raw: string, label: string): T {
   try {
     return JSON.parse(raw) as T;
   } catch {
-    throw new Error(`${label}: response not JSON (${raw.slice(0, 120)})`);
+    throw new Error(`${label}：响应不是合法 JSON（${raw.slice(0, 120)}）`);
   }
 }
 

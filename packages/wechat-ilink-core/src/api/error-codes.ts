@@ -74,7 +74,7 @@ export class ILinkError extends Error {
   readonly kind: ILinkErrorKind;
   constructor(op: string, code: number, errmsg?: string) {
     const { kind, label, hint } = describeILinkCode(code);
-    super(`${op} failed: ${label}${hint ? ` — ${hint}` : ""}${errmsg ? ` (${errmsg})` : ""}`);
+    super(`${op} 调用失败：${label}${hint ? ` — ${hint}` : ""}${errmsg ? `（${errmsg}）` : ""}`);
     this.name = "ILinkError";
     this.code = code;
     this.kind = kind;

@@ -55,7 +55,7 @@ describe("checkQrcodeStatus 高级态（不再静默卡死）", () => {
     m.pollQRStatus.mockResolvedValue({ status: "need_verifycode" });
     const r = await checkQrcodeStatus();
     expect(parse(r).status).toBe("need_verifycode");
-    expect(parse(r).message).toMatch(/verification code/i);
+    expect(parse(r).message).toMatch(/验证码/);
     expect(parse(r).message).toMatch(/wemind login/);
   });
 
@@ -71,15 +71,16 @@ describe("checkQrcodeStatus 高级态（不再静默卡死）", () => {
     });
     const r = await checkQrcodeStatus();
     expect(parse(r).status).toBe("scaned_but_redirect");
-    expect(parse(r).message).toMatch(/redirect/i);
+    expect(parse(r).message).toMatch(/重定向/);
     expect(parse(r).message).toContain("idc2.x.com");
   });
 
   it("binded_redirect 无 host → 文案里不出现空括号", async () => {
     m.pollQRStatus.mockResolvedValue({ status: "binded_redirect" });
     const msg = parse(await checkQrcodeStatus()).message as string;
-    expect(msg).toMatch(/IDC redirect,/);
+    expect(msg).toMatch(/IDC 重定向/);
     expect(msg).not.toContain("()");
+    expect(msg).not.toContain("（）");
   });
 });
 
@@ -112,7 +113,7 @@ describe("checkQrcodeStatus 正常态（保持原行为）", () => {
 
   it("confirmed 但服务端数据不全 → 抛错且不落盘半份凭证", async () => {
     m.pollQRStatus.mockResolvedValue({ status: "confirmed", bot_token: "bt" });
-    await expect(checkQrcodeStatus()).rejects.toThrow(/incomplete data/);
+    await expect(checkQrcodeStatus()).rejects.toThrow(/凭证数据不完整/);
     expect(m.saveAccount).not.toHaveBeenCalled();
   });
 
@@ -120,12 +121,12 @@ describe("checkQrcodeStatus 正常态（保持原行为）", () => {
     m.pollQRStatus.mockResolvedValue({ status: "wait" });
     const r = await checkQrcodeStatus();
     expect(parse(r).status).toBe("wait");
-    expect(parse(r).message).toMatch(/Waiting/i);
+    expect(parse(r).message).toMatch(/等待扫码/);
   });
 
   it("scaned（已扫未确认）→ 继续轮询的提示", async () => {
     m.pollQRStatus.mockResolvedValue({ status: "scaned" });
-    expect(parse(await checkQrcodeStatus()).message).toMatch(/waiting for confirmation/i);
+    expect(parse(await checkQrcodeStatus()).message).toMatch(/正在等待微信端确认/);
   });
 
   it("本地 TTL 已过 → 直接返回 expired 并清掉扫码态，不再打服务端", async () => {
@@ -145,7 +146,7 @@ describe("checkQrcodeStatus 正常态（保持原行为）", () => {
 
   it("没有待处理二维码 → 提示先调 login_qrcode", async () => {
     m.loadQrState.mockReturnValue(null);
-    await expect(checkQrcodeStatus()).rejects.toThrow(/Call login_qrcode first/);
+    await expect(checkQrcodeStatus()).rejects.toThrow(/请先调用 login_qrcode/);
   });
 
   it("已登录时直接返回 confirmed，不再轮询", async () => {

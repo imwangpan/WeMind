@@ -72,7 +72,7 @@ export async function loginQrcode(): Promise<ToolResult> {
   if (account?.botToken) {
     return jsonResult({
       status: "already_logged_in",
-      message: "Already logged in. Use logout first if you want to re-login.",
+      message: "已登录。如需重新登录，请先调用 logout。",
       botId: account.botId,
       userId: account.userId,
     });
@@ -108,7 +108,7 @@ export const checkQrcodeStatusSchema = z.object({});
 function expiredResult(): ToolResult {
   return jsonResult({
     status: "expired",
-    message: "QR code expired. Call login_qrcode to generate a new one.",
+    message: "二维码已过期，请调用 login_qrcode 重新生成。",
   });
 }
 
@@ -122,7 +122,7 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
   if (account?.botToken) {
     return jsonResult({
       status: "confirmed",
-      message: "Already logged in.",
+      message: "已登录。",
       botId: account.botId,
       userId: account.userId,
     });
@@ -132,7 +132,7 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
   if (!qrState) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
-      "No pending QR code. Call login_qrcode first.",
+      "当前没有待验证的二维码，请先调用 login_qrcode。",
     );
   }
 
@@ -149,7 +149,7 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
       if (!bot_token || !ilink_bot_id || !ilink_user_id) {
         throw new ProtocolError(
           ProtocolErrorCode.InternalError,
-          "Login confirmed but server returned incomplete data.",
+          "服务端已确认登录，但返回的凭证数据不完整，请重试登录。",
         );
       }
       const baseUrl = statusResponse.baseurl ?? DEFAULT_BASE_URL;
@@ -169,7 +169,7 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
 
       return jsonResult({
         status: "confirmed",
-        message: "Login successful! Bot is now connected to WeChat.",
+        message: "登录成功！机器人已连接到微信。",
         botId: ilink_bot_id,
         userId: ilink_user_id,
       });
@@ -183,30 +183,31 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
     case "verify_code_blocked":
       return unsupportedResult(
         statusResponse.status,
-        "Login requires a verification code, which the MCP login flow does not support. Use the `wemind login` CLI instead, or try again later.",
+        "本次登录需要输入验证码，MCP 登录流程不支持该步骤。请改用 `wemind login` 命令行完成登录，或稍后重试。",
       );
 
     case "scaned_but_redirect":
     case "binded_redirect": {
-      const host = statusResponse.redirect_host ? ` (to ${statusResponse.redirect_host})` : "";
+      const host = statusResponse.redirect_host
+        ? `（需重定向到 ${statusResponse.redirect_host}）`
+        : "";
       return unsupportedResult(
         statusResponse.status,
-        `Login requires an IDC redirect${host}, which the MCP login flow does not support. Use the \`wemind login\` CLI instead.`,
+        `本次登录需要 IDC 重定向${host}，MCP 登录流程不支持该步骤。请改用 \`wemind login\` 命令行完成登录。`,
       );
     }
 
     case "wait":
       return jsonResult({
         status: "wait",
-        message: "Waiting for QR code scan. Call check_qrcode_status again after scanning.",
+        message: "等待扫码。扫码完成后请再次调用 check_qrcode_status。",
       });
 
     default:
       // scaned / 其它未列状态：都还在服务端处理中，让 Agent 继续轮询
       return jsonResult({
         status: statusResponse.status,
-        message:
-          "QR code scanned, waiting for confirmation in WeChat. Call check_qrcode_status again.",
+        message: "已扫码，正在等待微信端确认。请再次调用 check_qrcode_status。",
       });
   }
 }
@@ -224,5 +225,5 @@ export async function logout(): Promise<ToolResult> {
   resetState();
   clearAccount();
 
-  return jsonResult({ status: "logged_out", message: "Logged out successfully." });
+  return jsonResult({ status: "logged_out", message: "已登出，凭证已清除。" });
 }

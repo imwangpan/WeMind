@@ -7,6 +7,6 @@ export function sessionExpiredResult(botId: string): ToolResult {
   const mins = Math.ceil(getRemainingPauseMs(botId) / 60_000);
   return jsonResult({
     status: "session_expired",
-    message: `WeChat bot session expired (errcode ${SESSION_EXPIRED_ERRCODE}). Call login_qrcode to re-authenticate. Polling paused for ~${mins} min.`,
+    message: `微信机器人会话已过期（错误码 ${SESSION_EXPIRED_ERRCODE}），请调用 login_qrcode 重新登录。轮询已暂停约 ${mins} 分钟。`,
   });
 }

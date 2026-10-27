@@ -31,6 +31,7 @@
 
 ### Changed
 
+- **MCP 提示文案改为中文 + description 统一三段式（2026-10-27）**：`packages/wechat-mcp/src/tools/*` 的 `message` / `ProtocolError` 文本与 core 的错误文案（`error-codes.ts` 的 `ILinkError`、`client.ts` 的 HTTP 非 2xx 与「响应不是合法 JSON」）全部改为中文——这些是**给模型读、并常被转述给微信用户**的文本。**刻意保持英文的三类**：① 6 个工具的 `description`（MCP 生态惯例 + 模型对 `MUST` / `wait=true` / 步骤顺序的遵循度，`index.ts` 顶部注释写明理由）；② `login.ts` 的 `qrHelpText`（它是命令 Agent「自己 `cat` 终端二维码」的指令，不面向人）；③ 状态码本身（`confirmed` / `expired` / `typing` / `sent` 等，Agent 可能据其分支）。同时把 6 个 `description` 统一为「做什么 → 何时调用/返回什么 → 硬约束」的空行分段格式（`get_messages` 那 4 步工作流逐字保留），`README.md` / `packages/wechat-mcp/README.md` / `docs/repowiki/04-MCP-Server.md` 的工具表 description 列同步改为节选。测试断言同步匹配中文文案。
 - **发布包改名 `wemind` → `@wemind/cli`（2026-10-26，收进 `@wemind` scope）**：与 `@wemind/wechat-mcp` 并列在同一个 scope 下；**命令名保持 `wemind`**（`bin` 字段与包名无关）。仓库根包名**不改**（仍 `wemind`，`private`），只把根 `package.json` 里的 `-w wemind` 改成 `-w @wemind/cli`。代价：`npx` 按包名解析、且包名与 bin 名不同，所以 `npx wemind` 不可用，需写 `npx -y @wemind/cli`（`npm i -g` 后命令不受影响）。
 - **单文件产物带 sourcemap（2026-10-26）**：`tsdown` 开 `sourcemap: true`，`dist/cli.js.map` 随包发布（安装包 51 KB → ~147 KB），用户报错可映射回 `.ts`；`prepack` 守卫新增「声明了 `sourceMappingURL` 就必须把 `.map` 带进包」的检查。
 - **qrcode 改为懒加载（2026-10-26）**：`manage.ts` 顶层 `import QRCode from "qrcode"` 改为 `loadQrCode()`（首次画码时 `await import("qrcode")`，同进程复用）。产物顶层 import 从 7 条降到 6 条，`version`/`list`/`brain`/`task`/`daemon` 不再解析 qrcode 及其 yargs 依赖树（实测首次解析约 33–36 ms，只有 `login` 付这笔钱）；qrcode 缺失时给出可操作提示而不是堆栈。

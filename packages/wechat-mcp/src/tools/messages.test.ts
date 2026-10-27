@@ -37,7 +37,7 @@ const parse = (r: { content: Array<{ text: string }> }) => JSON.parse(r.content[
 describe("getMessages", () => {
   it("未登录 → 抛 McpError", async () => {
     m.loadAccount.mockReturnValue(null);
-    await expect(getMessages({})).rejects.toThrow(/Not logged in/);
+    await expect(getMessages({})).rejects.toThrow(/尚未登录/);
   });
 
   it("会话暂停 → 直接返回 session_expired，不轮询", async () => {

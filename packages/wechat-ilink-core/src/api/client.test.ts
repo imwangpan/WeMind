@@ -215,7 +215,7 @@ describe("getUpdates（长轮询超时语义）", () => {
     handler = (_req, res) => res.end("<html>proxy error</html>");
     const err = await getUpdates({ baseUrl, token: "t", timeoutMs: 5000 }).catch((e) => e);
 
-    expect(err.message).toMatch(/getUpdates: response not JSON/);
+    expect(err.message).toMatch(/getUpdates：响应不是合法 JSON/);
     expect(err.message).toContain("<html>proxy error");
   });
 });
