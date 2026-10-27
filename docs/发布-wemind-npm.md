@@ -174,10 +174,18 @@ wemind 1.1.0 (@wemind/cli, node 24.21.0, win32-x64)
 
 `npm pack`/`publish` 前检查：`files` 里每个目录存在且非空、`bin` 指向的文件存在且带 shebang。不满足 → **exit 1**，从源头杜绝空壳包。
 
-### 4.7 新增 `scripts/check-version.mjs` + `scripts/bump-version.mjs`
+### 4.7 `scripts/check-version.mjs` + 三个 `release:*` 脚本
 
 - `check-version.mjs`：包名 = `@wemind/cli`、`bin` 含 `wemind`、lock 里 `packages/wechat-daemon` 的 `name`/`version` 一致，且 `src/version.ts` **没有**回退成硬编码版本号字面量（回退会让版本重新分裂成两处）。
-- `bump-version.mjs`（`npm run release:patch|minor|major`）：一条命令完成「`npm version` 改 package.json + lock → 自检」，并在结尾打印下一步（build / pack 预演 / 提交 / 推送）。支持 `--dry-run`。
+- `package.json` 里的 `release:patch|minor|major` 是**三行 npm script**，没有自定义脚本文件：
+
+  ```json
+  "release:patch": "npm version patch --workspace @wemind/cli --no-git-tag-version && npm run check:version"
+  ```
+
+  前半句改 `package.json` + `package-lock.json`（`--no-git-tag-version` 阻止 npm 自动 commit/tag），后半句自检，失败即中断。
+
+  > 曾经有个 `scripts/bump-version.mjs` 包装（含「打印下一步」提示与 `--dry-run`）。版本号改成单一来源后它没必要了——它要解决的核心问题（同步 `version.ts`）已被结构性消灭；剩下的防呆用一行 `&&` 就能覆盖。删除后少了 ~120 行自维护代码（含一段为规避 Windows `DEP0190`/`EINVAL` 而写的 npm-cli.js 路径解析）。
 
 ### 4.8 新增 `.github/workflows/wemind-publish.yml`
 
@@ -214,8 +222,9 @@ check-version（包名+版本一致性）→ npm ci → lint → format:check �
 ### 6.1 升版本号（一条命令）
 
 ```bash
-npm run release:patch      # 或 release:minor / release:major，也可 node scripts/bump-version.mjs 1.4.2
-# 脚本内部：npm version -w @wemind/cli（改 package.json + lock）→ 跑 check-version 自检 → 打印下一步
+npm run release:patch      # 或 release:minor / release:major
+# 等价于：npm version patch -w @wemind/cli --no-git-tag-version && npm run check:version
+# 指定具体版本：npm version 1.4.2 -w @wemind/cli --no-git-tag-version
 ```
 
 > 版本号的**唯一来源**是 `packages/wechat-daemon/package.json`。`src/version.ts` 运行时读它，

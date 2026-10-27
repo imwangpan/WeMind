@@ -122,20 +122,20 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 npm run release:patch    # 1.1.0 → 1.1.1（Bug 修复）
 npm run release:minor    # 1.1.0 → 1.2.0（向后兼容的新功能）
 npm run release:major    # 1.1.0 → 2.0.0（不兼容改动）
-
-# 也可以直接指定版本，或先演练（不改任何文件）
-npm run release:minor -- --dry-run
-node scripts/bump-version.mjs 1.4.2
 ```
 
-脚本（`scripts/bump-version.mjs`）内部做三件事：
+这三个脚本等价于：
 
-1. `npm version <type> --workspace @wemind/cli --no-git-tag-version` —— 改 `package.json` 与 `package-lock.json`，且**不**自动 commit / tag；
-2. 跑 `scripts/check-version.mjs` 自检：包名对不对、`bin` 是否仍叫 `wemind`、lock 是否同步、**`src/version.ts` 有没有被改回硬编码版本号**（改回去会让版本重新分裂成两处）；
-3. 打印下一步该执行什么。
+```powershell
+npm version <type> --workspace @wemind/cli --no-git-tag-version && npm run check:version
+```
 
-> 想手动改也可以：只改 `packages/wechat-daemon/package.json` 的 `"version"`，然后
-> `npm install --package-lock-only --ignore-scripts` 刷新 lock。
+- 前半句改 **`package.json` 与 `package-lock.json` 两处**；`--no-git-tag-version` 让它**不**自动创建 git commit 和 tag（我们的发布流程要求「版本号 + 源码改动」在同一个 commit 里）；
+- 后半句跑 `check-version` 自检：包名、`bin` 是否仍叫 `wemind`、lock 是否同步、**`src/version.ts` 有没有被改回硬编码版本号**。任一项不对就 `exit 1`，`&&` 会中断，不会带着错误版本继续。
+
+> **指定具体版本**：`npm version 1.4.2 --workspace @wemind/cli --no-git-tag-version`
+>
+> 想完全手动也可以：改 `packages/wechat-daemon/package.json` 的 `"version"`，再 `npm install --package-lock-only --ignore-scripts` 刷新 lock。
 > **不需要**改 `src/version.ts`——它运行时读 package.json。不要手动编辑 `package-lock.json`。
 
 ### 第四步：本地校验
