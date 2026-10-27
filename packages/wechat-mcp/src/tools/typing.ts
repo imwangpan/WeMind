@@ -11,6 +11,7 @@ import {
 } from "@wemind/wechat-ilink-core";
 
 import { sessionExpiredResult } from "./session-result.js";
+import { jsonResult, type ToolResult } from "./tool-result.js";
 
 export const sendTypingSchema = z.object({
   to: z.string().min(1).describe("The WeChat user ID to send the typing indicator to."),
@@ -21,12 +22,10 @@ export const sendTypingSchema = z.object({
     .describe("'typing' to show typing indicator, 'cancel' to stop it."),
 });
 
-export async function sendTypingIndicator(input: {
-  to: string;
-  status?: "typing" | "cancel";
-}): Promise<{
-  content: Array<{ type: "text"; text: string }>;
-}> {
+/** 工具入参：status 在 schema 层有默认值，函数层按可选处理（便于直接调用/测试）。 */
+type SendTypingInput = { to: string; status?: "typing" | "cancel" };
+
+export async function sendTypingIndicator(input: SendTypingInput): Promise<ToolResult> {
   const account = loadAccount();
   if (!account?.botToken) {
     throw new ProtocolError(
@@ -38,10 +37,7 @@ export async function sendTypingIndicator(input: {
     return sessionExpiredResult(account.botId);
   }
 
-  const state = loadState();
-  const ctxKey = `${account.botId}:${input.to}`;
-  const contextToken = state.contextTokens[ctxKey];
-
+  const contextToken = loadState().contextTokens[`${account.botId}:${input.to}`];
   if (!contextToken) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
@@ -49,57 +45,34 @@ export async function sendTypingIndicator(input: {
     );
   }
 
+  // typing_ticket 与 context_token 绑定，每次都要现取；拿不到就不能带空 ticket 硬发（服务端会拒）。
   const configResp = await getConfig({
     baseUrl: account.baseUrl,
     token: account.botToken,
     ilinkUserId: input.to,
     contextToken,
   });
-
-  if (configResp.errmsg || !configResp.typing_ticket) {
+  if (!configResp.typing_ticket) {
     throw new ProtocolError(
       ProtocolErrorCode.InternalError,
-      `getConfig failed: ${configResp.errmsg ?? "no typing_ticket (likely ret!=0)"}`,
+      `getConfig failed: ${configResp.errmsg ?? "no typing_ticket"}`,
     );
   }
 
-  if (input.status === "cancel") {
-    await sendTyping({
-      baseUrl: account.baseUrl,
-      token: account.botToken,
-      body: {
-        ilink_user_id: input.to,
-        typing_ticket: configResp.typing_ticket,
-        status: TypingStatus.CANCEL,
-      },
-    });
-  } else {
-    await sendTyping({
-      baseUrl: account.baseUrl,
-      token: account.botToken,
-      body: {
-        ilink_user_id: input.to,
-        typing_ticket: configResp.typing_ticket,
-        status: TypingStatus.TYPING,
-      },
-    });
-  }
+  const cancel = input.status === "cancel";
+  await sendTyping({
+    baseUrl: account.baseUrl,
+    token: account.botToken,
+    body: {
+      ilink_user_id: input.to,
+      typing_ticket: configResp.typing_ticket,
+      status: cancel ? TypingStatus.CANCEL : TypingStatus.TYPING,
+    },
+  });
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(
-          {
-            status: input.status === "cancel" ? "typing_cancelled" : "typing",
-            message:
-              input.status === "cancel" ? "Typing indicator stopped." : "Typing indicator sent.",
-            to: input.to,
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-  };
+  return jsonResult({
+    status: cancel ? "typing_cancelled" : "typing",
+    message: cancel ? "Typing indicator stopped." : "Typing indicator sent.",
+    to: input.to,
+  });
 }

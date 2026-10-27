@@ -19,26 +19,36 @@ import {
   resetState,
   DATA_DIR,
 } from "@wemind/wechat-ilink-core";
+import type { QRStatusResponse } from "@wemind/wechat-ilink-core";
+
+import { jsonResult, textResult, type ToolResult } from "./tool-result.js";
 
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 
+/** 本地二维码 TTL：超过即视为过期，重新取一张，避免 Agent 拿着废码反复轮询。 */
 const QR_TTL_MS = 5 * 60_000;
 
 function isQrFresh(createdAt: number): boolean {
   return Date.now() - createdAt < QR_TTL_MS;
 }
 
+function qrPaths(): { png: string; txt: string } {
+  return {
+    png: path.join(DATA_DIR, "qrcode.png"),
+    txt: path.join(DATA_DIR, "qrcode.txt"),
+  };
+}
+
+/** 生成二维码的三种形式：PNG 图片 + 终端可渲染的 ANSI 文本。 */
 async function saveQrPng(url: string): Promise<string> {
-  const qrPath = path.join(DATA_DIR, "qrcode.png");
-  const txtPath = path.join(DATA_DIR, "qrcode.txt");
+  const { png, txt } = qrPaths();
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  await Promise.all([
-    QRCode.toFile(qrPath, url, { width: 400, margin: 2 }),
-    QRCode.toString(url, { type: "terminal", small: true }).then((str) => {
-      fs.writeFileSync(txtPath, str, "utf-8");
-    }),
+  const [, terminal] = await Promise.all([
+    QRCode.toFile(png, url, { width: 400, margin: 2 }),
+    QRCode.toString(url, { type: "terminal", small: true }),
   ]);
-  return qrPath;
+  fs.writeFileSync(txt, terminal, "utf-8");
+  return png;
 }
 
 function qrHelpText(qrUrl: string, qrPath: string, txtPath: string): string {
@@ -57,92 +67,65 @@ function qrHelpText(qrUrl: string, qrPath: string, txtPath: string): string {
 
 export const loginQrcodeSchema = z.object({});
 
-export async function loginQrcode(): Promise<{
-  content: Array<{ type: "text"; text: string }>;
-}> {
+export async function loginQrcode(): Promise<ToolResult> {
   const account = loadAccount();
   if (account?.botToken) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              status: "already_logged_in",
-              message: "Already logged in. Use logout first if you want to re-login.",
-              botId: account.botId,
-              userId: account.userId,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
+    return jsonResult({
+      status: "already_logged_in",
+      message: "Already logged in. Use logout first if you want to re-login.",
+      botId: account.botId,
+      userId: account.userId,
+    });
   }
 
+  const { png, txt } = qrPaths();
   const existing = loadQrState();
-  const qrUrl = existing?.qrcodeUrl;
-  const qrPath = path.join(DATA_DIR, "qrcode.png");
-  const txtPath = path.join(DATA_DIR, "qrcode.txt");
+  const existingUrl = existing?.qrcodeUrl;
 
-  if (existing && isQrFresh(existing.createdAt) && qrUrl) {
-    if (!fs.existsSync(qrPath) || !fs.existsSync(txtPath)) {
-      await saveQrPng(qrUrl);
+  // 复用未过期二维码；但图片文件可能被清理/未生成，缺了就按同一 URL 重新渲染，不必再打服务端。
+  if (existing && isQrFresh(existing.createdAt) && existingUrl) {
+    if (!fs.existsSync(png) || !fs.existsSync(txt)) {
+      await saveQrPng(existingUrl);
     }
-    return {
-      content: [
-        {
-          type: "text",
-          text: qrHelpText(qrUrl, qrPath, txtPath),
-        },
-      ],
-    };
+    return textResult(qrHelpText(existingUrl, png, txt));
   }
 
   const qrResponse = await fetchQRCode(DEFAULT_BASE_URL);
+  const createdAt = Date.now();
   saveQrState({
     qrcode: qrResponse.qrcode,
     qrcodeUrl: qrResponse.qrcode_img_content,
-    createdAt: Date.now(),
+    createdAt,
   });
-
   await saveQrPng(qrResponse.qrcode_img_content);
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: qrHelpText(qrResponse.qrcode_img_content, qrPath, txtPath),
-      },
-    ],
-  };
+  return textResult(qrHelpText(qrResponse.qrcode_img_content, png, txt));
 }
 
 export const checkQrcodeStatusSchema = z.object({});
 
-export async function checkQrcodeStatus(): Promise<{
-  content: Array<{ type: "text"; text: string }>;
-}> {
+/** 二维码已过期时的统一返回（本地 TTL 与服务端 expired 两个分支共用）。 */
+function expiredResult(): ToolResult {
+  return jsonResult({
+    status: "expired",
+    message: "QR code expired. Call login_qrcode to generate a new one.",
+  });
+}
+
+/** 需要 MCP 登录流程不支持的能力（验证码 / IDC 重定向）时，明确指路 CLI，而不是让 Agent 无限轮询。 */
+function unsupportedResult(status: QRStatusResponse["status"], message: string): ToolResult {
+  return jsonResult({ status, message });
+}
+
+export async function checkQrcodeStatus(): Promise<ToolResult> {
   const account = loadAccount();
   if (account?.botToken) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              status: "confirmed",
-              message: "Already logged in.",
-              botId: account.botId,
-              userId: account.userId,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
+    return jsonResult({
+      status: "confirmed",
+      message: "Already logged in.",
+      botId: account.botId,
+      userId: account.userId,
+    });
   }
 
   const qrState = loadQrState();
@@ -155,179 +138,91 @@ export async function checkQrcodeStatus(): Promise<{
 
   if (!isQrFresh(qrState.createdAt)) {
     clearQrState();
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              status: "expired",
-              message: "QR code expired. Call login_qrcode to generate a new one.",
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
+    return expiredResult();
   }
 
   const statusResponse = await pollQRStatus(DEFAULT_BASE_URL, qrState.qrcode);
 
-  if (statusResponse.status === "confirmed") {
-    if (
-      !statusResponse.bot_token ||
-      !statusResponse.ilink_bot_id ||
-      !statusResponse.ilink_user_id
-    ) {
-      throw new ProtocolError(
-        ProtocolErrorCode.InternalError,
-        "Login confirmed but server returned incomplete data.",
+  switch (statusResponse.status) {
+    case "confirmed": {
+      const { bot_token, ilink_bot_id, ilink_user_id } = statusResponse;
+      if (!bot_token || !ilink_bot_id || !ilink_user_id) {
+        throw new ProtocolError(
+          ProtocolErrorCode.InternalError,
+          "Login confirmed but server returned incomplete data.",
+        );
+      }
+      const baseUrl = statusResponse.baseurl ?? DEFAULT_BASE_URL;
+
+      saveAccount({
+        botToken: bot_token,
+        botId: ilink_bot_id,
+        userId: ilink_user_id,
+        baseUrl,
+        savedAt: Date.now(),
+      });
+      clearQrState();
+
+      // 重新登录成功：解掉该账号的 -14 冷却，并通知服务端上线（notifyStart 自身 best-effort）
+      clearSessionPause(ilink_bot_id);
+      await notifyStart({ baseUrl, token: bot_token });
+
+      return jsonResult({
+        status: "confirmed",
+        message: "Login successful! Bot is now connected to WeChat.",
+        botId: ilink_bot_id,
+        userId: ilink_user_id,
+      });
+    }
+
+    case "expired":
+      clearQrState();
+      return expiredResult();
+
+    case "need_verifycode":
+    case "verify_code_blocked":
+      return unsupportedResult(
+        statusResponse.status,
+        "Login requires a verification code, which the MCP login flow does not support. Use the `wemind login` CLI instead, or try again later.",
+      );
+
+    case "scaned_but_redirect":
+    case "binded_redirect": {
+      const host = statusResponse.redirect_host ? ` (to ${statusResponse.redirect_host})` : "";
+      return unsupportedResult(
+        statusResponse.status,
+        `Login requires an IDC redirect${host}, which the MCP login flow does not support. Use the \`wemind login\` CLI instead.`,
       );
     }
 
-    saveAccount({
-      botToken: statusResponse.bot_token,
-      botId: statusResponse.ilink_bot_id,
-      userId: statusResponse.ilink_user_id,
-      baseUrl: statusResponse.baseurl ?? DEFAULT_BASE_URL,
-      savedAt: Date.now(),
-    });
+    case "wait":
+      return jsonResult({
+        status: "wait",
+        message: "Waiting for QR code scan. Call check_qrcode_status again after scanning.",
+      });
 
-    clearQrState();
-
-    clearSessionPause(statusResponse.ilink_bot_id);
-    await notifyStart({
-      baseUrl: statusResponse.baseurl ?? DEFAULT_BASE_URL,
-      token: statusResponse.bot_token,
-    }).catch(() => {});
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              status: "confirmed",
-              message: "Login successful! Bot is now connected to WeChat.",
-              botId: statusResponse.ilink_bot_id,
-              userId: statusResponse.ilink_user_id,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
+    default:
+      // scaned / 其它未列状态：都还在服务端处理中，让 Agent 继续轮询
+      return jsonResult({
+        status: statusResponse.status,
+        message:
+          "QR code scanned, waiting for confirmation in WeChat. Call check_qrcode_status again.",
+      });
   }
-
-  if (statusResponse.status === "expired") {
-    clearQrState();
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              status: "expired",
-              message: "QR code expired. Call login_qrcode to generate a new one.",
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
-  }
-
-  // 高级态（验证码 / IDC 重定向 / 已绑定）当前 MCP 登录流程未实现自动处理；
-  // 返回明确提示而非静默「等待确认」，避免 Agent 无限轮询却永不 confirmed。
-  if (
-    statusResponse.status === "need_verifycode" ||
-    statusResponse.status === "verify_code_blocked"
-  ) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              status: statusResponse.status,
-              message:
-                "Login requires a verification code, which the MCP login flow does not support. Use the `wemind login` CLI instead, or try again later.",
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
-  }
-  if (
-    statusResponse.status === "scaned_but_redirect" ||
-    statusResponse.status === "binded_redirect"
-  ) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              status: statusResponse.status,
-              message: `Login requires an IDC redirect${statusResponse.redirect_host ? ` (to ${statusResponse.redirect_host})` : ""}, which the MCP login flow does not support. Use the \`wemind login\` CLI instead.`,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
-  }
-
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(
-          {
-            status: statusResponse.status,
-            message:
-              statusResponse.status === "wait"
-                ? "Waiting for QR code scan. Call check_qrcode_status again after scanning."
-                : "QR code scanned, waiting for confirmation in WeChat. Call check_qrcode_status again.",
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-  };
 }
 
 export const logoutSchema = z.object({});
 
-export async function logout(): Promise<{
-  content: Array<{ type: "text"; text: string }>;
-}> {
+export async function logout(): Promise<ToolResult> {
   const account = loadAccount();
   if (account?.botToken) {
-    await notifyStop({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
+    // notifyStop 内部已是 best-effort，失败只记日志；这里不再重复吞错
+    await notifyStop({ baseUrl: account.baseUrl, token: account.botToken });
   }
 
   clearQrState();
   resetState();
   clearAccount();
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(
-          { status: "logged_out", message: "Logged out successfully." },
-          null,
-          2,
-        ),
-      },
-    ],
-  };
+  return jsonResult({ status: "logged_out", message: "Logged out successfully." });
 }

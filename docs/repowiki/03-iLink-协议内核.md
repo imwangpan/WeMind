@@ -61,7 +61,7 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 1. **超时与慢响应**：用 `AbortController` 控制超时，但要在**读完响应体后**才 `clearTimeout` —— 否则慢 body 不受超时保护，长轮询尤其可能无限阻塞。`getUpdates` / `pollQRStatus` 命中 `AbortError` 时不抛错，而是返回「空结果」让调用方继续轮询。
 
-2. **HTTP 200 不等于成功**：iLink 即使 HTTP 200，响应体里也可能带非 0 的 `ret`/`errcode` 表示失败。`sendMessage` 因此会解析响应体，拿到非 0 错误码时抛 `ILinkError`（携带原始码 + 分类），避免「假成功」（消息其实没送达）。防御性 JSON 解析失败时抛带 label 与响应片段的清晰错误，而非裸 `SyntaxError`。
+2. **HTTP 200 不等于成功**：iLink 即使 HTTP 200，响应体里也可能带非 0 的 `ret`/`errcode` 表示失败。所有「有语义响应体」的接口（`sendMessage` / `sendTyping` / `getConfig` / `getUploadUrl`）都走同一个 `throwIfErrorCode`，拿到非 0 错误码时抛 `ILinkError`（携带原始码 + 分类），避免「假成功」（消息其实没送达）；调用方不再需要自己重复校验。例外：`notifyStart` / `notifyStop` 是 best-effort，刻意只记日志不抛。防御性 JSON 解析失败时抛带 label 与响应片段的清晰错误，而非裸 `SyntaxError`；空/非 JSON 的成功响应（服务端部分接口无响应体）不会误报失败。
 
 ## 3.3 协议类型（api/types.ts）
 
@@ -148,7 +148,7 @@ API：`pauseSession` / `isSessionPaused` / `getRemainingPauseMs` / `clearSession
 
 多账号即「不同 `WECHAT_ACCOUNT` → 不同目录 → 互相隔离」。
 
-**原子写**：所有落盘都用「先写临时文件再 rename」（同盘 rename 原子），避免写途崩溃/并发产生半截损坏文件。**坏文件处理**：读取时若解析失败，不静默清空，而是备份坏文件（`.corrupt-<时间戳>`）+ 记日志，便于人工恢复。
+**原子写**：所有落盘都用「先写临时文件再 rename」（同盘 rename 原子），避免写途崩溃/并发产生半截损坏文件；写/rename 失败时会清掉临时文件，不在数据目录里留 `*.tmp-*` 垃圾。**坏文件处理**：读取时若解析失败，不静默清空，而是备份坏文件（`.corrupt-<时间戳>`）+ 记日志，便于人工恢复。**错误不吞**：只有 `ENOENT`（文件不存在）才当作「首次运行」返回空；权限等 fs 错误会向上抛——否则调用方下一步 save 会覆盖掉真实凭证。删除类函数（`clearAccount` / `clearQrState`）返回布尔值表示是否真的删掉了，非 ENOENT 的删除失败会记日志。
 
 **Windows 权限提示**：`account.json` 含 bot token。POSIX 下设权限 `600`；Windows 下 `chmod` 是 no-op，文件以明文存放，启动保存时会有一次性告警，提示用文件夹权限或磁盘加密保护。
 

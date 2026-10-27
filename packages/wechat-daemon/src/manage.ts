@@ -17,13 +17,13 @@ import {
   pollQRStatus,
   saveQrState,
   saveAccountTo,
+  loadAccount as readAccount,
   clearSessionPause,
   notifyStart,
   notifyStop,
   addAllowFrom,
   removeAllowFrom,
   readAllowFrom,
-  type AccountData,
 } from "@wemind/wechat-ilink-core";
 import { pm2Start, pm2Stop } from "./pm2-runner.js";
 import { watchdogStart } from "./watchdog-runner.js";
@@ -64,13 +64,6 @@ const BASE = process.env.WEMIND_ILINK_BASE?.trim() || "https://ilinkai.weixin.qq
 const STAGING = path.join(WEMIND_ROOT, ".staging");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function readAccount(dir: string): AccountData | null {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(dir, "account.json"), "utf-8")) as AccountData;
-  } catch {
-    return null;
-  }
-}
 function readPid(dir: string, name: string): number | null {
   try {
     const n = parseInt(fs.readFileSync(path.join(dir, name), "utf-8").trim(), 10);

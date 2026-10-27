@@ -1,7 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 import { getUploadUrl, sendMessage, generateId } from "../api/client.js";
-import { ILinkError } from "../api/error-codes.js";
 import {
   MessageType,
   MessageState,
@@ -123,6 +122,7 @@ async function uploadMediaBytes(params: {
   const filekey = randomBytes(16).toString("hex");
   const aeskey = randomBytes(16);
 
+  // 非 0 ret/errcode 已由 getUploadUrl 内部抛 ILinkError，这里直接用
   const up = await getUploadUrl({
     baseUrl,
     token,
@@ -135,8 +135,6 @@ async function uploadMediaBytes(params: {
     no_need_thumb: true,
     aeskey: aeskey.toString("hex"),
   });
-  const code = up.ret ?? up.errcode;
-  if (code !== undefined && code !== 0) throw new ILinkError("getUploadUrl", code, up.errmsg);
 
   const downloadParam = await uploadBufferToCdn({
     buf: data,

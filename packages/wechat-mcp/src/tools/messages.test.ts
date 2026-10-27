@@ -14,6 +14,8 @@ const m = vi.hoisted(() => ({
 vi.mock("@wemind/wechat-ilink-core", () => ({
   ...m,
   SESSION_EXPIRED_ERRCODE: -14,
+  // 枚举是纯数据，照抄真实取值（不桩成函数，避免测试与协议常量脱节）
+  MessageType: { NONE: 0, USER: 1, BOT: 2 },
 }));
 
 import { getMessages } from "./messages.js";

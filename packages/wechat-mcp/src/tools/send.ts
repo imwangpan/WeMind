@@ -14,15 +14,14 @@ import {
 import type { SendMessageReq } from "@wemind/wechat-ilink-core";
 
 import { sessionExpiredResult } from "./session-result.js";
+import { jsonResult, type ToolResult } from "./tool-result.js";
 
 export const sendTextMessageSchema = z.object({
   to: z.string().min(1).describe("The WeChat user ID to send the message to."),
   text: z.string().min(1).describe("The text message to send."),
 });
 
-export async function sendTextMessage(input: { to: string; text: string }): Promise<{
-  content: Array<{ type: "text"; text: string }>;
-}> {
+export async function sendTextMessage(input: { to: string; text: string }): Promise<ToolResult> {
   const account = loadAccount();
   if (!account?.botToken) {
     throw new ProtocolError(
@@ -61,22 +60,11 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
     body: req,
   });
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(
-          {
-            status: "sent",
-            message: "Message sent successfully.",
-            to: input.to,
-            text: input.text,
-            client_id: req.msg?.client_id,
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-  };
+  return jsonResult({
+    status: "sent",
+    message: "Message sent successfully.",
+    to: input.to,
+    text: input.text,
+    client_id: req.msg?.client_id,
+  });
 }

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { ILINK_APP_ID } from "../config.js";
 import { ILinkError } from "./error-codes.js";
 import type {
+  BaseInfo,
   GetUpdatesResp,
   SendMessageReq,
   QRCodeResponse,
@@ -13,14 +14,11 @@ import type {
   GetUploadUrlResp,
 } from "./types.js";
 
-export type ApiOptions = {
-  baseUrl: string;
-  token?: string;
-  timeoutMs?: number;
-};
-
-const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
+/** 普通 RPC 的超时（send/typing/config/upload/notify）。 */
 const DEFAULT_API_TIMEOUT_MS = 15_000;
+/** 消息长轮询（getupdates）超时。 */
+const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
+/** 扫码状态长轮询（get_qrcode_status）超时。与消息长轮询语义不同，故分开命名。 */
 const QR_LONG_POLL_TIMEOUT_MS = 35_000;
 
 // 对外声明的 iLink 客户端版本：模仿官方 openclaw-weixin 的版本，
@@ -69,6 +67,7 @@ function buildHeaders(opts: { token?: string; body: string }): Record<string, st
   return headers;
 }
 
+/** POST 一个 iLink CGI，返回原始响应体。HTTP 非 2xx 抛错；响应体是否是 JSON 由调用方决定。 */
 async function apiFetch(params: {
   baseUrl: string;
   endpoint: string;
@@ -82,7 +81,7 @@ async function apiFetch(params: {
   const hdrs = buildHeaders({ token: params.token, body: params.body });
 
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), params.timeoutMs);
+  const timer = setTimeout(() => controller.abort(), params.timeoutMs);
   try {
     const res = await fetch(url.toString(), {
       method: "POST",
@@ -90,15 +89,25 @@ async function apiFetch(params: {
       body: params.body,
       signal: controller.signal,
     });
-    const rawText = await res.text(); // 读完响应体后再 clearTimeout：否则慢 body 不受超时保护、可能无限阻塞（长轮询尤甚）
-    clearTimeout(t);
+    // 读完响应体后才算这次请求结束：只清定时器会漏掉「头已到、体卡住」的慢响应，
+    // 长轮询尤甚——所以清理放在 finally，成功/失败/超时都只写一次。
+    const rawText = await res.text();
     if (!res.ok) {
-      throw new Error(`${params.label} ${res.status}: ${rawText}`);
+      throw new Error(`${params.label} ${res.status}: ${rawText.slice(0, 500)}`);
     }
     return rawText;
-  } catch (err) {
-    clearTimeout(t);
-    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 宽松解析：空响应体或非 JSON 返回 null（部分接口成功时无响应体）。 */
+function tryParseJson<T>(raw: string): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
   }
 }
 
@@ -111,7 +120,22 @@ function parseJsonResp<T>(raw: string, label: string): T {
   }
 }
 
-export function buildBaseInfo() {
+/**
+ * iLink 即使 HTTP 200 也可能在响应体返回非 0 ret/errcode 表示失败。语义见 error-codes.ts：
+ *   ret=-2 参数错误（最常见 context_token 失效/不匹配）；errcode=-14 会话过期。
+ * 不校验会导致「假成功」——消息其实没送达。仅在明确拿到非 0 错误码时抛 ILinkError（携带码+分类，供上层按类型处理）。
+ */
+function throwIfErrorCode(
+  op: string,
+  resp: { ret?: number; errcode?: number; errmsg?: string } | null,
+): void {
+  const code = resp?.ret ?? resp?.errcode;
+  if (code !== undefined && code !== 0) {
+    throw new ILinkError(op, code, resp?.errmsg);
+  }
+}
+
+export function buildBaseInfo(): BaseInfo {
   return { channel_version: CHANNEL_VERSION };
 }
 
@@ -136,6 +160,7 @@ export async function getUpdates(params: {
     });
     return parseJsonResp<GetUpdatesResp>(rawText, "getUpdates");
   } catch (err) {
+    // 长轮询超时是常态：返回空结果（保留游标），让调用方直接进入下一轮。
     if (err instanceof Error && err.name === "AbortError") {
       return { ret: 0, msgs: [], get_updates_buf: params.updatesBuf };
     }
@@ -157,23 +182,8 @@ export async function sendMessage(params: {
     timeoutMs: params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
     label: "sendMessage",
   });
-  // iLink 即使 HTTP 200 也可能在响应体返回非 0 ret/errcode 表示失败。语义见 error-codes.ts：
-  //   ret=-2 参数错误（最常见 context_token 失效/不匹配）；errcode=-14 会话过期。
-  // 不校验会导致"假成功"——消息其实没送达。仅在明确拿到非 0 错误码时抛 ILinkError（携带码+分类，供上层按类型处理）。
-  let code: number | undefined;
-  let errmsg: string | undefined;
-  try {
-    const resp = raw
-      ? (JSON.parse(raw) as { ret?: number; errcode?: number; errmsg?: string })
-      : null;
-    code = resp?.ret ?? resp?.errcode;
-    errmsg = resp?.errmsg;
-  } catch {
-    /* 空/非 JSON 的成功响应，忽略 */
-  }
-  if (code !== undefined && code !== 0) {
-    throw new ILinkError("sendMessage", code, errmsg);
-  }
+  // 空/非 JSON 响应视为成功（历史上 iLink 成功时可能无响应体）；只有明确拿到非 0 错误码才抛。
+  throwIfErrorCode("sendMessage", tryParseJson(raw));
 }
 
 /** 取 CDN 上传地址（发图/发文件用）。返回 upload_full_url 或 upload_param。 */
@@ -198,7 +208,9 @@ export async function getUploadUrl(
     timeoutMs: params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
     label: "getUploadUrl",
   });
-  return parseJsonResp<GetUploadUrlResp>(raw, "getUploadUrl");
+  const resp = parseJsonResp<GetUploadUrlResp>(raw, "getUploadUrl");
+  throwIfErrorCode("getUploadUrl", resp);
+  return resp;
 }
 
 export async function fetchQRCode(apiBaseUrl: string): Promise<QRCodeResponse> {
@@ -223,30 +235,27 @@ export async function pollQRStatus(apiBaseUrl: string, qrcode: string): Promise<
       headers: buildCommonHeaders(),
       signal: controller.signal,
     });
+    const text = await response.text();
     if (!response.ok) {
-      const body = await response.text().catch(() => "(unreadable)");
-      clearTimeout(timer);
       throw new Error(
-        `Failed to poll QR status: ${response.status} ${response.statusText} ${body}`,
+        `pollQRStatus ${response.status} ${response.statusText} ${text.slice(0, 500)}`,
       );
     }
-    const text = await response.text();
-    clearTimeout(timer);
     return parseJsonResp<QRStatusResponse>(text, "pollQRStatus");
   } catch (err) {
-    clearTimeout(timer);
+    // 服务端会把长轮询 hold 到超时：AbortError 表示「这段时间没人扫码」，不是失败。
     if (err instanceof Error && err.name === "AbortError") {
       return { status: "wait" };
     }
     throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 export function generateId(prefix: string): string {
   return `${prefix}:${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 }
-
-const DEFAULT_CONFIG_TIMEOUT_MS = 15_000;
 
 export async function getConfig(params: {
   baseUrl: string;
@@ -263,10 +272,12 @@ export async function getConfig(params: {
       base_info: buildBaseInfo(),
     }),
     token: params.token,
-    timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
+    timeoutMs: DEFAULT_API_TIMEOUT_MS,
     label: "getConfig",
   });
-  return parseJsonResp<GetConfigResp>(rawText, "getConfig");
+  const resp = parseJsonResp<GetConfigResp>(rawText, "getConfig");
+  throwIfErrorCode("getConfig", resp);
+  return resp;
 }
 
 export async function sendTyping(params: {
@@ -274,48 +285,50 @@ export async function sendTyping(params: {
   token?: string;
   body: SendTypingReq;
 }): Promise<void> {
-  await apiFetch({
+  const raw = await apiFetch({
     baseUrl: params.baseUrl,
     endpoint: "ilink/bot/sendtyping",
     body: JSON.stringify({ ...params.body, base_info: buildBaseInfo() }),
     token: params.token,
-    timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
+    timeoutMs: DEFAULT_API_TIMEOUT_MS,
     label: "sendTyping",
   });
+  // 与 sendMessage 同理：HTTP 200 也可能带非 0 ret，不校验会让「打字中」显示成假成功。
+  throwIfErrorCode("sendTyping", tryParseJson(raw));
+}
+
+/**
+ * 上线/下线通知的共同实现。
+ * best-effort：失败只记日志、绝不抛出——通知失败不应阻断登录/登出主流程。
+ * 也正因为要吞错，这里刻意**不校验**响应体的 ret/errcode。
+ */
+async function notifyLifecycle(
+  op: "notifyStart" | "notifyStop",
+  endpoint: string,
+  params: { baseUrl: string; token?: string },
+): Promise<void> {
+  try {
+    await apiFetch({
+      baseUrl: params.baseUrl,
+      endpoint,
+      body: JSON.stringify({ base_info: buildBaseInfo() }),
+      token: params.token,
+      timeoutMs: DEFAULT_API_TIMEOUT_MS,
+      label: op,
+    });
+  } catch (err) {
+    console.error(
+      `[wemind/wechat-ilink-core/ilink] ${op} failed (ignored, best-effort): ${String(err)}`,
+    );
+  }
 }
 
 /** 通知服务端该 bot 客户端上线（best-effort，失败不阻断）。 */
 export async function notifyStart(params: { baseUrl: string; token?: string }): Promise<void> {
-  try {
-    await apiFetch({
-      baseUrl: params.baseUrl,
-      endpoint: "ilink/bot/msg/notifystart",
-      body: JSON.stringify({ base_info: buildBaseInfo() }),
-      token: params.token,
-      timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
-      label: "notifyStart",
-    });
-  } catch (err) {
-    console.error(
-      `[wemind/wechat-ilink-core/ilink] notifyStart failed (ignored, best-effort): ${String(err)}`,
-    );
-  }
+  await notifyLifecycle("notifyStart", "ilink/bot/msg/notifystart", params);
 }
 
 /** 通知服务端该 bot 客户端下线（best-effort，失败不阻断）。 */
 export async function notifyStop(params: { baseUrl: string; token?: string }): Promise<void> {
-  try {
-    await apiFetch({
-      baseUrl: params.baseUrl,
-      endpoint: "ilink/bot/msg/notifystop",
-      body: JSON.stringify({ base_info: buildBaseInfo() }),
-      token: params.token,
-      timeoutMs: DEFAULT_CONFIG_TIMEOUT_MS,
-      label: "notifyStop",
-    });
-  } catch (err) {
-    console.error(
-      `[wemind/wechat-ilink-core/ilink] notifyStop failed (ignored, best-effort): ${String(err)}`,
-    );
-  }
+  await notifyLifecycle("notifyStop", "ilink/bot/msg/notifystop", params);
 }

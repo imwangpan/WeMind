@@ -3,6 +3,7 @@ import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 
 import {
   getUpdates,
+  MessageType,
   SESSION_EXPIRED_ERRCODE,
   isSessionPaused,
   pauseSession,
@@ -14,6 +15,7 @@ import {
 import type { WeixinMessage } from "@wemind/wechat-ilink-core";
 
 import { sessionExpiredResult } from "./session-result.js";
+import { jsonResult, type ToolResult } from "./tool-result.js";
 
 const LONG_POLL_MS = 25_000;
 const POLL_FLOOR_MS = 1000; // wait 模式两次轮询最小间隔，防服务端快速返回空时零间隔请求风暴
@@ -37,9 +39,7 @@ export const getMessagesSchema = z.object({
 export async function getMessages(
   input: { wait?: boolean; timeout?: number },
   signal?: AbortSignal,
-): Promise<{
-  content: Array<{ type: "text"; text: string }>;
-}> {
+): Promise<ToolResult> {
   const account = loadAccount();
   if (!account?.botToken) {
     throw new ProtocolError(
@@ -60,22 +60,11 @@ export async function getMessages(
     // MCP 客户端取消/断开后，下一轮循环即退出，避免长轮询空转到 7 天 deadline（孤儿长轮询）
     if (signal?.aborted) {
       saveState(state);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({ message_count: 0, messages: [], cancelled: true }, null, 2),
-          },
-        ],
-      };
+      return jsonResult({ message_count: 0, messages: [], cancelled: true });
     }
     if (deadline && Date.now() > deadline) {
       saveState(state);
-      return {
-        content: [
-          { type: "text", text: JSON.stringify({ message_count: 0, messages: [] }, null, 2) },
-        ],
-      };
+      return jsonResult({ message_count: 0, messages: [] });
     }
 
     const polledAt = Date.now();
@@ -117,7 +106,8 @@ export async function getMessages(
 
     const newMessages =
       resp.msgs?.filter(
-        (m) => m.message_type === 1 && m.message_id && m.message_id > state.lastMessageId,
+        (m) =>
+          m.message_type === MessageType.USER && m.message_id && m.message_id > state.lastMessageId,
       ) ?? [];
 
     if (newMessages.length > 0) {
@@ -132,30 +122,15 @@ export async function getMessages(
       }
 
       saveState(state);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                message_count: newMessages.length,
-                messages: newMessages.map(formatMessage),
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+      return jsonResult({
+        message_count: newMessages.length,
+        messages: newMessages.map(formatMessage),
+      });
     }
 
     if (!input.wait) {
       saveState(state);
-      return {
-        content: [
-          { type: "text", text: JSON.stringify({ message_count: 0, messages: [] }, null, 2) },
-        ],
-      };
+      return jsonResult({ message_count: 0, messages: [] });
     }
     // wait 模式继续前：若本轮服务端快速返回（未 hold 满），补足地板间隔，防零间隔请求风暴
     const elapsed = Date.now() - polledAt;
