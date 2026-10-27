@@ -31,14 +31,14 @@ packages/wechat-mcp/src/
 
 ## 4.3 六个 MCP 工具
 
-| 工具                  | 说明                                                  |
-| --------------------- | ----------------------------------------------------- |
-| `login_qrcode`        | 生成微信登录二维码（返回 URL，并生成 PNG 与终端文本） |
-| `check_qrcode_status` | 检查二维码是否已扫码确认（轮询到 `confirmed`）        |
-| `logout`              | 退出登录并清除凭证                                    |
-| `get_messages`        | 拉取新消息（`wait=true` 阻塞等待直到收到消息）        |
-| `send_text_message`   | 发送文本消息                                          |
-| `send_typing`         | 发送或取消「正在输入」状态                            |
+| 工具                  | 说明                                                     | 代码 description（`index.ts` 注册原文节选）                                                                          |
+| --------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `login_qrcode`        | 取登录二维码（返回 URL，并在数据目录生成 PNG 与终端文本） | Get a WeChat login QR code. Returns the QR code URL. Call `check_qrcode_status` afterwards to verify.                 |
+| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check if the QR code (from `login_qrcode`) has been scanned and confirmed. Call this repeatedly until status is `confirmed`. |
+| `logout`              | 登出并清除已保存的凭证                                   | Log out the current WeChat bot session and clear all saved credentials.                                               |
+| `get_messages`        | 长轮询收消息（`wait=true` 阻塞直到收到）                  | Poll for new WeChat messages. Always call with `wait=true` to block until a message arrives.（后接 4 步 typing 工作流） |
+| `send_text_message`   | 发文本消息                                               | Send a text message to a WeChat user. The `to` field is the user ID from a received message.                          |
+| `send_typing`         | 打字状态（`typing` 显示 / `cancel` 取消）                 | Send or cancel a typing indicator to a WeChat user. `typing` shows the indicator, `cancel` stops it.                   |
 
 每个工具用 `zod` schema 声明参数，工具描述（description）里写明用法与约束 —— 这些描述是引导 MCP 客户端正确编排的关键。
 
