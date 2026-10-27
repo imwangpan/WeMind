@@ -70,7 +70,9 @@ graph TD
 
 `onProgress` 把 `session/update` 帧翻译成进度事件（`tool`/`answer`/`thinking`/`activity`）给 daemon 上报。每个工具调用只上报一次（`seenTools` 去重），优先取 `rawInput.__tool_use_purpose` 作为人类可读描述。
 
-> **心跳注意**：`index.ts` 每 15s 检查 `lastProgressAt`，只有 `session/update` 帧会刷新它。纯推理/committed-only 的 agent 长时间无帧时，会连续发「还在思考」，占微信约 10 条连发额度；接入时要单独调心跳。
+> **心跳注意**：`index.ts` 每 `HEARTBEAT_MS` 检查 `lastProgressAt`，只有 `session/update` 帧会刷新它。纯推理/committed-only 的 agent 长时间无帧时，会连续发「还在思考」，占微信约 10 条连发额度。
+>
+> 默认是 15s，但**三层可覆盖**（优先级从高到低）：`WECHAT_BRAIN_HEARTBEAT_MS` env → 预设 `heartbeatMs`（DSH 已设为 60s）→ 15s 兜底。接新 agent 时优先在预设里设 `heartbeatMs`，而不是让用户配 env。
 
 每个会话首轮会注入一段「可发图」系统提示，告诉大脑：需要发图时用 Markdown `![](图片链接或本地绝对路径)`，并提示**服务器从中国大陆下载图片**，优先选可直链下载的源（如 `raw.githubusercontent.com`），避开被墙或带热链保护的图床。该提示只影响「发图」；「收图」取决于 agent 的 `image` 能力。
 

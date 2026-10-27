@@ -110,7 +110,7 @@ askWorker 抛错（进程退出 / idle / cap 超时）
 |---|---|---|
 | 1 | `parseControl` 命中（mcp / 新会话 / 加载…） | 走 `handleControl`（brain 控制，保持） |
 | 2 | `结束任务` / `停止任务` / `/stop` | **停止**当前任务 |
-| 3 | **明确发 worker**：`任务：` / `任务 ` / `>` 前缀 | 无活跃任务 → **派发**新任务；有 → **注入/追加**（waiting 喂下一轮、running 暂存） |
+| 3 | **明确发 worker**：`任务` / `task` + **冒号**（`任务：`、`task:`，半角/全角均可）前缀，或行首 `>`（`任务 ` + 空格**不是**有效前缀——`parseTaskControl` 要求冒号，避免把「任务很重要」这类正常对话误判为派发） | 无活跃任务 → **派发**新任务；有 → **注入/追加**（waiting 喂下一轮、running 暂存） |
 | 4 | **明确问大脑**：`问大脑` / `问大脑：` 前缀 | 去前缀 → 强制走 `handleMessage`（brain），即使 worker 在等你 |
 | 5 | 无前缀 ＋ worker 处于 **waiting**（刚问你、在等你回）＋ 非图片 | 作为**注入**喂 worker |
 | 6 | 其余（running / 无任务 / 图片消息） | 走 `handleMessage`（brain 对话） |

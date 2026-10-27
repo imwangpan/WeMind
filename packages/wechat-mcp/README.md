@@ -35,14 +35,14 @@
 
 ## 工具
 
-| 工具                  | 说明                                                      |
-| --------------------- | --------------------------------------------------------- |
-| `login_qrcode`        | 生成微信登录二维码（终端文本 / PNG 图片 / 链接 三种形式） |
-| `check_qrcode_status` | 检查二维码是否已扫码确认                                  |
-| `logout`              | 退出登录并清除凭证                                        |
-| `get_messages`        | 拉取新消息（`wait=true` 长轮询阻塞直到收到，最长 7 天）   |
-| `send_text_message`   | 发送文本消息                                              |
-| `send_typing`         | 显示 / 取消「正在输入」                                   |
+| 工具                  | 说明                                                      | 代码 description（`src/index.ts` 注册原文节选）                                                                                                                    |
+| --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `login_qrcode`        | 取登录二维码（返回链接，并在数据目录生成 PNG 与终端文本） | Get a WeChat login QR code. Scan it with WeChat to connect the bot. Returns the QR code URL. Call `check_qrcode_status` afterwards to verify.                      |
+| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check if the QR code (from `login_qrcode`) has been scanned and confirmed. Call this repeatedly until status is `confirmed`.                                       |
+| `logout`              | 登出并清除已保存的凭证                                    | Log out the current WeChat bot session and clear all saved credentials.                                                                                            |
+| `get_messages`        | 长轮询收消息（`wait=true` 阻塞直到收到，最长 7 天）       | Poll for new WeChat messages. Always call with `wait=true` to block until a message arrives.（后接 4 步 typing 工作流）                                            |
+| `send_text_message`   | 发文本消息                                                | Send a text message to a WeChat user. The `to` field is the user ID from a received message.                                                                       |
+| `send_typing`         | 打字状态（`typing` 显示 / `cancel` 取消）                 | Send or cancel a typing indicator to a WeChat user. The `to` field is the user ID from a received message. Status `typing` shows the indicator, `cancel` stops it. |
 
 ## 使用流程
 
@@ -143,7 +143,7 @@ git push origin main
 
 ```powershell
 npm view @wemind/wechat-mcp version           # 应显示新版本号
-npx -y @wemind/wechat-mcp --help             # 新装一次，确认能拉起
+npx -y @wemind/wechat-mcp                    # 应打印 Connected / Not logged in 后挂在 stdio（Ctrl+C 退出）
 ```
 
 ### 常见坑

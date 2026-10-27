@@ -235,7 +235,7 @@
 
    > 只有 `dsh.cmd`（无无扩展名 `dsh`），所以 WeMind 预设要写 `binWin: "dsh.cmd"`，或让 `onPath` 对 `.cmd` 补试。
 
-2. 用现有 `scripts/acp-smoke.mjs` 的同款思路（换行 JSON-RPC、`clientCapabilities:{}`）驱动 `dsh --profile acp`，逐项记录：
+2. 用 `scripts/acp-probe.mjs`（换行 JSON-RPC、`clientCapabilities:{}`；`ACP_BIN`/`ACP_ARGS` 指到 dsh）驱动 `dsh --profile acp`，逐项记录：
    - `initialize` 返回的 `agentCapabilities`（是否广告 `loadSession`、`session/resume`、`promptCapabilities.image`、`mcpCapabilities`）；
    - `session/new` 是否成功、返回哪些 `configOptions`；
    - `session/prompt` 的首帧时间、`session/update` 的 `sessionUpdate` 类型、正文是否分多 chunk；
@@ -381,7 +381,7 @@ deepseek: {
 
    > `firstFrameMs` 应 **≤ `WECHAT_BRAIN_IDLE_MS`（120s）**。实测首帧 1–4s，60s 已足够兜底；180s 没有意义：首帧一旦到达，判据就换成 idle；首帧超时只决定「一个帧都没有时等多久才重建」。真死 60s 后重建；纯推理若 60s 仍无任何帧，应该调 idle/心跳而不是继续拉长首帧。
 
-4. **`wemind brain check` 放宽**：`checkAgent(ag)` 默认 20s → 60s（或读 `WEMIND_BRAIN_CHECK_MS`），否则 DSH/`npx` 冷启动会误报。
+4. **`wemind brain check` 放宽**：`checkAgent(ag)` 默认 20s → 60s，否则 DSH/`npx` 冷启动会误报。**已落地**（`brain-check.ts:18` 默认 `60_000`）；`WEMIND_BRAIN_CHECK_MS` 是当初设想的 env 覆盖，**当前没有实现**——要改超时只能改代码或直接调用 `checkAgent(ag, ms)`。
 
 5. **（可选）`session/close`**：`restart()` / `newSession()` 杀进程前先发 `session/close`，让 DSH 干净落盘；失败忽略。
 
@@ -446,7 +446,7 @@ DSH 的布局（官方文档）：
 | `packages/wechat-daemon/src/acp-brain.ts` | `session/set_config_option` 选 model；`session/resume` 兜底；反向请求应答器；首帧按预设覆盖；图片能力拦截；导出 `supportsImages`/`heartbeatMs` | M2 |
 | `packages/wechat-daemon/src/worker-acp.ts` | 同步上述协议项（独立副本） | M2 |
 | `packages/wechat-daemon/src/index.ts` | 静默心跳按预设放宽（`heartbeatMs` / `progressMode`）；收到图片但 agent `image:false` 时友好提示 | M2 |
-| `packages/wechat-daemon/src/brain-check.ts` | 默认超时 20s → 60s（可 env 覆盖） | M2 |
+| `packages/wechat-daemon/src/brain-check.ts` | 默认超时 20s → 60s（**无可用的 env 覆盖**，只能改代码） | M2 |
 | `packages/wechat-daemon/src/agent-mcp.ts` | `toAcpMcpServers()` 三种格式转换 | M3 |
 | `packages/wechat-daemon/src/mcp-sandbox.ts` | `mcpViaAcp` 时跳过文件写入/`syncKiroSettings`；暴露 `activeMcpServers()` | M3 |
 | `packages/wechat-daemon/src/brain-agents.test.ts` | 预设断言 | M5 |

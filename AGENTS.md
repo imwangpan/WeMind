@@ -1,6 +1,6 @@
 # AGENTS.md — WeMind 的 AI 协作者入口
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26（`@wemind/cli@1.0.0` 已发布） ｜ **维护约定**：改代码时同步本文件；不确定的结论标注「假设/待实测」。
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-27（`@wemind/cli@1.1.0` 已发布） ｜ **维护约定**：改代码时同步本文件；不确定的结论标注「假设/待实测」。
 >
 > 这份文件写给 AI agent，也写给人。**先读这里，再按链接深入**；不要一上来通读整个 `docs/repowiki/`。
 
@@ -94,7 +94,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 1. **一个 token 一个消费者**：MCP 形态与 daemon 形态二选一；brain 的 MCP 沙箱永久禁止 `wechat`（防回环）。
 2. **ACP 是最小方法集，不是「所有 agent 都一样」**：
    - `session/load` 不是通用能力；DSH 只有 `session/resume`，缺失时会退化为 `session/new`；
-   - `initialize.agentCapabilities` 决定 image / MCP / load / resume；不要假设；
+   - **image / restore(load|resume) / mcpViaAcp 目前来自「预设字段」，不来自 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。所以接新 agent 时必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进 `brain-agents.ts` 的预设；不要以为代码会自动适配；
    - agent 可能发反向请求（`session/request_permission`、`fs/*`、`terminal/*`）。`acp-brain.ts` / `worker-acp.ts` 已内置应答器：权限请求默认拒绝，未知 method 回 `-32601`；可信部署可设 `WEMIND_ACP_AUTO_ALLOW=1` 放行一次性权限。
 3. **brain 与 worker 是两个独立 ACP 进程、两套 session**：协议改动要同步 `acp-brain.ts` 和 `worker-acp.ts`。
 4. **MCP 按 agent 分派**：kiro 读 `settings/mcp.json`；opencode 读 `opencode.json` 的 `mcp.servers`；DSH 走 ACP `session/new` 的 `mcpServers`。**不要让 A 读 B 的配置文件**。
@@ -157,7 +157,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 
 - AI 上下文包：[`docs/ai/README.md`](docs/ai/README.md)
 - 任务配方：[`docs/ai/recipes/`](docs/ai/recipes/)
-- **发布方案与检查清单（已发布 1.0.0）**：[`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)
+- **发布方案与检查清单（已发布 1.1.0）**：[`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)
 - 面向用户的新手教程：[`docs/新手教程.md`](docs/新手教程.md)
 - 项目概览：[`docs/repowiki/01-项目概览.md`](docs/repowiki/01-项目概览.md)
 - 系统架构：[`docs/repowiki/02-系统架构.md`](docs/repowiki/02-系统架构.md)

@@ -2,6 +2,19 @@ import { describe, it, expect } from "vitest";
 
 import { buildShellLine, quoteCmdArg, quoteShArg, spawnAgent } from "./spawn-agent.js";
 
+// 下面两个 spawnAgent 用例会真起一个 node 子进程（Windows 上单跑 0.5–0.7s）。全量跑时多个
+// 测试文件并发、各自都在起进程，实测会超过 vitest 默认的 5s 而偶发失败。这里是「等确定会退出的
+// 子进程」，放宽超时不是掩盖问题；纯字符串拼接的用例仍走默认超时。
+const SPAWN_TEST_TIMEOUT_MS = 20_000;
+
+/*
+ * 子进程会**继承 NODE_OPTIONS**。在 VS Code 里调试/集成终端下跑时，它带着 js-debug 的
+ * `--require …/bootloader.js`，子 node 启动后会停在「Waiting for the debugger to disconnect…」
+ * 直到 20s 超时——本用例只想验「引号拼装后参数原样到达」，不该被调试器环境拖死。
+ * 故 spawn 时把 NODE_OPTIONS 去掉（只影响本用例起的子进程，不动测试进程自身）。
+ */
+const CLEAN_ENV = { ...process.env, NODE_OPTIONS: "" };
+
 describe("quoteCmdArg", () => {
   it("裸名不加引号", () => {
     expect(quoteCmdArg("opencode")).toBe("opencode");
@@ -60,54 +73,72 @@ describe("buildShellLine", () => {
 });
 
 describe("spawnAgent", () => {
-  it("shell=true 时经整串 + shell 启动，参数不丢、不触发 DEP0190", async () => {
-    const seen: string[] = [];
-    const onWarning = (w: Error & { code?: string }): void => {
-      if (w.code === "DEP0190") seen.push("DEP0190");
-    };
-    process.on("warning", onWarning);
-    try {
-      const proc = spawnAgent({
-        bin: process.execPath,
-        args: ["-e", "process.stdout.write('ok ' + (1 + 1))"],
-        shell: true,
-      });
-      const out = await new Promise<string>((resolve, reject) => {
-        let buf = "";
-        proc.stdout.on("data", (d) => (buf += d.toString()));
-        proc.on("error", reject);
-        proc.on("close", (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit=${code}`))));
-      });
-      // 带空格与引号的参数原样到达子进程（引号拼装正确）
-      expect(out).toBe("ok 2");
-      expect(seen).toEqual([]);
-    } finally {
-      process.off("warning", onWarning);
-    }
-  });
+  it(
+    "shell=true 时经整串 + shell 启动，参数不丢、不触发 DEP0190",
+    async () => {
+      const seen: string[] = [];
+      const onWarning = (w: Error & { code?: string }): void => {
+        if (w.code === "DEP0190") seen.push("DEP0190");
+      };
+      process.on("warning", onWarning);
+      try {
+        const proc = spawnAgent(
+          {
+            bin: process.execPath,
+            args: ["-e", "process.stdout.write('ok ' + (1 + 1))"],
+            shell: true,
+          },
+          { env: CLEAN_ENV },
+        );
+        const out = await new Promise<string>((resolve, reject) => {
+          let buf = "";
+          proc.stdout.on("data", (d) => (buf += d.toString()));
+          proc.on("error", reject);
+          proc.on("close", (code) =>
+            code === 0 ? resolve(buf) : reject(new Error(`exit=${code}`)),
+          );
+        });
+        // 带空格与引号的参数原样到达子进程（引号拼装正确）
+        expect(out).toBe("ok 2");
+        expect(seen).toEqual([]);
+      } finally {
+        process.off("warning", onWarning);
+      }
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
 
-  it("shell=false 时直接 spawn，同样不触发 DEP0190", async () => {
-    const seen: string[] = [];
-    const onWarning = (w: Error & { code?: string }): void => {
-      if (w.code === "DEP0190") seen.push("DEP0190");
-    };
-    process.on("warning", onWarning);
-    try {
-      const proc = spawnAgent({
-        bin: process.execPath,
-        args: ["-e", "process.stdout.write('direct')"],
-        shell: false,
-      });
-      const out = await new Promise<string>((resolve, reject) => {
-        let buf = "";
-        proc.stdout.on("data", (d) => (buf += d.toString()));
-        proc.on("error", reject);
-        proc.on("close", (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit=${code}`))));
-      });
-      expect(out).toBe("direct");
-      expect(seen).toEqual([]);
-    } finally {
-      process.off("warning", onWarning);
-    }
-  });
+  it(
+    "shell=false 时直接 spawn，同样不触发 DEP0190",
+    async () => {
+      const seen: string[] = [];
+      const onWarning = (w: Error & { code?: string }): void => {
+        if (w.code === "DEP0190") seen.push("DEP0190");
+      };
+      process.on("warning", onWarning);
+      try {
+        const proc = spawnAgent(
+          {
+            bin: process.execPath,
+            args: ["-e", "process.stdout.write('direct')"],
+            shell: false,
+          },
+          { env: CLEAN_ENV },
+        );
+        const out = await new Promise<string>((resolve, reject) => {
+          let buf = "";
+          proc.stdout.on("data", (d) => (buf += d.toString()));
+          proc.on("error", reject);
+          proc.on("close", (code) =>
+            code === 0 ? resolve(buf) : reject(new Error(`exit=${code}`)),
+          );
+        });
+        expect(out).toBe("direct");
+        expect(seen).toEqual([]);
+      } finally {
+        process.off("warning", onWarning);
+      }
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
 });

@@ -73,7 +73,7 @@ wemind brain set qoder       # 换大脑（按账号落盘，重启仍生效）
 
 ## 功能
 
-- **6 个 MCP 工具**：登录、消息轮询、文本发送、打字状态
+- **6 个 MCP 工具**：`login_qrcode`（取登录二维码）· `check_qrcode_status`（查扫码状态）· `logout`（登出并清凭证）· `get_messages`（长轮询收消息）· `send_text_message`（发文本）· `send_typing`（打字状态）
 - **扫码登录**：生成终端文本二维码、PNG 图片、URL 链接三种方式
 - **长轮询监听**：阻塞等待新消息，最长可等待 7 天
 - **打字状态**：Agent 处理消息时自动显示"对方正在输入..."
@@ -192,14 +192,17 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 
 ## 工具列表
 
-| 工具                  | 说明                                           |
-| --------------------- | ---------------------------------------------- |
-| `login_qrcode`        | 生成微信登录二维码                             |
-| `check_qrcode_status` | 检查二维码是否已扫码确认                       |
-| `logout`              | 退出登录并清除凭证                             |
-| `get_messages`        | 拉取新消息（`wait=true` 阻塞等待直到收到消息） |
-| `send_text_message`   | 发送文本消息                                   |
-| `send_typing`         | 发送或取消"正在输入"状态                       |
+| 工具                  | 说明                                                      | 代码 description（注册原文节选）                                                                                                                                   |
+| --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `login_qrcode`        | 取登录二维码（返回 URL，并在数据目录生成 PNG 与终端文本） | Get a WeChat login QR code. Scan it with WeChat to connect the bot. Returns the QR code URL. Call `check_qrcode_status` afterwards to verify.                      |
+| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check if the QR code (from `login_qrcode`) has been scanned and confirmed. Call this repeatedly until status is `confirmed`.                                       |
+| `logout`              | 登出并清除已保存的凭证                                    | Log out the current WeChat bot session and clear all saved credentials.                                                                                            |
+| `get_messages`        | 长轮询收消息（`wait=true` 阻塞直到收到）                  | Poll for new WeChat messages. Always call with `wait=true` to block until a message arrives.（后接 4 步 typing 工作流）                                            |
+| `send_text_message`   | 发文本消息                                                | Send a text message to a WeChat user. The `to` field is the user ID from a received message.                                                                       |
+| `send_typing`         | 打字状态（`typing` 显示 / `cancel` 取消）                 | Send or cancel a typing indicator to a WeChat user. The `to` field is the user ID from a received message. Status `typing` shows the indicator, `cancel` stops it. |
+
+> description 取自 `packages/wechat-mcp/src/index.ts` 的 `registerTool` 第二参数（仅给代码标识符补了反引号）。
+> `get_messages` 的完整描述是一段 4 步 `send_typing` 编排指引（收到消息即 `typing`、处理中每 15–20s 续发、回复后 `cancel`），与上文「开始聊天」的流程一致。
 
 ## 数据存储
 
@@ -216,6 +219,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `worker-sessions.json`                        | worker（远程任务）单任务 `ACP sessionId` 映射（键 `<agent>:task`），daemon 重启后据此 `load`/`resume` 续传 |
 | `worker-home/`                                | worker 沙箱（同 brain 机制；MCP 继承**全量除 `wechat`** ＋ 记忆/技能/settings）                              |
 | `worker.pid`                                  | worker 大脑进程 pid（与 brain/用户会话区分、便于精确清理）                                                  |
+| `pm2.app.json`                                | **仅 `--runner pm2`**：pm2 的 app 声明（5s 重拉 / 最多 50 次 / 退出码 78 停手 / 日志合并到 `daemon.log`）    |
 
 **多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<名>` 切换（→ `~/.wemind/<名>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。
 

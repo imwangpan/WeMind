@@ -55,8 +55,16 @@ export function loadAccount(): AccountData | null {
 
 let warnedWinPerms = false;
 
-export function saveAccount(account: AccountData): void {
-  const file = path.join(DATA_DIR, "account.json");
+/**
+ * 把登录凭证写进**指定**目录的 `account.json`（原子写 + POSIX 600 + Windows 一次性明文告警）。
+ *
+ * 为什么要有 dir 参数：`wemind login` 是先写到暂存目录 `.staging/`、扫码确认后才 rename 成账号目录。
+ * 那条路径以前直接 `fs.writeFileSync`，于是「POSIX 600 / Windows 告警」这两条安全承诺在最推荐
+ * 的登录入口上不成立（chmod 也漏了）。改成复用本函数，两条路径行为一致。
+ * rename 同盘保留权限位，所以先写好再归档不会丢 600。
+ */
+export function saveAccountTo(dir: string, account: AccountData): void {
+  const file = path.join(dir, "account.json");
   writeJson(file, account);
   if (process.platform === "win32") {
     // Windows 上 fs.chmod 实际是 no-op，无法用 0o600 限制访问。
@@ -65,7 +73,7 @@ export function saveAccount(account: AccountData): void {
       warnedWinPerms = true;
       console.error(
         `[wemind/wechat-ilink-core] warning: ${file} stores the bot token in plaintext; ` +
-          `Windows cannot restrict it via chmod. Protect ${DATA_DIR} with folder permissions or disk encryption.`,
+          `Windows cannot restrict it via chmod. Protect ${dir} with folder permissions or disk encryption.`,
       );
     }
   } else {
@@ -75,6 +83,10 @@ export function saveAccount(account: AccountData): void {
       /* best-effort */
     }
   }
+}
+
+export function saveAccount(account: AccountData): void {
+  saveAccountTo(DATA_DIR, account);
 }
 
 export function clearAccount(): void {
