@@ -47,6 +47,7 @@
 | `daemon.pid` | ② daemon | `index.ts` 启动时 | 精确定位本账号 node 进程 |
 | `brain.pid` | ③ 大脑 | `acp-brain.ts` spawn 后 | 区分「bot 的大脑」与用户自己日常用的 agent，便于清理 |
 | `worker.pid` | ③' worker | `worker-acp.ts` spawn 后 | 远程任务进程；`stop` 时一并清理（漏了它会留下孤儿进程占着会话） |
+| `pm2.app.json` | ① 看门狗 | `pm2-runner.ts`（仅 `--runner pm2`） | pm2 的 app 声明（名字/重拉策略/日志/`WECHAT_ACCOUNT`）；由 `wemind start --runner pm2` 生成后 `pm2 start` |
 
 > **身份校验（防 pid 复用）**：pid 会被系统复用（尤其**重启后**）——只凭「pid 还活着」就杀进程或判定「运行中」，可能**误杀别人的进程**、或反而看不出「其实没起来」。所以所有基于 pid 文件的判断/停止都会先**核对该 pid 的命令行是否确属本程序**（`proc-identity.ts`）：daemon/wrapper 需含 **`wemind` + `cli.js`**（或 `run-daemon.ps1`）；大脑/worker 需含其启动命令（如 `opencode acp`，据此与用户自己的 `opencode serve` 区分）。查不到命令行时**一律判否、不杀**。
 >
@@ -86,9 +87,12 @@ for (;;) {
 - **跨平台**：不依赖 shell / Mutex / pm2，Windows 用 `windowsHide` 防闪窗；
 - **日志**：stdout/stderr 一并写 `<数据目录>/daemon.log`，与 PowerShell 路线一致。
 
-> pm2 有**两条**路线，别混：
-> - `wemind start --runner pm2` 走 `pm2-runner.ts`：`pm2 start "<cli.js>" --name wemind-<key> --interpreter node --output/--error <daemon.log> --merge-logs -- daemon`——app 名 `wemind-<key>`、日志归一到 `daemon.log`；**不设** `restart_delay`/`stop_exit_codes`（重启延迟用 pm2 默认值，退出码 78 也不会停手）。
-> - 源码开发者的 `pm2 start ecosystem.config.cjs` 才有 app 级设置：`restart_delay: 5000`、`max_restarts: 50`、`stop_exit_codes: [78]`（与 builtin 看门狗的 5s 重拉 + 78 特判对齐）。
+> pm2 也是第①层的一种实现，与 builtin 看门狗**行为对齐**（`pm2-runner.ts`）：app 名 `wemind-<key>`、
+> `restart_delay: 5000`、`max_restarts: 50`、`stop_exit_codes: [78]`、日志合并到账号 `daemon.log`。
+> 声明写在账号目录的 `pm2.app.json` 里（不是把参数堆在 `pm2 start` 命令行上——`--stop-exit-codes`
+> 是变参，还要和 `--` 分隔符挤在一起，只能靠真机试；JSON 声明没有这层解析）。
+>
+> 源码开发者的 `pm2 start ecosystem.config.cjs` 是**另一条**路线（同一组设置，按 `accounts.json` 批量生成 app）。
 
 ---
 
@@ -225,7 +229,7 @@ foreach ($key in $accounts) {
 
 | 命令 | 做什么 |
 |------|--------|
-| `start <key\|label> [--runner builtin\|pm2]` | 起该账号的看门狗（默认 builtin detached `_watchdog`；`pm2` 则走 pm2） |
+| `start <key\|label> [--runner builtin\|pm2]` | 起该账号的看门狗（默认 builtin detached `_watchdog`；`pm2` 则生成 `pm2.app.json` 交给 pm2，重拉/78 语义与 builtin 一致） |
 | `list` | 列出各账号状态（读 daemon/brain pid，并**核对命令行身份**后判断「运行中」） |
 | `logout <key>` | 停整条链（看门狗→daemon→brain/worker）+ iLink 下线 + 清凭证，**保留目录** |
 | `delete <key>` | 停整条链 + 删数据目录 + 注销注册表 |
