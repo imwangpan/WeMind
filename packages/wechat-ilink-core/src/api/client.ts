@@ -21,8 +21,7 @@ const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 /** 扫码状态长轮询（get_qrcode_status）超时。与消息长轮询语义不同，故分开命名。 */
 const QR_LONG_POLL_TIMEOUT_MS = 35_000;
 
-// 对外声明的 iLink 客户端版本：模仿官方 openclaw-weixin 的版本，
-// 避免后端因客户端版本过低而拒绝/快速过期二维码。需随官方更新——故支持 env 覆盖，免改代码。
+// 对外声明的 iLink 客户端版本：模仿官方 openclaw-weixin 的版本，避免后端因客户端版本过低而拒绝/快速过期二维码。需随官方更新——故支持 env 覆盖，免改代码。
 const ILINK_CLIENT_VERSION = process.env.ILINK_CLIENT_VERSION?.trim() || "2.4.3";
 const CHANNEL_VERSION = ILINK_CLIENT_VERSION;
 
@@ -89,8 +88,7 @@ async function apiFetch(params: {
       body: params.body,
       signal: controller.signal,
     });
-    // 读完响应体后才算这次请求结束：只清定时器会漏掉「头已到、体卡住」的慢响应，
-    // 长轮询尤甚——所以清理放在 finally，成功/失败/超时都只写一次。
+    // 读完响应体后才算这次请求结束：只清定时器会漏掉「头已到、体卡住」的慢响应，长轮询尤甚——所以清理放在 finally，成功/失败/超时都只写一次。
     const rawText = await res.text();
     if (!res.ok) {
       throw new Error(`${params.label} ${res.status}: ${rawText.slice(0, 500)}`);

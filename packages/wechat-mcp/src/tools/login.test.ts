@@ -21,8 +21,7 @@ const m = vi.hoisted(() => ({
   clearQrState: vi.fn(),
   resetState: vi.fn(),
 }));
-// 用 getter 而不是取值快照：登录模块在 import 时就绑定 DATA_DIR，若这里给快照，
-// 会拿到 hoisted 阶段的 undefined。getter 保证每次读到的都是最新值。
+// 用 getter 而不是取值快照：登录模块在 import 时就绑定 DATA_DIR，若这里给快照，会拿到 hoisted 阶段的 undefined。getter 保证每次读到的都是最新值。
 m.dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-login-"));
 vi.mock("@wemind/wechat-ilink-core", () => ({
   ...m,

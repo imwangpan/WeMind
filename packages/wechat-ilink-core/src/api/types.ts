@@ -45,8 +45,7 @@ export const MessageItemType = {
  * - NEW=0：新消息。
  * - GENERATING=1：生成中（流式/进行中）。
  * - FINISH=2：本回合结束。
- * [实测] 关键：发送进度/中间消息用 **GENERATING**，仅最终答案用 **FINISH**——
- *   FINISH 会结束当前回合（关闭该 context 的发送窗口），若进度也用 FINISH 会提前关掉会话。
+ * [实测] 关键：发送进度/中间消息用 **GENERATING**，仅最终答案用 **FINISH**——FINISH 会结束当前回合（关闭该 context 的发送窗口），若进度也用 FINISH 会提前关掉会话。
  *   详见笔记里程碑 21/23 与 README「进度提示与连续发送上限」。
  */
 export const MessageState = {
@@ -281,8 +280,7 @@ export interface QRCodeResponse {
  * 扫码登录状态轮询响应。
  * 官方完整状态机（8 态，见 openclaw-weixin login-qr.ts）：
  *   wait / scaned / confirmed / expired / scaned_but_redirect / need_verifycode / verify_code_blocked / binded_redirect
- * [实测] WeMind 的登录流程只处理常见 4 态（wait/scaned/confirmed/expired）；其余高级态（验证码回填、IDC 重定向、已绑定）
- *   当前未实现——如遇到，会落到默认分支按「等待」处理。类型在此列全以对齐官方、便于将来补全。
+ * [实测] WeMind 的登录流程只处理常见 4 态（wait/scaned/confirmed/expired）；其余高级态（验证码回填、IDC 重定向、已绑定）当前未实现——如遇到，会落到默认分支按「等待」处理。类型在此列全以对齐官方、便于将来补全。
  */
 export interface QRStatusResponse {
   status:

@@ -1,8 +1,7 @@
 /**
  * iLink Bot API 错误码定义与分类。
  *
- * 权威来源：逆向自官方 Tencent/openclaw-weixin 的「iLink Bot API 协议参考」
- * （corespeed-io/wechatbot `docs/protocol.md` 的 Error Codes 表，社区逆向、目前最权威的公开文档）。
+ * 权威来源：逆向自官方 Tencent/openclaw-weixin 的「iLink Bot API 协议参考」（corespeed-io/wechatbot `docs/protocol.md` 的 Error Codes 表，社区逆向、目前最权威的公开文档）。
  *
  * 两个字段，语义不同：
  *  - `ret`    ：发送/上传等 RPC 的返回码（sendmessage / getuploadurl 等响应体）。
@@ -18,8 +17,7 @@
  * ⚠️ 重要澄清（避免重蹈覆辙）：
  *  - `ret = -2` 官方定义是**参数错误**，**不是**"context_token 按时间过期"。
  *    常见诱因：context_token 失效/与当前会话不匹配、必填字段缺失/格式不对。
- *  - context_token 官方说明：按 `(accountId, userId)` **缓存、持久化、重用**，
- *    **仅在会话过期(-14)/重新登录时清除**——**没有**文档化的时间 TTL。
+ *  - context_token 官方说明：按 `(accountId, userId)` **缓存、持久化、重用**，**仅在会话过期(-14)/重新登录时清除**——**没有**文档化的时间 TTL。
  *  - 真正"按时间/会话过期"的是 `errcode = -14`（会话级），与 -2 无关。
  */
 

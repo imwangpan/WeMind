@@ -12,8 +12,7 @@ import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
 /*
  * 统一用「单条命令字符串 + shell」调用 pm2，而不是 spawnSync(cmd, args[], { shell: true })。
  * 后者在 Node 20+ 会触发 DEP0190 弃用警告（shell:true 同时传 args 数组、参数仅拼接不转义）。
- * 这里命令中只拼入受控值：固定的 cliPath（import.meta 解析得到）、账号 key 派生的 name 与日志路径，
- * 且路径都加引号处理空格——无任何外部不可信输入，无注入风险。
+ * 这里命令中只拼入受控值：固定的 cliPath（import.meta 解析得到）、账号 key 派生的 name 与日志路径，且路径都加引号处理空格——无任何外部不可信输入，无注入风险。
  */
 function pm2Run(
   cmd: string,
@@ -45,15 +44,11 @@ function daemonLogPath(key: string): string {
  * 生成 pm2 的 app 声明（`{ apps: [decl] }`，写进账号目录的 `pm2.app.json`）。
  *
  * **为什么用 JSON 声明而不是把参数堆在 `pm2 start` 命令行上**：
- * - `restart_delay` / `stop_exit_codes` / `max_restarts` 在命令行上是 `--restart-delay` /
- *   `--stop-exit-codes`（**变参**）/ `--max-restarts`，还要和 `-- daemon` 这个「脚本参数分隔符」
- *   挤在同一条命令里——解析顺序、变参吞掉后续 token 的风险都只能靠真机试；
- * - JSON 声明没有解析层：键值原样进 `pm2_env`（`stop_exit_codes` 在 `God.handleExit` 里既接受
- *   数字数组也接受数字字符串，这里给数字数组），与 `ecosystem.config.cjs` 同源同义；
+ * - `restart_delay` / `stop_exit_codes` / `max_restarts` 在命令行上是 `--restart-delay` / `--stop-exit-codes`（**变参**）/ `--max-restarts`，还要和 `-- daemon` 这个「脚本参数分隔符」挤在同一条命令里——解析顺序、变参吞掉后续 token 的风险都只能靠真机试；
+ * - JSON 声明没有解析层：键值原样进 `pm2_env`（`stop_exit_codes` 在 `God.handleExit` 里既接受数字数组也接受数字字符串，这里给数字数组），与 `ecosystem.config.cjs` 同源同义；
  * - 路径全走 JSON 转义，不再依赖 shell 引号。
  *
- * 与 `ecosystem.config.cjs` 保持一致的项：app 名 `wemind-<key>`、崩溃 5s 重拉、最多 50 次、
- * 退出码 78（大脑配置错误）不重启、日志合并到账号 `daemon.log`。导出供单测直接断言（不需要装 pm2）。
+ * 与 `ecosystem.config.cjs` 保持一致的项：app 名 `wemind-<key>`、崩溃 5s 重拉、最多 50 次、退出码 78（大脑配置错误）不重启、日志合并到账号 `daemon.log`。导出供单测直接断言（不需要装 pm2）。
  */
 export function buildAppDeclaration(
   key: string,
@@ -74,15 +69,13 @@ export function buildAppDeclaration(
     error_file: logPath,
     merge_logs: true,
     watch: false, // daemon 是长轮询常驻进程
-    // 只声明账号；其余（DEEPSEEK_API_KEY、WEMIND_HOME 等）由 pm2 从执行 `pm2 start` 的进程环境
-    // 合并进来（`Common.prepareAppConf`：shell env 打底、声明里的 env 覆盖）——与改动前一致。
+    // 只声明账号；其余（DEEPSEEK_API_KEY、WEMIND_HOME 等）由 pm2 从执行 `pm2 start` 的进程环境合并进来（`Common.prepareAppConf`：shell env 打底、声明里的 env 覆盖）——与改动前一致。
     env: { WECHAT_ACCOUNT: key },
   };
 }
 
 /**
- * 把声明写进账号目录，返回文件路径。单独导出便于测试（不触碰 pm2）；
- * `dir` 可覆盖目标目录——单测传临时目录，避免动真实 `~/.wemind`。
+ * 把声明写进账号目录，返回文件路径。单独导出便于测试（不触碰 pm2）；`dir` 可覆盖目标目录——单测传临时目录，避免动真实 `~/.wemind`。
  */
 export function writeAppDeclaration(
   key: string,

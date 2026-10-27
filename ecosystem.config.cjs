@@ -2,8 +2,7 @@
 // pm2 同时充当：看门狗（崩溃自动重拉）+ 自启（pm2 startup/save）+ 单实例（按 app 名）+ 进程托管（脱离终端）。
 // 三系统通用：Windows / Linux / macOS。用法见 docs/跨平台常驻-pm2.md。
 //
-// 多账号：读取 ~/.wemind/accounts.json，为每个已登记账号生成一个 app（wemind-<key>）；
-// 无注册表时回退到单账号 "default"（数据目录 ~/.wemind/default）。
+// 多账号：读取 ~/.wemind/accounts.json，为每个已登记账号生成一个 app（wemind-<key>）；无注册表时回退到单账号 "default"（数据目录 ~/.wemind/default）。
 // 新增账号后重跑 `pm2 start ecosystem.config.cjs && pm2 save` 即可纳入新账号。
 const fs = require("node:fs");
 const os = require("node:os");

@@ -3,8 +3,7 @@
  * 版本号一致性检查：发布前确认「包身份」与「锁文件」一致，且源码里没有硬编码版本号。
  *
  * 为什么需要：npm 发布包取自 `packages/wechat-daemon`（包名 `@wemind/cli`，命令 `wemind`）。
- * 版本号现在**只有一处来源**：`packages/wechat-daemon/package.json` 的 `version`
- * （`src/version.ts` 在运行时读它，不再手写常量）。仍需校验的是：
+ * 版本号现在**只有一处来源**：`packages/wechat-daemon/package.json` 的 `version`（`src/version.ts` 在运行时读它，不再手写常量）。仍需校验的是：
  *   - package.json 的 name / version / bin 是否符合发布约定
  *   - package-lock.json 里该 workspace 的记录是否同步（`npm version` 会改，手改 package.json 不会）
  *   - src/version.ts 是否**没有**回退成硬编码字面量（回退会让版本号重新分裂成两处）

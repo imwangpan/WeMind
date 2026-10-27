@@ -34,8 +34,7 @@ export function classifyTransportError(err: unknown): TransportErrorInfo {
     return { kind: "dns", retryable: true, message, code };
   if (s.includes("econnreset") || s.includes("socket hang up"))
     return { kind: "connection", retryable: true, message, code };
-  // TLS/证书错误判定必须排在 "fetch failed" 兜底之前：Node fetch 的网络失败顶层恒为 "TypeError: fetch failed"，
-  // 真正的 cert/tls 原因在 err.cause 里（已并入 s）。若放在 network 分支之后，会被 "fetch failed" 先匹配成可重试 → 此分支成死代码。
+  // TLS/证书错误判定必须排在 "fetch failed" 兜底之前：Node fetch 的网络失败顶层恒为 "TypeError: fetch failed"，真正的 cert/tls 原因在 err.cause 里（已并入 s）。若放在 network 分支之后，会被 "fetch failed" 先匹配成可重试 → 此分支成死代码。
   if (s.includes("cert") || s.includes("tls") || s.includes("ssl"))
     return { kind: "tls", retryable: false, message, code };
   if (

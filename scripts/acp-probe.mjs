@@ -1,7 +1,5 @@
 // ACP capability probe: initialize → session/new → prompt → close → kill → load/resume → prompt.
-// Mirrors WeMind's acp-brain.ts (newline-delimited JSON-RPC, clientCapabilities: {}),
-// records capabilities, first-frame latency, update types, reverse requests, and
-// whether the agent preserves context across a restart.
+// Mirrors WeMind's acp-brain.ts (newline-delimited JSON-RPC, clientCapabilities: {}), records capabilities, first-frame latency, update types, reverse requests, and whether the agent preserves context across a restart.
 //
 // Usage (PowerShell):
 //   $env:ACP_BIN = "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"

@@ -4,8 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * Qoder 沙箱：设置基底（剥离 MCP/插件/自定义供应商 + 关自动更新）、凭据/标识文件同步、
- * 以及 brain/worker 的 MCP curated 策略。模块级常量在 import 时解析，故先设环境再动态导入。
+ * Qoder 沙箱：设置基底（剥离 MCP/插件/自定义供应商 + 关自动更新）、凭据/标识文件同步、以及 brain/worker 的 MCP curated 策略。模块级常量在 import 时解析，故先设环境再动态导入。
  */
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-sandbox-qoder-"));

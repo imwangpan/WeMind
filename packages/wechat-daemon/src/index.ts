@@ -265,16 +265,14 @@ function handleSendError(e: unknown, account: AccountData): void {
 // 串行发送队列：保证多条消息（进度/答案）按入队顺序送达，不并发乱序
 let replyChain: Promise<void> = Promise.resolve();
 let lastSendAt = 0;
-// 两条发送之间的最小间隔：iLink 对 bot 发送有速率限流（rapid sends → ret=-2 "rate limited"，导致消息丢失，
-// 见 NousResearch/hermes-agent#21011）。全局节流主动规避。
+// 两条发送之间的最小间隔：iLink 对 bot 发送有速率限流（rapid sends → ret=-2 "rate limited"，导致消息丢失，见 NousResearch/hermes-agent#21011）。全局节流主动规避。
 const MIN_SEND_GAP_MS = Number(process.env.WECHAT_MIN_SEND_GAP_MS) || 1500;
 
 // iLink 在用户回复前能连续发送的消息数上限（实测约 10，可调）。
 const CONSEC_SEND_LIMIT = Number(process.env.WECHAT_CONSEC_SEND_LIMIT) || 10;
 // 静默期心跳：默认 15s；预设可放宽（如 DSH committed-only，但仍会发 thought/usage 帧）。
 const HEARTBEAT_MS = Number(process.env.WECHAT_BRAIN_HEARTBEAT_MS) || heartbeatMs() || 15_000;
-// 「距该用户上一条消息以来」bot 已连续发送的条数 + 是否处于"等待继续"段。按用户(to)维护、**跨回合持续**，
-// 仅在该用户发来任何消息时重置（镜像服务端"任何用户消息都重置连续发送配额"的规则）。
+// 「距该用户上一条消息以来」bot 已连续发送的条数 + 是否处于"等待继续"段。按用户(to)维护、**跨回合持续**，仅在该用户发来任何消息时重置（镜像服务端"任何用户消息都重置连续发送配额"的规则）。
 // 这样即使 A 任务期间你发了 B、A 又继续发了几条，B 任务接手时计数是延续的，不会误以为"还能再发10条"而撞上限。
 type SendBudget = { count: number; awaiting: boolean };
 const sendBudget = new Map<string, SendBudget>();
@@ -310,9 +308,7 @@ function sendOrdered(
 /**
  * 发一条「必须送达」的答复（控制指令回执、任务回执、任务结束确认、出错提示）。
  *
- * 与 sendOrdered 的唯一差别：**先计入连发额度**。服务端按「距用户上一条消息」计连续发送数，
- * 这类答复确实占额度；只发不计数会让 brain 回合的 budgetOf 低估真实值 → 误判「还能发」→
- * 撞 ret=-2 限流、结果丢失。计数后仍走同一条 replyChain，保证与进度/答案不乱序、遵守最小间隔。
+ * 与 sendOrdered 的唯一差别：**先计入连发额度**。服务端按「距用户上一条消息」计连续发送数，这类答复确实占额度；只发不计数会让 brain 回合的 budgetOf 低估真实值 → 误判「还能发」→ 撞 ret=-2 限流、结果丢失。计数后仍走同一条 replyChain，保证与进度/答案不乱序、遵守最小间隔。
  * 与 `setTaskPush` 同一套语义：task 推送也是「必须送达、只计数不被 awaiting 暂停」。
  */
 function sendNotice(
@@ -392,14 +388,12 @@ async function handleMessage(
   const t0 = Date.now();
   let lastProgressAt = Date.now();
   // iLink 限制 bot 在用户回复前连续发送的消息数（实测约 10，超出被 ret=-2 拒）。计数按用户跨回合维护(budgetOf)。
-  // 当已发到「上限-2」(默认第8条)后，下一条进度改为「即将达上限」提示并进入等待，把最后一条额度留给最终答案；
-  // 用户回复「继续」(或发任何消息)会重置计数恢复发送（见 poller）。
+  // 当已发到「上限-2」(默认第8条)后，下一条进度改为「即将达上限」提示并进入等待，把最后一条额度留给最终答案；用户回复「继续」(或发任何消息)会重置计数恢复发送（见 poller）。
   const sendProgress = (msg: string) => {
     lastProgressAt = Date.now();
     const b = budgetOf(to);
     if (b.awaiting) return; // 等待「继续」期间不发任何进度
-    // 发出一条文本会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，
-    // 否则快回合（回复 < 旧 8s 续发间隔）全程看不到指示。
+    // 发出一条文本会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，否则快回合（回复 < 旧 8s 续发间隔）全程看不到指示。
     const sendWithTyping = (text: string) => {
       void sendOrdered(account, to, cx(), text, MessageState.GENERATING)
         .then(() => setTyping(account, to, cx(), 1))
@@ -578,8 +572,7 @@ async function handleMessage(
 
 // ===== 解耦：拉取器(poller) 与 处理器(worker) 通过队列协作 =====
 // 大脑(ACP session)严格串行，但「拉取消息/抓 token」无需串行。把两者解耦：
-// poller 持续 getUpdates、实时更新 token、把消息入队，永不被大脑阻塞；
-// worker 串行从队列取消息喂大脑（尊重 kiro-cli 串行约束），发送时取最新 token，规避 ret=-2。
+// poller 持续 getUpdates、实时更新 token、把消息入队，永不被大脑阻塞；worker 串行从队列取消息喂大脑（尊重 kiro-cli 串行约束），发送时取最新 token，规避 ret=-2。
 type QueuedMsg = {
   from: string;
   text: string;
@@ -841,8 +834,7 @@ function scanTaskInbox(owner: string): void {
 }
 
 export async function runDaemon(): Promise<void> {
-  // 启动即校验大脑：早失败、说人话——避免「进程看着正常、直到第一条消息才炸」
-  // （历史上表现为反复「⏳ 响应中断了，正在自动重试…」，实为默认大脑的二进制没装）。
+  // 启动即校验大脑：早失败、说人话——避免「进程看着正常、直到第一条消息才炸」（历史上表现为反复「⏳ 响应中断了，正在自动重试…」，实为默认大脑的二进制没装）。
   const agent = resolveAgent(loadBrainConfig());
   const brainProblem = agentProblem(agent);
   if (brainProblem) {
@@ -882,8 +874,7 @@ export async function runDaemon(): Promise<void> {
     cleanupPid();
     process.exit(0);
   });
-  // 防御：任何未捕获的 promise 拒绝/异常（多为瞬时网络 fetch failed 或回合内 send 被拒）只记录、不退出，
-  // 避免 daemon 崩溃丢掉在途回合、用户卡在心跳。此前的 code=1 崩溃即源于此类未捕获拒绝。
+  // 防御：任何未捕获的 promise 拒绝/异常（多为瞬时网络 fetch failed 或回合内 send 被拒）只记录、不退出，避免 daemon 崩溃丢掉在途回合、用户卡在心跳。此前的 code=1 崩溃即源于此类未捕获拒绝。
   process.on("unhandledRejection", (reason) => {
     log(
       "unhandledRejection:",
@@ -902,8 +893,7 @@ export async function runDaemon(): Promise<void> {
   // worker 任务推送：用该用户最新 token 经串行发送层发出（与 brain 共用 sendOrdered，保证不乱序）
   setTaskPush((to, text) => {
     const tok = state.contextTokens[`${account.botId}:${to}`];
-    // task 推送也占用连续发送额度（与 brain 回合共用 budgetOf）：task 在后台运行，可能与 brain 回合并发，
-    // 若不计数，本地 budget 会低估服务端真实连续发送数 → brain 的 sendProgress 误判「还能发」→ 撞 ret=-2 限流、结果丢失。
+    // task 推送也占用连续发送额度（与 brain 回合共用 budgetOf）：task 在后台运行，可能与 brain 回合并发，若不计数，本地 budget 会低估服务端真实连续发送数 → brain 的 sendProgress 误判「还能发」→ 撞 ret=-2 限流、结果丢失。
     // 注：task 推送是「本轮结果」（必须送达），故只累加计数、不被 awaiting 暂停（暂停只作用于可丢弃的 brain 进度提示）。
     budgetOf(to).count += 1;
     void sendOrdered(account, to, tok, text, MessageState.FINISH, tok);

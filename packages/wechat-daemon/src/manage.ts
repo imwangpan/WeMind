@@ -137,10 +137,8 @@ export function descendantPids(pid: number): number[] {
  * 杀「pid 及其整棵进程树」。
  *
  * Windows：`taskkill /T /F` 本来就连带子树。
- * POSIX：`process.kill(pid)` **只**结束该进程，不动它的子进程——daemon 被停后，它拉起的
- * ACP 大脑 / worker 会留下来继续占着会话与文件句柄（Windows 的 `taskkill /T` 会连带子树，所以这个缺陷只在 POSIX 暴露）。
- * 所以这里先收集后代、由叶子往根 SIGTERM（daemon 的 SIGTERM 处理器会自己清 pid 文件），
- * 等一小会儿再对仍存活的补 SIGKILL。
+ * POSIX：`process.kill(pid)` **只**结束该进程，不动它的子进程——daemon 被停后，它拉起的 ACP 大脑 / worker 会留下来继续占着会话与文件句柄（Windows 的 `taskkill /T` 会连带子树，所以这个缺陷只在 POSIX 暴露）。
+ * 所以这里先收集后代、由叶子往根 SIGTERM（daemon 的 SIGTERM 处理器会自己清 pid 文件），等一小会儿再对仍存活的补 SIGKILL。
  */
 function killProcessTrees(pids: number[]): void {
   const unique = [...new Set(pids.filter((p) => isAlive(p)))];
@@ -209,8 +207,7 @@ function resolveKey(arg: string): string {
 /** 启动某账号的 daemon（方案 a：委托 pm2 常驻，跑 `wemind daemon`，注入 WECHAT_ACCOUNT）。 */
 function startDaemon(key: string, runner?: string): void {
   // 用 process.argv[1]（即正在执行的 cli.js 绝对路径），而不是 dirname(import.meta.url)：
-  // 发布后 tsdown 把 manage.ts 内联进 dist/cli.js，两者恰好相同；但若将来拆成多 chunk，
-  // argv[1] 才是「用户装的那个 bin」，dirname(import.meta.url) 可能是 dist/chunks/ 下。
+  // 发布后 tsdown 把 manage.ts 内联进 dist/cli.js，两者恰好相同；但若将来拆成多 chunk，argv[1] 才是「用户装的那个 bin」，dirname(import.meta.url) 可能是 dist/chunks/ 下。
   const cliPath =
     process.argv[1] || path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
   // start 前先停现有任何 runner（pm2 app / builtin 看门狗），避免同账号双跑抢 token
@@ -220,8 +217,7 @@ function startDaemon(key: string, runner?: string): void {
 }
 
 /**
- * 停止某账号的常驻：先 pm2 delete（方案 a），再按 pid 兜底杀 wrapper/daemon/brain/worker
- * （兼容直接启动的）。停的是**整条链**：除列出的进程外，还连带它们的子进程树。
+ * 停止某账号的常驻：先 pm2 delete（方案 a），再按 pid 兜底杀 wrapper/daemon/brain/worker（兼容直接启动的）。停的是**整条链**：除列出的进程外，还连带它们的子进程树。
  */
 function stopDaemon(key: string): string {
   pm2Stop(key); // best-effort：停掉 pm2 托管的 app（若有）
@@ -231,8 +227,7 @@ function stopDaemon(key: string): string {
     { pid: readPid(dir, "wrapper.pid"), name: "wrapper", markers: CLI_PID_MARKERS },
     { pid: readPid(dir, "daemon.pid"), name: "daemon", markers: CLI_PID_MARKERS },
     { pid: readPid(dir, "brain.pid"), name: "brain", markers: brainPidMarkers(ag.bin, ag.args) },
-    // worker 也是我们拉起的 ACP agent（worker-acp.ts 写 worker.pid）；漏掉它 → POSIX 上
-    // 停完 daemon 任务进程还活着、stale worker.pid 一直留着（Windows 靠 /T 连带，看不出来）。
+    // worker 也是我们拉起的 ACP agent（worker-acp.ts 写 worker.pid）；漏掉它 → POSIX 上停完 daemon 任务进程还活着、stale worker.pid 一直留着（Windows 靠 /T 连带，看不出来）。
     {
       pid: readPid(dir, "worker.pid"),
       name: "worker",
@@ -309,8 +304,7 @@ function finalizeStaging(label?: string): { key: string; msg: string } {
 
 /**
  * 懒加载 `qrcode`：只有扫码登录要画二维码，`list` / `brain` / `task` / `daemon` 全用不上。
- * 顶层 `import` 会让**每次**启动都付约 36ms（实测）解析 qrcode + yargs 依赖树；
- * 这里在第一次画码时才加载，之后同进程内复用（登录过程会因过期刷新多次）。
+ * 顶层 `import` 会让**每次**启动都付约 36ms（实测）解析 qrcode + yargs 依赖树；这里在第一次画码时才加载，之后同进程内复用（登录过程会因过期刷新多次）。
  * 用函数声明而非 `const QRCode = await import(...)`：后者在 ESM 顶层要多一层 TDZ 心智负担。
  */
 let qrcodeMod: typeof import("qrcode") | undefined;
@@ -415,8 +409,7 @@ function cmdList(): string {
   const def = getDefaultKey();
   const accs = listAccounts();
   if (!accs.length) return "（无已登记账号）。用 `login` 添加。";
-  // 先收集各账号的 pid + 大脑特征，再**一次性**批量查命令行（Windows 下每次查询较慢）；
-  // 只凭「pid 活着」显示状态会在重启后 pid 复用时骗人，所以要带身份校验。
+  // 先收集各账号的 pid + 大脑特征，再**一次性**批量查命令行（Windows 下每次查询较慢）；只凭「pid 活着」显示状态会在重启后 pid 复用时骗人，所以要带身份校验。
   const entries = accs.map((a) => {
     const dir = accountDir(a.key);
     const ag = resolveAgent(loadBrainConfig(dir));
@@ -535,8 +528,7 @@ async function cmdBrain(rest: string[]): Promise<string> {
     const i = argv.indexOf(name);
     if (i < 0) return undefined;
     const v = argv[i + 1];
-    // `--bin` 后面没值、或紧跟的是另一个开关（`brain set kiro --bin --restart`）时，
-    // 以前会静默把 `--restart` 当成 bin 的值，看起来「设置成功」但存进去的是错的。
+    // `--bin` 后面没值、或紧跟的是另一个开关（`brain set kiro --bin --restart`）时，以前会静默把 `--restart` 当成 bin 的值，看起来「设置成功」但存进去的是错的。
     // 值本身允许以 `--` 开头（如 `--args "--experimental-acp"`），所以只对已知开关报错。
     if (v === undefined || FLAGS.has(v)) throw new Error(`${name} 缺少参数值`);
     argv.splice(i, 2);

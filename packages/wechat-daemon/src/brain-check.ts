@@ -7,8 +7,7 @@ import type { ResolvedAgent } from "./brain-agents.js";
 import { spawnAgent } from "./spawn-agent.js";
 
 /**
- * 「大脑连通性自检」：真正起一个 ACP agent 进程并跑完 initialize / session/new 握手，
- * 用来证明「这个大脑不只是找得到，而且能说 ACP」——比单纯「文件存在」更硬的证据。
+ * 「大脑连通性自检」：真正起一个 ACP agent 进程并跑完 initialize / session/new 握手，用来证明「这个大脑不只是找得到，而且能说 ACP」——比单纯「文件存在」更硬的证据。
  *
  * 用**临时沙箱目录**（避免污染真实配置与账号沙箱），结束后杀进程、删临时目录。
  * 供 `wemind brain check` 使用；不影响正在运行的 daemon（各起各的进程）。
@@ -22,8 +21,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
   if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把「配置目录」指向临时沙箱
   for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
 
-  // 需要登录的 agent（DSH / Qoder）缺凭据会在 session/new 报认证失败——把凭据带进临时沙箱，
-  // 否则自检会把「没登录」误报成「二进制不可用」。标识类文件（如 Qoder 的 machine_id）必须一致。
+  // 需要登录的 agent（DSH / Qoder）缺凭据会在 session/new 报认证失败——把凭据带进临时沙箱，否则自检会把「没登录」误报成「二进制不可用」。标识类文件（如 Qoder 的 machine_id）必须一致。
   const cfgDir = path.join(home, ag.configSubdir);
   for (const f of [...ag.credentialFiles, ...ag.identityFiles]) {
     try {
