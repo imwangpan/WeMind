@@ -98,7 +98,7 @@ poller（长轮询，不被大脑阻塞）
 | **strict 恢复** | `恢复会话` 的语义：`load`/`resume` 都失败就如实报错，**不回退 `new`、不改指针** |
 | **交接 / handoff** | `handoff.ts`：摘要落盘（TTL 24h），切走后**下一条消息前缀注入**、**答成才消费**、切回来源不注入 |
 | **任务编号** | 按用户单调递增、**不复用**、跨重启不归零；多任务并存时无编号消息必须消歧 |
-| **默认任务大脑** | `worker.agent ?? agent`；`切换任务大脑`/`--worker` 可在进程内粘性覆盖（**不落盘**）；`任务 <预设>：`/`--agent` **只对那一条任务生效**，不改它 |
+| **默认任务大脑** | `worker.agent ?? agent`；`切换任务大脑`/`--worker` 可在**进程内**覆盖它（**不落盘**，重启回到配置值）；`任务 <预设>：`/`--agent` **只对那一条任务生效**，不改它 |
 | **进程池 / worker-pool** | `worker-pool.ts`：同 agent 空闲复用 → 回收最旧腾位 → spawn；并发 `WEMIND_MAX_WORKERS`、空闲 `WEMIND_IDLE_MAX`、回收 `WEMIND_WORKER_REAP_MS` |
 | **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收预设名与纯数据**（无 `bin`/`args`/`shell`） |
 | **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |

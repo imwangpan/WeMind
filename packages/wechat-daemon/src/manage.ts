@@ -826,7 +826,7 @@ async function viaBridge(key: string, req: Omit<ControlRequest, "id" | "at">): P
 /**
  * `brain switch <预设|auto>`：**热切换**——daemon 在跑就走控制桥（不重启、不打断在途回合）；
  * daemon 没在跑就只写 brain.json（下次启动生效）。
- * `--worker` 设默认任务大脑：那是 daemon 进程内的粘性状态，没有 daemon 就没有意义，必须先启动。
+ * `--worker` 设默认任务大脑：那是 daemon 进程内才有的状态（不落盘），没有 daemon 就没有意义，必须先启动。
  */
 async function cmdBrainSwitch(agentName: string, key: string, worker: boolean): Promise<string> {
   const agent = agentName.trim().toLowerCase();

@@ -98,7 +98,7 @@ wemind version       # 已安装的 CLI 版本（npm i -g @wemind/cli）
 wemind brain         # 查看当前大脑（含预设/自动探测顺序）
 wemind brain check   # 真机 ACP 握手
 wemind brain switch opencode        # 热切换对话大脑（daemon 在跑就不重启、不打断在途回合）
-wemind brain switch opencode --worker   # 设默认任务大脑（粘性，不写 brain.json）
+wemind brain switch opencode --worker   # 设默认任务大脑（本次运行内一直生效，不写 brain.json）
 wemind brain handoff # 生成交接摘要（供切走后第一条消息注入）
 wemind session list  # 会话列表（daemon 不在也能读，只是按「下次会用的那个大脑」列）
 wemind session new 周报 / resume 3 / rename 3 新名字 / delete 3

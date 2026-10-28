@@ -22,7 +22,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 export type ControlKind =
   /** 热切换对话大脑（落盘 + 预热 + 失败回滚）。 */
   | "brain.switch"
-  /** 设默认任务大脑（粘性，不落盘）。 */
+  /** 设默认任务大脑（本次运行内一直生效，不落盘）。 */
   | "brain.worker"
   /** 生成交接摘要（落盘，返回摘要正文）。 */
   | "brain.handoff"

@@ -33,7 +33,7 @@ export type ChatCommand =
   | { kind: "ai" }
   /** 切换对话大脑（无参 = 显示当前）。 */
   | { kind: "brain"; target?: string }
-  /** 切默认任务大脑（粘性；不写 brain.json）。 */
+  /** 切默认任务大脑（本次运行内一直生效；不写 brain.json）。 */
   | { kind: "workerBrain"; target?: string }
   /** 生成切换用摘要并落盘。 */
   | { kind: "handoff" }
@@ -217,7 +217,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     zh: "切换任务大脑 [预设|auto]",
     slash: "/worker [预设|auto]、/ai task [预设|auto]",
     cli: "wemind brain switch <预设> --worker",
-    brief: "设默认任务大脑（粘性，不写 brain.json）",
+    brief: "设默认任务大脑（本次运行内一直生效，不写 brain.json）",
     match: (t) => {
       const m = t.match(
         /^(?:切换任务大脑|任务大脑|ai\s*任务|\/worker|\/ai\s+task)(?:\s+([\s\S]+))?$/i,

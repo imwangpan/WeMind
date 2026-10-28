@@ -76,7 +76,7 @@ graph TD
 
 ### 运行时热切换（brain-switch.ts）
 
-1.2.0 起换大脑不需要重启 daemon：微信 `切换大脑 [名]` / `/ai brain` / `/brain`，CLI `wemind brain switch <预设|auto>`（`--worker` 则是设默认任务大脑，只改进程内粘性、不落盘）。`brain-switch.ts` 的流程：
+1.2.0 起换大脑不需要重启 daemon：微信 `切换大脑 [名]` / `/ai brain` / `/brain`，CLI `wemind brain switch <预设|auto>`（`--worker` 则是设默认任务大脑，只改**进程内**状态、不落盘）。`brain-switch.ts` 的流程：
 
 ```mermaid
 graph TD
@@ -105,7 +105,7 @@ graph TD
 | 作用对象 | **消息进来的那个账号**（daemon 是哪个就切哪个） | **任意账号**（省略 = 默认账号）；`--worker`（设默认任务大脑）走另一条桥命令 `brain.worker` |
 | 谁能做 | 仅该账号**登录者**（微信平台只投递登录者本人的消息；代码里另有兜底门：非登录者会被短提示拒绝、不进大脑，见 [5. Daemon](05-守护进程-Daemon.md) §5.4 的权限模型） | 能在本机写 `~/.wemind/<key>/control-inbox/` 的人（= 机主）；不走微信、也不经微信侧那道具名门 |
 | daemon 在跑 | 进程内热切换（上面的流程） | 经控制桥转给**同一个** `switchBrain`；CLI 超时自动放大到 drain+warm+15s |
-| daemon 没跑 | —（没有 daemon 就没有微信侧） | `brain switch` 退化为「只写该账号的 `brain.json` + 注明下次启动生效」；`--worker` 必须先有 daemon（粘性是进程内状态） |
+| daemon 没跑 | —（没有 daemon 就没有微信侧） | `brain switch` 退化为「只写该账号的 `brain.json` + 注明下次启动生效」；`--worker` 必须先有 daemon（这个设置只存在进程内） |
 | 落盘 | 成功才写该账号的 `brain.json` | 同上（同一段代码） |
 
 - CLI 侧**没有跨账号批量**：要切多个账号就逐个写 `key`/`label`；`brain set` / `unset` / `check` / `handoff` 同样按账号寻址（省略 = 默认账号）。

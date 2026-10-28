@@ -99,7 +99,7 @@ stateDiagram-v2
 
 **任务级指定 agent**：`任务 <预设>：正文`（冒号前必须是**已知预设名**，且整串锚定）永远**派发新任务**，不往在跑的任务里塞；冒号前不是预设名时**不当成指定 agent**——`任务 明天：去买菜` 整句仍是正文，照旧派给任务侧（想只跟大脑说话用「问大脑 …」）；`任务`/`任务：`（无预设）则走**默认任务大脑**，若已有任务就注入它。指定的 agent **只对这条任务生效**，不会改变「默认任务大脑」（要改默认用 `切换任务大脑` / CLI `--worker`）。
 
-**默认任务大脑（粘性）**：`worker.agent ?? agent`（配置文件里的 `worker` 段优先，否则跟对话大脑同一个）。微信 `切换任务大脑 [名]` / `/ai task`、CLI `wemind brain switch <预设> --worker` 可在**进程内**改它，**不写 `brain.json`**（重启回到配置值，回执里写明）；若已有空闲进程属于别的 agent，会被重启以保证后续任务用新 agent。
+**默认任务大脑（本次运行内一直生效）**：`worker.agent ?? agent`（配置文件里的 `worker` 段优先，否则跟对话大脑同一个）。微信 `切换任务大脑 [名]` / `/ai task`、CLI `wemind brain switch <预设> --worker` 可在**进程内**改它，**不写 `brain.json`**（重启回到配置值，回执里写明）；若已有空闲进程属于别的 agent，会被重启以保证后续任务用新 agent。
 
 依赖注入（task-manager 不直接碰发送层/文件，保持可测）：`setTaskPush`（推送文本，走 daemon 的 `sendOrdered` + 最新 token）、`setTaskTyping`（发打字状态）、`setTaskStateSink`（落盘 `task-state.json`）。
 
