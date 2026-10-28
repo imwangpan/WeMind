@@ -35,7 +35,7 @@ export type CreateFn = (userId: string) => Promise<void>;
 export type SessionCtx = {
   /** 当前对话大脑的预设名（登记表按 agent 分命名空间）。 */
   agent: string;
-  /** 会话属于谁（微信 userId / CLI 的账号本人）。 */
+  /** 会话属于谁（微信 userId / CLI 的登录者）。 */
   userId: string;
   dir?: string;
   /** 注入 `now` 只为测试可复现；不传就用真实时间。 */

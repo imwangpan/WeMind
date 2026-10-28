@@ -295,7 +295,7 @@ export interface QRStatusResponse {
   bot_token?: string;
   ilink_bot_id?: string;
   baseurl?: string;
-  /** 扫码者的 user id（confirmed 时返回；用于加入 allowFrom 授权清单）。 */
+  /** 扫码者的 user id（confirmed 时返回；用于加入 allowFrom 登录者白名单）。 */
   ilink_user_id?: string;
   /** status=scaned_but_redirect 时，需把后续轮询切换到的新 host（IDC 重定向）。 */
   redirect_host?: string;

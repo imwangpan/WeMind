@@ -134,8 +134,8 @@ MCP                 # 列出可选与已激活
 
 ## 4. 安全
 
-- brain 默认是 `--trust-all-tools`（kiro）/ 自动批准（opencode）；**加载一个 MCP = 对白名单发件人开放该工具的全部能力**。
-- `allowFrom` 是唯一发件人闸门，不要为了省事关掉。
+- brain 默认是 `--trust-all-tools`（kiro）/ 自动批准（opencode）；**加载一个 MCP = 对登录者（唯一能发消息的人）开放该工具的全部能力**。
+- `allowFrom` 是唯一的发件人闸门（默认只放行登录者），不要为了省事关掉。
 - worker 继承全量 MCP，风险更高；不要把 worker 的 cwd 指到敏感目录。
 - `wechat` 永久禁止：同一 token 长轮询会与 daemon 抢消息/回环。
 - MCP 定义里不要写明文密钥到仓库；用环境变量或本机配置。

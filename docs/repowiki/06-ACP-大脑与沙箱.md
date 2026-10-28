@@ -96,6 +96,22 @@ graph TD
 - **沙箱无需撤销**：`ensureBrainHome(newAgent)` 只往新 agent 的 `configSubdir` 里**加**文件，不动旧 agent 的沙箱。
 - 已知窄窗口：`reset()` → 新进程写 pid 记录之间约 1s 内执行 `wemind stop`，可能漏杀新起的 ACP 子进程（与既有 `/加载` 触发 `restart()` 同类，不是新引入的形态）。
 
+### 多账号下的范围、两个入口
+
+**换大脑是账号级的**：一个 daemon（= 一个账号）同一时刻只有一个活跃对话大脑，切它**不影响任何别的账号**——多账号就是多个 daemon，各有自己的 `brain.json`、会话表、沙箱与进程树（见 [8. 数据存储与多账号](08-数据存储与多账号.md)）。
+
+| | 微信 `切换大脑 X` | 本机 CLI `wemind brain switch X [<key\|label>]` |
+| --- | --- | --- |
+| 作用对象 | **消息进来的那个账号**（daemon 是哪个就切哪个） | **任意账号**（省略 = 默认账号）；`--worker`（设默认任务大脑）走另一条桥命令 `brain.worker` |
+| 谁能做 | 仅该账号**登录者**（微信平台只投递登录者本人的消息；代码里另有兜底门：非登录者会被短提示拒绝、不进大脑，见 [5. Daemon](05-守护进程-Daemon.md) §5.4 的权限模型） | 能在本机写 `~/.wemind/<key>/control-inbox/` 的人（= 机主）；不走微信、也不经微信侧那道具名门 |
+| daemon 在跑 | 进程内热切换（上面的流程） | 经控制桥转给**同一个** `switchBrain`；CLI 超时自动放大到 drain+warm+15s |
+| daemon 没跑 | —（没有 daemon 就没有微信侧） | `brain switch` 退化为「只写该账号的 `brain.json` + 注明下次启动生效」；`--worker` 必须先有 daemon（粘性是进程内状态） |
+| 落盘 | 成功才写该账号的 `brain.json` | 同上（同一段代码） |
+
+- CLI 侧**没有跨账号批量**：要切多个账号就逐个写 `key`/`label`；`brain set` / `unset` / `check` / `handoff` 同样按账号寻址（省略 = 默认账号）。
+- 控制桥**只接受预设名与纯数据**，所以 `brain switch` 带 `--bin`/`--args`/`--shell` 会被直接拒绝——那是 `brain set` 的活（配置变更，写盘 + 需重启），安全边界见 [7. Worker](07-远程任务-Worker.md) §7.5。
+- `WEMIND_BRAIN` 压过命令式切换这一条，对**每个账号各自**成立。
+
 ### 进程身份（pid-record.ts）
 
 `brain.pid` 不再是裸整数，而是 **JSON 身份记录**（`{pid, agent, bin, args, shell, state, startedAt, writtenAt}`），worker 侧是 `workers.pid.json` **记录数组**。原因：`manage.ts` 过去用**配置里**的 agent 算进程特征串（bin+args）来判定/杀进程，有三种情况会失效——① `wemind brain set X` 不带 `--restart`（配置已改、旧 agent 进程还在跑，`list` 显示「已停止」、`stop` 跳过不杀；1.2.0 起 `brain set` 对纯预设名会热应用，这种「配置与进程不一致」已少见，但带 `--bin` 的改动、或 daemon 没跑时改配置仍会出现）；② 热切换窗口内；③ **多任务/多 agent 并存**（多 worker 之后是常态）。现在按记录里**起进程时真实用的** bin/args 算，缺失时回退配置（兼容旧账号）；旧版 CLI 读新格式会拿到 `NaN` → 显示「已停止」且**不杀**（安全侧）。

@@ -49,7 +49,7 @@ export type TaskCommand =
   /** 任务列表。 */
   | { kind: "tasks" };
 
-/** owner-only 的指令：非账号本人发送 → 短提示拒绝，**不**转发给大脑（避免大脑替用户执行越权动作）。 */
+/** owner-only 的指令：非登录者发送 → 短提示拒绝，**不**转发给大脑（避免大脑替用户执行越权动作）。 */
 export const OWNER_ONLY_KINDS: ReadonlySet<ChatCommand["kind"]> = new Set([
   "ai",
   "brain",
@@ -66,7 +66,7 @@ export type CommandSection = "session" | "task" | "brain" | "mcp" | "misc";
 export type CommandSpec<C> = {
   id: string;
   section: CommandSection;
-  /** 仅账号本人可用。 */
+  /** 仅登录者可用（兜底门：微信平台只投递登录者的消息，正常不会触发）。 */
   ownerOnly?: boolean;
   /** 帮助里的中文写法。 */
   zh: string;
@@ -345,7 +345,7 @@ export function parseTaskCommand(text: string): TaskCommand | null {
 const SECTION_TITLE: Record<CommandSection, string> = {
   session: "会话（各自只管自己的）",
   task: "任务",
-  brain: "大脑（仅账号本人可切换）",
+  brain: "大脑（仅登录者）",
   mcp: "MCP",
   misc: "",
 };
@@ -400,7 +400,7 @@ export function renderHelp(
     lines.push(...specLines(specs, mode));
   }
   if (role !== "owner")
-    lines.push("（切换大脑 / 交接仅账号本人可用；会话与任务指令对每位授权用户开放，各管各的。）");
+    lines.push("（切换大脑 / 交接这类账号级指令仅登录者可用；会话与任务指令永远只属于你自己。）");
   lines.push("提示：<尖括号> 表示占位内容，实际发送不要带尖括号。");
   return lines.join("\n");
 }

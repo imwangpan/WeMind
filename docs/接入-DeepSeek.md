@@ -531,7 +531,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | R6 | 第三方 `deepseek-acp` 供应链 / 维护 | 长期不可控 | 只作冒烟/回退；锁版本；不默认启用 |
 | R7 | 版本是 RC，ACP 面可能漂移 | 升级即坏 | 锁 `0.2.1-rc.2`；升级先跑 M0 脚本；文档记录版本 |
 | R8 | Node ≥22（社区包明确；官方以安装包为准），而仓库声明 ≥20 | 旧环境起不来 | 文档标注；`agentProblem` 加 `minNode` 检查；M0 记录 |
-| R9 | DSH 的 Windows ACL 沙箱只限制普通 NTFS 写，不限制读/网络/进程可见性 | 微信侧提示注入可外带本机文件 | `allowFrom` 白名单；专用 OS 账号；`workspace-write`；不要把敏感目录设为 worker cwd |
+| R9 | DSH 的 Windows ACL 沙箱只限制普通 NTFS 写，不限制读/网络/进程可见性 | 微信侧提示注入可外带本机文件 | `allowFrom` 登录者白名单；专用 OS 账号；`workspace-write`；不要把敏感目录设为 worker cwd |
 | R10 | 模型/路由选择 | 不选就落到 official 路由，需 API key | 预设 `model` + `session/set_config_option`；桌面登录用 `deepseek-account` |
 | R11 | 桌面端 CLI 只有 `dsh.cmd`，无无扩展名 `dsh` | `onPath("dsh")` 找不到，`auto`/预设判不可用 | 预设 `binWin: "dsh.cmd"`；或让 `onPath` 对 `.cmd` 补试；`WEMIND_BRAIN_BIN` 绝对路径兜底 |
 | R12 | 多账号 / pm2 环境变量传递 | key 不生效 | 文档给 pm2 / `Start-Process -Environment` 示例 |

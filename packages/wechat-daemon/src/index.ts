@@ -289,7 +289,7 @@ function taskAgentForSticky(key: string): ResolvedAgent | null {
 }
 
 type ControlCtx = {
-  /** 账号本人 id（帮助文案据此裁剪）。 */
+  /** 登录者 id（帮助文案据此裁剪）。 */
   owner: string;
   /** 补发一条「必须送达」的消息（用于切脑的 ack/结果两段回执）。 */
   notify: (text: string) => Promise<void>;
@@ -794,7 +794,7 @@ function notifyWorker(): void {
   if (w) w();
 }
 
-/** 发件人鉴权：账号本人(owner，始终允许，作安全兜底) 或 在 allowFrom 授权清单中。 */
+/** 发件人鉴权：登录者（owner，始终允许）或在登录者白名单 allowFrom 中——兜底闸门（微信平台只投递登录者本人的消息，这道闸防的是投递范围变化/别的入口）。 */
 function isAuthorized(from: string, owner: string): boolean {
   return !!from && (from === owner || isAllowed(from));
 }
@@ -921,7 +921,7 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
     if (ctrl) {
       // owner-only（切脑/交接）：非本人 → 短提示拒绝，**不**转发给大脑（否则大脑可能替用户执行越权动作）
       if (isOwnerOnly(ctrl) && from !== owner) {
-        const r = "这条指令仅账号本人可用。发送「帮助」看你自己的指令。";
+        const r = "这条指令仅登录者可用。发送「帮助」看你自己的指令。";
         log("control: denied(not owner)", JSON.stringify(ctrl));
         await sendNotice(account, from, token, r, latestToken());
         continue;
@@ -1145,7 +1145,7 @@ function scanTaskInbox(owner: string): void {
  * 执行一条 CLI 桥请求，返回要打印给用户的那句话。
  * 与微信指令**共用同一批实现函数**（switchBrain / session-manager / task-manager），
  * 所以「CLI 与微信行为一致」不是靠约定，而是同一段代码。
- * 这里的 `owner` 就是账号本人：本地命令没有「谁发的」的概念，一律作用于本人。
+ * 这里的 `owner` 就是登录者：本地命令没有「谁发的」的概念，一律作用于本人。
  */
 async function handleControlRequest(req: ControlRequest, owner: string): Promise<string> {
   const sc = (): SessionCtx => ({ agent: getAgent("brain").name, userId: owner, dir: DATA_DIR });
@@ -1257,8 +1257,8 @@ export async function runDaemon(): Promise<void> {
     log("not logged in; run the MCP login_qrcode flow first.");
     process.exit(1);
   }
-  const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId; // 账号本人：始终授权（安全兜底）
-  if (owner) addAllowFrom(owner, DATA_DIR); // 种入授权清单(自动迁移老账号)；新登录在 finalize 已配对
+  const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId; // 登录者：始终授权（兜底闸门）
+  if (owner) addAllowFrom(owner, DATA_DIR); // 种入登录者白名单(自动迁移老账号)；新登录在 finalize 已配对
   // 写 PID 文件，供管理命令（logout/delete）精确定位并停止本账号的 daemon
   const pidFile = path.join(DATA_DIR, "daemon.pid");
   try {

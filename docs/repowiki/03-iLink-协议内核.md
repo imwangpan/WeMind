@@ -166,7 +166,7 @@ API：`pauseSession` / `isSessionPaused` / `getRemainingPauseMs` / `clearSession
 
 ### 授权清单（store/allow-from.ts）
 
-每账号一份持久化的「被授权用户 userId 清单」`allowFrom.json`，取代单一环境变量白名单。这是核心安全闸（因为 daemon 大脑是 `--trust-all-tools`）。
+每账号一份持久化的「登录者白名单」`allowFrom.json`（允许发消息的 userId 清单），取代单一环境变量白名单。它是**兜底闸门**：微信平台只把消息投递给登录者本人，这道闸防的是「投递范围将来变化 / daemon 被接到别的入口」（daemon 大脑是 `--trust-all-tools`，任何被接受的发件人都能驱动它）。
 
 - 格式 `{ version, allowFrom: string[] }`（对齐官方 openclaw-weixin）。
 - API：`readAllowFrom` / `addAllowFrom` / `removeAllowFrom` / `isAllowed`。

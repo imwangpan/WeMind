@@ -218,7 +218,7 @@ npm run build; npm run daemon
 | 1 | ACP 反向请求 | 可能卡死 | ✅ 已排除（M1 实测无） |
 | 2 | 配置隔离彻底性 | global/system MCP 串入大脑 | ✅ 已用 `XDG_CONFIG_HOME` 实测隔离并成功读取沙箱 `mcp.servers`；预设已注入 `OPENCODE_DISABLE_PROJECT_CONFIG=1` |
 | 3 | 模型不继承 | 大脑用 OpenCode 默认（或免费模型） | ✅ 已实现：`syncOpencodeBase` 把用户 `opencode.json`（去 `mcp`）作基底写入沙箱 `model` |
-| 4 | 权限语义 | OpenCode 自动批准 ≈ `--trust-all-tools` | 保留 daemon 的 `allowFrom` 发件人鉴权（唯一安全闸，勿关） |
+| 4 | 权限语义 | OpenCode 自动批准 ≈ `--trust-all-tools` | 保留 daemon 的 `allowFrom` 登录者白名单（兜底闸门，默认只放行登录者，勿关） |
 | 5 | 共享后台服务 | 多实例/生命周期 | 观察 `opencode acp` 是否复用全局 background server；必要时评估 `--standalone` |
 | 6 | 冷启动时延 | 首帧超时 | OpenCode 冷启动可能偏慢，按需放宽 `WECHAT_BRAIN_FIRST_FRAME_MS` |
 | 7 | Code Mode 工具命名 | 微信"步骤 N"文案 | 实测 `tool_call.title` 文案，必要时在 `zhTool()` 增加 OpenCode 风格映射 |

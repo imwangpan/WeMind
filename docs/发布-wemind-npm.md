@@ -108,7 +108,7 @@ npm 的 `npx <name>` 按**包名**解析，再按「唯一 bin」挑命令：
 
 ```
 npm i -g @wemind/cli                 → 得到 wemind 命令
-wemind login --label 主号 --start    → 微信扫码 → 常驻守护 + ACP 大脑
+wemind login --label 工作号 --start    → 微信扫码 → 常驻守护 + ACP 大脑
 wemind list / brain check / task …   → 全部命令自洽（不再出现源码路径）
 git push main（CI）                  → 一次发布 = 构建产物 + prepack 守卫 + 装包冒烟 + provenance
 ```

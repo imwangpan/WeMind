@@ -28,7 +28,7 @@ wemind stop <账号> && wemind start <账号>   # 已在运行的 daemon 不会�
 ## 三步上手
 
 ```bash
-wemind login --label 主号 --start   # ① 终端里出二维码，微信扫码 → 自动归档 + 启动常驻
+wemind login --label 工作号 --start   # ① 终端里出二维码，微信扫码 → 自动归档 + 启动常驻
 wemind list                          # ② 看账号与运行状态
 wemind brain check                   # ③ 验证大脑能说 ACP（initialize + session/new 握手）
 ```

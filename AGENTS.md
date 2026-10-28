@@ -122,7 +122,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 4. **MCP 按 agent 分派**：kiro 读 `settings/mcp.json`；opencode 读 `opencode.json` 的 `mcp.servers`；DSH 走 ACP `session/new` 的 `mcpServers`。**不要让 A 读 B 的配置文件**。
 5. **微信有连发上限（约 10 条）**：进度消息会占额度；`index.ts` 的 15s 心跳在「无 activity 帧」时会持续发，接入 committed-only agent 要单独处理。
 6. **Windows `.cmd`/`.bat` 必须经 shell**：统一用 `spawnAgent()`，不要直接 `spawn(bin,args,{shell:true})`（DEP0190 + 注入面）。
-7. **数据按账号隔离**：默认 `~/.wemind/<账号>/`；不要跨账号共用 `brain-sessions.json` / `brain-home`。
+7. **数据按账号隔离**：默认 `~/.wemind/<账号>/`；不要跨账号共用 `brain-sessions.json` / `brain-home`。**一个账号一个 daemon、各有自己的「登录者」**（扫码登录它的那个微信号；不是「主号」，账号之间没有任何隶属关系）：换大脑是**账号级**的，微信侧只有该账号的登录者能切**它自己**那个 daemon，本机 CLI 可用 `key|label` 指定任意账号（范围/限制/两入口区别见 README「多账号管理」与 `docs/repowiki/06`）。
 8. **切换大脑落盘用 `wemind brain set`**；环境变量 `WEMIND_BRAIN*` 是一次性覆盖，不要写进 profile。
 9. **不要把密钥写进预设/源码**；`DEEPSEEK_API_KEY` 等由 daemon 进程环境提供。
 10. **注释按段落换行，不按行宽折行**：一段一行（多长都不手工断开，编辑器/阅读器自己折行），只有语义上属于不同段落时才另起一行；列表项 / 标题 / 代码围栏 / 分隔线 / 用法表 / 独立命令行各自成行，「标签：内容」行（`用法：` / `退出码：` / `注意：`）另起一行。缩进保留原样——它表达层级，不是折行标记。`oxfmt` 不重排注释，所以别把英文注释按 120 列折回来。
@@ -173,6 +173,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 - **多任务共享同一份微信额度（2026-10-28）**：连发上限（约 10 条）是**按用户**计的，N 条任务的进度 + 对话大脑的回复都算同一份额度。worker 进度默认安静、结果推送走既有 ret=-2 退避；扛不住就调小 `WEMIND_MAX_WORKERS`。
 - **同 agent 并发 = 两个终端在同一个配置目录里跑（2026-10-28）**：不同 agent 各有 `configSubdir` 天然隔离；同一 agent 的两个 worker 进程共用其配置目录（会话/缓存文件是否互踩**待实测**）。
 - **VS Code 集成终端里 `wemind start` 会「假启动」（2026-10-29 修）**：VS Code 的「智能自动附加」给终端里每个 node 注入 `NODE_OPTIONS=--require <…>/ms-vscode.js-debug/bootloader.js` + `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true`），被注入的进程要**等调试器接上才执行主脚本**；终端里的前台命令会被接上（`stop`/`list` 看着一切正常），但 `start` **脱离出去的看门狗不会被接** → 进程活着、一行 JS 不跑：回执说「已启动」，实际 `daemon.log` / `wrapper.pid` 不更新、daemon 没起（`wemind list` 显示未运行，进程表里只有一个没有子进程的 `cli.js _watchdog`）。现在 `watchdog-runner.ts` 的两次脱离式 spawn 都过 `debug-env.ts` 的 `stripVscodeDebugEnv()`：只摘 VS Code 自己那段 `--require`，用户其它 `NODE_OPTIONS` 原样保留。同一注入也是「本机跑测试偶发超时」的原因——测试用 `NODE_OPTIONS=` 前缀跑。
+- **权限口径（2026-10-29 统一，平台事实已确认）**：**必须扫码登录该 bot 才能给它发消息**（微信平台限制），所以每个 bot 只有它的**登录者**（扫码登录它的那个微信号）能发。文档一律用「**登录者**」与「**登录者白名单**（`allowFrom`，**默认拒绝**；它是**兜底闸门**，正常只含登录者一个 userId，防投递范围变化/别的入口）」，作用范围写成「**整个账号（仅登录者）**」/「**登录者的会话**」/「**登录者的任务**」；**禁用**「账号本人 / 授权用户 / **主号 / 主账号**」——「主号」会被读成「多个微信账号之间有一个有权限的主号」，`label` 只是别名（示例统一用 `工作号`）。**一个微信账号 = 一个真人、一个 daemon**：微信侧换大脑只能由该账号的登录者切**它自己**那个（`OWNER_ONLY_KINDS`），本机 CLI 才能用 `key|label` 指定任意账号（范围/限制/两入口区别见 README「多账号管理」与 `docs/repowiki/06`「多账号下的范围、两个入口」）。
 - **本次待实测（2026-10-28，先量再写进文档）**：① ACP 是否有 `session/delete`；② 各 agent `session/load` 是否回放历史帧、规模多大；③ 各 agent 冷启动 `initialize`/`session/new` 真实耗时（对 `REQ_TIMEOUT=30s` 的余量）；④ 多任务并行时两条以上 `sendNotice` 是否撞 `ret=-2`；⑤ Windows `taskkill /T /F` 在 `session/load` 途中、以及**杀掉池中某个特定进程**时的行为；⑥ 同 agent 两进程共用配置目录是否互踩；⑦ 被强杀后各 agent 能否 `session/load|resume` 回该任务会话（「重启后续跑」的可行边界由这条决定）。清单在 [`docs/ai/recipes/run-e2e.md`](docs/ai/recipes/run-e2e.md)。
 
 ---
@@ -190,7 +191,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 | **热切换大脑** | 真机 kiro↔opencode；预热期间发消息**只 spawn 一次**（看 log）；未知/不可用预设被拒；故意坏 bin → 回滚 + 旧大脑继续答 + `brain.json` 未变 |
 | **多任务并行** | `任务 kiro：…` + `任务 opencode：…` 同时跑且都出结果；第三条超上限被拒；结束「等你回复」的任务后进程回池、空闲 5 分钟后消失（`wemind list`/进程管理器验；结束「正在跑」的那条只能力杀）；`wemind stop` 一次杀光所有 worker |
 | **任务中断续跑** | 跑到一半 `taskkill` daemon → 重启后 `任务列表` 显示「已中断」→ 回「继续」上下文确实接上；agent 不支持恢复时给诚实文案且编号连续 |
-| **会话四件套** | 会话 A 塞暗号 → 新会话 → 列表 → 恢复 → 暗号回来；恢复不存在的 id → 失败且当前会话不变；删当前会话后下条消息开新的；非 owner 只见自己的 |
+| **会话四件套** | 会话 A 塞暗号 → 新会话 → 列表 → 恢复 → 暗号回来；恢复不存在的 id → 失败且当前会话不变；删当前会话后下条消息开新的；会话与任务只见登录者自己的 |
 | **交接** | 交接 → 切脑 → 问只靠旧上下文能答的问题 → 文件已消费、第二条不重复注入 |
 | **CLI 热切换 / 控制桥** | daemon 在跑时 `wemind brain switch` 免重启生效；daemon 停时 `session list` 仍可用；`session rename` 后微信 `会话列表` 可见；旧版 daemon → 「必须由 daemon 执行」的命令发前拒绝，文件类命令照常（`session list` 附一行说明） |
 

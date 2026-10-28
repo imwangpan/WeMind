@@ -261,7 +261,7 @@ worker 复用现有 `WEMIND_BRAIN*` 的 agent 解析（同一 `resolveAgent()`�
 
 ## 11. 安全
 
-- worker 指向真实目录 + `--trust-all-tools` → 微信回复即可驱动它在你电脑上全权操作。**已与用户确认接受**，靠 `allowFrom` 发件人白名单兜底（poller 已对所有消息 `isAuthorized`）。
+- worker 指向真实目录 + `--trust-all-tools` → 微信回复即可驱动它在你电脑上全权操作。**已与用户确认接受**，靠 `allowFrom` 登录者白名单兜底（poller 已对所有消息 `isAuthorized`；平台限制下发件人只有登录者）。
 - `wechat` MCP 在 worker 沙箱永禁，防回环抢连接（同 brain 坑①）。
 
 ---

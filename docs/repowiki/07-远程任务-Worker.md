@@ -238,7 +238,7 @@ graph LR
     OUT -->|读并打印（exit code）| CLI
 ```
 
-- **复用同一段代码**：`handleControlRequest` 调的就是微信指令走的那几个函数（`切换大脑` = `switchBrain`、`新会话` = `newSessionCmd`…），会话类命令以**账号本人**作为 userId。
+- **复用同一段代码**：`handleControlRequest` 调的就是微信指令走的那几个函数（`切换大脑` = `switchBrain`、`新会话` = `newSessionCmd`…），会话类命令以**登录者**作为 userId（CLI 代表机主本人）。
 - **先删后做**：daemon 先 `unlink` 请求文件再执行（崩了不会重启后被重放）；`controlBusy` 保证一次只处理一条。
 - **超时如实报**：CLI 短轮询默认 30s（`WEMIND_CONTROL_TIMEOUT_MS`）；`brain.switch` 自动放大到 `预热上限 + drain + 15s`，否则正确的长切换会被误报超时。超时/没等到 → 直接说「没等到回复」，**不假装成功**。
 - **`.bridge` 凭据（升级期可用性）**：daemon 启动时把**自己的 pid** 写进 `control-out/.bridge`，并在启动时清空两个桥目录。CLI 拿它与 `daemon.pid` 比对——对不上说明 daemon 在跑**旧版本**（不认识桥），于是：**必须由 daemon 执行**的命令（`session new|resume`、`brain switch|worker|handoff`）**发出前**就拒绝并给出「`wemind stop <key> && wemind start <key>`」；**文件类**命令照常——`session rename|delete` 直接改登记表、`session list` 直接读登记表（附一行「按下次会用的那个大脑列」的说明）、`task-list` 读 `tasks.json`（只在 daemon 没跑时注明「上次快照」）。这把 30s～165s 的静默等待换成一句能照做的话。
@@ -263,7 +263,7 @@ graph LR
 
 worker 指向真实目录 + `--trust-all-tools` → 微信回复即可驱动它在你电脑上全权操作（含 shell/写文件）。安全闸：
 
-- **微信侧**：靠 `allowFrom` 发件人授权清单兜底（poller 已对所有消息鉴权）；owner-only 命令（切脑/交接）非本人发会被短提示拒绝、不进大脑。
+- **微信侧**：**平台只投递登录者本人的消息**（必须扫码登录该 bot 才能给它发消息）；代码里另有 `allowFrom` 登录者白名单兜底（默认拒绝、默认只放行登录者；poller 已对所有消息鉴权）。账号级指令（切脑/交接）由非登录者发会被短提示拒绝、不进大脑（兜底门）。
 - **本地侧**：能写 `task-inbox/`（或 `control-inbox/`）= 本机当前用户 = 机主，无需额外鉴权；控制桥的额外约束是**只收预设名与纯数据**（§7.5），所以「本机用户」这个前提被伪造请求利用时，最坏也只是选一个已装的 agent。
 - `wechat` MCP 在 worker 沙箱**永久禁止**，防回环抢连接。
 

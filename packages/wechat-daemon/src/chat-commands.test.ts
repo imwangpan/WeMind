@@ -229,7 +229,7 @@ describe("renderHelp：按角色裁剪", () => {
     expect(user).not.toContain("切换大脑 [预设");
     expect(user).not.toContain("生成当前会话摘要");
     expect(user).toContain("新会话");
-    expect(user).toContain("仅账号本人可用");
+    expect(user).toContain("仅登录者可用");
   });
 
   it("CLI 形态列 CLI 命令", () => {

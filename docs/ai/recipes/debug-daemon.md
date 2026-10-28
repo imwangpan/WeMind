@@ -11,7 +11,7 @@
 | 症状 | 先看 | 大概率原因 |
 |---|---|---|
 | `wemind start` 立刻退出 / 日志 `FATAL 大脑不可用`（exit 78） | `wemind brain` | 预设未知、二进制不在 PATH、`binWin` 写错（如只有 `dsh.cmd`） |
-| daemon 在跑，但微信完全没反应 | `daemon.log` 有无 `turn start` / `prompt ok` | 没登录、allowFrom 不含你、bot token 被另一个消费者抢走 |
+| daemon 在跑，但微信完全没反应 | `daemon.log` 有无 `turn start` / `prompt ok` | 没登录、你（登录者）不在白名单 `allowFrom` 里（异常情况）、bot token 被另一个消费者抢走 |
 | 反复「⏳ 响应中断了，正在自动重试…」 | `daemon.log` 的 `[wemind/wechat-daemon/acp]` | agent 启动失败、`initialize` 超时、参数不对、`.cmd` 没经 shell |
 | 回复突然停 / 「接近微信连续消息上限」 | 进度条数 | iLink 连发上限 ~10；回「继续」恢复 |
 | 重启后「它忘了」 | `session/load failed` / `session/resume` | agent 不支持 load，或 resume 参数/cwd 不对 |
@@ -20,7 +20,7 @@
 | 多账号互相抢消息 | `list` / 进程 | 同一 bot token 起了多个 daemon，或 brain 加载了 `wechat` MCP |
 | worker 任务不动 | `wemind task-list` | worker 超时/权限/agent 不支持；看 `.../worker` 日志 |
 | 切换大脑失败 / 回滚 | 回执 + `wemind brain` | 目标预设不可用、预热超时（120s）、drain 超时（30s）、`WEMIND_BRAIN` 压着命令 |
-| 微信里发命令被短拒 | 回执文案 | owner-only 命令（切脑/交接）由非本人发出 |
+| 微信里发命令被短拒 | 回执文案 | 账号级命令（切脑/交接）由**非登录者**发出——兜底门，平台限制下正常不会出现 |
 | CLI 命令被拒 / 显示「daemon 未运行」 | `wemind list` | 真没跑；**或**升级 CLI 后没重启 daemon（`.bridge` 凭据对不上）；**或**手跑 daemon 时路径特征不匹配 |
 | 任务数超上限被拒 | 回执 | `WEMIND_MAX_WORKERS`（默认 3）到了；先 `结束任务 <编号>` 或调大 |
 | `wemind start` 说「已启动」但 `list` 显示未运行、日志不更新 | 进程表里的 `cli.js _watchdog` 有没有子进程 | 从 **VS Code 集成终端**启动时被调试引导卡死（见 §3.12）；换普通终端，或升级到带 `stripVscodeDebugEnv` 的版本 |
@@ -100,7 +100,7 @@ wemind session list <key|label>
 [wemind/wechat-daemon] brain switch: ✅ 已切换对话大脑 … | 切换失败，已回滚到「…」
 [wemind/wechat-daemon] control(cli): session.new {"target":…}          # CLI 经控制桥发来的请求
 [wemind/wechat-daemon] control: <kind> … -> …                          # 处理结果（微信侧命令同款日志）
-[wemind/wechat-daemon] control: denied(not owner) …                    # owner-only 命令被非本人触发
+[wemind/wechat-daemon] control: denied(not owner) …                    # 账号级命令被非登录者触发（兜底门，正常不会出现）
 [wemind/wechat-daemon] control: 非法请求（未知 kind / 坏 JSON），已丢弃: …
 [wemind/wechat-daemon] task: dispatch(agent=…) / task: inject(#n) / task: stop -> …
 [wemind/wechat-daemon/worker] <connId>(<agent>) initialized / session/load ok / exited code=…
@@ -130,7 +130,7 @@ wemind brain check
 ### 3.2 daemon 在跑但不回复
 
 1. `wemind list` 确认账号 `运行中`；
-2. 确认你已在 `allowFrom`：`wemind allowlist <key>` / `wemind allow <key> <userId>`；
+2. 确认你（登录者）在 `allowFrom` 白名单里（正常会自动写入）：`wemind allowlist <key>` 看清单、异常时 `wemind allow <key> <userId>` 加人；
 3. 看 `daemon.log` 有没有 `turn start`：
    - 没有 → 消息没被拉取（登录/token/多消费者）；
    - 有但没有 `prompt ok` → ACP 层问题，转 3.3；
@@ -264,7 +264,7 @@ wemind start <key>
 
 ## 4. 不要做的事
 
-- 不要为了「让它回」而关掉 `allowFrom`；
+- 不要为了「让它回」而关掉 `allowFrom`（它是 `--trust-all-tools` 下唯一的安全闸，默认只放行登录者）；
 - 不要让 brain 加载 `wechat` MCP；
 - 不要在同一 token 上同时跑 MCP 形态与 daemon；
 - 不要把 `WEMIND_BRAIN*` 写进系统 profile 当默认（用 `brain.json`）；

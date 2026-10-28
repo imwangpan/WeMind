@@ -121,7 +121,7 @@ pm2 save                       # 保存当前列表（改动后记得存，否�
 可在 `ecosystem.config.cjs` 各 app 的 `env` 里加（或系统级设置）：
 
 - `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_HOME_ENV` —— 选/配 ACP agent（见 docs/接入其它-ACP-Agent.md）。**更省心**：用 `wemind brain set <预设> [--bin <绝对路径>]` 把选择落到账号 `brain.json`——pm2 / 看门狗 / 手动启动都读它，无需在 `env` 里配；
-- `WECHAT_OWNER_ID` —— 发件人白名单（默认仅本人）；
+- `WECHAT_OWNER_ID` —— 覆盖「登录者」（默认取扫码登录者的 userId；`allowFrom` 登录者白名单是兜底）；
 - `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` —— 大脑回合空闲/硬超时。
 
 `WECHAT_ACCOUNT` 已由配置自动按账号注入，不要手动覆盖。

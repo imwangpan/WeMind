@@ -639,7 +639,7 @@ async function cmdBrain(rest: string[]): Promise<string> {
   const first = (pos[0] || "").toLowerCase();
   const SUBCOMMANDS = new Set(["show", "set", "unset", "check", "switch", "handoff"]);
   if (first && !SUBCOMMANDS.has(first)) {
-    // 省略子命令 → 视为 `brain show <key|label>`（如 `wemind brain 主号`）。
+    // 省略子命令 → 视为 `brain show <key|label>`（如 `wemind brain 工作号`）。
     return describeBrain(pickKey(pos[0]));
   }
   const sub = first || "show";
@@ -693,7 +693,7 @@ function cmdAdopt(key: string, label?: string): string {
     baseUrl: acc.baseUrl,
     label: label || key,
   });
-  if (acc.userId) addAllowFrom(acc.userId, accountDir(key)); // 接管时把账号本人种入授权清单
+  if (acc.userId) addAllowFrom(acc.userId, accountDir(key)); // 接管时把登录者种入白名单
   return `已登记：key=${key}  label=${meta.label}  botId=${acc.botId}`;
 }
 
@@ -844,7 +844,7 @@ async function cmdBrainSwitch(agentName: string, key: string, worker: boolean): 
   return `daemon 未在运行：已把 ${key} 的大脑写进 brain.json（agent=${agent}，下次启动生效）。\n运行中热切换：先 wemind start ${key}`;
 }
 
-/** 会话命令归属的人：账号本人（与 daemon 里 owner 的定义一致）。 */
+/** 会话命令归属的人：登录者（与 daemon 里 owner 的定义一致）。 */
 function ownerOf(key: string): string {
   return process.env.WECHAT_OWNER_ID?.trim() || readAccount(accountDir(key))?.userId || "";
 }
@@ -855,7 +855,7 @@ function agentNameOf(key: string): string {
 }
 
 /**
- * 末尾那个「长得像账号」的位置参数摘出来当账号选择（`session list 主号`）。
+ * 末尾那个「长得像账号」的位置参数摘出来当账号选择（`session list 工作号`）。
  * 认不出就当普通参数——session 的名字可能跟账号别名撞脸，宁可把它当名字。
  */
 function splitKeyArg(args: string[]): { args: string[]; sel?: string } {
@@ -1229,7 +1229,7 @@ export async function runManage(argv: string[]): Promise<void> {
       const uid = rest[1];
       if (!uid) throw new Error("用法: allow <key|label> <userId>");
       const list = addAllowFrom(uid, accountDir(k));
-      console.log(`已授权 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ")}`);
+      console.log(`已加入白名单 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ")}`);
       break;
     }
     case "revoke": {
@@ -1237,14 +1237,16 @@ export async function runManage(argv: string[]): Promise<void> {
       const uid = rest[1];
       if (!uid) throw new Error("用法: revoke <key|label> <userId>");
       const list = removeAllowFrom(uid, accountDir(k));
-      console.log(`已撤销 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ") || "（空）"}`);
+      console.log(
+        `已从白名单移除 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ") || "（空）"}`,
+      );
       break;
     }
     case "allowlist": {
       const k = resolveKey(rest[0]);
       const list = readAllowFrom(accountDir(k));
       console.log(
-        `${k} 授权用户(${list.length})：\n${list.map((u) => "  - " + u).join("\n") || "  （空）"}`,
+        `${k} 登录者白名单(${list.length})：\n${list.map((u) => "  - " + u).join("\n") || "  （空）"}`,
       );
       break;
     }
@@ -1279,9 +1281,9 @@ export function helpText(): string {
   label <key|label> <新别名>     改别名
   set-default <key|label>        设默认账号
   adopt <key> [--label 名]       把已存在的账号目录登记进注册表
-  allowlist <key|label>          查看该账号的授权用户清单(allowFrom)
-  allow <key|label> <userId>     授权某用户可驱动该账号 bot
-  revoke <key|label> <userId>    撤销某用户的授权
+  allowlist <key|label>          查看该账号的登录者白名单(allowFrom)
+  allow <key|label> <userId>     （兜底）把某 userId 加进白名单（正常只会有登录者本人）
+  revoke <key|label> <userId>    （兜底）从白名单里移除某 userId
 
 【与微信等价的操作指令】以下都能带 [<key|label>]（省略则用默认账号）。
 运行中的命令经**控制桥**交给 daemon 执行（CLI 与微信走同一段代码，行为一致）；daemon 没跑时，
