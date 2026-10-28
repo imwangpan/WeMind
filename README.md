@@ -481,7 +481,7 @@ Register-ScheduledTask -TaskName "wemind-daemon" -Action $action -Trigger (New-S
 
 支持登录多个微信账号，每个账号一份独立目录 `~/.wemind/<key>/`，`key` 由微信 **botId** 派生（唯一、自动获取；当前 iLink 接口不返回昵称/微信号，故用 botId，另存可编辑的 `label` 别名）。账号清单记录在 `~/.wemind/accounts.json`。不同账号 = 不同 token = 各跑一个 daemon，互不冲突。
 
-> **key vs label**：`key`（botId 派生）是唯一标识、也是目录名，系统据它区分；`label` 是人类可读别名（可改、可重复）。下列命令多数 **可用 key 或 label 选择账号**（label 唯一匹配时）。
+> **key / label / 默认账号 / owner 是四个不同概念**：`key`（botId 派生）是唯一标识、也是目录名，系统据它区分；`label` 是人类可读别名（可改、可重复、**无任何权限含义**，`--label 主号` 里的「主号」只是随手起的名字）；**默认账号**（`set-default` 设置、`list` 标 `[默认]`、**首个登记的账号自动成为它**）决定「命令里省略账号时用哪个」；**owner（账号本人）是按账号算的**——每个账号的 owner 就是扫码登录它的那个微信号（`account.json` 的 `userId`），决定谁能发「仅账号本人可用」的 `切换大脑`/`交接`，不存在「一个账号拥有其它账号权限」的主号。下列命令多数 **可用 key 或 label 选择账号**（label 唯一匹配时）；`start`/`stop` 与会话/任务类命令**省略账号 = 默认账号**。
 
 **新增一个账号（推荐：一条命令）** —— 在终端跑：
 
