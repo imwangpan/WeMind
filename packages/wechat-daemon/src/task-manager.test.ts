@@ -40,7 +40,7 @@ function fakeConn(name = "kiro") {
   };
 }
 
-const { setAgent: setSlotAgent, resetSlotsForTest } = await import("./agent-slot.js");
+const { setAgent: setSlotAgent, resetSlotsForTest, getAgent } = await import("./agent-slot.js");
 const {
   dispatchTask,
   injectTask,
@@ -392,6 +392,13 @@ describe("多任务与编号", () => {
     expect(list).toContain("等你回复");
     expect(list).toContain("1 轮");
     expect(list).toContain("我先问你一件事");
+  });
+
+  it("指定 agent 只影响本条任务：不改默认任务大脑（worker 槽位保持 kiro）", async () => {
+    dispatchTask("u1", "这条用 opencode", { agentKey: "opencode" });
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalled());
+    expect(listTasks("u1")[0]?.agent).toBe("opencode");
+    expect(getAgent("worker").name).toBe("kiro"); // 回归护栏：`任务 <预设>：` 不再顺带改进程内默认
   });
 });
 

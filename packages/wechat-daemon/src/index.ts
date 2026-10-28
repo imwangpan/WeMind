@@ -263,7 +263,7 @@ async function switchBrainAck(target: string, userId: string, ctx: ControlCtx): 
   return `⏳ 正在切到「${pre.agent.name}」…（预热中，成功或失败稍后补发消息；这期间发来的消息会等新大脑就绪）`;
 }
 
-/** `切换任务大脑`：只改本进程的默认任务大脑（决策⑨⑮：粘性，不写 brain.json）。 */
+/** `切换任务大脑`：只改本进程的默认任务大脑（粘性，不写 brain.json）。 */
 function setTaskBrain(target: string): string {
   const key = target.trim().toLowerCase();
   const cfg = loadBrainConfig(DATA_DIR);
@@ -279,13 +279,6 @@ function setTaskBrain(target: string): string {
   return busy
     ? `✅ 默认任务大脑：${cur.name} → ${r.agent.name}${note}。\n在跑的任务继续用它自己起的 agent 跑完；**之后的新任务**用新大脑。`
     : `✅ 默认任务大脑：${cur.name} → ${r.agent.name}${note}。`;
-}
-
-/** 指定过 agent 的 `任务 <预设>：正文` 之后，该 agent 成为默认任务大脑（粘性；解析失败返回 null，不影响派发结果）。 */
-function taskAgentForSticky(key: string): ResolvedAgent | null {
-  const cfg = loadBrainConfig(DATA_DIR);
-  const r = resolvePresetByName(key, agentConfigFor(cfg, "worker"));
-  return r.ok ? r.agent : null;
 }
 
 type ControlCtx = {
@@ -967,10 +960,8 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
     }
     // 4) 派发：带预设名 = 指定 agent 起一条**新任务**（多任务并行）；不带 = 沿用「有任务就注入，没有就派发」
     if (tcmd?.kind === "toWorker" && tcmd.agentToken) {
+      // 指定的 agent **只对这条任务生效**，不改默认任务大脑：那是账号级状态（`切换任务大脑` 是 owner-only），顺手改会让「派一条任务」变成一次隐形的全局设置变更，也破坏微信与 CLI（`--agent` 无粘性）两边的对称。
       const r = dispatchTask(from, tcmd.text, { agentKey: tcmd.agentToken });
-      // 粘性（决策⑨）：指定过的 agent 成为之后的默认任务大脑——只在本进程生效，不写 brain.json
-      const ag = taskAgentForSticky(tcmd.agentToken);
-      if (ag && ag.name !== getAgent("worker").name) setAgent("worker", ag);
       log(`task: dispatch(agent=${tcmd.agentToken}):`, r.replace(/\n/g, " | "));
       await sendNotice(account, from, token, r, latestToken());
       continue;

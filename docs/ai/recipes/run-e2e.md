@@ -135,7 +135,7 @@ CLI：
 
 ```powershell
 wemind task "在任务目录创建一个 hello.txt，内容为 hello"
-wemind task "统计一下仓库里 TODO 的数量" --agent opencode    # 指定 agent（粘性）
+wemind task "统计一下仓库里 TODO 的数量" --agent opencode    # 指定 agent（只影响这一条，不改默认任务大脑）
 wemind task-list                                           # 编号/agent/状态/轮次/时长
 wemind task-reply 2 "继续"                                  # 指定编号注入
 wemind task-stop 2                                         # 单条；task-stop 全部 = 全停

@@ -66,7 +66,7 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 | `packages/wechat-daemon/src/brain-switch.ts` | 热切换：预检 → drain → 预热 → 成功才落盘；失败回滚 |
 | `packages/wechat-daemon/src/worker-acp.ts` | 任务 worker 的 ACP 客户端（`class WorkerConn`，一条任务一条连接） |
 | `packages/wechat-daemon/src/worker-pool.ts` | worker 进程池（复用/回收/上限；`workers.pid.json` 记录数组） |
-| `packages/wechat-daemon/src/task-manager.ts` | 任务表（编号、注入消歧、停止；默认任务大脑 + 粘性） |
+| `packages/wechat-daemon/src/task-manager.ts` | 任务表（编号、注入消歧、停止；默认任务大脑 + 进程内覆盖） |
 | `packages/wechat-daemon/src/task-store.ts` | 任务表落盘 `tasks.json`（损坏降级、中断标记、编号跨重启连续） |
 | `packages/wechat-daemon/src/session-manager.ts` | 会话五条指令的实现层（`create`/`resume` 依赖注入） |
 | `packages/wechat-daemon/src/session-registry.ts` | 会话登记表（派生元数据：名字/标题/轮次）——**不是**「当前是哪个」的权威 |

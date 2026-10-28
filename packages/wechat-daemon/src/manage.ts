@@ -836,7 +836,7 @@ async function cmdBrainSwitch(agentName: string, key: string, worker: boolean): 
     );
   const dir = accountDir(key);
   if (worker) {
-    requireDaemonAlive(key); // 「默认任务大脑」是进程内状态，不落盘（决策⑨⑮）
+    requireDaemonAlive(key); // 「默认任务大脑」是进程内状态，不落盘
     return await viaBridge(key, { kind: "brain.worker", target: agent });
   }
   if (daemonAlive(key)) return await viaBridge(key, { kind: "brain.switch", target: agent });
