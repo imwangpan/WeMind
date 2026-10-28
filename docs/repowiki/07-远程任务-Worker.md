@@ -191,7 +191,7 @@ worker 的微信侧路由在 `workerLoop` 内（详见 [5. 守护进程 Daemon](
 - **本地派发**能指定工作目录 cwd（微信入口做不到），默认取终端当前目录，对标本地直接开 kiro 的体验；
 - **不依赖微信**，纯本地也能看状态、回复、结束。
 
-### 文件桥机制（`task-inbox/` → `task-state.json`）
+### 文件桥机制（`task-inbox/` → `task-out/` → `task-state.json`）
 
 CLI（`wemind`）与 daemon 是两个独立进程，用轻量文件桥通信（不引入 socket/端口）：
 
@@ -199,6 +199,7 @@ CLI（`wemind`）与 daemon 是两个独立进程，用轻量文件桥通信（�
 graph LR
     CLI["wemind（本地终端）"]
     INBOX["task-inbox/*.json<br/>（命令收件箱）"]
+    OUTBOX["task-out/&lt;id&gt;.json<br/>（命令回执）"]
     STATE["task-state.json<br/>（状态文件）"]
     DM["daemon<br/>（独立定时器 1s 扫描）"]
     TM["task-manager"]
@@ -206,17 +207,21 @@ graph LR
     CLI -->|原子写命令| INBOX
     INBOX -->|扫描读取后删除| DM
     DM --> TM
+    TM -->|这条命令的真实结果| OUTBOX
+    OUTBOX -->|短轮询后打印| CLI
     TM -->|关键节点写状态| STATE
     STATE -->|读取展示| CLI
 ```
 
 - **命令方向**：CLI 原子写（临时文件 + rename）命令文件 → daemon 定时扫描（按时间戳升序）→ 调 task-manager → 删文件。
+- **回执方向**（1.2.0）：命令文件带 `ack` id，daemon 处理完写 `task-out/<id>.json {id, at, ok, text}`；CLI 短轮询后打印 `text`。**派发的回执等 `acquire` 之后才发**（池满/起不来是那时才知道的），所以 `wemind task` 说的「已派发」是真话——在此之前它只能猜，池满被拒会被报成「已派发任务 #2（opencode）」（上一条的编号，因为 `active` 本来就是 true）。**空 `text` 也是一种回执**（＝「已送达、无别的话」），CLI 据此立刻用自己的措辞；等不到回执（老版 daemon）则退回「已投递…」并附一句说明，不把「没等到」当成功。
 - **状态方向**：daemon 在派发/每轮/waiting/停止时原子写 `task-state.json` → CLI 读并显示（顶层字段镜像最近一条任务，另带 `tasks` 数组，旧版 CLI 读不错）。
-- daemon 启动清空 `task-inbox/` 防重放；CLI 写命令前预检 daemon 存活（读 `daemon.pid` + **身份校验**）。
+- daemon 启动清空 `task-inbox/` 与 `task-out/` 防重放；CLI 写命令前预检 daemon 存活（读 `daemon.pid` + **身份校验**）。
+- 两侧共用 `task-inbox.ts`（目录、原子写、回执读写、清理），路径与格式只有一处定义。
 
 ### 控制桥（`control-inbox/` → `control-out/`）
 
-task-inbox 是**单向**的（CLI 派活，结果从微信回）。但**切换大脑、开新会话、恢复会话**这类操作必须发生在 **daemon 进程里**（进程内的 ACP 连接、会话指针、任务表都是它的活状态），而且 CLI 需要**当场知道成没成**（要打印成功/失败、要给非零退出码）。于是有了双向的控制桥（`control-bridge.ts`）：
+task-inbox 的命令是**异步**的（派活/回复/结束，回执只回答「这条命令收下了没有、结果如何」，任务的活本身还在 worker 里跑）。但**切换大脑、开新会话、恢复会话**这类操作必须发生在 **daemon 进程里**（进程内的 ACP 连接、会话指针、任务表都是它的活状态），而且 CLI 需要**当场知道成没成**（要打印成功/失败、要给非零退出码）。于是另有双向的控制桥（`control-bridge.ts`）：
 
 ```mermaid
 graph LR

@@ -105,9 +105,11 @@ import {
   setTaskPush,
   setTaskTyping,
   setTaskStateSink,
+  setTaskAckSink,
   taskPoolSummary,
   type TaskStateSnapshot,
 } from "./task-manager.js";
+import { clearTaskDirs, taskInboxDir, writeTaskAck } from "./task-inbox.js";
 import {
   killAll as killWorkerPool,
   killIdle as killIdleConns,
@@ -1050,8 +1052,8 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
   }
 }
 
-// ===== 本地命令入口（文件桥）：CLI 写 task-inbox/*.json，daemon 扫描分发到 task-manager =====
-const TASK_INBOX_DIR = path.join(DATA_DIR, "task-inbox");
+// ===== 本地命令入口（文件桥）：CLI 写 task-inbox/*.json，daemon 扫描分发到 task-manager，结果写回 task-out/*.json =====
+const TASK_INBOX_DIR = taskInboxDir(DATA_DIR);
 const TASK_STATE_FILE = path.join(DATA_DIR, "task-state.json");
 const TASK_SCAN_MS = Number(process.env.WEMIND_TASK_SCAN_MS) || 1000;
 
@@ -1067,7 +1069,14 @@ function scanTaskInbox(owner: string): void {
   files.sort(); // 文件名带时间戳前缀，字典序即时间序
   for (const f of files) {
     const fp = path.join(TASK_INBOX_DIR, f);
-    let cmd: { kind?: string; text?: string; cwd?: string; agent?: string; id?: number | string };
+    let cmd: {
+      kind?: string;
+      text?: string;
+      cwd?: string;
+      agent?: string;
+      id?: number | string;
+      ack?: string;
+    };
     try {
       cmd = JSON.parse(fs.readFileSync(fp, "utf-8"));
     } catch {
@@ -1085,16 +1094,19 @@ function scanTaskInbox(owner: string): void {
     } // 先删，避免重复处理
     try {
       if (cmd.kind === "dispatch") {
+        // 回执由 task-manager 在**起进程有结果之后**发（池满/起不来都是那时才知道），这里只把 ack id 递进去
         log(
           "local task dispatch:",
           dispatchTask(owner, String(cmd.text ?? ""), {
             ...(cmd.cwd ? { cwd: String(cmd.cwd) } : {}),
             ...(cmd.agent ? { agentKey: String(cmd.agent) } : {}),
+            ...(cmd.ack ? { ackId: String(cmd.ack) } : {}),
           }).slice(0, 60),
         );
       } else if (cmd.kind === "reply") {
         const id = Number(cmd.id) > 0 ? Number(cmd.id) : undefined;
-        const r = injectTask(owner, String(cmd.text ?? ""), id);
+        const ackId = cmd.ack === undefined ? undefined : String(cmd.ack);
+        const r = injectTask(owner, String(cmd.text ?? ""), id, ackId);
         log(
           "local task reply:",
           id ? `#${id}` : "-",
@@ -1107,13 +1119,24 @@ function scanTaskInbox(owner: string): void {
           stopTask(
             owner,
             cmd.id === "all" ? "all" : Number(cmd.id) > 0 ? Number(cmd.id) : undefined,
+            cmd.ack === undefined ? undefined : String(cmd.ack),
           ),
         );
       } else {
         log("unknown task-inbox cmd:", cmd.kind);
+        writeTaskAck(
+          DATA_DIR,
+          cmd.ack === undefined ? undefined : String(cmd.ack),
+          `❌ 不认识的任务命令：${cmd.kind}`,
+        );
       }
     } catch (e) {
       log("task-inbox dispatch error:", String(e));
+      writeTaskAck(
+        DATA_DIR,
+        cmd.ack === undefined ? undefined : String(cmd.ack),
+        `❌ 命令执行出错：${String(e)}`,
+      );
     }
   }
 }
@@ -1303,17 +1326,9 @@ export async function runDaemon(): Promise<void> {
       /* best-effort */
     }
   });
-  // 本地命令入口：启动清空收件箱（作废重启前残留命令、防重放），再起独立定时器扫描分发（不挂 poller，避免被 25s 长轮询阻塞）
-  try {
-    fs.rmSync(TASK_INBOX_DIR, { recursive: true, force: true });
-  } catch {
-    /* ignore */
-  }
-  try {
-    fs.mkdirSync(TASK_INBOX_DIR, { recursive: true });
-  } catch {
-    /* ignore */
-  }
+  setTaskAckSink((id, text) => writeTaskAck(DATA_DIR, id, text)); // 本地命令的回执腿（`wemind task` 等着的「到底派上了没有」）
+  // 本地命令入口：启动清空收件箱与回执目录（作废重启前残留命令、防重放），再起独立定时器扫描分发（不挂 poller，避免被 25s 长轮询阻塞）
+  clearTaskDirs(DATA_DIR);
   setInterval(() => scanTaskInbox(owner), TASK_SCAN_MS);
   // 控制桥：同样「启动清空 + 独立定时器扫描」（作废重启前的残留命令，防重放）
   clearControlDirs(DATA_DIR);

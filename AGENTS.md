@@ -72,6 +72,7 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 | `packages/wechat-daemon/src/session-registry.ts` | 会话登记表（派生元数据：名字/标题/轮次）——**不是**「当前是哪个」的权威 |
 | `packages/wechat-daemon/src/handoff.ts` | 交接（摘要落盘 + 前缀注入 + 答成才消费） |
 | `packages/wechat-daemon/src/control-bridge.ts` | CLI↔daemon 文件桥（请求/应答/`.bridge` 凭据；**只收预设名与纯数据**） |
+| `packages/wechat-daemon/src/task-inbox.ts` | 任务收件箱两条腿（`task-inbox/` 命令 + `task-out/` 回执，两侧共用；派发的回执等起进程有结果才发） |
 | `packages/wechat-daemon/src/chat-commands.ts` | 命令表（解析 + 帮助**同表**驱动） |
 | `packages/wechat-daemon/src/pid-record.ts` | `brain.pid` / `workers.pid.json` 身份记录（JSON，含起进程时真实用的 bin/args） |
 | `packages/wechat-daemon/src/brain-agents.ts` | `ACP_AGENT_PRESETS`、`resolveAgent()`、`resolveAgentFor(cfg, role)`、`agentProblem()` |

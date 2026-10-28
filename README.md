@@ -384,7 +384,7 @@ worker 与对话大脑是**独立的 ACP 进程，互不干扰**——而且是*
 | `task-reply <编号> "<内容>"`（或 `task-reply "#编号 内容"`） | 回复/注入任务（`task-reply 2 "继续"`；不给编号 = 唯一那条） |
 | `task-stop [<编号\|全部\|all>]`                | 结束任务（不给编号 = 唯一那条，多条并存回消歧清单）                   |
 
-机制为**文件桥**：CLI 原子写 `task-inbox/*.json`，daemon 独立定时器扫描分发到同一套 task-manager，状态写 `task-state.json`（另有一份 `tasks.json` 供重启续跑）。CLI 的 `brain switch` / `session *` 则走**控制桥**（daemon 在跑就进程内执行、回话给你；daemon 没跑时读命令降级为直接读文件）。详见 [docs/本地双入口-命令派发与看敲.md](docs/本地双入口-命令派发与看敲.md)。
+机制为**文件桥**：CLI 原子写 `task-inbox/*.json`（带 `ack` id），daemon 独立定时器扫描分发到同一套 task-manager，命令的真实结果写回 `task-out/<id>.json`（CLI 短轮询后打印它，所以「已派发」不会说谎：池满被拒会如实说），状态写 `task-state.json`（另有一份 `tasks.json` 供重启续跑）。CLI 的 `brain switch` / `session *` 则走**控制桥**（daemon 在跑就进程内执行、回话给你；daemon 没跑时读命令降级为直接读文件）。详见 [docs/本地双入口-命令派发与看敲.md](docs/本地双入口-命令派发与看敲.md)。
 
 ### 进度提示与连续发送上限
 

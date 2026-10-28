@@ -71,6 +71,7 @@ import {
   renameSession,
 } from "./session-registry.js";
 import { clearSessionPointer, brainSessionMapPath, sessionKey } from "./session-map.js";
+import { awaitTaskAck, writeTaskCmd as writeTaskCommand } from "./task-inbox.js";
 
 /**
  * WeMind 多账号管理 CLI。
@@ -650,7 +651,12 @@ async function cmdBrain(rest: string[]): Promise<string> {
         throw new Error(
           '用法: brain set <预设|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]',
         );
-      return await cmdBrainSet(pos[1], pickKey(pos[2]), { bin, args: argsOverride, shell, restart });
+      return await cmdBrainSet(pos[1], pickKey(pos[2]), {
+        bin,
+        args: argsOverride,
+        shell,
+        restart,
+      });
     }
     case "switch": {
       // 桥只接受**预设名**（安全边界：见 control-bridge.ts）。带 --bin/--args/--shell 就走 set（只写盘 + 需重启）。
@@ -731,18 +737,30 @@ function cmdStart(sel: string, runner?: string): string {
   return `已启动 daemon（账号 ${key}）。用 list 查看运行状态。`;
 }
 
-// ===== 本地任务命令（文件桥）：写 task-inbox/*.json，由 daemon 扫描执行；状态读 task-state.json =====
-function taskInboxDir(key: string): string {
-  return path.join(accountDir(key), "task-inbox");
+// ===== 本地任务命令（文件桥）：写 task-inbox/*.json，由 daemon 扫描执行；状态读 task-state.json，结果读 task-out/*.json =====
+/** 原子写一个命令文件到收件箱（临时文件 + rename，避免 daemon 读到半截）；返回本次命令的回执 id。 */
+function writeTaskCmd(key: string, obj: Record<string, unknown>): string {
+  return writeTaskCommand(accountDir(key), obj);
 }
-/** 原子写一个命令文件到收件箱（临时文件 + rename，避免 daemon 读到半截）。 */
-function writeTaskCmd(key: string, obj: Record<string, unknown>): void {
-  const dir = taskInboxDir(key);
-  fs.mkdirSync(dir, { recursive: true });
-  const fp = path.join(dir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
-  const tmp = `${fp}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ ...obj, ts: Date.now() }, null, 2), "utf-8");
-  fs.renameSync(tmp, fp);
+
+/**
+ * 等这次命令的回执（daemon 把真实结果写进 `task-out/<id>.json`）。
+ * 三种情形分得很清楚：
+ *  - 有回执、有文案 → 打印 daemon 的那句话（失败原因、「没有 #9 号任务」这类只有它知道的事）；
+ *  - 有回执、文案为空 → 命令成功但没有额外要说的，用调用方自己那句话（**立刻**，不干等）；
+ *  - 没有回执 → 老版 daemon 不认这条腿（或它正在退出）：回退到「已投递」措辞并说明一句，
+ *    不把「没等到」当成「成功了」——池满被拒与「派发成功」在旧措辞里长得一模一样。
+ */
+async function taskOutcome(
+  key: string,
+  ackId: string,
+  fallback: string,
+  timeoutMs = 5000,
+): Promise<string> {
+  const a = await awaitTaskAck(accountDir(key), ackId, timeoutMs);
+  if (!a)
+    return `${fallback}\n（没等到 daemon 回执：它可能还在跑旧版本，或刚启动。用 task-list / task-status 核对实际状态。）`;
+  return a.text || fallback;
 }
 /** 选账号：显式 key/label 优先，否则用默认账号。 */
 function pickKey(sel?: string): string {
@@ -974,46 +992,37 @@ async function cmdTask(
   const key = pickKey(sel);
   requireDaemonAlive(key);
   const useCwd = cwd || process.cwd();
-  writeTaskCmd(key, {
+  // 回执等 daemon：**起进程有结果之后**它才发（池满/agent 起不来是那时才知道的），
+  // 所以这里不能自己编「已派发」——旧写法轮询 task-state.json 的 active，会把「池满被拒」和
+  // 甚至上一条任务的编号报成成功。
+  const ackId = writeTaskCmd(key, {
     kind: "dispatch",
     text,
     cwd: useCwd,
     ...(agentKey ? { agent: agentKey } : {}),
   });
-  // 短轮询 task-state.json 确认已派发（最多 ~3s）
-  const stateFile = path.join(accountDir(key), "task-state.json");
-  for (let i = 0; i < 15; i++) {
-    await sleep(200);
-    try {
-      const s = JSON.parse(fs.readFileSync(stateFile, "utf-8")) as {
-        active?: boolean;
-        tasks?: Array<{ id: number; agent: string }>;
-      };
-      if (s.active) {
-        const latest = s.tasks?.[s.tasks.length - 1];
-        const tag = latest ? ` #${latest.id}（${latest.agent}）` : "";
-        return `已派发任务${tag}（worker 运行中，cwd=${useCwd}）。\n用 task-status/task-list 看进展、task-reply 回复、task-stop 结束。`;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  return `已投递任务（cwd=${useCwd}）。daemon 处理中，用 task-status 查看。`;
+  return await taskOutcome(
+    key,
+    ackId,
+    `已投递任务（cwd=${useCwd}）。看进展用 task-list。`,
+    // 派发的回执要等「起进程有结果」：冷启动一个 agent 可能要几十秒，等得久一点好过说假话
+    30_000,
+  );
 }
-function cmdTaskReply(text: string, sel?: string, id?: number): string {
+async function cmdTaskReply(text: string, sel?: string, id?: number): Promise<string> {
   if (!text) throw new Error('用法: task-reply ["#编号"] "<内容>" [<key|label>]');
   const key = pickKey(sel);
   requireDaemonAlive(key);
-  writeTaskCmd(key, { kind: "reply", text, ...(id ? { id } : {}) });
-  return `已发送给任务${id ? ` #${id}` : ""}：${text.slice(0, 40)}`;
+  const ackId = writeTaskCmd(key, { kind: "reply", text, ...(id ? { id } : {}) });
+  return await taskOutcome(key, ackId, `已发送给任务${id ? ` #${id}` : ""}：${text.slice(0, 40)}`);
 }
-function cmdTaskStop(sel?: string, id?: number | "all"): string {
+async function cmdTaskStop(sel?: string, id?: number | "all"): Promise<string> {
   const key = pickKey(sel);
   requireDaemonAlive(key);
-  writeTaskCmd(key, { kind: "stop", ...(id ? { id } : {}) });
-  return id === "all"
-    ? "已发送「结束全部任务」指令。"
-    : `已发送「结束任务${id ? ` ${id}` : ""}」指令。`;
+  const ackId = writeTaskCmd(key, { kind: "stop", ...(id ? { id } : {}) });
+  const fallback =
+    id === "all" ? "已发送「结束全部任务」指令。" : `已发送「结束任务${id ? ` ${id}` : ""}」指令。`;
+  return await taskOutcome(key, ackId, fallback);
 }
 
 type WmTaskRow = {
@@ -1169,10 +1178,10 @@ export async function runManage(argv: string[]): Promise<void> {
       // 兼容两种写法：`task-reply "#3 内容"` 与 `task-reply 3 "内容"`
       const first = rest[0] ?? "";
       const m = first.match(/^[#＃](\d+)\s*([\s\S]*)$/);
-      if (m) console.log(cmdTaskReply(m[2], rest[1], Number(m[1])));
+      if (m) console.log(await cmdTaskReply(m[2], rest[1], Number(m[1])));
       else if (rest.length >= 2 && /^\d+$/.test(first))
-        console.log(cmdTaskReply(rest[1], rest[2], Number(first)));
-      else console.log(cmdTaskReply(first, rest[1]));
+        console.log(await cmdTaskReply(rest[1], rest[2], Number(first)));
+      else console.log(await cmdTaskReply(first, rest[1]));
       break;
     }
     case "task-list":
@@ -1185,7 +1194,7 @@ export async function runManage(argv: string[]): Promise<void> {
       const a = rest[0];
       const id: number | "all" | undefined =
         a === "all" || a === "全部" ? "all" : a && /^\d+$/.test(a) ? Number(a) : undefined;
-      console.log(cmdTaskStop(id === undefined ? a : rest[1], id));
+      console.log(await cmdTaskStop(id === undefined ? a : rest[1], id));
       break;
     }
     case "label": {

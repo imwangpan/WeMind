@@ -48,6 +48,10 @@ export type Task = {
   /** 本次运行解析出的 agent（interrupted 任务在恢复前没有）。 */
   ag?: ResolvedAgent;
   conn?: WorkerConn;
+  /** 本地命令（`wemind task`）等着的回执 id：起进程有结果了才回，见 `setTaskAckSink`。 */
+  ackId?: string;
+  /** 回执里要不要带编号（带 `--agent`/`--cwd` 或已有别的任务时带）。 */
+  numbered?: boolean;
   /** 下一轮是「从中断处续跑」：会话恢复失败要诚实报错，不能静默换空会话。 */
   strictResume?: boolean;
   pendingInjects?: string[];
@@ -65,6 +69,32 @@ export function setTaskPush(fn: PushFn): void {
 let typing: (to: string) => void = () => {};
 export function setTaskTyping(fn: (to: string) => void): void {
   typing = fn;
+}
+
+/**
+ * 依赖注入：回执出口（CLI 写 `task-out/<id>.json`）。
+ *
+ * 只在「本地命令问结果」时用到：`wemind task` 这类命令丢完命令就只能猜，
+ * 猜出来的「已派发」在池满被拒时会变成假消息。派发的回执**必须等起进程有结果**再回——
+ * 池满/agent 起不来都是 acquire 阶段才知道的（dispatchTask 当场返回时还不知道）。
+ */
+let ack: (id: string, text: string) => void = () => {};
+export function setTaskAckSink(fn: (id: string, text: string) => void): void {
+  ack = fn;
+}
+/**
+ * 发一条回执（没有 id / 没有出口就当没这回事）。
+ *
+ * **空文案也照发**：它是「命令已送达、没有额外要说的」这个信号——CLI 收到它就能立刻用自己那句话，
+ * 而不是干等到超时才敢打印（超时是留给「老版 daemon 不认这条腿」的）。
+ */
+function ackIf(id: string | undefined, text: string): void {
+  if (!id) return;
+  try {
+    ack(id, text);
+  } catch {
+    /* ignore */
+  }
 }
 
 /** 任务状态快照（落盘 task-state.json 供本地 `task-status` 读；顶层字段镜像「最近一条」，旧版 CLI 仍能显示）。 */
@@ -188,7 +218,9 @@ export const listTasks = (userId: string): Task[] =>
  * 单条任务时 `#n 继续` 也走这条路（显式编号那条分支在解析层就分流了）。
  */
 export function looksLikeResume(text: string | undefined): boolean {
-  return /^(?:继续|接着|接着跑|继续跑|续跑|继续吧|continue|go\s*on)[。.!！]?$/i.test((text ?? "").trim());
+  return /^(?:继续|接着|接着跑|继续跑|续跑|继续吧|continue|go\s*on)[。.!！]?$/i.test(
+    (text ?? "").trim(),
+  );
 }
 /** 是否存在活跃任务（可选限定某用户）。 */
 export function hasActiveTask(to?: string): boolean {
@@ -265,16 +297,25 @@ function resolveTaskAgent(
 /**
  * 派发新任务（后台异步执行，立即返回回执文案，不阻塞调用方）。
  * `agentKey`：`任务 <预设>：正文` 指定的 agent；`cwd`：本地派发指定的任务工作目录。
+ * `ackId` 给了就等起进程有结果再回执（成功＝真回执文案，池满/起不来＝那句警告）。
  */
 export function dispatchTask(
   to: string,
   instruction: string,
-  opts: { cwd?: string; agentKey?: string } = {},
+  opts: { cwd?: string; agentKey?: string; ackId?: string } = {},
 ): string {
   const text = (instruction ?? "").trim();
-  if (!text) return "要派发的任务正文是空的。";
+  if (!text) {
+    const r = "要派发的任务正文是空的。";
+    ackIf(opts.ackId, r);
+    return r;
+  }
   const got = resolveTaskAgent(opts.agentKey);
-  if (!got.ok) return `❌ 不能用「${opts.agentKey}」跑任务：${got.problem}`;
+  if (!got.ok) {
+    const r = `❌ 不能用「${opts.agentKey}」跑任务：${got.problem}`;
+    ackIf(opts.ackId, r);
+    return r;
+  }
   const numbered = !!opts.agentKey || !!opts.cwd || listTasks(to).length > 0;
   const id = takeNextId(store, to);
   const task: Task = {
@@ -286,8 +327,10 @@ export function dispatchTask(
     turns: 0,
     startedAt: 0, // 真正起进程时再定（起进程可能失败）
     ag: got.ag,
+    numbered,
   };
   if (opts.cwd) task.cwd = opts.cwd;
+  if (opts.ackId) task.ackId = opts.ackId;
   tasks.set(id, task);
   persist();
   emitState();
@@ -325,7 +368,9 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
     tasks.delete(task.id);
     persist();
     emitState();
-    push(task.userId, `⚠️ 任务 #${task.id} 没起得来：${got.problem}`);
+    const msg = `⚠️ 任务 #${task.id} 没起得来：${got.problem}`;
+    push(task.userId, msg);
+    ackIf(task.ackId, msg); // 本地命令要的是「到底派上了没有」——这里才是答案
     return;
   }
   const conn = got.conn;
@@ -334,6 +379,8 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
   if (!task.startedAt) task.startedAt = Date.now();
   persist();
   emitState();
+  ackIf(task.ackId, ackFor(task, task.numbered === true)); // 起进程成功：这时才敢说「已派发」
+  task.ackId = undefined;
   log(`task ${task.id} start agent=${ag.name} conn=${conn.id} cwd=${conn.effectiveCwd()}`);
 
   let instruction: string | null = firstInstruction;
@@ -409,69 +456,75 @@ function reason(e: unknown): string {
 function resumeTask(task: Task, instruction: string): string {
   const got = resolveTaskAgent(task.agent);
   if (!got.ok) {
-    push(
-      task.userId,
-      `⚠️ 接不上 #${task.id} 号任务（原 agent「${task.agent}」现在用不了）：${got.problem}`,
-    );
-    return "";
+    // 返回而不是 push：微信侧一样会看到（injectTask 的返回值由调用方当回执发出去），CLI 侧则能拿到真话，
+    // 否则「接不上」只进 daemon 日志、CLI 却报「已发送」。
+    return `⚠️ 接不上 #${task.id} 号任务（原 agent「${task.agent}」现在用不了）：${got.problem}`;
   }
   task.ag = got.ag;
   task.strictResume = true; // 续跑要求「上下文真的接上」：恢复失败要报错，不能静默换空会话
-  push(
-    task.userId,
-    `⏳ 正在按 #${task.id} 号任务续跑（${got.ag.name}）。上一步可能已经改过文件或发过请求，核对时注意别重复动作。`,
-  );
   void runTask(
     task,
     `（这条任务在 daemon 重启时中断了，现在续跑；上下文按会话恢复。动手前先核对上一步是否已经产生副作用，避免重复。）\n${instruction}`,
   );
-  return "";
+  return `⏳ 正在按 #${task.id} 号任务续跑（${got.ag.name}）。上一步可能已经改过文件或发过请求，核对时注意别重复动作。`;
 }
 
 /**
  * 注入用户消息。`id` 给定时只作用于那条任务；不给时：唯一一条 → 它；多条 → 回消歧提示（不猜）。
  * 返回要额外回复的文案（空字符串＝只推给了任务，不需要额外回执）。
+ * `ackId`（本地命令）：非空返回文案也回一份给 CLI——「没有 #9 号任务」这种话不能只进 daemon 日志。
  */
-export function injectTask(to: string, text: string, id?: number): string {
+export function injectTask(to: string, text: string, id?: number, ackId?: string): string {
+  const done = (r: string): string => {
+    ackIf(ackId, r);
+    return r;
+  };
   const live = liveTasks(to);
   const intr = interruptedTasks(to);
   const body = (text ?? "").trim();
-  if (!body) return "要回给任务的内容是空的。";
+  if (!body) return done("要回给任务的内容是空的。");
 
   let target: Task | undefined;
   if (id !== undefined) {
     target = tasks.get(id);
-    if (!target || target.userId !== to) return `没有 #${id} 号任务。发「任务列表」看现有编号。`;
+    if (!target || target.userId !== to)
+      return done(`没有 #${id} 号任务。发「任务列表」看现有编号。`);
   } else {
     const awaiting = live.filter((t) => t.status === "waiting");
     // 「谁在等就喂谁」优先于「只有一条就喂它」：一条 running + 一条 waiting 时，无前缀消息显然是回给在等的那条
     if (awaiting.length === 1) target = awaiting[0];
     else if (live.length === 1) target = live[0];
     else if (live.length === 0) {
-      if (intr.length === 1) return resumeTask(intr[0], body);
+      if (intr.length === 1) return done(resumeTask(intr[0], body));
       if (intr.length > 1)
-        return `有 ${intr.length} 条已中断的任务，请指明编号续跑：${intr.map((t) => `#${t.id}`).join("、")}（写法：\`#${intr[0].id} 继续\`）。`;
-      return "";
+        return done(
+          `有 ${intr.length} 条已中断的任务，请指明编号续跑：${intr.map((t) => `#${t.id}`).join("、")}（写法：\`#${intr[0].id} 继续\`）。`,
+        );
+      return done("");
     } else {
       const rows = live.map((t) => `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]}`).join("  ");
-      return `有 ${live.length} 条任务在跑，请指明要回给哪条：「#<编号> 正文」。\n${rows}`;
+      return done(`有 ${live.length} 条任务在跑，请指明要回给哪条：「#<编号> 正文」。\n${rows}`);
     }
   }
 
-  if (target.status === "interrupted") return resumeTask(target, body);
+  if (target.status === "interrupted") return done(resumeTask(target, body));
   if (target.status === "waiting" && target.injectResolver) {
     const r = target.injectResolver;
     target.injectResolver = undefined;
     r(body);
-    return "";
+    return done("");
   }
   (target.pendingInjects ??= []).push(body); // running 期间：按序累积，等这一步跑完一并处理（不覆盖前一条）
   push(to, `📝 已记下给 #${target.id} 的补充，等当前这步跑完就处理。`);
-  return "";
+  return done("");
 }
 
 /** 结束任务：停 worker、清状态、唤醒退出循环。`id` 缺省＝唯一那条；`"all"`＝全部。 */
-export function stopTask(to: string, id?: number | "all"): string {
+export function stopTask(to: string, id?: number | "all", ackId?: string): string {
+  const done = (r: string): string => {
+    ackIf(ackId, r);
+    return r;
+  };
   const live = liveTasks(to);
   const intr = interruptedTasks(to);
   if (id === undefined && live.length === 0) {
@@ -481,27 +534,29 @@ export function stopTask(to: string, id?: number | "all"): string {
     const hint = intr.length
       ? `有 ${intr.length} 条已中断的任务记录（回「继续」可续跑，或「结束任务 <编号>」清掉记录）。`
       : "";
-    return `当前没有正在运行的任务。${hint}`;
+    return done(`当前没有正在运行的任务。${hint}`);
   }
   if (id === undefined && live.length > 1) {
     const rows = live.map((t) => `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]}`).join("  ");
-    return `有 ${live.length} 条任务在跑，请指明编号（「结束任务 <编号>」），或「结束全部任务」。\n${rows}`;
+    return done(
+      `有 ${live.length} 条任务在跑，请指明编号（「结束任务 <编号>」），或「结束全部任务」。\n${rows}`,
+    );
   }
 
   const targets =
     id === "all" ? live : id === undefined ? live.slice(0, 1) : live.filter((t) => t.id === id);
   if (!targets.length) {
-    if (id === undefined) return "当前没有正在运行的任务。";
-    if (id === "all") return "当前没有正在运行的任务。";
+    if (id === undefined) return done("当前没有正在运行的任务。");
+    if (id === "all") return done("当前没有正在运行的任务。");
     const t = tasks.get(id);
     if (t && t.userId === to && t.status === "interrupted") {
       tasks.delete(id);
       removeStoredTask(store, id);
       persist();
       emitState();
-      return `已清掉 #${id} 号已中断任务的记录。`;
+      return done(`已清掉 #${id} 号已中断任务的记录。`);
     }
-    return `没有 #${id} 号在跑的任务。发「任务列表」看现有编号。`;
+    return done(`没有 #${id} 号在跑的任务。发「任务列表」看现有编号。`);
   }
 
   for (const t of targets) {
@@ -523,9 +578,9 @@ export function stopTask(to: string, id?: number | "all"): string {
   }
   persist();
   emitState();
-  if (id === "all") return `🛑 已结束全部任务（${targets.length} 条）。`;
+  if (id === "all") return done(`🛑 已结束全部任务（${targets.length} 条）。`);
   const one = targets[0];
-  return targets.length === 1 ? `🛑 任务 #${one.id} 已结束。` : "🛑 任务已结束。";
+  return done(targets.length === 1 ? `🛑 任务 #${one.id} 已结束。` : "🛑 任务已结束。");
 }
 
 /** daemon 退出 / `wemind stop`：停掉一切（任务与池）。 */

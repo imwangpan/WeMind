@@ -50,9 +50,9 @@ describe("matchesMarkers（纯逻辑，无系统调用）", () => {
     ).toBe(true);
     // 仓库根目录用**相对路径**手跑（`node packages/wechat-daemon/dist/cli.js daemon`）：命令行里没有仓库名/包名，
     // 只有源码目录名 → 必须靠追加的那组 marker 命中，否则 daemon 活着、CLI 却认定「没在运行」。
-    expect(
-      matchesMarkers("node packages/wechat-daemon/dist/cli.js daemon", CLI_PID_MARKERS),
-    ).toBe(true);
+    expect(matchesMarkers("node packages/wechat-daemon/dist/cli.js daemon", CLI_PID_MARKERS)).toBe(
+      true,
+    );
     expect(matchesMarkers("node ./packages/wechat-daemon/dist/cli.js brain", CLI_PID_MARKERS)).toBe(
       true,
     );

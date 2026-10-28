@@ -232,6 +232,8 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 | 重启后状态「已中断」 | 日志 `restored tasks: interrupted=[…]` | **预期**：不自动拉起，回「继续」/`#n 继续` 才续跑 |
 | 续跑接不上 | 回执 | agent 不支持 load/resume 或会话已被它自己清理 → 会给「请用文字重述」，**不**改指针、不假装成功 |
 | 同 agent 并发时行为怪 | 池信息 | 同一 agent 的两个 worker **共用它的配置目录**（等价"两个终端在同一个目录里跑"）——已知形态；不同 agent 各自子目录天然隔离 |
+| CLI 说「没等到 daemon 回执」 | `task-out/` | 命令照常执行（这一行只是回执丢了）：**老版 daemon 不认回执腿**（重启一次即可），或 daemon 正在退出。查实际状态用 `task-list`/`task-status`——别把这一行当「没派上」 |
+| CLI 说「已投递」而不是「已派发」 | `task-out/`、`tasks.json` | 同上（等不到回执）：`task-out/` 里没有 `<命令 id>.json` 说明 daemon 没写回执；任务本身在 `tasks.json` 里能看到就是跑起来了。派发的回执**要等起进程**（冷启动可能几十秒），CLI 最多等 30s |
 
 ### 3.11 「恢复会话」失败（strict，1.2.0）
 
