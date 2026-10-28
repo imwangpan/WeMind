@@ -255,7 +255,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     zh: "任务 [<预设>：]正文",
     slash: "/task [<预设>] 正文",
     cli: 'wemind task "正文" [--agent <预设>]',
-    brief: "派发新任务；带预设名即指定 agent（之后粘住）",
+    brief: "派发新任务；带预设名即指定 agent（只影响这一条）",
     match: (t) => {
       // ① `任务：正文` / `task: 正文`（沿用旧写法，无预设）
       let m = t.match(/^(?:任务|task)[:：]\s*([\s\S]+)$/i);
