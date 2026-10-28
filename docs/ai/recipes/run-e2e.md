@@ -52,6 +52,8 @@ pwsh -NoProfile -File scripts/doctor.ps1
 wemind list
 ```
 
+> **在 VS Code 集成终端里跑 `npm test`**：VS Code 的「智能自动附加」会给 node 注入调试 bootloader（`NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` + `VSCODE_INSPECTOR_OPTIONS`），测试里起的真实子进程会偶发卡住/超时——用 `NODE_OPTIONS= npm test`（PowerShell：`$env:NODE_OPTIONS=$null` 后再跑）。1.2.0 起 daemon 自己的脱离式 spawn 已过 `debug-env.ts` 净化，不受影响；受影响的是测试进程本身。
+
 > 下文的 `wemind` 指已发布的 CLI（`npm i -g @wemind/cli`，安装后用 `wemind version` 验证）。
 > 在仓库里跑源码版时等价于 `node packages/wechat-daemon/dist/cli.js <子命令>`；两种方式操作同一份 `~/.wemind/` 数据。
 

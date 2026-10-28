@@ -172,6 +172,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 - **切脑与 `wemind stop` 的窄窗口（2026-10-28，已知项）**：切换的 `restart()` 与新进程写 pid 记录之间约 1s，此刻执行 `wemind stop` 可能漏杀新起的 ACP 子进程（与既有的 `/加载` 触发 `restart()` 同类形态，不是本次新引入）。
 - **多任务共享同一份微信额度（2026-10-28）**：连发上限（约 10 条）是**按用户**计的，N 条任务的进度 + 对话大脑的回复都算同一份额度。worker 进度默认安静、结果推送走既有 ret=-2 退避；扛不住就调小 `WEMIND_MAX_WORKERS`。
 - **同 agent 并发 = 两个终端在同一个配置目录里跑（2026-10-28）**：不同 agent 各有 `configSubdir` 天然隔离；同一 agent 的两个 worker 进程共用其配置目录（会话/缓存文件是否互踩**待实测**）。
+- **VS Code 集成终端里 `wemind start` 会「假启动」（2026-10-29 修）**：VS Code 的「智能自动附加」给终端里每个 node 注入 `NODE_OPTIONS=--require <…>/ms-vscode.js-debug/bootloader.js` + `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true`），被注入的进程要**等调试器接上才执行主脚本**；终端里的前台命令会被接上（`stop`/`list` 看着一切正常），但 `start` **脱离出去的看门狗不会被接** → 进程活着、一行 JS 不跑：回执说「已启动」，实际 `daemon.log` / `wrapper.pid` 不更新、daemon 没起（`wemind list` 显示未运行，进程表里只有一个没有子进程的 `cli.js _watchdog`）。现在 `watchdog-runner.ts` 的两次脱离式 spawn 都过 `debug-env.ts` 的 `stripVscodeDebugEnv()`：只摘 VS Code 自己那段 `--require`，用户其它 `NODE_OPTIONS` 原样保留。同一注入也是「本机跑测试偶发超时」的原因——测试用 `NODE_OPTIONS=` 前缀跑。
 - **本次待实测（2026-10-28，先量再写进文档）**：① ACP 是否有 `session/delete`；② 各 agent `session/load` 是否回放历史帧、规模多大；③ 各 agent 冷启动 `initialize`/`session/new` 真实耗时（对 `REQ_TIMEOUT=30s` 的余量）；④ 多任务并行时两条以上 `sendNotice` 是否撞 `ret=-2`；⑤ Windows `taskkill /T /F` 在 `session/load` 途中、以及**杀掉池中某个特定进程**时的行为；⑥ 同 agent 两进程共用配置目录是否互踩；⑦ 被强杀后各 agent 能否 `session/load|resume` 回该任务会话（「重启后续跑」的可行边界由这条决定）。清单在 [`docs/ai/recipes/run-e2e.md`](docs/ai/recipes/run-e2e.md)。
 
 ---

@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, accountDir } from "@wemind/wechat-ilink-core";
 import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
+import { stripVscodeDebugEnv } from "./debug-env.js";
 import { CLI_PID_MARKERS, isOurProcess } from "./proc-identity.js";
 
 const RESTART_DELAY_MS = 5000;
@@ -69,7 +70,8 @@ export async function runWatchdog(): Promise<void> {
     );
     const logFd = fs.openSync(log, "a");
     const child: ChildProcess = spawn(process.execPath, [cliPath, "daemon"], {
-      env: process.env, // WECHAT_ACCOUNT 已在本进程环境中
+      // WECHAT_ACCOUNT 已在本进程环境中；同时摘掉 VS Code 终端注入的调试引导（看门狗若本身被注入过，daemon 不能再被带坏，见 debug-env.ts）
+      env: stripVscodeDebugEnv(process.env),
       stdio: ["ignore", logFd, logFd], // stdout/stderr 都并入 daemon.log（与 run-daemon.ps1 一致）
       windowsHide: true, // 不弹出控制台窗口（Windows）：日志已重定向到 daemon.log，无需可见窗口
     });
@@ -104,7 +106,8 @@ export function watchdogStart(key: string, cliPath: string): { ok: boolean; msg:
     detached: true,
     stdio: "ignore",
     windowsHide: true,
-    env: { ...process.env, WECHAT_ACCOUNT: key },
+    // 脱离出的看门狗拿不到 VS Code 的调试器，带着 bootloader 注入会被「等调试器」卡死 → 摘掉（见 debug-env.ts）
+    env: stripVscodeDebugEnv({ ...process.env, WECHAT_ACCOUNT: key }),
   });
   child.unref();
   return {

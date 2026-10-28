@@ -23,6 +23,7 @@
 | 微信里发命令被短拒 | 回执文案 | owner-only 命令（切脑/交接）由非本人发出 |
 | CLI 命令被拒 / 显示「daemon 未运行」 | `wemind list` | 真没跑；**或**升级 CLI 后没重启 daemon（`.bridge` 凭据对不上）；**或**手跑 daemon 时路径特征不匹配 |
 | 任务数超上限被拒 | 回执 | `WEMIND_MAX_WORKERS`（默认 3）到了；先 `结束任务 <编号>` 或调大 |
+| `wemind start` 说「已启动」但 `list` 显示未运行、日志不更新 | 进程表里的 `cli.js _watchdog` 有没有子进程 | 从 **VS Code 集成终端**启动时被调试引导卡死（见 §3.12）；换普通终端，或升级到带 `stripVscodeDebugEnv` 的版本 |
 | 池里进程不回收 / 内存高 | `wemind list` | 空闲回收默认 5 分钟（`WEMIND_WORKER_REAP_MS`）；上限 `WEMIND_IDLE_MAX`（默认 2） |
 | 「恢复会话」失败且当前会话没变 | 回执 | **预期行为**（strict）：agent 侧没有那条会话，或在途 load 超时；不会静默新建 |
 | 重启后任务显示「已中断」 | `wemind task-list` / 日志 `restored tasks:` | **预期行为**：不自动拉起，回「继续」才续跑 |
@@ -242,6 +243,22 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 - 回执说失败、而当前会话没变 → **这就是设计**，不是半成功；
 - 常见原因：该 agent 不支持 `session/load`（走 `resume`）、会话已被 agent 自己清理、load 超时（冷启动慢）；
 - 列表里**看不到**那条会话 → 是登记表（`session-registry.json`）缺项，不是会话不存在：重启 daemon 会按指针表回填（日志 `session registry backfilled:`），或直接看 `brain-sessions.json`。
+
+### 3.12 `start` 回执「已启动」但 daemon 没起来（VS Code 终端注入，2026-10-29 修）
+
+症状：`wemind start` 打印「已启动自带看门狗…已启动 daemon」，但 `wemind list` 显示未运行；`daemon.log`、`wrapper.pid`、账号目录的 mtime 全都不更新；进程表里只有一个 `node …cli.js _watchdog`，**没有子进程**。
+
+原因：VS Code 集成终端的「智能自动附加」给终端里每个 node 进程注入 `NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` 和 `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true` 等）——被注入的进程**要等调试器接上才执行主脚本**。终端里的前台命令（`stop`/`list`/`start` 本体）会被接上，所以输出都正常；但 `start` **脱离出去的看门狗不会被接**，于是卡在「等调试器」里，既不写 `wrapper.pid` 也不拉 daemon。
+
+处置：1.2.0 起 `watchdog-runner.ts` 的两次脱离式 spawn（看门狗、看门狗拉 daemon）都先过 `debug-env.ts` 的 `stripVscodeDebugEnv()`，已修。旧版本撞上时：换一个**非 VS Code 集成终端**（Windows Terminal / 普通 PowerShell）执行 `wemind start <key>`，或先清变量再跑：
+
+```powershell
+Remove-Item Env:VSCODE_INSPECTOR_OPTIONS -ErrorAction SilentlyContinue
+$env:NODE_OPTIONS = $null
+wemind start <key>
+```
+
+识别要点：卡死的看门狗只占一个 `cli.js _watchdog` 进程、无子进程；正常时它在 5 秒内就会写出 `wrapper.pid` 并拉出 `cli.js daemon`。
 
 ---
 
