@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import type { BrainConfig } from "./brain-config.js";
+import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config.js";
 
 /**
  * ACP agent 预设与解析。
@@ -11,7 +11,8 @@ import type { BrainConfig } from "./brain-config.js";
  *
  * 选择与覆盖（优先级从高到低）：
  *  ① 环境变量（一次性覆盖；临时试别的 agent 用它，别写进 profile）：
- *  - `WEMIND_BRAIN`            选预设（默认 `auto`：自动探测已安装的预设，见 AUTO_PROBE_ORDER）
+ *  - `WEMIND_BRAIN`            选「对话大脑」预设（默认 `auto`：自动探测已安装的预设，见 AUTO_PROBE_ORDER）
+ *  - `WEMIND_WORKER_BRAIN`     选「任务 worker」预设（未设则回落 `WEMIND_BRAIN`；与文件侧 `worker ?? 顶层` 的回退规则对称）
  *  - `WEMIND_BRAIN_BIN`        覆盖二进制（绝对路径或 PATH 上的名字）
  *  - `WEMIND_BRAIN_ARGS`       覆盖启动参数（空格分隔）
  *  - `WEMIND_BRAIN_HOME_ENV`   覆盖「配置目录环境变量名」
@@ -20,9 +21,13 @@ import type { BrainConfig } from "./brain-config.js";
  *  - `WEMIND_BRAIN_REAL_HOME`  覆盖被继承的真实配置目录（默认取预设 realHome）
  *  - `WEMIND_BRAIN_INHERIT_DIRS` 覆盖继承的子目录清单（逗号/空格分隔）
  *  - `KIRO_CLI_BIN`            旧的 kiro 专用覆盖（仅 kiro 预设、且未设 WEMIND_BRAIN_BIN 时仍生效）
- *  ② 账号级持久配置（`<数据目录>/brain.json`，见 brain-config.ts）：`agent` / `bin` / `args` / `shell` / `homeEnvVar`。落盘后任何入口重启都能复现，切换用 `wemind brain set <预设>`。
+ *  ② 账号级持久配置（`<数据目录>/brain.json`，见 brain-config.ts）：顶层 = 对话大脑，`worker` 段 = 任务 worker（缺省跟随顶层）；每段可带 `agent` / `bin` / `args` / `shell` / `homeEnvVar`，另有按预设名存启动覆盖的 `presets` 段。落盘后任何入口重启都能复现，切换用 `wemind brain set <预设>`。
  *  ③ `auto`（未配置时的兜底）：按 AUTO_PROBE_ORDER 取第一个二进制可解析的预设；一个都没有则标记 unavailable，由启动校验明确报错（不再「静默跑起来、第一条消息才炸」）。
  *  另：未知的 `WEMIND_BRAIN` 值不再静默回退 kiro，而是 `known:false`，交由启动校验报错。
+ *
+ * 角色（role）：同一份预设表既是「对话大脑」也是「任务 worker」的来源；`resolveAgent()` = 对话大脑，
+ * `resolveAgentFor(cfg, "worker")` = 任务 worker。命令驱动的切换用 `resolvePresetByName()` —— 它**绕开环境变量**，
+ * 否则用户点了切换、env 却压着它，会出现「看着成功、实际没生效」。
  */
 
 export type AcpAgentPreset = {
@@ -190,10 +195,16 @@ function presetExe(preset: AcpAgentPreset): string {
   return process.platform === "win32" ? (preset.binWin ?? `${preset.bin}.exe`) : preset.bin;
 }
 
-/** 预设的二进制是否能在 PATH 上解析到（只判定、不启动）。 */
-export function presetAvailable(key: string): boolean {
+/**
+ * 预设的二进制是否能在 PATH 上解析到（只判定、不启动）。
+ * 传入 cfg 时，`presets[名].bin` 里存的绝对路径也算「可用」——否则桌面端 DSH 这种「装了但不在 PATH」的预设，auto 探测会白白跳过它。
+ */
+export function presetAvailable(key: string, cfg?: BrainConfig | null): boolean {
   const preset = ACP_AGENT_PRESETS[key];
-  return !!preset && onPath(presetExe(preset)) !== null;
+  if (!preset) return false;
+  const ovBin = cfg?.presets?.[key.toLowerCase()]?.bin;
+  if (ovBin) return locateBin(ovBin) !== null;
+  return onPath(presetExe(preset)) !== null;
 }
 
 /**
@@ -252,10 +263,28 @@ export type ResolvedAgent = {
   binPath: string | null;
 };
 
-/** 解析当前要用的 ACP agent：环境变量 > 账号 brain.json > auto。 */
-export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
-  const envKey = process.env.WEMIND_BRAIN?.trim();
-  const fileKey = cfg?.agent?.trim();
+/** 该角色「选预设」的环境变量：worker 先看 `WEMIND_WORKER_BRAIN`，未设则回落 `WEMIND_BRAIN`。 */
+function envKeyFor(role: AgentRole): string | undefined {
+  const key =
+    role === "worker"
+      ? process.env.WEMIND_WORKER_BRAIN?.trim() || process.env.WEMIND_BRAIN?.trim()
+      : process.env.WEMIND_BRAIN?.trim();
+  return key || undefined;
+}
+
+/**
+ * 解析某角色要用的 ACP agent（核心实现，见文件头注释的三级优先级）。
+ * 覆盖优先级：环境变量 > 本角色那段自带 > `presets[预设名]` > 预设默认。
+ * `ignoreEnv`：命令驱动的切换（`resolvePresetByName`）必须绕开 `WEMIND_BRAIN*`，否则会出现「点了切换、env 却压着它」的假成功。
+ */
+function resolveAgentCore(
+  role: AgentRole,
+  cfg: BrainConfig | null,
+  opts: { ignoreEnv?: boolean } = {},
+): ResolvedAgent {
+  const envKey = opts.ignoreEnv ? undefined : envKeyFor(role);
+  const roleCfg = agentConfigFor(cfg, role);
+  const fileKey = roleCfg?.agent?.trim();
   const requestedKey = (envKey || fileKey || "auto").toLowerCase();
   const source: ResolvedAgent["source"] = envKey ? "env" : fileKey ? "file" : "auto";
 
@@ -263,30 +292,33 @@ export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
   let known = true;
   let key = requestedKey;
   if (key === "auto") {
-    key = AUTO_PROBE_ORDER.find((k) => presetAvailable(k)) ?? "kiro";
+    key = AUTO_PROBE_ORDER.find((k) => presetAvailable(k, cfg)) ?? "kiro";
   } else if (!ACP_AGENT_PRESETS[key]) {
     known = false;
     key = "kiro";
   }
   const preset = ACP_AGENT_PRESETS[key];
+  // 按预设名存的启动覆盖：无论谁在用这个预设都适用（顶层覆盖只属于「落盘那个 agent」，切走后不该跟过去）。
+  const presetOv = cfg?.presets?.[key];
 
-  // brain.json 的 bin/args/shell/homeEnvVar 是**给落盘那个 agent** 的启动覆盖；环境变量临时切到别的预设时不能沿用（否则会拿 deepseek 的 dsh.cmd 去起 qoder）。
+  // roleCfg 的 bin/args/shell/homeEnvVar 是**给该段所写那个 agent** 的启动覆盖；环境变量临时切到别的预设时不能沿用（否则会拿 deepseek 的 dsh.cmd 去起 qoder）。
   const overrideCfg =
-    envKey && cfg?.agent?.trim() && cfg.agent.trim().toLowerCase() !== requestedKey ? null : cfg;
+    envKey && roleCfg?.agent?.trim() && roleCfg.agent.trim().toLowerCase() !== requestedKey
+      ? null
+      : roleCfg;
 
-  const shellEnv = process.env.WEMIND_BRAIN_SHELL?.trim();
+  const shellEnv = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_SHELL?.trim();
   const shell =
     shellEnv !== undefined && shellEnv !== ""
       ? shellEnv === "1" || shellEnv.toLowerCase() === "true"
-      : (overrideCfg?.shell ?? preset.shell ?? false);
+      : (overrideCfg?.shell ?? presetOv?.shell ?? preset.shell ?? false);
 
-  // 二进制：env 覆盖 > (kiro 旧变量) > brain.json 覆盖 > PATH 解析 > 预设裸名。
+  // 二进制：env 覆盖 > (kiro 旧变量) > 本段覆盖 > presets[预设名] 覆盖 > PATH 解析 > 预设裸名。
   // 经 shell 启动时用裸名（让 shell 从 PATH 解析，避免带空格的全路径在 shell 下出问题）。
-  const explicitBin =
-    process.env.WEMIND_BRAIN_BIN?.trim() ||
-    (preset.name === "kiro" ? process.env.KIRO_CLI_BIN?.trim() : undefined) ||
-    overrideCfg?.bin?.trim() ||
-    "";
+  const envBin = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_BIN?.trim();
+  const kiroBin =
+    opts.ignoreEnv || preset.name !== "kiro" ? undefined : process.env.KIRO_CLI_BIN?.trim();
+  const explicitBin = envBin || kiroBin || overrideCfg?.bin?.trim() || presetOv?.bin?.trim() || "";
   const exe = presetExe(preset);
   const binPath = explicitBin
     ? locateBin(explicitBin)
@@ -296,16 +328,19 @@ export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
     (shell ? (process.platform === "win32" ? exe : preset.bin) : binPath || preset.bin);
   const available = known && binPath !== null;
 
-  const argsOverride = process.env.WEMIND_BRAIN_ARGS?.trim();
+  const argsOverride = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_ARGS?.trim();
   const args = argsOverride
     ? argsOverride.split(/\s+/)
     : overrideCfg?.args && overrideCfg.args.length
       ? overrideCfg.args
-      : preset.args;
+      : presetOv?.args && presetOv.args.length
+        ? presetOv.args
+        : preset.args;
 
   const homeEnvVar =
-    process.env.WEMIND_BRAIN_HOME_ENV?.trim() ||
+    (opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_HOME_ENV?.trim()) ||
     overrideCfg?.homeEnvVar?.trim() ||
+    presetOv?.homeEnvVar?.trim() ||
     preset.homeEnvVar;
 
   // 继承「记忆/规则/技能」：来源目录与子目录清单按 agent 而异（下沉到预设），env 可覆盖
@@ -350,6 +385,52 @@ export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
     available,
     binPath,
   };
+}
+
+/** 解析当前要用的**对话大脑**：环境变量 > 账号 brain.json 顶层 > auto。 */
+export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
+  return resolveAgentCore("brain", cfg ?? null);
+}
+
+/** 解析某**角色**要用的 ACP agent：`brain` = 对话大脑（同 resolveAgent），`worker` = 任务 worker（`worker` 段 > 顶层）。 */
+export function resolveAgentFor(
+  cfg: BrainConfig | null | undefined,
+  role: AgentRole,
+): ResolvedAgent {
+  return resolveAgentCore(role, cfg ?? null);
+}
+
+/** 全部预设名（不含 `auto` 这个「不是预设的预设」）。 */
+export function presetNames(): string[] {
+  return Object.keys(ACP_AGENT_PRESETS);
+}
+
+/**
+ * 按名字解析一个预设，**绕开环境变量**——供「切换大脑」这类命令使用。
+ *
+ * 为什么绕开：`WEMIND_BRAIN` 优先级高于 brain.json，命令若也走 env 优先级，会出现「用户点了切换、看着成功，实际还是 env 指的那个」。
+ * 命令语义 = 用户此刻的明确意图，应压过一次性环境覆盖（`resolvePresetByName` 的结果由调用方写进 brain.json）。
+ * 同理，属于「别的 agent」的启动覆盖不会被沿用；但 `presets[名]` 里按名字存的覆盖会（切走再切回不丢 `--bin`）。
+ *
+ * 失败返回面向用户的原因（未知预设 / 该预设二进制找不到），成功返回可直接 spawn 的 agent。
+ */
+export function resolvePresetByName(
+  name: string,
+  cfg?: BrainConfig | null,
+): { ok: true; agent: ResolvedAgent } | { ok: false; problem: string } {
+  const key = (name ?? "").trim().toLowerCase();
+  if (!key) return { ok: false, problem: "需要指定预设名（或 `auto` 重新自动探测）。" };
+  const base: BrainConfig = { agent: key, presets: cfg?.presets };
+  // 顶层启动覆盖只属于「落盘那个 agent」：目标就是它时带上（例如 `brain set deepseek --bin …` 后切回 deepseek）。
+  if (cfg?.agent?.trim().toLowerCase() === key) {
+    if (cfg.bin) base.bin = cfg.bin;
+    if (cfg.args?.length) base.args = cfg.args;
+    if (cfg.shell !== undefined) base.shell = cfg.shell;
+    if (cfg.homeEnvVar) base.homeEnvVar = cfg.homeEnvVar;
+  }
+  const agent = resolveAgentCore("brain", base, { ignoreEnv: true });
+  const problem = agentProblem(agent);
+  return problem ? { ok: false, problem } : { ok: true, agent };
 }
 
 /**

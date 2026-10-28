@@ -45,13 +45,32 @@ import {
 } from "./brain-agents.js";
 import {
   loadBrainConfig,
-  saveBrainConfig,
+  updateBrainConfig,
   clearBrainConfig,
   brainConfigPath,
   type BrainConfig,
 } from "./brain-config.js";
 import { checkAgent } from "./brain-check.js";
+import { readPidRecords, recordMarkers } from "./pid-record.js";
 import { CLI_VERSION, versionLine } from "./version.js";
+import { renderHelp } from "./chat-commands.js";
+import {
+  awaitControlResponse,
+  bridgePidOf,
+  controlTimeoutMs,
+  newRequestId,
+  writeControlRequest,
+  type ControlKind,
+  type ControlRequest,
+} from "./control-bridge.js";
+import {
+  currentSessionIdOf,
+  deleteSession,
+  listSessions,
+  renderSessionList,
+  renameSession,
+} from "./session-registry.js";
+import { clearSessionPointer, brainSessionMapPath, sessionKey } from "./session-map.js";
 
 /**
  * WeMind 多账号管理 CLI。
@@ -71,6 +90,23 @@ function readPid(dir: string, name: string): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 大脑进程的身份记录（`brain.pid` 现在是 JSON，见 pid-record.ts）：首条非 legacy 记录。
+ * 记录里存的是**起进程时真实用的** bin/args —— 比「按当前配置猜」可靠：
+ * `wemind brain set X` 之后、热切换窗口内、以及 brain≠worker 时，配置值都可能与实际在跑的进程不一致。
+ * （导出仅供单测。）
+ */
+export function brainRecord(dir: string): {
+  pid: number | null;
+  markers: string[][] | null;
+  agent: string;
+} {
+  const rec = readPidRecords(path.join(dir, "brain.pid"))[0];
+  if (!rec) return { pid: null, markers: null, agent: "" };
+  const markers = recordMarkers(rec);
+  return { pid: rec.pid, markers: markers.length ? markers : null, agent: rec.agent };
 }
 /**
  * 该 pid 是否「活着**且确实是我们自己的** CLI 进程」。
@@ -223,25 +259,41 @@ function stopDaemon(key: string): string {
   pm2Stop(key); // best-effort：停掉 pm2 托管的 app（若有）
   const dir = accountDir(key);
   const ag = resolveAgent(loadBrainConfig(dir));
-  const cand = [
+  // brain：优先用身份记录里「起进程时真实用的」bin/args 算特征串；没有记录（旧账号/未起过）才回退配置。
+  const brec = brainRecord(dir);
+  const brainMarkers = brec.markers ?? brainPidMarkers(ag.bin, ag.args);
+  const cand: Array<{ pid: number | null; name: string; markers: string[][] }> = [
     { pid: readPid(dir, "wrapper.pid"), name: "wrapper", markers: CLI_PID_MARKERS },
     { pid: readPid(dir, "daemon.pid"), name: "daemon", markers: CLI_PID_MARKERS },
-    { pid: readPid(dir, "brain.pid"), name: "brain", markers: brainPidMarkers(ag.bin, ag.args) },
-    // worker 也是我们拉起的 ACP agent（worker-acp.ts 写 worker.pid）；漏掉它 → POSIX 上停完 daemon 任务进程还活着、stale worker.pid 一直留着（Windows 靠 /T 连带，看不出来）。
-    {
+    { pid: brec.pid ?? readPid(dir, "brain.pid"), name: "brain", markers: brainMarkers },
+  ];
+  // worker：现在可能**多条并存**（多任务/多 agent），身份记录 `workers.pid.json` 里每条都带着起进程时真实用的 bin/args
+  // → 逐条按自己的特征串判定。旧账号只有裸整数 `worker.pid`（无 bin/args）→ 回退「按配置算特征串」的老办法。
+  const wrecs = readPidRecords(path.join(dir, "workers.pid.json"));
+  if (wrecs.length) {
+    for (const w of wrecs)
+      cand.push({
+        pid: w.pid,
+        name: `worker${w.taskId ? `#${w.taskId}` : ""}(${w.agent || "?"})`,
+        markers: recordMarkers(w),
+      });
+  } else {
+    cand.push({
       pid: readPid(dir, "worker.pid"),
       name: "worker",
       markers: brainPidMarkers(ag.bin, ag.args),
-    },
-  ];
+    });
+  }
   // 只杀「活着**且身份确认**」的：pid 会被复用，陈旧 pid 文件可能指向别人的进程 → 绝不误杀。
   // 命令行一次批量查（Windows 下较慢）；正常情况（陈旧 pid 早已不存在）根本不会发起查询。
   const lines = commandLines(cand.map((c) => c.pid));
   const stopped: string[] = [];
   const skipped: string[] = [];
   const toKill: number[] = [];
+  const seen = new Set<number>();
   for (const c of cand) {
-    if (!c.pid || !isAlive(c.pid)) continue;
+    if (!c.pid || seen.has(c.pid) || !isAlive(c.pid)) continue;
+    seen.add(c.pid);
     if (matchesMarkers(lines.get(c.pid), c.markers)) {
       toKill.push(c.pid);
       stopped.push(`${c.name} ${c.pid}`);
@@ -251,7 +303,7 @@ function stopDaemon(key: string): string {
   }
   // 身份校验都通过了才动手：一次性杀掉这些进程**及其子进程树**（见 killProcessTrees 注释）。
   killProcessTrees(toKill);
-  for (const f of ["wrapper.pid", "daemon.pid", "brain.pid", "worker.pid"]) {
+  for (const f of ["wrapper.pid", "daemon.pid", "brain.pid", "worker.pid", "workers.pid.json"]) {
     try {
       fs.unlinkSync(path.join(dir, f));
     } catch {
@@ -413,22 +465,41 @@ function cmdList(): string {
   const entries = accs.map((a) => {
     const dir = accountDir(a.key);
     const ag = resolveAgent(loadBrainConfig(dir));
+    const brec = brainRecord(dir);
     return {
       a,
       dir,
       dpid: readPid(dir, "daemon.pid"),
-      bpid: readPid(dir, "brain.pid"),
-      brainMarkers: brainPidMarkers(ag.bin, ag.args),
+      bpid: brec.pid ?? readPid(dir, "brain.pid"),
+      // 身份记录里是「起进程时真实用的」bin/args，比配置值可靠（brain set 未重启 / 热切换窗口 / brain≠worker）
+      brainMarkers: brec.markers ?? brainPidMarkers(ag.bin, ag.args),
+      brainAgent: brec.agent,
+      // 多 task worker：`workers.pid.json` 是记录数组（每条一个 agent/任务），逐条按自己的身份校验
+      workers: readPidRecords(path.join(dir, "workers.pid.json")).map((w) => ({
+        pid: w.pid,
+        agent: w.agent,
+        state: w.state,
+        taskId: w.taskId,
+        markers: recordMarkers(w),
+      })),
     };
   });
-  const lines = commandLines(entries.flatMap((e) => [e.dpid, e.bpid]));
+  const lines = commandLines(
+    entries.flatMap((e) => [e.dpid, e.bpid, ...e.workers.map((w) => w.pid)]),
+  );
   const aliveOursIn = (pid: number | null, markers: string[][]): boolean =>
     !!pid && matchesMarkers(lines.get(pid), markers);
   return entries
     .map((e) => {
       const running = aliveOursIn(e.dpid, CLI_PID_MARKERS) ? `运行中(pid ${e.dpid})` : "已停止";
-      const brainPid = aliveOursIn(e.bpid, e.brainMarkers) ? `  brain(pid ${e.bpid})` : "";
-      return `- ${e.a.key}${e.a.key === def ? " [默认]" : ""}  label=${e.a.label}  botId=${e.a.botId}  agent=${agentLabel(e.dir)}  ${running}${brainPid}`;
+      const brainPid = aliveOursIn(e.bpid, e.brainMarkers)
+        ? `  brain(pid ${e.bpid}${e.brainAgent ? ` ${e.brainAgent}` : ""})`
+        : "";
+      const live = e.workers.filter((w) => aliveOursIn(w.pid, w.markers));
+      const pool = live.length
+        ? `  pool[${live.map((w) => `${w.agent}${w.taskId ? `#${w.taskId}` : ""}:${w.state}`).join(", ")}]`
+        : "";
+      return `- ${e.a.key}${e.a.key === def ? " [默认]" : ""}  label=${e.a.label}  botId=${e.a.botId}  agent=${agentLabel(e.dir)}  ${running}${brainPid}${pool}`;
     })
     .join("\n");
 }
@@ -469,22 +540,34 @@ function describeBrain(key: string): string {
 }
 
 /** `wemind brain set <预设|auto>`：把选择按账号落盘（可选 --bin/--args/--shell；--restart 立即重启 daemon）。 */
-function cmdBrainSet(
+async function cmdBrainSet(
   agentName: string,
   key: string,
   opts: { bin?: string; args?: string; shell?: boolean; restart: boolean },
-): string {
+): Promise<string> {
   const agent = agentName.trim().toLowerCase();
   if (agent !== "auto" && !ACP_AGENT_PRESETS[agent])
     throw new Error(
       `未知预设「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制用 --bin 搭配任一预设）`,
     );
-  const cfg: BrainConfig = { agent };
-  if (opts.bin) cfg.bin = opts.bin;
-  if (opts.args !== undefined) cfg.args = opts.args.trim() ? opts.args.trim().split(/\s+/) : [];
-  if (opts.shell !== undefined) cfg.shell = opts.shell;
   const dir = accountDir(key);
-  saveBrainConfig(cfg, dir);
+  const customized = opts.bin !== undefined || opts.args !== undefined || opts.shell !== undefined;
+  // 只选预设（没带自定义启动参数）+ 没要求重启时，落盘和「热切换」其实是同一件事：daemon 在跑且认桥就交给它一次做完——
+  // 它先预热新大脑、成功才写 brain.json（失败回滚，盘上不留半截结果），这比「写盘 + 等下次重启」对用户更实在（决策⑪）。
+  // 带 --bin/--args/--shell 则**不能**热应用：控制桥只接受预设名（见 control-bridge.ts 的安全边界）。
+  if (!opts.restart && !customized && bridgeReady(key)) {
+    const r = await cmdBrainSwitch(agent, key, false);
+    // 热切换失败时**没有落盘**（持久化放最后，见 brain-switch.ts）：把这点说清楚，否则用户会以为 brain.json 已经改了。
+    return r.startsWith("❌")
+      ? `${r}\n（brain.json **没有被改写**：热切换失败就不落盘，这是「失败回滚」的代价。想强制写入再重启：wemind brain set ${agent} --restart）`
+      : r;
+  }
+  const patch: BrainConfig = { agent };
+  if (opts.bin) patch.bin = opts.bin;
+  if (opts.args !== undefined) patch.args = opts.args.trim() ? opts.args.trim().split(/\s+/) : [];
+  if (opts.shell !== undefined) patch.shell = opts.shell;
+  // 读-改-写：保留 worker 段（任务侧独立选择）与 presets 段（按预设名存的启动覆盖），旧 agent 的覆盖自动迁移。
+  const cfg = updateBrainConfig(patch, dir);
   const lines = [
     `已设置 ${key} 的大脑：agent=${agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}`,
     `配置文件：${brainConfigPath(dir)}`,
@@ -497,6 +580,14 @@ function cmdBrainSet(
     } else {
       lines.push(`daemon 未在运行，未重启（用 wemind start ${key} 启动）。`);
     }
+  } else if (customized && bridgeReady(key)) {
+    lines.push(
+      `（带 --bin/--args/--shell 的改动不能热应用：控制桥只认预设名。重启后生效——wemind stop ${key} && wemind start ${key}）`,
+    );
+  } else if (daemonAlive(key)) {
+    lines.push(
+      `（daemon 在跑但不是当前版本（不认控制桥）：盘已写好，重启一次才生效——wemind stop ${key} && wemind start ${key}）`,
+    );
   } else {
     lines.push(`（daemon 需重启才生效：wemind start ${key}）`);
   }
@@ -545,7 +636,7 @@ async function cmdBrain(rest: string[]): Promise<string> {
   }
   const pos = argv.filter((x) => x && !x.startsWith("--"));
   const first = (pos[0] || "").toLowerCase();
-  const SUBCOMMANDS = new Set(["show", "set", "unset", "check"]);
+  const SUBCOMMANDS = new Set(["show", "set", "unset", "check", "switch", "handoff"]);
   if (first && !SUBCOMMANDS.has(first)) {
     // 省略子命令 → 视为 `brain show <key|label>`（如 `wemind brain 主号`）。
     return describeBrain(pickKey(pos[0]));
@@ -559,14 +650,29 @@ async function cmdBrain(rest: string[]): Promise<string> {
         throw new Error(
           '用法: brain set <预设|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]',
         );
-      return cmdBrainSet(pos[1], pickKey(pos[2]), { bin, args: argsOverride, shell, restart });
+      return await cmdBrainSet(pos[1], pickKey(pos[2]), { bin, args: argsOverride, shell, restart });
     }
+    case "switch": {
+      // 桥只接受**预设名**（安全边界：见 control-bridge.ts）。带 --bin/--args/--shell 就走 set（只写盘 + 需重启）。
+      if (bin !== undefined || argsOverride !== undefined || shell !== undefined)
+        throw new Error(
+          "`brain switch` 只接受预设名（热切换是「换一个已装好的 agent」，不能带 --bin/--args）。\n" +
+            "需要自定义二进制用 `brain set <预设> --bin …`（那是配置变更，需要重启 daemon 生效）。",
+        );
+      if (!pos[1]) throw new Error("用法: brain switch <预设|auto> [--worker] [<key|label>]");
+      const worker = rest.includes("--worker");
+      return await cmdBrainSwitch(pos[1], pickKey(pos[2]), worker);
+    }
+    case "handoff":
+      return await cmdBrainHandoff(pickKey(pos[1]));
     case "unset":
       return cmdBrainUnset(pickKey(pos[1]));
     case "check":
       return await cmdBrainCheck(pickKey(pos[1]));
     default:
-      throw new Error(`未知 brain 子命令「${sub}」（可用：show / set / unset / check）`);
+      throw new Error(
+        `未知 brain 子命令「${sub}」（可用：show / set / switch / handoff / unset / check）`,
+      );
   }
 }
 
@@ -654,40 +760,323 @@ function requireDaemonAlive(key: string): void {
     );
 }
 
-async function cmdTask(text: string, cwd: string | undefined, sel?: string): Promise<string> {
-  if (!text) throw new Error('用法: task "<任务描述>" [--cwd 目录] [<key|label>]');
+// ===== 控制桥（CLI → daemon → 回话）：让 CLI 与微信指令走同一段代码 =====
+/** daemon 是否活着（且确实是我们自己的进程）。读命令不需要它，写命令优先走它。 */
+function daemonAlive(key: string): boolean {
+  return aliveOurs(readPid(accountDir(key), "daemon.pid"));
+}
+
+/**
+ * daemon 活着**且认识控制桥**（升级 CLI 后没重启的旧 daemon 在这里判为不可用）。
+ * 决定「走桥还是走文件」都该问这个而不是 daemonAlive：对旧 daemon 投递只会白等到超时。
+ */
+function bridgeReady(key: string): boolean {
+  const dir = accountDir(key);
+  return daemonAlive(key) && bridgePidOf(dir) === readPid(dir, "daemon.pid");
+}
+
+/**
+ * 经控制桥让 daemon 执行一条命令并等回话。
+ * 超时**如实**报「没等到回复」——桥的价值就在于「CLI 说的」和「daemon 做的」是同一件事，绝不假装成功。
+ */
+async function viaBridge(key: string, req: Omit<ControlRequest, "id" | "at">): Promise<string> {
+  const dir = accountDir(key);
+  // 先验「在跑的这个 daemon 认不认识桥」：升级 CLI 后 daemon 常常还在跑旧版本，径直投递只会干等到超时。
+  // 凭据是 daemon 启动时写的 control-out/.bridge（内容 = 它自己的 pid）——pid 对上才算数。
+  const dpid = readPid(dir, "daemon.pid");
+  if (bridgePidOf(dir) !== dpid)
+    throw new Error(
+      `账号 ${key} 的 daemon 还在跑**旧版本**（不认识控制桥），热切换/会话命令投递过去只会白等超时。\n` +
+        `重启一次即可：wemind stop ${key} && wemind start ${key}\n` +
+        `（只想改配置不动进程：wemind brain set <预设>，但它要等下次启动才生效。）`,
+    );
+  const full: ControlRequest = { id: newRequestId(), at: Date.now(), ...req };
+  writeControlRequest(full, dir);
+  const res = await awaitControlResponse(full.id, dir, controlTimeoutMs(req.kind as ControlKind));
+  if (!res)
+    throw new Error(
+      `等 daemon 回复超时（${req.kind}）。它可能正忙或已退出，用 wemind list 看状态、daemon.log 看日志。`,
+    );
+  if (!res.ok) process.exitCode = 1; // ❌ 开头的答复 = 失败（脚本据此判成败）
+  return res.text;
+}
+
+/**
+ * `brain switch <预设|auto>`：**热切换**——daemon 在跑就走控制桥（不重启、不打断在途回合）；
+ * daemon 没在跑就只写 brain.json（下次启动生效）。
+ * `--worker` 设默认任务大脑：那是 daemon 进程内的粘性状态，没有 daemon 就没有意义，必须先启动。
+ */
+async function cmdBrainSwitch(agentName: string, key: string, worker: boolean): Promise<string> {
+  const agent = agentName.trim().toLowerCase();
+  if (agent !== "auto" && !ACP_AGENT_PRESETS[agent])
+    throw new Error(
+      `未知预设「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
+    );
+  const dir = accountDir(key);
+  if (worker) {
+    requireDaemonAlive(key); // 「默认任务大脑」是进程内状态，不落盘（决策⑨⑮）
+    return await viaBridge(key, { kind: "brain.worker", target: agent });
+  }
+  if (daemonAlive(key)) return await viaBridge(key, { kind: "brain.switch", target: agent });
+  updateBrainConfig({ agent }, dir);
+  return `daemon 未在运行：已把 ${key} 的大脑写进 brain.json（agent=${agent}，下次启动生效）。\n运行中热切换：先 wemind start ${key}`;
+}
+
+/** 会话命令归属的人：账号本人（与 daemon 里 owner 的定义一致）。 */
+function ownerOf(key: string): string {
+  return process.env.WECHAT_OWNER_ID?.trim() || readAccount(accountDir(key))?.userId || "";
+}
+
+/** daemon 没在跑时用来定会话命名空间的大脑名（与 daemon 启动期同一个解析来源：配置 + 环境变量 + 自动探测）。 */
+function agentNameOf(key: string): string {
+  return resolveAgent(loadBrainConfig(accountDir(key))).name;
+}
+
+/**
+ * 末尾那个「长得像账号」的位置参数摘出来当账号选择（`session list 主号`）。
+ * 认不出就当普通参数——session 的名字可能跟账号别名撞脸，宁可把它当名字。
+ */
+function splitKeyArg(args: string[]): { args: string[]; sel?: string } {
+  const last = args[args.length - 1];
+  if (args.length && last && listAccounts().some((a) => a.key === last || a.label === last))
+    return { args: args.slice(0, -1), sel: last };
+  return { args };
+}
+
+/**
+ * `wemind session <new|list|resume|rename|delete>`。
+ * 读写规则：**读**永远可用（直接读登记表）；**写**优先走 daemon（单一写者，且会话指针/agent 侧状态都是它的活状态）。
+ * 例外：`rename`/`delete` 只动登记表这一个文件，daemon 没跑时直接改也是安全的；`resume` 必须真让 agent load，没 daemon 做不了。
+ */
+async function cmdSession(rest: string[]): Promise<string> {
+  const argv = [...rest];
+  const pi = argv.indexOf("--page");
+  let page: number | undefined;
+  if (pi >= 0) {
+    page = Number(argv[pi + 1]) || undefined;
+    argv.splice(pi, 2);
+  }
+  const pos = argv.filter((x) => x && !x.startsWith("--"));
+  const sub = (pos[0] ?? "").toLowerCase();
+  const { args, sel } = splitKeyArg(pos.slice(1));
+  const USAGE =
+    "用法: session list [--page N] | session new [名字] | session resume <序号|名字|id前缀> | " +
+    "session rename <序号|名字> <新名字> | session delete <序号|名字|id前缀>   [<key|label>]";
+
+  if (sub === "list") {
+    const key = pickKey(sel);
+    // 读优先走桥（daemon 里在用的那个大脑才是真的命名空间）；桥不可用就退回直接读文件——读永远不该失败。
+    if (bridgeReady(key)) return await viaBridge(key, { kind: "session.list", page });
+    const dir = accountDir(key);
+    const agent = agentNameOf(key);
+    const userId = ownerOf(key);
+    if (!userId) throw new Error(`账号 ${key} 没有 userId（account.json 不全），先重新登录。`);
+    const { entries, others, currentSessionId } = listSessions(agent, userId, dir);
+    const why = daemonAlive(key)
+      ? "（daemon 是升级前启动的旧版本，没法问它：以上按 brain.json/自动探测的「下次会用的大脑」列出；重启 daemon 后以进程内在用的为准。）"
+      : "（daemon 未运行：按 brain.json/自动探测得到的「下次会用的大脑」列出。）";
+    return (
+      renderSessionList(entries, { agent, page, currentSessionId, others, verbose: true }) +
+      "\n" +
+      why
+    );
+  }
+
+  if (sub === "new") {
+    const key = pickKey(sel);
+    const name = args.join(" ").trim() || undefined;
+    if (daemonAlive(key))
+      return await viaBridge(key, { kind: "session.new", ...(name ? { name } : {}) });
+    // 没 daemon：能做的只有「丢掉当前会话指针」——下条消息会开新的。名字要等会话真的建好再 rename。
+    const dir = accountDir(key);
+    const userId = ownerOf(key);
+    if (!userId) throw new Error(`账号 ${key} 没有 userId（account.json 不全），先重新登录。`);
+    const cleared = clearSessionPointer(
+      brainSessionMapPath(dir),
+      sessionKey(agentNameOf(key), userId),
+    );
+    return [
+      cleared ? "已清空当前会话指针" : "当前本来就没有会话指针",
+      "（daemon 未运行：下次启动后你发的第一条消息会开一个新会话）",
+      name ? `名字等新会话建好后再登记：wemind session rename 1 ${name}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (sub === "resume") {
+    const key = pickKey(sel);
+    if (!args[0]) throw new Error(USAGE);
+    requireDaemonAlive(key); // 恢复要真的让 agent load 那条会话：只有 daemon 里有 ACP 连接，做不了假
+    return await viaBridge(key, { kind: "session.resume", ref: args.join(" ") });
+  }
+
+  if (sub === "rename" || sub === "delete") {
+    const key = pickKey(sel);
+    const [ref, ...nameRest] = args;
+    if (!ref || (sub === "rename" && !nameRest.length)) throw new Error(USAGE);
+    if (bridgeReady(key))
+      return await viaBridge(
+        key,
+        sub === "rename"
+          ? { kind: "session.rename", ref, name: nameRest.join(" ") }
+          : { kind: "session.delete", ref },
+      );
+    // 只动登记表（+ 删除时可能清指针），daemon 不在也不影响它下次读到的结果
+    const dir = accountDir(key);
+    const userId = ownerOf(key);
+    if (!userId) throw new Error(`账号 ${key} 没有 userId（account.json 不全），先重新登录。`);
+    const agent = agentNameOf(key);
+    if (sub === "delete") {
+      const r = deleteSession(agent, userId, ref, { dir });
+      if (!r.ok) {
+        process.exitCode = 1;
+        return `❌ ${r.error}`;
+      }
+      return `已从列表删除：${r.entry.name ?? r.entry.title ?? r.entry.sessionId.slice(0, 8)}。${
+        r.clearedPointer ? "它就是当前会话，下一条消息会开一个新的。" : "当前会话没有变。"
+      }`;
+    }
+    const r = renameSession(agent, userId, ref, nameRest.join(" "), dir);
+    if (!r.ok) {
+      process.exitCode = 1;
+      return `❌ ${r.error}`;
+    }
+    return `已重命名：${r.entry.name}（当前 brain=${agent} 的会话）`;
+  }
+
+  throw new Error(USAGE);
+}
+
+/** `wemind brain handoff`：让当前大脑写一份交接摘要（与微信「交接」同一段实现）。 */
+async function cmdBrainHandoff(key: string): Promise<string> {
+  requireDaemonAlive(key);
+  return await viaBridge(key, { kind: "brain.handoff" });
+}
+
+/** 当前会话指针（供 CLI 展示；不常用但排查时值钱）。 */
+function cmdSessionCurrent(key: string): string {
+  const agent = agentNameOf(key);
+  const userId = ownerOf(key);
+  const sid = userId ? currentSessionIdOf(agent, userId, accountDir(key)) : undefined;
+  return sid
+    ? `${key} 当前会话：${sid}（agent=${agent}）`
+    : `${key} 当前没有会话指针（下一条消息会开新会话）。agent=${agent}`;
+}
+
+async function cmdTask(
+  text: string,
+  cwd: string | undefined,
+  sel?: string,
+  agentKey?: string,
+): Promise<string> {
+  if (!text) throw new Error('用法: task "<任务描述>" [--cwd 目录] [--agent 预设] [<key|label>]');
   const key = pickKey(sel);
   requireDaemonAlive(key);
   const useCwd = cwd || process.cwd();
-  writeTaskCmd(key, { kind: "dispatch", text, cwd: useCwd });
+  writeTaskCmd(key, {
+    kind: "dispatch",
+    text,
+    cwd: useCwd,
+    ...(agentKey ? { agent: agentKey } : {}),
+  });
   // 短轮询 task-state.json 确认已派发（最多 ~3s）
   const stateFile = path.join(accountDir(key), "task-state.json");
   for (let i = 0; i < 15; i++) {
     await sleep(200);
     try {
-      if (JSON.parse(fs.readFileSync(stateFile, "utf-8")).active)
-        return `已派发任务（worker 运行中，cwd=${useCwd}）。\n用 task-status 看进展、task-reply 回复、task-stop 结束。`;
+      const s = JSON.parse(fs.readFileSync(stateFile, "utf-8")) as {
+        active?: boolean;
+        tasks?: Array<{ id: number; agent: string }>;
+      };
+      if (s.active) {
+        const latest = s.tasks?.[s.tasks.length - 1];
+        const tag = latest ? ` #${latest.id}（${latest.agent}）` : "";
+        return `已派发任务${tag}（worker 运行中，cwd=${useCwd}）。\n用 task-status/task-list 看进展、task-reply 回复、task-stop 结束。`;
+      }
     } catch {
       /* ignore */
     }
   }
   return `已投递任务（cwd=${useCwd}）。daemon 处理中，用 task-status 查看。`;
 }
-function cmdTaskReply(text: string, sel?: string): string {
-  if (!text) throw new Error('用法: task-reply "<内容>" [<key|label>]');
+function cmdTaskReply(text: string, sel?: string, id?: number): string {
+  if (!text) throw new Error('用法: task-reply ["#编号"] "<内容>" [<key|label>]');
   const key = pickKey(sel);
   requireDaemonAlive(key);
-  writeTaskCmd(key, { kind: "reply", text });
-  return `已发送给任务：${text.slice(0, 40)}`;
+  writeTaskCmd(key, { kind: "reply", text, ...(id ? { id } : {}) });
+  return `已发送给任务${id ? ` #${id}` : ""}：${text.slice(0, 40)}`;
 }
-function cmdTaskStop(sel?: string): string {
+function cmdTaskStop(sel?: string, id?: number | "all"): string {
   const key = pickKey(sel);
   requireDaemonAlive(key);
-  writeTaskCmd(key, { kind: "stop" });
-  return "已发送「结束任务」指令。";
+  writeTaskCmd(key, { kind: "stop", ...(id ? { id } : {}) });
+  return id === "all"
+    ? "已发送「结束全部任务」指令。"
+    : `已发送「结束任务${id ? ` ${id}` : ""}」指令。`;
 }
+
+type WmTaskRow = {
+  id: number;
+  userId: string;
+  agent: string;
+  status: string;
+  turns: number;
+  startedAt: number;
+  lastOutput?: string;
+  cwd?: string;
+};
+const STATUS_ZH: Record<string, string> = {
+  running: "运行中",
+  waiting: "等回复",
+  interrupted: "已中断",
+};
+
+/**
+ * 读任务表（daemon 没跑也能读：文件就是唯一真相）。
+ * 先看 `tasks.json`——那是任务表的**持久**副本（重启后也在，编号跨重启不归零）；
+ * 老版本只写过 `task-state.json`（状态快照），仍兼容读它。
+ */
+function readTaskRows(key: string): WmTaskRow[] | null {
+  const dir = accountDir(key);
+  for (const name of ["tasks.json", "task-state.json"]) {
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(dir, name), "utf-8")) as {
+        tasks?: WmTaskRow[];
+      };
+      if (Array.isArray(s.tasks)) return s.tasks;
+    } catch {
+      /* 换下一个 */
+    }
+  }
+  return null;
+}
+
+function cmdTaskList(sel?: string): string {
+  const key = pickKey(sel);
+  const rows = readTaskRows(key);
+  if (!rows)
+    return `账号 ${key}：无任务表（tasks.json / task-state.json 都不存在，daemon 未跑过多任务）。`;
+  // 任务表是 daemon 的活状态：它没在跑（或还在跑旧版）时，表里的「运行中」只是上次留下的，别当成现在时。
+  const stale = daemonAlive(key)
+    ? ""
+    : "\n（daemon 未运行：以下状态是它上次留下的快照；未完成的任务会在下次启动时标为「已中断」，回「继续」可续跑。）";
+  if (!rows.length) return `账号 ${key}：当前没有任务。${stale}`;
+  const lines = [`账号 ${key} 任务（${rows.length} 条）：`];
+  for (const t of rows) {
+    const age = t.startedAt ? `${Math.round((Date.now() - t.startedAt) / 1000)}s` : "?";
+    lines.push(
+      `  #${t.id} [${t.agent}] ${STATUS_ZH[t.status] ?? t.status} · ${t.turns} 轮 · ${age}${t.cwd ? ` · cwd=${t.cwd}` : ""}`,
+    );
+    if (t.lastOutput) lines.push(`      ${t.lastOutput.replace(/\n/g, " ").slice(0, 140)}`);
+  }
+  return lines.join("\n") + stale;
+}
+
 function cmdTaskStatus(sel?: string): string {
   const key = pickKey(sel);
+  const rows = readTaskRows(key);
+  if (rows && rows.length) return cmdTaskList(sel);
   const stateFile = path.join(accountDir(key), "task-state.json");
   let s: {
     active?: boolean;
@@ -734,6 +1123,12 @@ export async function runManage(argv: string[]): Promise<void> {
     runner = rest[ri + 1];
     rest.splice(ri, 2);
   }
+  const ai = rest.indexOf("--agent");
+  let agentKey: string | undefined;
+  if (ai >= 0) {
+    agentKey = rest[ai + 1];
+    rest.splice(ai, 2);
+  }
 
   switch (cmd) {
     case "version":
@@ -750,6 +1145,12 @@ export async function runManage(argv: string[]): Promise<void> {
     case "brain":
       console.log(await cmdBrain(rest));
       break;
+    case "session": {
+      const sub = (rest[0] ?? "").toLowerCase();
+      if (sub === "current") console.log(cmdSessionCurrent(pickKey(rest[1])));
+      else console.log(await cmdSession(rest));
+      break;
+    }
     case "adopt":
       console.log(cmdAdopt(rest[0], label));
       break;
@@ -762,17 +1163,31 @@ export async function runManage(argv: string[]): Promise<void> {
       break;
     }
     case "task":
-      console.log(await cmdTask(rest[0], cwd, rest[1]));
+      console.log(await cmdTask(rest[0], cwd, rest[1], agentKey));
       break;
-    case "task-reply":
-      console.log(cmdTaskReply(rest[0], rest[1]));
+    case "task-reply": {
+      // 兼容两种写法：`task-reply "#3 内容"` 与 `task-reply 3 "内容"`
+      const first = rest[0] ?? "";
+      const m = first.match(/^[#＃](\d+)\s*([\s\S]*)$/);
+      if (m) console.log(cmdTaskReply(m[2], rest[1], Number(m[1])));
+      else if (rest.length >= 2 && /^\d+$/.test(first))
+        console.log(cmdTaskReply(rest[1], rest[2], Number(first)));
+      else console.log(cmdTaskReply(first, rest[1]));
+      break;
+    }
+    case "task-list":
+      console.log(cmdTaskList(rest[0]));
       break;
     case "task-status":
       console.log(cmdTaskStatus(rest[0]));
       break;
-    case "task-stop":
-      console.log(cmdTaskStop(rest[0]));
+    case "task-stop": {
+      const a = rest[0];
+      const id: number | "all" | undefined =
+        a === "all" || a === "全部" ? "all" : a && /^\d+$/.test(a) ? Number(a) : undefined;
+      console.log(cmdTaskStop(id === undefined ? a : rest[1], id));
       break;
+    }
     case "label": {
       const k = resolveKey(rest[0]);
       setLabel(k, rest.slice(1).join(" "));
@@ -835,21 +1250,17 @@ export async function runManage(argv: string[]): Promise<void> {
   }
 }
 
-function helpText(): string {
+export function helpText(): string {
   return `WeMind 多账号管理（wemind v${CLI_VERSION}）
 用法: wemind <command>            其余：wemind version | help
 
   login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动归档（--start 顺带启动 daemon）
-  list                           列出账号、别名、运行状态
+  list                           列出账号、别名、运行状态（含 brain 进程与 worker 池）
   start <key|label>              启动某账号的 daemon
-  stop <key|label>               停止某账号的 daemon
-  brain [show|set|unset|check] [<key|label>]   查看/切换/清除/自检账号的大脑（ACP agent）
-                                 set: brain set <预设|auto> [--bin X] [--args "…"] [--restart] [<key|label>]
-                                 大脑选择按账号持久化在 brain.json；环境变量 WEMIND_BRAIN* 为一次性覆盖
-  task "<描述>" [--cwd 目录] [<key|label>]   本地派发任务给 worker（默认 cwd=当前终端目录）
-  task-reply "<内容>" [<key|label>]          回复/注入当前任务（「task-reply 继续」= 续跑）
-  task-status [<key|label>]                  查看当前任务状态与最近输出
-  task-stop [<key|label>]                    结束当前任务
+  stop <key|label>               停止某账号的 daemon（连带 brain 与全部 worker 进程树）
+  brain set <预设|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]
+                                 改账号大脑**配置**（写 brain.json；daemon 需重启才生效）
+  brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
   logout <key|label>             停 daemon + 通知下线 + 清凭证（保留目录，可重登）
   delete <key|label>             停 daemon + 删除目录 + 移除注册
   label <key|label> <新别名>     改别名
@@ -858,6 +1269,12 @@ function helpText(): string {
   allowlist <key|label>          查看该账号的授权用户清单(allowFrom)
   allow <key|label> <userId>     授权某用户可驱动该账号 bot
   revoke <key|label> <userId>    撤销某用户的授权
+
+【与微信等价的操作指令】以下都能带 [<key|label>]（省略则用默认账号）。
+运行中的命令经**控制桥**交给 daemon 执行（CLI 与微信走同一段代码，行为一致）；daemon 没跑时，
+读命令照常可用，部分写命令会只改文件或提示先启动。
+
+${renderHelp("owner", "cli", { sections: ["brain", "session", "task", "misc"] })}
 
 说明：key = 由微信 botId 派生的唯一标识（目录名）；label = 人类可读别名。多数命令可用 key 或 label。`;
 }

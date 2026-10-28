@@ -36,6 +36,8 @@ wemind list                          # 查看运行状态
 wemind brain                 # 看当前用的是哪个大脑
 wemind brain check           # 真起一次 ACP 握手，验证能不能用
 wemind brain set qoder       # 换大脑（按账号落盘，重启仍生效）
+wemind brain switch opencode # 热切换：daemon 在跑就不重启、不打断在途回合；失败自动回滚
+wemind session list          # 会话列表（新会话 / 恢复会话 / 重命名 / 删除同名子命令）
 ```
 
 > **「支持 ACP」不等于能用**：`session/load`、`session/resume`、图片输入、MCP 传输、反向请求都是**可降级项**，各家实现差别很大。完整判断流程、各 agent 实测结论见 **[docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)**。
@@ -217,9 +219,14 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain-sessions.json`                         | `<agent>:<userId> → ACP sessionId` 映射（按大脑分命名空间，切换 agent 互不覆盖）；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建） |
 | `brain-mcps.json`                             | brain 当前激活的 MCP 集（默认空）                                                                           |
 | `brain-home/`                                 | brain 沙箱（由预设的 `homeEnvVar` 指向它；kiro 是 `KIRO_HOME`，opencode 是 `XDG_CONFIG_HOME`），含 agent 配置与 ACP 会话 |
-| `worker-sessions.json`                        | worker（远程任务）单任务 `ACP sessionId` 映射（键 `<agent>:task`），daemon 重启后据此 `load`/`resume` 续传 |
+| `worker-sessions.json`                        | worker（远程任务）`ACP sessionId` 映射（键 `<agent>:task-<编号>@<userId>`），任务中断后据此 `load`/`resume` 续跑 |
 | `worker-home/`                                | worker 沙箱（同 brain 机制；MCP 继承**全量除 `wechat`** ＋ 记忆/技能/settings）                              |
-| `worker.pid`                                  | worker 大脑进程 pid（与 brain/用户会话区分、便于精确清理）                                                  |
+| `workers.pid.json`                            | worker 进程池的**身份记录数组**（每条的 pid / agent / 真实 bin+args / busy\|idle / 任务编号）；`wemind stop` 一次杀光全部，旧账号的裸整数 `worker.pid` 仍兼容读取 |
+| `session-registry.json`                       | 会话**登记表**（名字/标题/轮次/最近使用；最多 50 条/人·大脑）——只供列表展示，「当前是哪个」的唯一权威仍是 `brain-sessions.json` |
+| `tasks.json`                                  | 任务表（编号/agent/状态/轮次/cwd/最近输出），用于**重启后续跑**：未完成的标「已中断」，回「继续」才续跑；损坏则降级为空表 |
+| `handoff.json`                                | 交接摘要（`交接` 生成；TTL 24h，切到别的大脑后第一条消息注入一次即消费）                                     |
+| `control-inbox/` `control-out/`               | CLI ↔ daemon **控制桥**（CLI 写请求、daemon 写应答）；`control-out/.bridge` 记着 daemon 自己的 pid——对不上说明它在跑旧版本 |
+| `brain.pid` / `daemon.pid`                    | 进程身份的 JSON 记录（含起进程时**真实用的** bin/args）/ 裸整数 pid（供 `wemind list/stop` 精确识别与清理） |
 | `pm2.app.json`                                | **仅 `--runner pm2`**：pm2 的 app 声明（5s 重拉 / 最多 50 次 / 退出码 78 停手 / 日志合并到 `daemon.log`）    |
 
 **多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<名>` 切换（→ `~/.wemind/<名>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。
@@ -300,8 +307,14 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WEMIND_WORKER_HOME`                                    | worker 沙箱配置目录（默认 `<数据目录>/worker-home`）                                                                                |
 | `WEMIND_WORKER_MCP_EXCLUDE`                             | worker 不继承的 MCP（逗号分隔；`wechat` 始终强制排除，防回环）                                                                      |
 | `WEMIND_WORKER_IDLE_MS` / `_CAP_MS` / `_FIRST_FRAME_MS` | worker 单轮空闲/硬上限/首帧超时（默认 180000 / 1800000 / 30000，比对话大脑宽松）                                                    |
+| `WEMIND_WORKER_BRAIN`                                   | 默认任务大脑（预设名；未设则回落 `WEMIND_BRAIN`。两者都是**一次性覆盖**，会压过 brain.json 里的 `worker.agent`）                     |
+| `WEMIND_MAX_WORKERS` / `WEMIND_IDLE_MAX`                | 同时运行的任务数上限（默认 3）/ 池中保留的空闲进程数（默认 2）                                                                      |
+| `WEMIND_WORKER_REAP_MS`                                 | 空闲 worker 进程回收时间（默认 300000，即 5 分钟；**注意不是** `WEMIND_WORKER_IDLE_MS`——那是单轮 prompt 空闲超时）                   |
 | `WEMIND_WORKER_PROGRESS`                                | 是否推送 worker 全程文字进度（默认 `0` 安静；`1` 开启。「正在输入中」始终有）                                                       |
-| `WEMIND_TASK_SCAN_MS`                                   | daemon 扫描本地命令收件箱 `task-inbox/` 的间隔毫秒（默认 1000）                                                                     |
+| `WEMIND_TASK_SCAN_MS`                                   | daemon 扫描本地命令收件箱 `task-inbox/` 与控制桥 `control-inbox/` 的间隔毫秒（默认 1000）                                          |
+| `WEMIND_SWITCH_DRAIN_MS` / `WEMIND_SWITCH_TIMEOUT_MS`   | 热切换：等在跑的回合结束的上限（默认 30000）/ 新大脑预热（`initialize` + 会话）硬上限（默认 120000）                                 |
+| `WEMIND_CONTROL_TIMEOUT_MS`                             | CLI 等 daemon 回话的上限（默认 30000；`brain switch` 自动放大到 warm+drain+15s）                                                    |
+| `WEMIND_HANDOFF_TTL_MS`                                 | 交接摘要的有效期（默认 86400000，即 24h；过期不注入）                                                                               |
 | 大脑 agent 选择 / 记忆继承                              | 见下方「切换大脑 Agent」与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
 
 限制：
@@ -310,39 +323,68 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 - **不能主动发起对话**（iLink 限制），需你先发消息；
 - iLink 会话超时（errcode `-14`）会进入 1 小时冷却，重发消息恢复。
 
+### 微信指令总览（大脑 / 会话 / 任务）
+
+在微信里**直接发**这些消息即可，daemon 拦截处理、不进大脑（中文与斜杠双轨，`/ai` 是收敛前缀）：
+
+| 你发的消息                                  | 作用                                                                    | 谁能发 |
+| ------------------------------------------- | ----------------------------------------------------------------------- | ------ |
+| `切换大脑 [名]` · `/ai brain [名]` · `/brain [名]` | **热切换**对话大脑：进程内换，不重启 daemon、不打断在途回合；失败自动回滚到原大脑 | 账号本人 |
+| `切换任务大脑 [名]` · `/ai task [名]` · `/worker [名]` | 设**默认任务大脑**（粘性；不写 `brain.json`，重启回到配置值）           | 账号本人 |
+| `AI` / `AI 列表` · `/ai`                    | 列可选 agent + 当前对话大脑 / 默认任务大脑                              | 账号本人 |
+| `交接` · `/handoff`                         | 生成交接摘要（目标/已确认结论/未决问题/关键事实），切到别的大脑后**第一条消息自动带上**，答完即用掉 | 账号本人 |
+| `新会话 [名字]` · `/new`                    | 清当前会话并新建（可命名）                                              | 已授权 |
+| `会话列表 [页]` · `/sessions`               | 序号 / 名字或摘要 / 时间 / 轮次 / `←当前`；末尾提示其它大脑另有几条     | 已授权 |
+| `恢复会话 <序号\|名字\|id前缀>` · `/resume` | 切回旧会话（**strict**：接不上就如实报错，不改当前会话）                | 已授权 |
+| `重命名会话 <序号> <名字>` · `/rename`      | 给会话登记表改名                                                        | 已授权 |
+| `删除会话 <序号>` · `/delete`               | 从 WeMind 列表删除（若是当前会话则同时清指针，下条消息开新会话）        | 已授权 |
+| `任务 [<预设>：]正文` · `/task`             | 派发新任务（可指定 agent；不指定用默认任务大脑）                        | 已授权 |
+| `#<编号> 正文` · `/reply <编号> 正文`       | 注入指定任务（多任务时必须带编号）                                      | 本人任务 |
+| `任务列表` · `/tasks`                       | 编号 / agent / 状态（跑/等你）/ 轮次 / 时长 / 最近输出                  | 本人任务 |
+| `结束任务 [编号]` · `结束全部任务` · `/stop` | 结束任务（「等你回复」的那条进程**回池复用**；「正在跑」的那条回合没法优雅取消，只能力杀；多条并存必须带编号） | 本人任务 |
+| `帮助` · `/help`                            | 全部指令，按角色裁剪                                                    | 全部 |
+
+非账号本人发上述「账号本人」类命令会收到一句短提示（**不会**转发给大脑）。
+
 ### 远程任务（worker）：把漫长任务交给微信遥控
 
 > 📖 完整使用方法（微信 + 本地终端两入口、典型流程、FAQ）见 **[docs/使用指南-远程任务（worker）.md](docs/使用指南-远程任务（worker）.md)**。
 
 除了「对话大脑」，daemon 还能把**漫长任务**交给一个**受控的 ACP worker 进程**跑——你在电脑上派发任务后离开，它在「需要你决策」（如列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑（远程 human-in-the-loop）。
 
-worker 与对话大脑是**两个独立的 ACP 进程，互不干扰**；worker 跑在任务工作目录、继承所用 agent 真实配置目录的**全量 MCP（除 `wechat`）＋ 记忆/技能/模型**（kiro 即 `~/.kiro`，opencode 即 `~/.config/opencode`）。
+worker 与对话大脑是**独立的 ACP 进程，互不干扰**——而且是**每个任务一条连接**（进程池：结束「等你回复」的任务时进程回池复用，空闲超 5 分钟回收；结束「正在跑」的那条只能力杀）：可以同时让 kiro 做任务 1、opencode 做任务 2。worker 跑在任务工作目录、继承所用 agent 真实配置目录的**全量 MCP（除 `wechat`）＋ 记忆/技能/模型**（kiro 即 `~/.kiro`，opencode 即 `~/.config/opencode`）。
 
 **指令集**：
 
 | 你发的消息                        | 去向                                                               |
 | --------------------------------- | ------------------------------------------------------------------ |
-| `任务：xxx` / `>xxx`              | 明确发给 worker：没任务时**启动**新任务，有任务时**追加/回复**给它 |
+| `任务：xxx` / `>xxx`              | 明确发给 worker：没任务时**启动**新任务；有活跃任务时注入（唯一那条）；多条并存回消歧清单 |
+| `任务 <预设>：xxx`                | 用指定 agent **新开**一条任务（冒号前必须是不带空格的已知预设名）   |
+| `#2 正文`                         | 注入**第 2 条**任务（多任务并存时用它消歧）                        |
+| `任务列表` / `结束任务 [编号]` / `结束全部任务` | 看 / 结束任务（不给编号 = 唯一那条；多条并存回消歧清单）  |
 | `问大脑 xxx`                      | 明确发给对话大脑（worker 正等你时也能临时插话问大脑）              |
-| `结束任务` / `停止任务`           | 终止当前 worker 任务                                               |
 | worker 刚问你后，直接回（无前缀） | 注入 worker（最自然的决策回复）                                    |
 | worker 埋头跑时，直接发（无前缀） | 走对话大脑（任务不受影响）                                         |
+| 任务「已中断」后回「继续」（无前缀） | 拉进程**续跑**那条中断的任务（只有一条时才这么判）                |
 
 - worker 只在 **waiting（刚停下问你）** 时才默认接管你的无前缀消息；它埋头跑时大脑照常可用。
+- 只有一条活跃任务时无前缀消息直接注入它；**多条并存**时必须带编号（`#2 …`），否则回一份消歧清单。任务编号**按用户单调递增、不复用**，且**跨重启不归零**。
 - worker 每轮输出带 `🤖【任务】` 标记；跑一轮期间持续「正在输入中」（typing 不占连续发送上限）。
-- 中断（崩溃/超时）靠 `session/load`（不支持时 `session/resume`）恢复——回「继续」即从中断处续跑；两者都不可用时只能重开。
+- 中断（崩溃/超时/daemon 重启）后任务标**「已中断」**并在 `任务列表` 可见；回「继续」（或 `#n 继续`）才拉进程续跑（按预设试 `session/load` → `session/resume`）。接不上会如实说明「这次接不上，请用文字重述」；半截回合的副作用可能已发生，续跑前会提示核对（**不会**自动续跑）。
+- 并发上限默认 3（`WEMIND_MAX_WORKERS`），超出时派发被拒并提示。
 - 详见 [docs/方案C-MVP-远程human-in-the-loop.md](docs/方案C-MVP-远程human-in-the-loop.md)。
 
 **本地终端入口**（与微信并列、管同一任务，**不依赖微信**）：在电脑前用 `wemind` 直接管 worker 任务，适合开任务时贴长描述 / 指定工作目录，或专注电脑工作不想掏手机时。
 
 | 命令（`wemind …`）                            | 作用                                                                  |
 | --------------------------------------------- | --------------------------------------------------------------------- |
-| `task "<描述>" [--cwd <目录>] [<key\|label>]` | 本地派发任务（默认 cwd=终端当前目录，可指定项目目录——微信入口做不到） |
-| `task-status [<key\|label>]`                  | 查看任务状态 + 轮次 + 最近输出（读本地 `task-state.json`）            |
-| `task-reply "<内容>" [<key\|label>]`          | 回复/注入当前任务（`task-reply 继续` = 续跑）                         |
-| `task-stop [<key\|label>]`                    | 结束当前任务                                                          |
+| `task "<描述>" [--cwd <目录>] [--agent <预设>]` | 本地派发任务（默认 cwd=终端当前目录，可指定项目目录——微信入口做不到） |
+| `task-list [<key\|label>]`                    | 任务列表（编号/agent/状态/轮次/时长）                                 |
+| `task-status [<key\|label>]`                  | 任务概览（任务表有记录时与 `task-list` 同一份；表为空才退回读 `task-state.json` 快照） |
+| `task-reply <编号> "<内容>"`（或 `task-reply "#编号 内容"`） | 回复/注入任务（`task-reply 2 "继续"`；不给编号 = 唯一那条） |
+| `task-stop [<编号\|全部\|all>]`                | 结束任务（不给编号 = 唯一那条，多条并存回消歧清单）                   |
 
-机制为**文件桥**：CLI 原子写 `task-inbox/*.json`，daemon 独立定时器扫描分发到同一套 task-manager，状态写 `task-state.json` 供 `task-status` 读。详见 [docs/本地双入口-命令派发与看敲.md](docs/本地双入口-命令派发与看敲.md)。
+机制为**文件桥**：CLI 原子写 `task-inbox/*.json`，daemon 独立定时器扫描分发到同一套 task-manager，状态写 `task-state.json`（另有一份 `tasks.json` 供重启续跑）。CLI 的 `brain switch` / `session *` 则走**控制桥**（daemon 在跑就进程内执行、回话给你；daemon 没跑时读命令降级为直接读文件）。详见 [docs/本地双入口-命令派发与看敲.md](docs/本地双入口-命令派发与看敲.md)。
 
 ### 进度提示与连续发送上限
 
@@ -365,7 +407,7 @@ brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认�
 | `MCP` / `列出 MCP`          | 列出可选 MCP（来自全局 `mcp.json`）与当前已激活 |
 | `加载 <名>` / `load <名>`   | 把指定 MCP 加入激活集（`wechat` 永久禁止）      |
 | `卸载 <名>` / `unload <名>` | 移除                                            |
-| `新会话` / `重置` / `/new`  | 开启新 ACP 会话（清空多轮上下文）               |
+| `新会话 [名字]` / `/new`    | 开启新 ACP 会话（清空多轮上下文）；给名字便于在 `会话列表` 里认出来 |
 
 加载/卸载 MCP 后 daemon 会**重启 ACP 进程**以按新沙箱配置重载，下一条消息生效。激活的 MCP 等于对白名单发件人全权开放（kiro 预设是 `--trust-all-tools`；其它 agent 按其批准策略），按需加载、用完可卸载。
 
@@ -392,7 +434,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（指向 brain 沙箱） | 预设值       |
 | `KIRO_CLI_BIN`          | 旧的 kiro 专用二进制覆盖（仍兼容）                  | —            |
 
-`kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量。持久化选择用 `wemind brain set <预设> [--bin ...]`（写入 `<数据目录>/brain.json`，任何入口重启都复现）。
+`kiro` 预设 = `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 加一条预设、或直接用上面四个变量。持久化选择用 `wemind brain set <预设> [--bin ...]`（写入 `<数据目录>/brain.json`，任何入口重启都复现；只给预设名且 daemon 在跑并认控制桥时会**立刻热应用**，带 `--bin/--args/--shell` 则仍是「只写盘、需重启」）。**运行时切换**用 `wemind brain switch <预设>` 或微信里发 `切换大脑 <预设>`——进程内换、失败自动回滚，见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](docs/repowiki/06-ACP-大脑与沙箱.md)。
 
 > 详细步骤、各 agent 需确认的 4 件事、MCP 沙箱差异、验证方法见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)。
 >

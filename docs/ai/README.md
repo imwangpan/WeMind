@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26（`@wemind/cli@1.1.0` 与 `@wemind/wechat-mcp@1.0.4` 均已发布到 npm）
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28（`@wemind/cli@1.1.1` 已发布，1.2.0 待发布；`@wemind/wechat-mcp@1.0.5` 已发布）
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -56,24 +56,29 @@ wechat-ilink-core  ◄──  wechat-mcp      （tsdown 内联 core，发布单�
 ```text
 poller（长轮询，不被大脑阻塞）
   → 收到消息 / 逐条入队（**不合并**：一条消息 = 一次 prompt）
-  → 指令拦截（新会话 / MCP / 任务 / 问大脑 …）
-  → 选择 brain 或 worker
+  → 指令拦截（帮助 / 切脑 / 交接 / 会话四件套 / 任务 / MCP / 问大脑 …；
+     owner-only 命令由非本人发 → 短提示拒绝，不进大脑）
+  → 选择 brain 或 worker（多任务时按编号寻址；无编号按 waiting > running > 唯一已中断）
   → askBrain(userId, text, onProgress, images)
-       ├─ ensureProcess()：懒启动 ACP agent，initialize
-       ├─ ensureSession()：内存 session → 磁盘 map → load/resume → 否则 new
+       ├─ 等切换门（切换大脑进行中时有界等待）
+       ├─ ensureProcess(ag)：懒启动 ACP agent，initialize
+       ├─ ensureSession(ag, userId)：内存 session → 磁盘 map → load/resume → 否则 new
+       ├─ 有交接摘要且目标大脑不是来源 → 作为本条消息的**前缀**注入
        ├─ session/prompt：文本（+ 图片）
        └─ session/update：拼 agent_message_chunk；tool/thought → 进度
+  → 成功：写会话登记表（轮次+1/标题首写）、答成才消费交接摘要
   → md-reply / image-reply 处理长文与图片
   → send_text_message（受连续发送额度约束）
 ```
 
 关键点：
 
-- **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`（键 `<agent>:<userId>`，换大脑不丢各自上下文）；
-- **worker 是第二个独立 ACP 进程**，单任务 session，映射在 `worker-sessions.json`；
+- **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`（键 `<agent>:<userId>`，换大脑不丢各自上下文）——**这张指针表是「当前是哪个会话」的唯一权威**；`session-registry.json` 只是展示用的登记表（名字/标题/轮次），坏了不影响恢复；
+- **worker 是 N 个独立 ACP 进程**（进程池，一条任务一条连接），任务会话在 `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`）；任务表另存 `tasks.json` 供**重启后续跑**（未完成的标「已中断」，回「继续」才续跑）；
+- **切换大脑是进程内的**（`brain-switch.ts`）：预检 → 等回合 drain → 预热 → **成功才写 `brain.json`**；失败回滚、槽位留旧大脑；
 - **自愈**：prompt 超时/失败 → `reset()` 杀进程树 → 下条消息重建并尝试恢复会话；
 - **进度**：`tool_call` → 「步骤 N」；`agent_message_chunk` → 「正在整理回复」；任意 `session/update` → 刷新心跳基线；
-- **连发上限**：iLink 约 10 条；`index.ts` 预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」。
+- **连发上限**：iLink 约 10 条；`index.ts` 预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」；**多任务与对话大脑共享同一份额度**（按用户计）。
 
 ---
 
@@ -83,7 +88,20 @@ poller（长轮询，不被大脑阻塞）
 |---|---|
 | **ACP** | Agent Client Protocol，JSON-RPC 2.0 over stdio，每行一个 JSON；Zed 提出 |
 | **brain** | 对话大脑，`acp-brain.ts`，每用户一个 session |
-| **worker** | 远程任务执行器，`worker-acp.ts`，单 session，独立进程 |
+| **worker** | 远程任务执行器，`worker-acp.ts` 的 `class WorkerConn`，**一条任务一条连接**（进程池复用） |
+| **agent 槽位（agent-slot）** | `agent-slot.ts`：`getAgent("brain"\|"worker")` 懒解析 + 记忆化；`setAgent` 供热切换改写（取代了模块常量） |
+| **热切换 / brain-switch** | `brain-switch.ts`：预检 → drain（等回合结束）→ 预热 → **成功才落盘**；失败回滚 |
+| **drain** | 切换/停止前「等在跑的回合自然结束」的门（默认 30s，超时=诚实失败，不砍回合） |
+| **预热 / warmup** | 切脑时先把新 agent 起起来跑 `initialize` + 建会话，成功才对外宣布切换完成 |
+| **会话指针表** | `brain-sessions.json`（键 `<agent>:<userId>`）——**「当前是哪个会话」的唯一权威** |
+| **会话登记表** | `session-registry.json`：名字/标题/轮次/最近使用（派生元数据，坏了只导致列表空） |
+| **strict 恢复** | `恢复会话` 的语义：`load`/`resume` 都失败就如实报错，**不回退 `new`、不改指针** |
+| **交接 / handoff** | `handoff.ts`：摘要落盘（TTL 24h），切走后**下一条消息前缀注入**、**答成才消费**、切回来源不注入 |
+| **任务编号** | 按用户单调递增、**不复用**、跨重启不归零；多任务并存时无编号消息必须消歧 |
+| **默认任务大脑** | `worker.agent ?? agent`；`切换任务大脑`/`--worker` 可在进程内粘性覆盖（**不落盘**） |
+| **进程池 / worker-pool** | `worker-pool.ts`：同 agent 空闲复用 → 回收最旧腾位 → spawn；并发 `WEMIND_MAX_WORKERS`、空闲 `WEMIND_IDLE_MAX`、回收 `WEMIND_WORKER_REAP_MS` |
+| **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收预设名与纯数据**（无 `bin`/`args`/`shell`） |
+| **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
 | **preset / 预设** | `ACP_AGENT_PRESETS` 里的一条：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
 | **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |
 | **WORKER_HOME** | worker 的沙箱目录 |
@@ -190,6 +208,18 @@ poller（长轮询，不被大脑阻塞）
 | DSH 会发 thought/tool/usage 帧 | ✅ 实测 | `agent_thought_chunk` / `tool_call` / `usage_update` |
 | 微信连发上限约 10 条 | ✅ 实测/代码 | `CONSEC_SEND_LIMIT=10`，预留最后一条 |
 | 15s 心跳会占连发额度 | ✅ 代码 | `index.ts` `heartbeat` + `sendProgress`；DSH 有帧时通常不触发 |
+| **切大脑要重启 daemon** | ⚪ **已不成立（1.2.0）** | `brain-switch.ts` 进程内切换：drain → 预热 → 成功才落盘；失败回滚 |
+| **agent 在进程启动时冻结** | ⚪ **已不成立（1.2.0）** | `agent-slot.ts` 槽位 + 过程内显式传 `ag`；心跳/首帧每回合现算 |
+| **任务只能有一条（单任务单例）** | ⚪ **已不成立（1.2.0）** | 任务表 + `class WorkerConn` + `worker-pool.ts`；编号按用户递增不复用 |
+| **任务结束即杀进程** | ⚪ **已不成立（1.2.0）** | 结束「等你回复」的任务时进程**回池**复用（「正在跑」的那条只能力杀——回合没法优雅取消）；空闲超 `WEMIND_WORKER_REAP_MS`(5min) 回收；`wemind stop` 才杀光 |
+| **daemon 重启后任务全丢** | ⚪ **已不成立（1.2.0）** | `tasks.json` 读回 → 未完成标「已中断」→ 回「继续」才 `load`/`resume` 续跑（**不自动**） |
+| 会话只能保留「当前一条」 | ⚪ **已不成立（1.2.0）** | 登记表 + 五条会话指令（列表/新/恢复/改名/删除）；指针表仍是唯一权威 |
+| ACP 有 `session/delete` | ⚪ **待实测** | 仓库内无调用；`删除会话` 只删 WeMind 登记，回复里写明 agent 侧归档仍在 |
+| 各 agent `session/load` 会回放历史帧 | ⚪ **待实测** | 回放帧在无 prompt 时本就被丢弃（`acp-brain.ts`），恢复用 strict 语义 |
+| 被强杀后各 agent 能 `load`/`resume` 回该任务会话 | ⚪ **待实测** | 「重启后续跑」的可行边界由这条决定（kiro/opencode/qoder/DSH 各一次） |
+| 同 agent 两个 worker 共用配置目录不互踩 | ⚪ **待实测** | 不同 agent 各有 `configSubdir`；同 agent 并发等于「两个终端在同一配置目录」 |
+| 多任务并发时 `sendNotice` 会撞 `ret=-2` | ⚪ **待实测** | 额度按用户共享；需真机微信验 |
+| Windows `taskkill /T /F` 杀池中特定进程 | ⚪ **待实测** | 决定池回收/结束任务的清理是否干净 |
 
 > **规矩**：新增 agent 接入文档时，必须写清「已实测 / 仅代码 / 未验证」，并给版本与日期。
 

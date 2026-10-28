@@ -35,10 +35,61 @@ import type {
   SendMessageReq,
   ImageItem,
 } from "@wemind/wechat-ilink-core";
-import { askBrain, newSession, restart, supportsImages, heartbeatMs } from "./acp-brain.js";
-import { resolveAgent, agentProblem, BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
-import { loadBrainConfig } from "./brain-config.js";
+import {
+  askBrain,
+  newSession,
+  restart,
+  resumeSession,
+  supportsImages,
+  heartbeatMs,
+} from "./acp-brain.js";
+import {
+  agentProblem,
+  BRAIN_CONFIG_EXIT_CODE,
+  presetAvailable,
+  presetNames,
+  resolvePresetByName,
+} from "./brain-agents.js";
+import type { ResolvedAgent } from "./brain-agents.js";
+import { agentConfigFor, loadBrainConfig } from "./brain-config.js";
+import { getAgent, seedSlots, setAgent } from "./agent-slot.js";
+import { preflightSwitch, switchBrain, switchInFlightTarget } from "./brain-switch.js";
+import {
+  isOwnerOnly,
+  renderHelp,
+  parseChatCommand,
+  parseTaskCommand,
+  type ChatCommand,
+  type TaskCommand,
+} from "./chat-commands.js";
 import { ensureBrainHome, addMcp, removeMcp, listMcp } from "./mcp-sandbox.js";
+import {
+  deleteSessionCmd,
+  newSessionCmd,
+  renameSessionCmd,
+  resumeSessionCmd,
+  sessionsCmd,
+  type SessionCtx,
+} from "./session-manager.js";
+import { syncFromPointerMap, currentSessionIdOf } from "./session-registry.js";
+import {
+  clearControlDirs,
+  controlInboxDir,
+  markBridgeReady,
+  readControlInbox,
+  writeControlResponse,
+  type ControlRequest,
+} from "./control-bridge.js";
+import {
+  HANDOFF_PROMPT,
+  HANDOFF_TTL_MS,
+  HANDOFF_VERSION,
+  clearHandoff,
+  handoffPrefix,
+  loadHandoff,
+  saveHandoff,
+  takeHandoffFor,
+} from "./handoff.js";
 import { extractImages, resolveImageBytes } from "./image-reply.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
 import {
@@ -46,12 +97,22 @@ import {
   injectTask,
   stopTask,
   hasActiveTask,
-  isAwaiting,
+  awaitingTasks,
+  interruptedTasks,
+  looksLikeResume,
+  renderTaskList,
+  initTasks,
   setTaskPush,
   setTaskTyping,
   setTaskStateSink,
+  taskPoolSummary,
   type TaskStateSnapshot,
 } from "./task-manager.js";
+import {
+  killAll as killWorkerPool,
+  killIdle as killIdleConns,
+  sweep as sweepWorkerPool,
+} from "./worker-pool.js";
 import { ensureWorkerHome } from "./worker-sandbox.js";
 
 const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon]", ...a);
@@ -124,34 +185,17 @@ function toolIcon(kind?: string): string {
   }
 }
 
-type Ctrl =
-  | { kind: "list" }
-  | { kind: "new" }
-  | { kind: "add"; name: string }
-  | { kind: "remove"; name: string };
-
-/** 解析控制指令（命中则由 daemon 直接处理，不转发给 brain）。 */
-export function parseControl(text: string): Ctrl | null {
-  const t = text.trim();
-  if (/^(\/?mcp|列出\s*mcp|mcp\s*list)$/i.test(t)) return { kind: "list" };
-  if (/^(新会话|重置|清空上下文|\/new|new\s*session)$/i.test(t)) return { kind: "new" };
-  let m = t.match(/^(?:加载|load)\s+(\S+)$/i);
-  if (m) return { kind: "add", name: m[1] };
-  m = t.match(/^(?:卸载|unload)\s+(\S+)$/i);
-  if (m) return { kind: "remove", name: m[1] };
-  return null;
+/**
+ * 解析控制指令（命中则由 daemon 直接处理，不转发给 brain）。
+ * 表与解析逻辑都在 chat-commands.ts（`manage.ts` 也要用它渲染 `wemind help`，故不能留在这里）。
+ */
+export function parseControl(text: string): ChatCommand | null {
+  return parseChatCommand(text);
 }
 
-type TaskCmd = { kind: "toWorker"; text: string } | { kind: "stop" };
-/** 解析「明确发给 worker」指令：任务：xxx / 任务 xxx / >xxx（toWorker：无任务则启动、有任务则注入）；结束任务/停止任务 → stop。 */
-export function parseTaskControl(text: string): TaskCmd | null {
-  const t = text.trim();
-  if (/^(结束任务|停止任务|\/stop)$/i.test(t)) return { kind: "stop" };
-  let m = t.match(/^(?:任务|task)[:：]\s*([\s\S]+)$/i);
-  if (m) return { kind: "toWorker", text: m[1].trim() };
-  m = t.match(/^>\s*([\s\S]+)$/); // 快捷别名：> 开头即明确发给 worker
-  if (m) return { kind: "toWorker", text: m[1].trim() };
-  return null;
+/** 解析「明确发给 worker」指令：任务 [预设：]正文 / >xxx / #编号 正文 / 任务列表 / 结束任务 [编号]。 */
+export function parseTaskControl(text: string): TaskCommand | null {
+  return parseTaskCommand(text);
 }
 
 /** 解析「明确问大脑」逃逸前缀：问大脑 xxx / 问大脑：xxx。命中返回去前缀后的文本（强制走 brain，即使 worker 在等你）。 */
@@ -160,20 +204,169 @@ export function parseBrainEscape(text: string): string | null {
   return m ? m[1].trim() : null;
 }
 
-async function handleControl(c: Ctrl, userId: string): Promise<string> {
-  if (c.kind === "list") return listMcp();
-  if (c.kind === "new") {
-    await newSession(userId);
-    return "已开启新会话（上下文已清空）。";
+/** 切脑结果/来源的中文说法（`AI` 总览与回执共用一套词，避免两处文案漂移）。 */
+const SOURCE_LABEL: Record<ResolvedAgent["source"], string> = {
+  env: "环境变量",
+  file: "brain.json",
+  auto: "自动探测",
+};
+
+function agentLine(ag: ResolvedAgent): string {
+  return `${ag.name}（来源：${SOURCE_LABEL[ag.source]}）`;
+}
+
+/** `AI` / `/ai`：可选 agent（带「装了没」）+ 当前对话大脑/默认任务大脑 + 池中进程。 */
+function agentOverview(): string {
+  const cfg = loadBrainConfig();
+  const brain = getAgent("brain");
+  const worker = getAgent("worker");
+  const list = presetNames()
+    .map((k) => `${k}${presetAvailable(k, cfg) ? "✅" : "❌"}`)
+    .join("、");
+  const pool = taskPoolSummary();
+  const lines = [
+    "🤖 AI 配置",
+    `对话大脑：${agentLine(brain)}`,
+    `默认任务大脑：${agentLine(worker)}${worker.name === brain.name ? "（随对话大脑）" : ""}`,
+    pool.length
+      ? `池中 worker：${pool.map((p) => `${p.agent} 忙${p.busy}${p.taskIds.length ? `(#${p.taskIds.join("/")})` : ""}/闲${p.idle}`).join(" ｜ ")}`
+      : undefined,
+    `可选预设：${list}、auto`,
+    "切换：`切换大脑 <预设>` ｜ `切换任务大脑 <预设>`",
+  ].filter((x): x is string => x !== undefined);
+  return lines.join("\n");
+}
+
+/**
+ * 切对话大脑：先回 ack，预热在后台跑、结果补发（决策⑦：切换可能要几十秒，不能让用户干等等不到一句回话）。
+ * 这里**不** await 整段切换——预热期间的入站消息会自己在 acp-brain 门口等新大脑就绪（有界），不会双起进程。
+ */
+async function switchBrainAck(target: string, userId: string, ctx: ControlCtx): Promise<string> {
+  const running = switchInFlightTarget();
+  if (running) return `正在切到「${running}」，等它完成后再发一次。`;
+  const pre = preflightSwitch(target, DATA_DIR);
+  if (!pre.ok) return `❌ ${pre.problem}`;
+  if (pre.already) {
+    // 已经是它（只是把选择落到 brain.json）：亚毫秒级，直接等它，不用 ack/补发两段
+    const out = await switchBrain(target, { userId, dir: DATA_DIR });
+    return out.ok ? out.notice : `❌ ${out.problem}`;
   }
+  void switchBrain(target, { userId, dir: DATA_DIR })
+    .then((out) => (out.ok ? out.notice : `❌ ${out.problem}`))
+    .catch((e) => `❌ 切换出错：${String(e)}`)
+    .then(async (r) => {
+      log("brain switch:", r.replace(/\n/g, " | "));
+      await ctx.notify(r).catch((e) => log("switch notice failed:", String(e)));
+    });
+  return `⏳ 正在切到「${pre.agent.name}」…（预热中，成功或失败稍后补发消息；这期间发来的消息会等新大脑就绪）`;
+}
+
+/** `切换任务大脑`：只改本进程的默认任务大脑（决策⑨⑮：粘性，不写 brain.json）。 */
+function setTaskBrain(target: string): string {
+  const key = target.trim().toLowerCase();
+  const cfg = loadBrainConfig(DATA_DIR);
+  const r = resolvePresetByName(key, agentConfigFor(cfg, "worker"));
+  if (!r.ok) return `❌ ${r.problem}`;
+  const cur = getAgent("worker");
+  if (cur.name === r.agent.name && cur.bin === r.agent.bin)
+    return `默认任务大脑已经是「${r.agent.name}」，无需切换。`;
+  setAgent("worker", r.agent);
+  const busy = hasActiveTask();
+  killIdleConns(); // 池里的空闲连接属于旧默认：留着没用（下次按新 agent 取），有任务在跑的那些不动
+  const note = "（不写 brain.json，重启后回到配置里的默认）";
+  return busy
+    ? `✅ 默认任务大脑：${cur.name} → ${r.agent.name}${note}。\n在跑的任务继续用它自己起的 agent 跑完；**之后的新任务**用新大脑。`
+    : `✅ 默认任务大脑：${cur.name} → ${r.agent.name}${note}。`;
+}
+
+/** 指定过 agent 的 `任务 <预设>：正文` 之后，该 agent 成为默认任务大脑（粘性；解析失败返回 null，不影响派发结果）。 */
+function taskAgentForSticky(key: string): ResolvedAgent | null {
+  const cfg = loadBrainConfig(DATA_DIR);
+  const r = resolvePresetByName(key, agentConfigFor(cfg, "worker"));
+  return r.ok ? r.agent : null;
+}
+
+type ControlCtx = {
+  /** 账号本人 id（帮助文案据此裁剪）。 */
+  owner: string;
+  /** 补发一条「必须送达」的消息（用于切脑的 ack/结果两段回执）。 */
+  notify: (text: string) => Promise<void>;
+  /** 补发一份长内容（交接摘要这类「要给用户留着」的文本走 .md 文件，不刷屏）。 */
+  notifyFile?: (text: string) => Promise<void>;
+};
+
+/**
+ * `交接`：让当前大脑把上下文写成摘要，落盘 + 回复给用户（长则另发 .md）。
+ * 先回一条「在做」的提示：写摘要要走一整个模型回合（可能一两分钟），没有进度提示会让人以为卡死。
+ */
+async function runHandoff(userId: string, ctx: ControlCtx): Promise<string> {
+  const from = getAgent("brain").name;
+  if (!currentSessionIdOf(from, userId, DATA_DIR))
+    return "ℹ️ 当前大脑还没有和你的对话记录，没什么可交接的。先聊几句再来交接。";
+  await ctx
+    .notify(`⏳ 正在让「${from}」把当前上下文写成交接摘要…（可能要一两分钟）`)
+    .catch(() => {});
+  let text: string;
+  try {
+    text = (await askBrain(userId, HANDOFF_PROMPT)).trim();
+  } catch (e) {
+    return `❌ 生成交接摘要失败：${String(e)}`;
+  }
+  if (!text) return "❌ 大脑这次没给出摘要内容（空回复），没有保存。可以再试一次。";
+  const now = Date.now();
+  saveHandoff(
+    {
+      version: HANDOFF_VERSION,
+      fromAgent: from,
+      userId,
+      text,
+      createdAt: now,
+      expiresAt: now + HANDOFF_TTL_MS,
+    },
+    DATA_DIR,
+  );
+  const head =
+    `✅ 交接摘要已保存（${text.length} 字，来自「${from}」）。\n` +
+    `切到别的大脑后，你发的第一条消息会自动带上它（答完即用掉，只带一次；切回「${from}」不注入）。`;
+  if (text.length > LONG_REPLY_THRESHOLD && ctx.notifyFile) {
+    await ctx.notifyFile(text).catch((e) => log("handoff md send failed:", String(e)));
+    return `${head}\n（摘要较长，已另发 .md 文件。）`;
+  }
+  return `${head}\n\n${text}`;
+}
+
+async function handleControl(c: ChatCommand, userId: string, ctx: ControlCtx): Promise<string> {
+  if (c.kind === "list") return listMcp();
+  // 会话类指令的共用上下文：谁、当前对话大脑、数据目录（登记表按 agent 分命名空间，切换后自然按新大脑列）
+  const sc = (): SessionCtx => ({ agent: getAgent("brain").name, userId, dir: DATA_DIR });
+  if (c.kind === "new") return await newSessionCmd({ ...sc(), name: c.name, create: newSession });
+  if (c.kind === "sessions") return sessionsCmd({ ...sc(), page: c.page });
+  if (c.kind === "resume") return await resumeSessionCmd({ ...sc(), resume: resumeSession }, c.ref);
+  if (c.kind === "rename") return renameSessionCmd(sc(), c.ref, c.name);
+  if (c.kind === "delete") return deleteSessionCmd(sc(), c.ref);
   if (c.kind === "add") {
     const r = addMcp(c.name);
     restart(); // 重启 acp 进程，使其按新沙箱 mcp.json 重新加载
     return r;
   }
-  const r = removeMcp(c.name);
-  restart();
-  return r;
+  if (c.kind === "remove") {
+    const r = removeMcp(c.name);
+    restart();
+    return r;
+  }
+  if (c.kind === "ai") return agentOverview();
+  if (c.kind === "brain")
+    return c.target
+      ? await switchBrainAck(c.target, userId, ctx)
+      : `当前对话大脑：${agentLine(getAgent("brain"))}。切换用 \`切换大脑 <预设>\`（可选：${presetNames().join("、")}、auto）。`;
+  if (c.kind === "workerBrain")
+    return c.target
+      ? setTaskBrain(c.target)
+      : `当前默认任务大脑：${agentLine(getAgent("worker"))}。切换用 \`切换任务大脑 <预设>\`。`;
+  if (c.kind === "help") return renderHelp(userId === ctx.owner ? "owner" : "user", "wechat");
+  if (c.kind === "handoff") return await runHandoff(userId, ctx);
+  // 兜底：指令表新增了 kind 但这里还没接通时（正常情况下 TS 会先把这里判成不可达），别静默吞掉
+  return `「${(c as { kind: string }).kind}」这条指令还没接通（当前版本请先用 CLI 对应命令）。`;
 }
 
 async function setTyping(
@@ -270,8 +463,8 @@ const MIN_SEND_GAP_MS = Number(process.env.WECHAT_MIN_SEND_GAP_MS) || 1500;
 
 // iLink 在用户回复前能连续发送的消息数上限（实测约 10，可调）。
 const CONSEC_SEND_LIMIT = Number(process.env.WECHAT_CONSEC_SEND_LIMIT) || 10;
-// 静默期心跳：默认 15s；预设可放宽（如 DSH committed-only，但仍会发 thought/usage 帧）。
-const HEARTBEAT_MS = Number(process.env.WECHAT_BRAIN_HEARTBEAT_MS) || heartbeatMs() || 15_000;
+// 静默期心跳默认 15s（预设可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。
+const HEARTBEAT_DEFAULT_MS = 15_000;
 // 「距该用户上一条消息以来」bot 已连续发送的条数 + 是否处于"等待继续"段。按用户(to)维护、**跨回合持续**，仅在该用户发来任何消息时重置（镜像服务端"任何用户消息都重置连续发送配额"的规则）。
 // 这样即使 A 任务期间你发了 B、A 又继续发了几条，B 任务接手时计数是延续的，不会误以为"还能再发10条"而撞上限。
 type SendBudget = { count: number; awaiting: boolean };
@@ -365,6 +558,10 @@ function sniffMime(b: Buffer): string {
   return "image/jpeg";
 }
 
+/**
+ * 处理一条发给大脑的消息。返回**是否真的答成了**（`brainErrorMessage` 兜底算没答成）——
+ * 交接摘要的消费就靠这个返回值：只有答成了才把摘要删掉（失败留着，下次还能用）。
+ */
 async function handleMessage(
   account: AccountData,
   ctx: string | undefined,
@@ -373,7 +570,7 @@ async function handleMessage(
   imageItems: ImageItem[],
   createTimeMs?: number,
   latestToken?: () => string | undefined,
-): Promise<void> {
+): Promise<boolean> {
   const msgAge = () => (createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"); // 这条消息已存在多久（诊断用）
   // activeTurn 只存当前回合的 from/token；连续发送计数用按用户、跨回合的 budgetOf(to)（不在回合开始清零）。
   activeTurn = { from: to, token: ctx };
@@ -387,6 +584,10 @@ async function handleMessage(
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
+  // 心跳间隔**每回合**取一次：热切换大脑后新 agent 的心跳覆盖要立刻生效（改造前是 import 期定死的常量，
+  // 切到 DSH（heartbeatMs=60s）却还按旧大脑的 15s 发心跳，白占微信连发额度）。
+  const heartbeatMsValue =
+    Number(process.env.WECHAT_BRAIN_HEARTBEAT_MS) || heartbeatMs() || HEARTBEAT_DEFAULT_MS;
   // iLink 限制 bot 在用户回复前连续发送的消息数（实测约 10，超出被 ret=-2 拒）。计数按用户跨回合维护(budgetOf)。
   // 当已发到「上限-2」(默认第8条)后，下一条进度改为「即将达上限」提示并进入等待，把最后一条额度留给最终答案；用户回复「继续」(或发任何消息)会重置计数恢复发送（见 poller）。
   const sendProgress = (msg: string) => {
@@ -417,11 +618,11 @@ async function handleMessage(
     log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
     sendProgress("🤖 收到，正在处理…");
   }
-  // 心跳：仅当 brain 真正静默(无任何帧)超过 HEARTBEAT_MS 才提示——首条用友好措辞，后续才带计时
+  // 心跳：仅当 brain 真正静默(无任何帧)超过心跳间隔才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
   let answerNoticeSent = false; // "正在整理回复"只发一次
   const heartbeat = setInterval(() => {
-    if (Date.now() - lastProgressAt >= HEARTBEAT_MS) {
+    if (Date.now() - lastProgressAt >= heartbeatMsValue) {
       hbCount += 1;
       sendProgress(
         hbCount === 1
@@ -429,7 +630,7 @@ async function handleMessage(
           : `⏳ 仍在处理中…（已 ${Math.round((Date.now() - t0) / 1000)} 秒）`,
       );
     }
-  }, HEARTBEAT_MS);
+  }, heartbeatMsValue);
 
   // 收图：下载并解密（失败的跳过）
   const images: Array<{ data: string; mimeType: string }> = [];
@@ -463,7 +664,7 @@ async function handleMessage(
     } finally {
       activeTurn = null;
     }
-    return;
+    return false; // 没有答成：交接摘要不能被消费掉
   }
 
   // 一次尝试：带进度（步骤编号每次尝试重置）。进度消息节流：避免一回合刷十几条触发 iLink 发送限流（疑似 ret=-2 主因）
@@ -522,9 +723,11 @@ async function handleMessage(
   };
 
   let answer: string;
+  let ok = true;
   try {
     answer = await runWithRetry(text, images);
   } catch (e2) {
+    ok = false; // 重试也失败 → 只是把错误提示当回复发出去，不算「答成」（交接摘要据此决定留不留）
     answer = brainErrorMessage(e2);
   } finally {
     clearInterval(keepAlive);
@@ -568,6 +771,7 @@ async function handleMessage(
   }
   log(`replied to ${to} (msgAge=${msgAge()}): ${(answer || "").slice(0, 60)}`);
   activeTurn = null; // 回合结束（计数 budgetOf 不清零，留待用户下条消息重置）
+  return ok;
 }
 
 // ===== 解耦：拉取器(poller) 与 处理器(worker) 通过队列协作 =====
@@ -689,7 +893,7 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
   }
 }
 
-async function workerLoop(account: AccountData, state: ServerState): Promise<void> {
+async function workerLoop(account: AccountData, state: ServerState, owner: string): Promise<void> {
   while (true) {
     if (isSessionPaused(account.botId)) {
       await sleep(Math.min(getRemainingPauseMs(account.botId), 30_000) || 30_000);
@@ -713,9 +917,23 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
     // 控制指令：单独处理
     const ctrl = item.text ? parseControl(item.text) : null;
     if (ctrl) {
+      // owner-only（切脑/交接）：非本人 → 短提示拒绝，**不**转发给大脑（否则大脑可能替用户执行越权动作）
+      if (isOwnerOnly(ctrl) && from !== owner) {
+        const r = "这条指令仅账号本人可用。发送「帮助」看你自己的指令。";
+        log("control: denied(not owner)", JSON.stringify(ctrl));
+        await sendNotice(account, from, token, r, latestToken());
+        continue;
+      }
+      // 补发用**最新**token（切换可能几十秒，期间用户又发过消息；旧 token 可能已失效）
+      const notify = (text: string) =>
+        sendNotice(account, from, latestToken() ?? token, text, latestToken());
+      const notifyFile = (text: string) => {
+        budgetOf(from).count += 1; // .md 也是一条消息，占同一份额度
+        return sendMdOrdered(account, from, latestToken() ?? token, text, latestToken());
+      };
       let r: string;
       try {
-        r = await handleControl(ctrl, from);
+        r = await handleControl(ctrl, from, { owner, notify, notifyFile });
       } catch (e) {
         r = "处理指令出错：" + String(e);
       }
@@ -725,45 +943,100 @@ async function workerLoop(account: AccountData, state: ServerState): Promise<voi
     }
 
     // ── 任务路由 ──
-    // 1) 结束任务 / 明确发给 worker（任务：、>）
+    // 1) 结束任务（可带编号/全部）
     const tcmd = item.text ? parseTaskControl(item.text) : null;
     if (tcmd?.kind === "stop") {
-      const r = stopTask(from);
-      log("task: stop ->", r);
+      const r = stopTask(from, tcmd.id);
+      log("task: stop ->", r.replace(/\n/g, " | "));
+      await sendNotice(account, from, token, r, latestToken());
+      continue;
+    }
+    // 2) 任务列表
+    if (tcmd?.kind === "tasks") {
+      await sendNotice(account, from, token, renderTaskList(from), latestToken());
+      continue;
+    }
+    // 3) 给指定编号的任务回话
+    if (tcmd?.kind === "reply") {
+      const r = injectTask(from, tcmd.text, tcmd.id);
+      log(`task: inject(#${tcmd.id}):`, tcmd.text.slice(0, 40));
+      if (r) await sendNotice(account, from, token, r, latestToken());
+      continue;
+    }
+    // 4) 派发：带预设名 = 指定 agent 起一条**新任务**（多任务并行）；不带 = 沿用「有任务就注入，没有就派发」
+    if (tcmd?.kind === "toWorker" && tcmd.agentToken) {
+      const r = dispatchTask(from, tcmd.text, { agentKey: tcmd.agentToken });
+      // 粘性（决策⑨）：指定过的 agent 成为之后的默认任务大脑——只在本进程生效，不写 brain.json
+      const ag = taskAgentForSticky(tcmd.agentToken);
+      if (ag && ag.name !== getAgent("worker").name) setAgent("worker", ag);
+      log(`task: dispatch(agent=${tcmd.agentToken}):`, r.replace(/\n/g, " | "));
       await sendNotice(account, from, token, r, latestToken());
       continue;
     }
     if (tcmd?.kind === "toWorker") {
-      // 明确发给 worker：无活跃任务 → 启动；有 → 注入/追加（running 暂存、waiting 喂下一轮）
+      // 明确发给 worker：有活跃任务 → 注入/追加（唯一一条喂下一轮、running 暂存、多条则回消歧提示）；
+      // 没有活跃任务 → 派发新任务（不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活）。
       if (hasActiveTask(from)) {
-        log("task: inject(explicit):", tcmd.text.slice(0, 40));
-        injectTask(from, tcmd.text);
+        const r = injectTask(from, tcmd.text);
+        log("task: inject(explicit):", tcmd.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
+        if (r) await sendNotice(account, from, token, r, latestToken());
       } else {
         const r = dispatchTask(from, tcmd.text);
+        log("task: dispatch:", r.replace(/\n/g, " | "));
         await sendNotice(account, from, token, r, latestToken());
       }
       continue;
     }
     // 2) 明确「问大脑」逃逸前缀 → 去前缀后强制走 brain（即使 worker 在等你）
     const brainEscape = item.text ? parseBrainEscape(item.text) : null;
-    // 3) 无前缀 + worker 正等你回 + 非图片 → 默认注入 worker；其余（running / 无任务 / 逃逸 / 图片）→ brain
-    if (!brainEscape && item.imageItems.length === 0 && isAwaiting(from)) {
-      log("task: inject(awaiting):", item.text.slice(0, 40));
-      injectTask(from, item.text);
+    // 3) 无前缀 + worker 正等你回 + 非图片 → 默认注入 worker（唯一一条 waiting 直接喂；多条 waiting 回消歧提示）；
+    //    其余（running / 无任务 / 逃逸 / 图片）→ brain
+    if (!brainEscape && item.imageItems.length === 0 && awaitingTasks(from).length > 0) {
+      const r = injectTask(from, item.text);
+      log("task: inject(awaiting):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
+      if (r) await sendNotice(account, from, token, r, latestToken());
+      continue;
+    }
+    // 已中断的任务（daemon 重启留下的）：没有活跃任务时**只有「继续」这类短句**才放行进任务表续跑。
+    // 为什么还要关键字这层闸：一条陈旧的中断任务会一直躺在表里，若见了消息就放行，「帮我查一下 X」这类日常提问会被它吞掉。
+    if (
+      !brainEscape &&
+      item.imageItems.length === 0 &&
+      !hasActiveTask(from) &&
+      interruptedTasks(from).length > 0 &&
+      looksLikeResume(item.text)
+    ) {
+      const r = injectTask(from, item.text);
+      log("task: resume(interrupted):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
+      if (r) await sendNotice(account, from, token, r, latestToken());
       continue;
     }
 
     const brainText = brainEscape ?? item.text;
+    // 交接注入：切换大脑后，发给**新**大脑的第一条消息带上前一个大脑留下的摘要（切回来源大脑、别人、
+    // 过期都不注入，规则见 handoff.ts）。作为前缀注入 = 不额外占一个回合、不多一次模型调用。
+    // 切换进行中时按**目标**大脑判断（这条消息会在门口等新大脑就绪，实际答话的是它）。
+    const pending = loadHandoff(DATA_DIR);
+    const goal = switchInFlightTarget() ?? getAgent("brain").name;
+    const htext = takeHandoffFor(pending, goal, from);
+    const withHandoff =
+      pending && htext ? handoffPrefix(pending.fromAgent, htext) + brainText : brainText;
+    if (htext) log(`handoff injected from=${pending?.fromAgent} to=${goal} chars=${htext.length}`);
     try {
-      await handleMessage(
+      const answered = await handleMessage(
         account,
         token,
         from,
-        brainText,
+        withHandoff,
         item.imageItems,
         item.createTimeMs,
         latestToken,
       );
+      // 答成才消费：失败/被图片挡下就留着，下次还能用。
+      // 切回来答话（回滚到来源大脑，或切换目标就是它）也不消费——那是它自己写的摘要，留着下次切走时用。
+      const answeredBy = getAgent("brain").name;
+      if (htext && answered && answeredBy !== pending?.fromAgent && clearHandoff(DATA_DIR))
+        log(`handoff consumed by ${answeredBy}`);
     } catch (e) {
       log("handleMessage error:", e instanceof Error ? e.stack || e.message : String(e));
       await sendNotice(
@@ -794,7 +1067,7 @@ function scanTaskInbox(owner: string): void {
   files.sort(); // 文件名带时间戳前缀，字典序即时间序
   for (const f of files) {
     const fp = path.join(TASK_INBOX_DIR, f);
-    let cmd: { kind?: string; text?: string; cwd?: string };
+    let cmd: { kind?: string; text?: string; cwd?: string; agent?: string; id?: number | string };
     try {
       cmd = JSON.parse(fs.readFileSync(fp, "utf-8"));
     } catch {
@@ -814,16 +1087,28 @@ function scanTaskInbox(owner: string): void {
       if (cmd.kind === "dispatch") {
         log(
           "local task dispatch:",
-          dispatchTask(owner, String(cmd.text ?? ""), cmd.cwd ? String(cmd.cwd) : undefined).slice(
-            0,
-            50,
-          ),
+          dispatchTask(owner, String(cmd.text ?? ""), {
+            ...(cmd.cwd ? { cwd: String(cmd.cwd) } : {}),
+            ...(cmd.agent ? { agentKey: String(cmd.agent) } : {}),
+          }).slice(0, 60),
         );
       } else if (cmd.kind === "reply") {
-        injectTask(owner, String(cmd.text ?? ""));
-        log("local task reply:", String(cmd.text ?? "").slice(0, 40));
+        const id = Number(cmd.id) > 0 ? Number(cmd.id) : undefined;
+        const r = injectTask(owner, String(cmd.text ?? ""), id);
+        log(
+          "local task reply:",
+          id ? `#${id}` : "-",
+          String(cmd.text ?? "").slice(0, 40),
+          r.slice(0, 40),
+        );
       } else if (cmd.kind === "stop") {
-        log("local task stop:", stopTask(owner));
+        log(
+          "local task stop:",
+          stopTask(
+            owner,
+            cmd.id === "all" ? "all" : Number(cmd.id) > 0 ? Number(cmd.id) : undefined,
+          ),
+        );
       } else {
         log("unknown task-inbox cmd:", cmd.kind);
       }
@@ -833,9 +1118,101 @@ function scanTaskInbox(owner: string): void {
   }
 }
 
+/**
+ * 执行一条 CLI 桥请求，返回要打印给用户的那句话。
+ * 与微信指令**共用同一批实现函数**（switchBrain / session-manager / task-manager），
+ * 所以「CLI 与微信行为一致」不是靠约定，而是同一段代码。
+ * 这里的 `owner` 就是账号本人：本地命令没有「谁发的」的概念，一律作用于本人。
+ */
+async function handleControlRequest(req: ControlRequest, owner: string): Promise<string> {
+  const sc = (): SessionCtx => ({ agent: getAgent("brain").name, userId: owner, dir: DATA_DIR });
+  switch (req.kind) {
+    case "brain.switch": {
+      if (!req.target) return "❌ 用法：brain switch <预设|auto>";
+      const pre = preflightSwitch(req.target, DATA_DIR);
+      if (!pre.ok) return `❌ ${pre.problem}`;
+      // 注意：这里**不用** ack/补发两段（那是微信侧的写法）。CLI 在等应答，直接等完整结果更实在。
+      const out = await switchBrain(req.target, { userId: owner, dir: DATA_DIR });
+      return out.ok ? out.notice : `❌ ${out.problem}`;
+    }
+    case "brain.worker":
+      if (!req.target)
+        return `当前默认任务大脑：${agentLine(getAgent("worker"))}。切换用 \`wemind brain switch <预设> --worker\`。`;
+      return setTaskBrain(req.target);
+    case "brain.handoff":
+      return await runHandoff(owner, { owner, notify: async () => {} });
+    case "session.new":
+      return await newSessionCmd({ ...sc(), name: req.name, create: newSession });
+    case "session.list":
+      return sessionsCmd({ ...sc(), page: req.page });
+    case "session.resume":
+      if (!req.ref) return "❌ 用法：session resume <序号|名字|id前缀>";
+      return await resumeSessionCmd({ ...sc(), resume: resumeSession }, req.ref);
+    case "session.rename":
+      if (!req.ref || !req.name) return "❌ 用法：session rename <序号|名字> <新名字>";
+      return renameSessionCmd(sc(), req.ref, req.name);
+    case "session.delete":
+      if (!req.ref) return "❌ 用法：session delete <序号|名字|id前缀>";
+      return deleteSessionCmd(sc(), req.ref);
+    case "task.list":
+      return renderTaskList(owner);
+    case "task.reply": {
+      if (!req.text) return '❌ 用法：task-reply [#编号] "内容"';
+      const r = injectTask(
+        owner,
+        req.text,
+        typeof req.taskId === "number" ? req.taskId : undefined,
+      );
+      return r || "已注入任务（它继续跑，结果会发到微信）。";
+    }
+    case "task.stop":
+      return stopTask(owner, req.taskId);
+  }
+}
+
+// ===== 控制桥（CLI ↔ daemon）：CLI 写 control-inbox，这里执行 + 写 control-out =====
+let controlBusy = false; // 同时只处理一条：切换/会话恢复本来就要串行（它们争的是同一个 ACP 连接）
+
+/** 扫描控制桥收件箱。异步：brain.switch 要等预热（最长 ~2 分钟），期间不能再处理下一条。 */
+async function scanControlInbox(owner: string): Promise<void> {
+  if (controlBusy) return;
+  const items = readControlInbox(DATA_DIR);
+  if (!items.length) return;
+  controlBusy = true;
+  try {
+    for (const { file, req } of items) {
+      try {
+        fs.unlinkSync(path.join(controlInboxDir(DATA_DIR), file));
+      } catch {
+        /* ignore */
+      } // 先删，避免重复处理
+      if (!req) {
+        log("control: 非法请求（未知 kind / 坏 JSON），已丢弃:", file);
+        continue;
+      }
+      log("control(cli):", req.kind, JSON.stringify({ target: req.target, ref: req.ref }));
+      let text: string;
+      try {
+        text = await handleControlRequest(req, owner);
+      } catch (e) {
+        text = `❌ 处理出错：${String(e)}`;
+      }
+      // 约定：❌ 开头即失败（CLI 据此定退出码）。应答一定写——不写的话 CLI 会白等到超时。
+      writeControlResponse(
+        { id: req.id, at: Date.now(), ok: !text.startsWith("❌"), text },
+        DATA_DIR,
+      );
+    }
+  } finally {
+    controlBusy = false;
+  }
+}
+
 export async function runDaemon(): Promise<void> {
   // 启动即校验大脑：早失败、说人话——避免「进程看着正常、直到第一条消息才炸」（历史上表现为反复「⏳ 响应中断了，正在自动重试…」，实为默认大脑的二进制没装）。
-  const agent = resolveAgent(loadBrainConfig());
+  // 先种槽位再校验：此后运行期一律从槽位取 agent（热切换会更新它，见 agent-slot.ts），启动期与运行期同一个来源。
+  seedSlots(loadBrainConfig());
+  const agent = getAgent("brain");
   const brainProblem = agentProblem(agent);
   if (brainProblem) {
     log(`FATAL 大脑不可用：${brainProblem}`);
@@ -844,6 +1221,14 @@ export async function runDaemon(): Promise<void> {
   log(
     `brain=${agent.name} bin=${agent.bin} args=[${agent.args.join(" ")}] shell=${agent.shell} (source: ${agent.source})`,
   );
+  const wagent = getAgent("worker");
+  if (wagent.name !== agent.name)
+    log(
+      `worker=${wagent.name} bin=${wagent.bin} args=[${wagent.args.join(" ")}] (source: ${wagent.source})`,
+    );
+  // 任务大脑不可用只警告、不退出：只聊天的用户不受影响，但派发任务会失败——早说清楚比任务静默失败好。
+  const workerProblem = agentProblem(wagent);
+  if (workerProblem) log(`WARN 任务大脑不可用（派发任务会失败）：${workerProblem}`);
   const account = loadAccount();
   if (!account?.botToken) {
     log("not logged in; run the MCP login_qrcode flow first.");
@@ -865,13 +1250,19 @@ export async function runDaemon(): Promise<void> {
       /* ignore */
     }
   };
-  process.on("exit", cleanupPid);
-  process.on("SIGINT", () => {
+  // 退出时连带收掉池里的全部 worker：Windows 上子进程不会随父进程退出，漏掉就是一堆孤儿 agent 进程。
+  // （任务表不在这里改状态：下次启动统一标「已中断」——那才是它真实的处境。）
+  const cleanupAll = () => {
     cleanupPid();
+    killWorkerPool();
+  };
+  process.on("exit", cleanupAll);
+  process.on("SIGINT", () => {
+    cleanupAll();
     process.exit(0);
   });
   process.on("SIGTERM", () => {
-    cleanupPid();
+    cleanupAll();
     process.exit(0);
   });
   // 防御：任何未捕获的 promise 拒绝/异常（多为瞬时网络 fetch failed 或回合内 send 被拒）只记录、不退出，避免 daemon 崩溃丢掉在途回合、用户卡在心跳。此前的 code=1 崩溃即源于此类未捕获拒绝。
@@ -924,9 +1315,23 @@ export async function runDaemon(): Promise<void> {
     /* ignore */
   }
   setInterval(() => scanTaskInbox(owner), TASK_SCAN_MS);
+  // 控制桥：同样「启动清空 + 独立定时器扫描」（作废重启前的残留命令，防重放）
+  clearControlDirs(DATA_DIR);
+  markBridgeReady(DATA_DIR, process.pid); // 凭据：CLI 据此判断「在跑的这个 daemon 认不认识控制桥」
+  setInterval(() => void scanControlInbox(owner), TASK_SCAN_MS);
+  // 任务表：读回上次的（未完成的标「已中断」，不自动恢复）；编号接着排
+  const restored = initTasks(DATA_DIR);
+  if (restored.interrupted.length)
+    log(`restored tasks: interrupted=[${restored.interrupted.join(",")}]（回「继续」可续跑）`);
+  // 会话登记表：把指针表里有、登记表里还没有的旧会话补进去（功能上线前的老账号，一次性、幂等）
+  const backfilled = syncFromPointerMap(DATA_DIR);
+  if (backfilled) log(`session registry backfilled: ${backfilled} 条（来自会话指针表）`);
+  // 进程池清扫：空闲超时的 worker 回收（默认 5 分钟）
+  const poolSweep = setInterval(() => sweepWorkerPool(), 30_000);
+  poolSweep.unref?.();
   // 解耦运行：拉取器持续抓消息(永不被大脑阻塞)，处理器串行喂大脑
   void pollerLoop(account, owner, state);
-  await workerLoop(account, state);
+  await workerLoop(account, state, owner);
 }
 
 // daemon 本体由 cli.ts 的 `wemind daemon` 调用 runDaemon() 启动，此处不再顶层自启。

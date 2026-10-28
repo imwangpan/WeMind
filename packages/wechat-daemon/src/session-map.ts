@@ -1,9 +1,57 @@
+import fs from "node:fs";
+import path from "node:path";
+
+import { DATA_DIR } from "@wemind/wechat-ilink-core";
+
 /**
  * brainstorm/worker 共用的 session 映射键规则：`<agent>:<key>`。
  * 换大脑后各 agent 的会话互不覆盖，切回原大脑仍能 session/load 回原上下文。
  */
 export function sessionKey(agent: string, key: string): string {
   return `${agent}:${key}`;
+}
+
+/** 对话大脑的会话指针表路径（`<agent>:<userId>` → sessionId）。 */
+export function brainSessionMapPath(dir: string = DATA_DIR): string {
+  return path.join(dir, "brain-sessions.json");
+}
+
+/** 任务 worker 的会话指针表路径（`<agent>:<taskKey>` → sessionId）。 */
+export function workerSessionMapPath(dir: string = DATA_DIR): string {
+  return path.join(dir, "worker-sessions.json");
+}
+
+/** 读会话指针表；缺失/损坏/非对象 → 空表（幂等、不抛）。只保留字符串值，**不做格式迁移**（迁移归 normalizeSessionMap）。 */
+export function readSessionMap(file: string): Record<string, string> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch {
+    return {};
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const map: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string" && v) map[k] = v;
+  }
+  return map;
+}
+
+/** 原子写会话指针表（tmp + rename）：这个文件在关键路径上（ensureSession → session/load），半截 JSON 等于「所有会话丢失」。 */
+export function writeSessionMap(file: string, map: Record<string, string>): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(map, null, 2) + "\n", "utf-8");
+  fs.renameSync(tmp, file);
+}
+
+/** 清掉某个键的会话指针（如「删除会话」删的正是当前那条）；返回是否确有改动。 */
+export function clearSessionPointer(file: string, key: string): boolean {
+  const map = readSessionMap(file);
+  if (!(key in map)) return false;
+  delete map[key];
+  writeSessionMap(file, map);
+  return true;
 }
 
 /**

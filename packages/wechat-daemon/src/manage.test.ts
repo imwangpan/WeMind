@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { spawn } from "node:child_process";
 
-import { descendantPids } from "./manage.js";
+import { descendantPids, helpText } from "./manage.js";
 import { isAlive } from "./proc-identity.js";
 
 /*
@@ -20,6 +20,26 @@ afterAll(() => {
       /* ignore */
     }
   }
+});
+
+describe("helpText（CLI 帮助面）", () => {
+  it("列出自本次改造起新增的指令：热切换 / 交接 / 会话四件套 / 任务列表（与微信表同源）", () => {
+    const h = helpText();
+    for (const s of [
+      "wemind brain switch", // 热切换（--worker 也在同一条里）
+      "wemind brain handoff",
+      "wemind session new",
+      "wemind session list",
+      "wemind session resume",
+      "wemind session rename",
+      "wemind session delete",
+      "wemind task-list",
+      "wemind task-reply",
+      "控制桥", // 说明「CLI 与微信走同一段代码」的那句
+    ])
+      expect(h).toContain(s);
+    expect(h).not.toContain("（无 CLI）"); // CLI 帮助不列只在微信里存在的操作（加载/卸载 MCP）
+  });
 });
 
 describe.skipIf(!isPosix)("descendantPids（POSIX 进程树）", () => {

@@ -4,10 +4,18 @@ import fs from "node:fs";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME, activeMcpServers } from "./mcp-sandbox.js";
-import { resolveAgent } from "./brain-agents.js";
-import { loadBrainConfig } from "./brain-config.js";
+import { getAgent } from "./agent-slot.js";
+import type { ResolvedAgent } from "./brain-agents.js";
+import { pidRecordOf, writePidRecords } from "./pid-record.js";
 import { spawnAgent } from "./spawn-agent.js";
-import { normalizeSessionMap, sessionKey } from "./session-map.js";
+import {
+  brainSessionMapPath,
+  normalizeSessionMap,
+  sessionKey,
+  writeSessionMap,
+} from "./session-map.js";
+import { ensureEntry, markUsed, titleOf, touchEntry } from "./session-registry.js";
+import { stripHandoffPrefix } from "./handoff.js";
 
 /**
  * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。
@@ -16,20 +24,27 @@ import { normalizeSessionMap, sessionKey } from "./session-map.js";
  * - 自愈：session/prompt 超时/失败 → 杀进程重建；重建后用 session/load 恢复上下文。
  * - 诊断日志（[wemind/wechat-daemon/acp] 前缀，进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差。
  * 跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
+ *
+ * **agent 显式传参**：本模块不再持有「当前 agent」常量（改造前是 import 时解析的 `AGENT`，
+ * 于是热切换只能重启整个 daemon）。入口 `askBrain`/`newSession` 取一次槽位（`getAgent("brain")`），
+ * 之后 `ensureProcess(ag)` / `ensureSession(ag,…)` / `applyModel(ag,…)` / `promptRequest(ag,…)` 一路显式传下去——
+ * 过程内不再读槽位，「握手到一半被换掉 agent」在结构上不可能发生（不需要锁）。
  */
 
 function dlog(...a: unknown[]): void {
   console.error("[wemind/wechat-daemon/acp]", ...a);
 }
 
-const AGENT = resolveAgent(loadBrainConfig()); // 当前 ACP agent（env > 账号 brain.json > auto）
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 120_000; // 多久没收到任何帧才算"卡死"。重任务单次慢抓取可静默较久（直连 kiro-cli 无此限制），放宽到 2min 兜底真死
 const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 900_000; // 单回合硬上限 15min。实测重任务(联网核实)需 ~6.5min；context_token 无时间 TTL(官方)，长回合用本消息 token 仍可送达。卡死由 idle/首帧超时兜底
-const FIRST_FRAME_MS =
-  Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || AGENT.firstFrameMs || 25_000; // 预设可覆盖；DSH 实测首帧 1–4s，兜底 60s
-const SESSION_MAP_FILE = path.join(DATA_DIR, "brain-sessions.json");
-const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 标记当前账号的大脑 kiro-cli pid，便于与用户自己的会话区分/清理
+const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 身份记录（JSON，见 pid-record.ts）；跨入口用同一文件名
+
+/** 首帧超时：env 覆盖 > 预设覆盖（DSH 实测首帧 1–4s，兜底 60s）> 默认 25s。
+ *  按 agent 算而不是模块常量——热切换后新 agent 的启动快慢与旧的不同。 */
+function firstFrameMs(ag: ResolvedAgent): number {
+  return Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || ag.firstFrameMs || 25_000;
+}
 
 type Pending = {
   resolve: (v: unknown) => void;
@@ -59,6 +74,52 @@ const seenUpdateTypes = new Set<string>(); // 诊断：本回合出现过的 ses
 const seenTools = new Set<string>(); // 当前回合已上报的工具标题，去重
 const hintedSessions = new Set<string>(); // 已注入「可发图」约定提示的 session（每会话首轮注入一次）
 
+// ---- 并发门（切脑用）----
+// 一回合是一段长异步（可能几分钟）：热切换必须先**等在跑的回合结束**，绝不在整回合上持锁。
+// 反过来，切换期间新回合要在门口等（有界），否则会与预热**双起进程**（看门狗/重试也走这条路）。
+let turnInFlight = false; // 有回合正在跑（askBrain / newSession 全程）
+let switching = false; // 正在切换大脑
+const SWITCH_WAIT_MS = Number(process.env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000; // 回合等切换的上限，与切换自身的预热上限一致
+
+export function isTurnInFlight(): boolean {
+  return turnInFlight;
+}
+
+/** 切换流程开始时调用：此后新回合在门口等，直到 `endSwitch()`。 */
+export function beginSwitch(): void {
+  switching = true;
+}
+
+export function endSwitch(): void {
+  switching = false;
+}
+
+/** 切换流程用：等在跑的回合结束（诚实失败——超时说明情况让用户重试，绝不半路砍掉回合）。 */
+export async function drainTurn(timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (turnInFlight) {
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return true;
+}
+
+/** 回合入口用：切换进行中就先等它完成（有界），再继续——避免与预热抢同一个 ACP 进程。 */
+async function waitWhileSwitching(): Promise<void> {
+  if (!switching) return;
+  dlog("turn waits for in-flight brain switch…");
+  await drainSwitch(SWITCH_WAIT_MS);
+}
+
+async function drainSwitch(timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (switching) {
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return true;
+}
+
 function isAlive(): boolean {
   return !!child && child.exitCode === null && !child.killed;
 }
@@ -80,11 +141,7 @@ function reset(): void {
       /* ignore */
     }
   }
-  try {
-    fs.unlinkSync(BRAIN_PID_FILE);
-  } catch {
-    /* ignore */
-  }
+  writePidRecords(BRAIN_PID_FILE, []); // 没有进程 = 没有记录
   for (const p of pending.values()) {
     p.clear();
     p.reject(new Error("acp process reset"));
@@ -96,22 +153,21 @@ function reset(): void {
 }
 
 // ---- 磁盘 session 映射（`<agent>:<userId>` -> sessionId），跨进程重建保上下文 ----
-const keyOf = (userId: string): string => sessionKey(AGENT.name, userId);
+const keyOf = (ag: ResolvedAgent, userId: string): string => sessionKey(ag.name, userId);
 
-function loadSessionMap(): Record<string, string> {
+function loadSessionMap(ag: ResolvedAgent): Record<string, string> {
   let raw: unknown;
   try {
-    raw = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, "utf-8"));
+    raw = JSON.parse(fs.readFileSync(brainSessionMapPath(DATA_DIR), "utf-8"));
   } catch {
     return {};
   }
-  const { map, migrated } = normalizeSessionMap(raw, AGENT.name);
+  const { map, migrated } = normalizeSessionMap(raw, ag.name);
   if (migrated) saveSessionMap(map); // 立即落盘，避免下次换 agent 时旧条目再被“继承”一次
   return map;
 }
 function saveSessionMap(m: Record<string, string>): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(SESSION_MAP_FILE, JSON.stringify(m, null, 2), "utf-8");
+  writeSessionMap(brainSessionMapPath(DATA_DIR), m); // 原子写：半截 JSON 等于所有会话丢失
 }
 
 function handleReverseRequest(f: Record<string, any>): void {
@@ -250,7 +306,7 @@ function request(method: string, params: unknown, timeoutMs: number): Promise<an
  * session/prompt 专用：空闲超时（PROMPT_IDLE_MS 内无任何帧才判卡死）+ 硬上限（PROMPT_CAP_MS）。
  * 只要 brain 还在出帧（工具进度/正文），就不打断——避免误杀"慢但在干活"的长查询。
  */
-function promptRequest(params: unknown): Promise<any> {
+function promptRequest(ag: ResolvedAgent, params: unknown): Promise<any> {
   return new Promise((resolve, reject) => {
     if (!child) {
       reject(new Error("no acp process"));
@@ -260,14 +316,15 @@ function promptRequest(params: unknown): Promise<any> {
     const startedAt = Date.now();
     lastFrameAt = Date.now(); // 重置空闲基线：从本次 prompt 发出算起，避免用上一回合的旧时间戳误判
     const startSeq = frameSeq; // 记录起点，用于判定本回合是否出过帧
+    const firstFrame = firstFrameMs(ag);
     dlog(
-      `→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms firstFrame=${FIRST_FRAME_MS}ms)`,
+      `→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms firstFrame=${firstFrame}ms)`,
     );
     const iv = setInterval(() => {
       const idle = Date.now() - lastFrameAt;
       const total = Date.now() - startedAt;
       const noFrameYet = frameSeq === startSeq; // 本回合从未出过帧
-      const firstFrameTimeout = noFrameYet && total > FIRST_FRAME_MS;
+      const firstFrameTimeout = noFrameYet && total > firstFrame;
       if (firstFrameTimeout || idle > PROMPT_IDLE_MS || total > PROMPT_CAP_MS) {
         if (pending.delete(id)) {
           clearInterval(iv);
@@ -283,21 +340,18 @@ function promptRequest(params: unknown): Promise<any> {
   });
 }
 
-async function ensureProcess(): Promise<void> {
+async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   if (isAlive() && initialized) return;
   reset();
   const env: NodeJS.ProcessEnv = { ...process.env };
-  if (AGENT.homeEnvVar) env[AGENT.homeEnvVar] = BRAIN_HOME; // 把 brain 沙箱目录传给 agent
+  if (ag.homeEnvVar) env[ag.homeEnvVar] = BRAIN_HOME; // 把 brain 沙箱目录传给 agent
   // 预设声明的额外环境变量（%HOME% → 沙箱根），如 opencode 的 OPENCODE_DISABLE_PROJECT_CONFIG
-  for (const [k, v] of Object.entries(AGENT.env ?? {})) env[k] = v.replaceAll("%HOME%", BRAIN_HOME);
-  const proc = spawnAgent(AGENT, { cwd: BRAIN_HOME, env });
+  for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", BRAIN_HOME);
+  const proc = spawnAgent(ag, { cwd: BRAIN_HOME, env });
   child = proc;
-  dlog(`spawn ${AGENT.name} acp pid=${proc.pid} bin=${AGENT.bin} args=[${AGENT.args.join(" ")}]`);
-  try {
-    fs.writeFileSync(BRAIN_PID_FILE, String(proc.pid), "utf-8");
-  } catch {
-    /* best-effort */
-  }
+  dlog(`spawn ${ag.name} acp pid=${proc.pid} bin=${ag.bin} args=[${ag.args.join(" ")}]`);
+  // 身份记录（JSON）：manage.ts 据此算进程特征串与展示 live 状态，不必猜「配置里的 agent 是不是正在跑的那个」
+  writePidRecords(BRAIN_PID_FILE, [pidRecordOf(proc.pid!, ag)]);
   proc.stdout.on("data", onStdout);
   proc.stderr.on("data", () => {
     /* ignore */
@@ -317,32 +371,32 @@ async function ensureProcess(): Promise<void> {
 }
 
 /** 按预设选择模型路由（如 DSH 的 deepseek-account）；没有 model 的 agent 跳过。 */
-async function applyModel(sid: string): Promise<void> {
-  if (!AGENT.model) return;
+async function applyModel(ag: ResolvedAgent, sid: string): Promise<void> {
+  if (!ag.model) return;
   try {
     await request(
       "session/set_config_option",
-      { sessionId: sid, configId: "model", value: AGENT.model },
+      { sessionId: sid, configId: "model", value: ag.model },
       REQ_TIMEOUT,
     );
-    dlog(`model set ${AGENT.model}`);
+    dlog(`model set ${ag.model}`);
   } catch (e) {
     dlog(`model set failed (${String(e)})`);
     throw e;
   }
 }
 
-async function ensureSession(userId: string): Promise<string> {
+async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string> {
   const existing = userSessions.get(userId);
   if (existing) return existing;
   // mcpViaAcp 预设（DSH）：激活集随 session 下发；其余 agent 传空（走各自沙箱配置文件）
-  const mcpServers = AGENT.mcpViaAcp ? activeMcpServers() : [];
-  const map = loadSessionMap();
-  const saved = map[keyOf(userId)];
+  const mcpServers = ag.mcpViaAcp ? activeMcpServers() : [];
+  const map = loadSessionMap(ag);
+  const saved = map[keyOf(ag, userId)];
   if (saved) {
     // 预设指定 resume（DSH）；其余仍先 load，失败再试 resume，最后 new
     const methods: Array<"load" | "resume"> =
-      AGENT.restore === "resume" ? ["resume"] : ["load", "resume"];
+      ag.restore === "resume" ? ["resume"] : ["load", "resume"];
     for (const method of methods) {
       try {
         await request(
@@ -350,8 +404,9 @@ async function ensureSession(userId: string): Promise<string> {
           { sessionId: saved, cwd: BRAIN_HOME, mcpServers },
           REQ_TIMEOUT,
         );
-        await applyModel(saved);
+        await applyModel(ag, saved);
         userSessions.set(userId, saved);
+        markUsed(ag.name, userId, saved); // 会话登记表：把它顶到「最近使用」（列表按此排序）
         dlog(`session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
         return saved;
       } catch (e) {
@@ -363,10 +418,11 @@ async function ensureSession(userId: string): Promise<string> {
     sessionId?: string;
   };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
-  await applyModel(res.sessionId);
+  await applyModel(ag, res.sessionId);
   userSessions.set(userId, res.sessionId);
-  map[keyOf(userId)] = res.sessionId;
+  map[keyOf(ag, userId)] = res.sessionId;
   saveSessionMap(map);
+  ensureEntry(ag.name, userId, res.sessionId); // 会话登记表：新会话进列表（turns 从 0 起）
   dlog(`session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
   return res.sessionId;
 }
@@ -378,8 +434,25 @@ export async function askBrain(
   onProgress?: (ev: ProgressEvent) => void,
   images?: Array<{ data: string; mimeType: string }>,
 ): Promise<string> {
-  await ensureProcess();
-  const sid = await ensureSession(userId);
+  await waitWhileSwitching(); // 切换进行中就先在门口等（有界）：绝不与预热双起进程
+  const ag = getAgent("brain"); // 等完之后才取槽位——拿到的是切换后的新大脑；此后全程用它，过程内不再读槽位
+  turnInFlight = true; // 从这一刻起，切脑会等本回合结束（drainTurn）
+  try {
+    return await runTurn(ag, userId, message, onProgress, images);
+  } finally {
+    turnInFlight = false;
+  }
+}
+
+async function runTurn(
+  ag: ResolvedAgent,
+  userId: string,
+  message: string,
+  onProgress?: (ev: ProgressEvent) => void,
+  images?: Array<{ data: string; mimeType: string }>,
+): Promise<string> {
+  await ensureProcess(ag);
+  const sid = await ensureSession(ag, userId);
   assembling.set(sid, []);
   currentOnProgress = onProgress ?? null;
   answerStarted = false;
@@ -388,13 +461,13 @@ export async function askBrain(
   seenTools.clear();
   const t0 = Date.now();
   const prompt: unknown[] = [];
-  if (images?.length && !AGENT.images) {
+  if (images?.length && !ag.images) {
     prompt.push({
       type: "text",
       text: "（用户发来图片，但当前大脑不支持图片输入；请让用户改用文字，或切换到支持图片的大脑。不要臆测图片内容。）",
     });
   }
-  if (AGENT.images) {
+  if (ag.images) {
     for (const im of images ?? [])
       prompt.push({ type: "image", mimeType: im.mimeType, data: im.data });
   }
@@ -407,8 +480,11 @@ export async function askBrain(
   }
   prompt.push({ type: "text", text: message || "（用户发来一张图片，请查看并回应）" });
   try {
-    await promptRequest({ sessionId: sid, prompt });
+    await promptRequest(ag, { sessionId: sid, prompt });
     const txt = (assembling.get(sid) ?? []).join("").trim();
+    // 成功回合才登记：轮次 +1、刷新最近使用、首次写入标题（用户消息前 30 字；纯图片消息没有文字 → 留给下一次）
+    // 标题取**剥掉交接前缀**后的正文：不然列表里全是「【交接摘要 · 来自 …】」，用户认不出哪条是哪条。
+    touchEntry(ag.name, userId, sid, { title: titleOf(stripHandoffPrefix(message)) });
     dlog(
       `prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length} updateTypes=[${[...seenUpdateTypes].join(",")}]`,
     );
@@ -429,12 +505,74 @@ export async function askBrain(
 
 /** 用户主动开新会话：丢弃旧 session（含磁盘映射），重建一个全新 session。 */
 export async function newSession(userId: string): Promise<void> {
-  const map = loadSessionMap();
-  delete map[keyOf(userId)]; // 只清当前 agent 的；换大脑前那个 agent 的上下文仍保留
-  saveSessionMap(map);
-  userSessions.delete(userId);
-  await ensureProcess();
-  await ensureSession(userId);
+  await waitWhileSwitching();
+  const ag = getAgent("brain");
+  turnInFlight = true; // 与 askBrain 共用「有回合在碰 ACP 进程」这一事实（切脑据此等待）
+  try {
+    const map = loadSessionMap(ag);
+    delete map[keyOf(ag, userId)]; // 只清当前 agent 的；换大脑前那个 agent 的上下文仍保留
+    saveSessionMap(map);
+    userSessions.delete(userId);
+    await ensureProcess(ag);
+    await ensureSession(ag, userId);
+  } finally {
+    turnInFlight = false;
+  }
+}
+
+/**
+ * 「恢复会话」：把某条**已有的**会话切回当前，**strict**——只认真接上的 load/resume，
+ * 接不上就如实报错，**绝不**回退成 session/new（那会让用户以为上下文回来了，其实是一张白纸），
+ * 也**不改**会话指针（当前会话原样保留，用户还能继续用）。
+ * 成功才动磁盘：userSessions + 指针表（`<agent>:<userId>` → 这条）。
+ */
+export async function resumeSession(
+  userId: string,
+  sessionId: string,
+): Promise<{ ok: true } | { ok: false; problem: string }> {
+  await waitWhileSwitching();
+  const ag = getAgent("brain");
+  turnInFlight = true; // 与 askBrain 共用「有回合在碰 ACP 进程」这一事实（切脑据此等待）
+  const short = sessionId.slice(0, 8);
+  try {
+    await ensureProcess(ag);
+    const mcpServers = ag.mcpViaAcp ? activeMcpServers() : [];
+    const methods: Array<"load" | "resume"> =
+      ag.restore === "resume" ? ["resume"] : ["load", "resume"];
+    let lastErr = "";
+    for (const method of methods) {
+      try {
+        await request(`session/${method}`, { sessionId, cwd: BRAIN_HOME, mcpServers }, REQ_TIMEOUT);
+        await applyModel(ag, sessionId);
+        userSessions.set(userId, sessionId);
+        const map = loadSessionMap(ag);
+        map[keyOf(ag, userId)] = sessionId;
+        saveSessionMap(map);
+        dlog(`resume ok ${sessionId}`);
+        return { ok: true };
+      } catch (e) {
+        lastErr = String(e);
+        dlog(`resume session/${method} failed (${lastErr})`);
+      }
+    }
+    return {
+      ok: false,
+      problem: `接不上会话 ${short}（该 agent 不支持恢复，或这条会话已被它自己清理）。当前会话没变，可以继续用；要开新的就发「新会话」。${lastErr ? `\n（原因：${lastErr.slice(0, 120)}）` : ""}`,
+    };
+  } finally {
+    turnInFlight = false;
+  }
+}
+
+/**
+ * 切换流程用：为新 agent 备好进程与（触发者）会话——预热成功才算「新大脑真的能用 ACP 说话」。
+ * 会话走既有 ensureSession：该 agent 里有本人的旧会话就 load/resume 恢复上下文，没有就新建。
+ * `userId` 为空（CLI 触发、还不知道是谁在聊）时只验进程能握手。
+ */
+export async function warmup(ag: ResolvedAgent, userId: string): Promise<string> {
+  await ensureProcess(ag);
+  if (!userId) return "";
+  return ensureSession(ag, userId);
 }
 
 /** MCP 激活集变更后调用：重启 acp 进程（重建后会 session/load 恢复上下文）。 */
@@ -444,10 +582,10 @@ export function restart(): void {
 
 /** 当前大脑是否接受图片输入（预设能力；默认 true）。 */
 export function supportsImages(): boolean {
-  return AGENT.images;
+  return getAgent("brain").images;
 }
 
-/** 当前预设的静默期心跳覆盖（默认 undefined → 15s）。 */
+/** 当前预设的静默期心跳覆盖（默认 undefined → 15s）。按回合取：热切换后心跳随之改变。 */
 export function heartbeatMs(): number | undefined {
-  return AGENT.heartbeatMs;
+  return getAgent("brain").heartbeatMs;
 }

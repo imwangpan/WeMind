@@ -4,9 +4,16 @@ import os from "node:os";
 import path from "node:path";
 
 import { resolveAgent, agentProblem, AUTO_PROBE_ORDER } from "./brain-agents.js";
+import {
+  presetAvailable,
+  presetNames,
+  resolveAgentFor,
+  resolvePresetByName,
+} from "./brain-agents.js";
 
 const VARS = [
   "WEMIND_BRAIN",
+  "WEMIND_WORKER_BRAIN",
   "WEMIND_BRAIN_BIN",
   "WEMIND_BRAIN_ARGS",
   "WEMIND_BRAIN_SHELL",
@@ -218,5 +225,130 @@ describe("resolveAgent auto 探测", () => {
   it("auto 探测把 qoder 排在最后，不影响老用户", () => {
     expect(AUTO_PROBE_ORDER[AUTO_PROBE_ORDER.length - 1]).toBe("qoder");
     expect(AUTO_PROBE_ORDER.indexOf("qoder")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("deepseek"));
+  });
+});
+
+describe("resolveAgentFor（对话大脑 / 任务 worker 两个角色）", () => {
+  it("未设 worker 段 → worker 回落到顶层（拆分角色之前的行为）", () => {
+    clearVars();
+    const cfg = { agent: "opencode" };
+    expect(resolveAgentFor(cfg, "worker").name).toBe("opencode");
+    expect(resolveAgentFor(cfg, "worker").source).toBe("file");
+    expect(resolveAgentFor(cfg, "brain").name).toBe("opencode");
+  });
+
+  it("worker 段优先于顶层；两个角色互不影响", () => {
+    clearVars();
+    const cfg = { agent: "kiro", worker: { agent: "opencode" } };
+    expect(resolveAgentFor(cfg, "brain").name).toBe("kiro");
+    expect(resolveAgentFor(cfg, "worker").name).toBe("opencode");
+  });
+
+  it("WEMIND_WORKER_BRAIN 只影响 worker；未设时回落 WEMIND_BRAIN", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "kiro";
+    process.env.WEMIND_WORKER_BRAIN = "qoder";
+    expect(resolveAgentFor({ agent: "opencode" }, "brain").name).toBe("kiro");
+    expect(resolveAgentFor({ agent: "opencode" }, "worker").name).toBe("qoder");
+    delete process.env.WEMIND_WORKER_BRAIN;
+    expect(resolveAgentFor({ agent: "opencode" }, "worker").name).toBe("kiro");
+  });
+
+  it("worker 段的 bin/args 只作用于 worker，且不会串给别的预设", () => {
+    clearVars();
+    const cfg = {
+      agent: "kiro",
+      worker: { agent: "opencode", bin: "/opt/oc", args: ["acp", "--z"] },
+    };
+    const w = resolveAgentFor(cfg, "worker");
+    expect(w.bin).toBe("/opt/oc");
+    expect(w.args).toEqual(["acp", "--z"]);
+    expect(resolveAgentFor(cfg, "brain").bin).not.toBe("/opt/oc");
+  });
+
+  it("env 切到别的预设时，worker 段的 bin/args 也不沿用", () => {
+    clearVars();
+    process.env.WEMIND_WORKER_BRAIN = "qoder";
+    const cfg = { agent: "kiro", worker: { agent: "deepseek", bin: "C:\\dsh\\dsh.cmd" } };
+    const w = resolveAgentFor(cfg, "worker");
+    expect(w.name).toBe("qoder");
+    expect(w.bin).toMatch(/qodercli(\.exe)?$/);
+  });
+});
+
+describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => {
+  it("预设定名表可见（帮助/报错都靠它）", () => {
+    const names = presetNames();
+    expect(names).toContain("kiro");
+    expect(names).toContain("deepseek");
+    expect(names).toContain("opencode");
+    expect(names).not.toContain("auto"); // auto 是「不是预设的预设」，不进列表
+  });
+
+  it("无视 WEMIND_BRAIN*：命令点名 opencode 就是 opencode", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "kiro";
+    process.env.WEMIND_WORKER_BRAIN = "qoder";
+    const r = resolvePresetByName("opencode");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.agent.name).toBe("opencode");
+      expect(r.agent.source).toBe("file");
+      expect(r.agent.requestedKey).toBe("opencode");
+    }
+  });
+
+  it("未知预设 / 空名字 → ok:false，带上可选清单", () => {
+    clearVars();
+    const bad = resolvePresetByName("opencod");
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.problem).toMatch(/未知大脑预设/);
+    const empty = resolvePresetByName("  ");
+    expect(empty.ok).toBe(false);
+    if (!empty.ok) expect(empty.problem).toMatch(/需要指定预设名/);
+  });
+
+  it("二进制找不到 → ok:false + 可读原因（不 spawn）", () => {
+    clearVars();
+    process.env.PATH = emptyBin;
+    const r = resolvePresetByName("kiro");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problem).toMatch(/找不到/);
+  });
+
+  it("auto：命令里显式 auto 也走探测", () => {
+    clearVars();
+    fs.writeFileSync(path.join(fakeBin, "opencode"), "");
+    process.env.PATH = fakeBin;
+    const r = resolvePresetByName("auto");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.agent.name).toBe("opencode");
+  });
+
+  it("★ 切走再切回不丢 --bin：presets[deepseek] 里的绝对路径仍被采用", () => {
+    clearVars();
+    process.env.PATH = emptyBin; // PATH 上没有 dsh，只能靠 presets 段
+    const dsh = path.join(fakeBin, "dsh2.cmd");
+    fs.writeFileSync(dsh, "");
+    const cfg = { agent: "opencode", presets: { deepseek: { bin: dsh } } };
+    expect(presetAvailable("deepseek")).toBe(false);
+    expect(presetAvailable("deepseek", cfg)).toBe(true); // auto 探测也会算上它
+    const r = resolvePresetByName("deepseek", cfg);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.agent.bin).toBe(dsh);
+      expect(r.agent.available).toBe(true);
+    }
+  });
+
+  it("不属于目标的顶层覆盖不会被沿用（切到别的预设时不拿旧 bin 去起）", () => {
+    clearVars();
+    const cfg = { agent: "deepseek", bin: "C:\\dsh\\dsh.cmd", args: ["--profile", "acp"] };
+    const r = resolvePresetByName("opencode", cfg);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.agent.args).toEqual(["acp"]);
+      expect(r.agent.bin).not.toBe("C:\\dsh\\dsh.cmd");
+    }
   });
 });

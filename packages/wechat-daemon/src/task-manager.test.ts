@@ -1,28 +1,64 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-// mock worker-acp（用 vi.hoisted 让 mock 工厂可引用）
-const { askWorker, stopWorker, setWorkerCwd } = vi.hoisted(() => ({
-  askWorker: vi.fn(),
-  stopWorker: vi.fn(),
-  setWorkerCwd: vi.fn(),
+// mock 进程池（用 vi.hoisted 让 mock 工厂可引用）：本文件只验任务表状态机与路由，不真起进程
+const { acquire, release, drop, killAll } = vi.hoisted(() => ({
+  acquire: vi.fn(),
+  release: vi.fn(),
+  drop: vi.fn(),
+  killAll: vi.fn(),
 }));
-vi.mock("./worker-acp.js", () => ({
-  askWorker: (...a: unknown[]) => askWorker(...a),
-  stopWorker: () => stopWorker(),
-  setWorkerCwd: (...a: unknown[]) => setWorkerCwd(...a),
-  newWorkerSession: vi.fn(),
-  isWorkerAlive: vi.fn(() => false),
+vi.mock("./worker-pool.js", () => ({
+  acquire: (...a: unknown[]) => acquire(...a),
+  release: (...a: unknown[]) => release(...a),
+  drop: (...a: unknown[]) => drop(...a),
+  killAll: () => killAll(),
+  poolSummary: () => [],
 }));
 
-import {
+/** 假连接：ask 由用例逐次控制（deferred），其余方法记个调用。 */
+function fakeConn(name = "kiro") {
+  return {
+    id: `fake-${name}-${Math.random().toString(36).slice(2, 6)}`,
+    agent: { name },
+    asks: [] as string[],
+    sessions: [] as string[],
+    cwd: undefined as string | undefined,
+    alive: true,
+    ask: vi.fn(),
+    setCwd(c: string | undefined) {
+      this.cwd = c;
+    },
+    effectiveCwd: () => "/cwd",
+    dropSession(k: string) {
+      this.sessions.push(k);
+    },
+    isAlive: () => true,
+    pid: () => 1234,
+  };
+}
+
+const { setAgent: setSlotAgent, resetSlotsForTest } = await import("./agent-slot.js");
+const {
   dispatchTask,
   injectTask,
   stopTask,
   hasActiveTask,
-  isAwaiting,
+  awaitingTasks,
+  interruptedTasks,
+  looksLikeResume,
+  listTasks,
+  renderTaskList,
+  initTasks,
+  resetTasksForTest,
   setTaskPush,
   setTaskStateSink,
-} from "./task-manager.js";
+} = await import("./task-manager.js");
+import type { TaskStateSnapshot } from "./task-manager.js";
+
+const AG = (name: string) => ({ name, bin: "node", args: ["acp"], shell: false }) as never;
 
 function deferred<T = string>() {
   let resolve!: (v: T) => void;
@@ -35,118 +71,493 @@ function deferred<T = string>() {
 }
 const has = (arr: string[], sub: string) => arr.some((p) => p.includes(sub));
 
-afterEach(() => {
-  stopTask("u1");
-  stopTask("u2"); // 清理可能残留的任务
-  setTaskStateSink(() => {}); // 清理 state sink，避免跨用例串扰
-  askWorker.mockReset();
-  stopWorker.mockReset();
-  setWorkerCwd.mockReset();
+let pushed: string[] = [];
+let states: TaskStateSnapshot[] = [];
+/** 每次 dispatch 都换一条新连接（除非用例自己设置 acquire 的返回值）。 */
+let conns: ReturnType<typeof fakeConn>[] = [];
+let tmpDir = "";
+
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-tasks-"));
+  resetTasksForTest(tmpDir);
+  resetSlotsForTest();
+  setSlotAgent("worker", AG("kiro"));
+  // 显式 `agentKey`（`任务 <预设>：`）走的是真实预设解析 + 可用性预检：把用到的预设指向本机 node（不 spawn，池是 mock 的）
+  fs.writeFileSync(
+    path.join(tmpDir, "brain.json"),
+    JSON.stringify({
+      agent: "kiro",
+      presets: {
+        kiro: { bin: process.execPath, args: ["--acp"] },
+        opencode: { bin: process.execPath, args: ["--acp"] },
+        qoder: { bin: process.execPath, args: ["--acp"] },
+      },
+    }),
+  );
+  pushed = [];
+  states = [];
+  conns = [];
+  setTaskPush((_to, t) => pushed.push(t));
+  setTaskStateSink((s) => states.push(s));
+  acquire.mockReset();
+  release.mockReset();
+  drop.mockReset();
+  acquire.mockImplementation(async () => {
+    const c = fakeConn();
+    conns.push(c);
+    return { ok: true, conn: c };
+  });
 });
 
-describe("task-manager 状态机", () => {
-  it("派发 → 一轮结束推送(带【任务】) → waiting → 注入续跑 → stop", async () => {
+afterEach(() => {
+  for (const t of listTasks("u1")) stopTask("u1", t.id);
+  resetTasksForTest();
+  resetSlotsForTest();
+  setTaskStateSink(() => {});
+  setTaskPush(() => {});
+});
+
+describe("task-manager 状态机（单任务：行为与改造前一致）", () => {
+  it("派发 → 一轮推送【任务】→ waiting → 注入续跑 → stop", async () => {
     const r1 = deferred();
     const r2 = deferred();
-    askWorker.mockReturnValueOnce(r1.promise).mockReturnValueOnce(r2.promise);
-    const pushed: string[] = [];
-    setTaskPush((_to, t) => pushed.push(t));
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise).mockReturnValueOnce(r2.promise);
+      return { ok: true, conn: c };
+    });
 
     const ack = dispatchTask("u1", "做X");
     expect(ack).toContain("已派");
-    expect(hasActiveTask("u1")).toBe(true);
-    expect(askWorker).toHaveBeenCalledTimes(1);
-    expect(askWorker.mock.calls[0][0]).toBe("做X");
+    expect(ack).not.toContain("#1"); // 单任务免编号：沿用改造前那句话
+    await vi.waitFor(() => expect(hasActiveTask("u1")).toBe(true));
+    const conn = conns[0];
+    await vi.waitFor(() => expect(conn.ask).toHaveBeenCalledTimes(1));
+    expect(conn.ask.mock.calls[0][0]).toBe("做X");
 
     r1.resolve("方案 A 还是 B？");
     await vi.waitFor(() => expect(has(pushed, "方案 A 还是 B？")).toBe(true));
     expect(has(pushed, "🤖【任务】")).toBe(true); // 来源标记
-    expect(isAwaiting("u1")).toBe(true); // 推送后进入 waiting（等你回）
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1)); // 推送后进入 waiting
 
     injectTask("u1", "选 A"); // waiting 态注入 → 第二轮
-    await vi.waitFor(() => expect(askWorker).toHaveBeenCalledTimes(2));
-    expect(askWorker.mock.calls[1][0]).toBe("选 A");
+    await vi.waitFor(() => expect(conn.ask).toHaveBeenCalledTimes(2));
+    expect(conn.ask.mock.calls[1][0]).toBe("选 A");
 
     r2.resolve("已完成");
     await vi.waitFor(() => expect(has(pushed, "已完成")).toBe(true));
 
     expect(stopTask("u1")).toContain("已结束");
     expect(hasActiveTask("u1")).toBe(false);
-    expect(isAwaiting("u1")).toBe(false);
+    expect(awaitingTasks("u1").length).toBe(0);
+    await vi.waitFor(() => expect(release).toHaveBeenCalled()); // 连接回池（不是杀掉）
+    expect(drop).not.toHaveBeenCalled();
   });
 
-  it("二次派发被拒（已有任务）", async () => {
-    const d = deferred();
-    askWorker.mockReturnValueOnce(d.promise);
-    setTaskPush(() => {});
-    expect(dispatchTask("u1", "X")).toContain("已派");
-    expect(dispatchTask("u1", "Y")).toContain("已有任务");
-    d.reject(new Error("cleanup"));
-    await Promise.resolve();
-  });
-
-  it("中断 → 推送中断提示（含「继续」字样），非 waiting 误判", async () => {
+  it("中断 → 推送中断提示（含「继续」字样）", async () => {
     const r1 = deferred();
-    askWorker.mockReturnValueOnce(r1.promise);
-    const pushed: string[] = [];
-    setTaskPush((_to, t) => pushed.push(t));
-
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise);
+      return { ok: true, conn: c };
+    });
     dispatchTask("u1", "重任务");
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalled());
     r1.reject(new Error("session/prompt idle timeout (idle=999ms total=999ms)"));
     await vi.waitFor(() => expect(has(pushed, "继续")).toBe(true));
     expect(has(pushed, "中断")).toBe(true);
+    expect(has(pushed, "超时/卡住")).toBe(true);
   });
 
-  it("running 期间消息暂存为 pendingInject，下一轮消费", async () => {
+  it("running 期间多次注入全部保留（按序累积，下一轮一并消费）", async () => {
     const r1 = deferred();
     const r2 = deferred();
-    askWorker.mockReturnValueOnce(r1.promise).mockReturnValueOnce(r2.promise);
-    const pushed: string[] = [];
-    setTaskPush((_to, t) => pushed.push(t));
-
-    dispatchTask("u2", "任务");
-    expect(isAwaiting("u2")).toBe(false); // running 中，不是 waiting
-    injectTask("u2", "顺便也做Y"); // running 中 → 暂存
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise).mockReturnValueOnce(r2.promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "任务");
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalledTimes(1));
+    expect(awaitingTasks("u1").length).toBe(0); // running 中不算 waiting
+    injectTask("u1", "顺便做Y");
+    injectTask("u1", "还有Z");
     expect(has(pushed, "已记下")).toBe(true);
 
     r1.resolve("第一轮完成");
-    await vi.waitFor(() => expect(askWorker).toHaveBeenCalledTimes(2));
-    expect(askWorker.mock.calls[1][0]).toBe("顺便也做Y"); // 消费暂存
+    await vi.waitFor(() => expect(conns[0].ask).toHaveBeenCalledTimes(2));
+    expect(conns[0].ask.mock.calls[1][0]).toBe("顺便做Y\n还有Z"); // 一条不丢
     r2.resolve("done");
     await vi.waitFor(() => expect(has(pushed, "done")).toBe(true));
   });
 
-  it("running 期间多次注入全部保留（队列累积，不覆盖丢第一条）", async () => {
+  it("cwd 透传给连接；状态 sink 走 running→waiting→idle，且快照带 tasks 数组", async () => {
     const r1 = deferred();
-    const r2 = deferred();
-    askWorker.mockReturnValueOnce(r1.promise).mockReturnValueOnce(r2.promise);
-    const pushed: string[] = [];
-    setTaskPush((_to, t) => pushed.push(t));
-
-    dispatchTask("u2", "任务");
-    injectTask("u2", "顺便做Y"); // running 中 → 暂存第一条
-    injectTask("u2", "还有Z"); // running 中 → 再暂存（修复前会覆盖掉「顺便做Y」）
-
-    r1.resolve("第一轮完成");
-    await vi.waitFor(() => expect(askWorker).toHaveBeenCalledTimes(2));
-    // 修复后：两条按序合并喂下一轮，一条不丢
-    expect(askWorker.mock.calls[1][0]).toBe("顺便做Y\n还有Z");
-    r2.resolve("done");
-    await vi.waitFor(() => expect(has(pushed, "done")).toBe(true));
-  });
-
-  it("dispatch 透传 cwd 给 setWorkerCwd + 状态 sink running→waiting→idle", async () => {
-    const r1 = deferred();
-    askWorker.mockReturnValueOnce(r1.promise);
-    setTaskPush(() => {});
-    const states: string[] = [];
-    setTaskStateSink((s) => states.push(s.status));
-    dispatchTask("u1", "做X", "D:\\proj");
-    expect(setWorkerCwd).toHaveBeenCalledWith("D:\\proj"); // cwd 透传
-    await vi.waitFor(() => expect(states[0]).toBe("running"));
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "做X", { cwd: "D:\\proj" });
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalled());
+    expect(conns[0].cwd).toBe("D:\\proj"); // cwd 透传
+    await vi.waitFor(() => expect(states.some((s) => s.status === "running")).toBe(true));
     r1.resolve("问你选 A 还是 B");
-    await vi.waitFor(() => expect(states).toContain("waiting"));
+    await vi.waitFor(() => expect(states.some((s) => s.status === "waiting")).toBe(true));
+    const snap = states[states.length - 1];
+    expect(snap.tasks.length).toBe(1);
+    expect(snap.tasks[0]).toMatchObject({ id: 1, agent: "kiro", status: "waiting", turns: 1 });
     expect(stopTask("u1")).toContain("已结束");
-    await vi.waitFor(() => expect(states).toContain("idle"));
+    await vi.waitFor(() => expect(states[states.length - 1].status).toBe("idle"));
+  });
+});
+
+describe("多任务与编号", () => {
+  it("可并行派发多条：编号递增、回执带编号、按编号注入互不串台", async () => {
+    const a1 = deferred();
+    const a2 = deferred();
+    acquire
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("kiro");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(a1.promise);
+        return { ok: true, conn: c };
+      })
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("opencode");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(a2.promise);
+        return { ok: true, conn: c };
+      });
+
+    const ack1 = dispatchTask("u1", "任务甲", { agentKey: "kiro" });
+    expect(ack1).toContain("#1");
+    const ack2 = dispatchTask("u1", "任务乙", { agentKey: "opencode" });
+    expect(ack2).toContain("#2");
+    await vi.waitFor(() => expect(conns.length).toBe(2));
+    expect(listTasks("u1").map((t) => t.id)).toEqual([1, 2]);
+    expect(listTasks("u1").map((t) => t.agent)).toEqual(["kiro", "opencode"]);
+
+    a1.resolve("甲第一轮");
+    a2.resolve("乙第一轮");
+    await vi.waitFor(() => expect(has(pushed, "乙第一轮")).toBe(true));
+    expect(has(pushed, "🤖【任务1】")).toBe(true); // 多条任务时带编号
+    expect(has(pushed, "🤖【任务2】")).toBe(true);
+
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(2));
+    // 两条都在等 → 无编号注入必须回消歧提示（不猜）
+    const dis = injectTask("u1", "随便说点什么");
+    expect(dis).toContain("2 条任务");
+    expect(dis).toContain("#1");
+    expect(dis).toContain("#2");
+    // 指定编号 → 只喂那一条
+    injectTask("u1", "只回给乙", 2);
+    await vi.waitFor(() => expect(conns[1].ask).toHaveBeenCalledTimes(2));
+    expect(conns[1].ask.mock.calls[1][0]).toBe("只回给乙");
+    expect(conns[0].ask).toHaveBeenCalledTimes(1); // 甲没被动过
+  });
+
+  it("一条 running + 一条 waiting：无编号消息喂给在等的那条（谁在等就喂谁）", async () => {
+    const a1 = deferred();
+    const a2 = deferred();
+    acquire
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("kiro");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(a1.promise).mockReturnValueOnce(deferred().promise);
+        return { ok: true, conn: c };
+      })
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("opencode");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(a2.promise);
+        return { ok: true, conn: c };
+      });
+    dispatchTask("u1", "甲", { agentKey: "kiro" });
+    dispatchTask("u1", "乙", { agentKey: "opencode" });
+    await vi.waitFor(() => expect(conns.length).toBe(2));
+    a1.resolve("甲暂停，等你回话");
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1)); // 甲 waiting，乙还在跑
+    expect(injectTask("u1", "回给甲")).toBe("");
+    await vi.waitFor(() => expect(conns[0].ask).toHaveBeenCalledTimes(2));
+    expect(conns[0].ask.mock.calls[1][0]).toBe("回给甲");
+  });
+
+  it("结束指定编号只停那条；其它照跑", async () => {
+    const a1 = deferred();
+    acquire
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("kiro");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(a1.promise).mockReturnValueOnce(deferred().promise);
+        return { ok: true, conn: c };
+      })
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("opencode");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(deferred().promise);
+        return { ok: true, conn: c };
+      });
+    dispatchTask("u1", "甲", { agentKey: "kiro" });
+    dispatchTask("u1", "乙", { agentKey: "opencode" });
+    await vi.waitFor(() => expect(conns.length).toBe(2));
+
+    a1.resolve("甲第一轮");
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
+    const r = stopTask("u1", 1); // 甲在 waiting → 连接回池；乙仍在跑
+    expect(r).toContain("#1");
+    await vi.waitFor(() => expect(release).toHaveBeenCalled());
+    expect(drop).not.toHaveBeenCalled();
+    expect(listTasks("u1").map((t) => t.id)).toEqual([2]);
+    expect(hasActiveTask("u1")).toBe(true);
+  });
+
+  it("结束正在跑的那条 → 杀掉它的连接（不是回池）；结束全部 → 两条都收", async () => {
+    acquire
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("kiro");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(deferred().promise); // 一直 running（不 resolve）
+        return { ok: true, conn: c };
+      })
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("opencode");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(deferred().promise);
+        return { ok: true, conn: c };
+      });
+    dispatchTask("u1", "甲", { agentKey: "kiro" });
+    dispatchTask("u1", "乙", { agentKey: "opencode" });
+    await vi.waitFor(() => expect(conns.length).toBe(2));
+
+    stopTask("u1", 1);
+    await vi.waitFor(() => expect(drop).toHaveBeenCalledTimes(1)); // 正在跑的：只能杀
+    expect(stopTask("u1", "all")).toContain("全部");
+    await vi.waitFor(() => expect(drop).toHaveBeenCalledTimes(2));
+    expect(hasActiveTask("u1")).toBe(false);
+  });
+
+  it("无编号「结束任务」在多任务时拒绝并列出编号（不猜）", async () => {
+    acquire.mockImplementation(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(deferred().promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "甲");
+    dispatchTask("u1", "乙");
+    await vi.waitFor(() => expect(conns.length).toBe(2));
+    const r = stopTask("u1");
+    expect(r).toContain("指明编号");
+    expect(r).toContain("#1");
+    expect(hasActiveTask("u1")).toBe(true);
+  });
+
+  it("池拒绝派发（并发上限）：如实回话，任务不留在表里", async () => {
+    acquire.mockImplementationOnce(async () => ({
+      ok: false,
+      problem: "同时运行的任务数已达上限（3 个）",
+    }));
+    const ack = dispatchTask("u1", "做X");
+    expect(ack).toContain("已派"); // 回执先发（编号已分配，之后才有结果）
+    await vi.waitFor(() => expect(has(pushed, "已达上限")).toBe(true));
+    expect(hasActiveTask("u1")).toBe(false);
+    expect(listTasks("u1").length).toBe(0);
+  });
+
+  it("任务列表：编号/agent/状态/轮次/最近输出", async () => {
+    const a1 = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn("qoder");
+      conns.push(c);
+      c.ask.mockReturnValueOnce(a1.promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "做X", { agentKey: "qoder" });
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalled());
+    a1.resolve("我先问你一件事");
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
+    const list = renderTaskList("u1");
+    expect(list).toContain("#1");
+    expect(list).toContain("[qoder]");
+    expect(list).toContain("等你回复");
+    expect(list).toContain("1 轮");
+    expect(list).toContain("我先问你一件事");
+  });
+});
+
+describe("任务表落盘与重启续跑", () => {
+  it("重启后未完成的标「已中断」，编号接着排不归零；回「继续」才拉进程续跑（strictResume）", async () => {
+    // 模拟上次运行留下的一条 running 任务
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 8 },
+        tasks: [
+          {
+            id: 7,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-7@u1",
+            status: "running",
+            turns: 3,
+            startedAt: Date.now() - 60_000,
+          },
+        ],
+      }),
+    );
+    const out = initTasks(tmpDir);
+    expect(out.interrupted).toEqual([7]);
+    expect(listTasks("u1")[0].status).toBe("interrupted");
+    expect(renderTaskList("u1")).toContain("已中断");
+    expect(hasActiveTask("u1")).toBe(false); // 不自动恢复
+
+    // 新任务接着 8 号（不复用 7）
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(deferred().promise);
+      return { ok: true, conn: c };
+    });
+    expect(dispatchTask("u1", "新活")).toContain("#8");
+
+    // 回「继续」→ 续跑 7 号：拉进程 + strictResume（要求上下文真的接上）
+    const resumed = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn("kiro");
+      conns.push(c);
+      c.ask.mockReturnValueOnce(resumed.promise);
+      return { ok: true, conn: c };
+    });
+    injectTask("u1", "继续", 7);
+    await vi.waitFor(() => expect(conns.length).toBe(2));
+    const conn7 = conns[1];
+    await vi.waitFor(() => expect(conn7.ask).toHaveBeenCalledTimes(1));
+    expect(conn7.ask.mock.calls[0][1]).toBe("task-7@u1"); // 沿用原会话键
+    expect(conn7.ask.mock.calls[0][3]).toEqual({ strictResume: true });
+    expect(conn7.ask.mock.calls[0][0]).toContain("中断");
+    expect(has(pushed, "正在按 #7 号任务续跑")).toBe(true);
+    // 续跑里的 agent 已被确认为「kiro」
+    expect(listTasks("u1").find((t) => t.id === 7)?.ag?.name).toBe("kiro");
+    resumed.resolve("接着干");
+    await vi.waitFor(() => expect(has(pushed, "接着干")).toBe(true));
+  });
+
+  it("无编号「继续」也能续跑（微信侧走的就是这条路）；日常提问不会被陈旧的中断任务吞掉", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 2 },
+        tasks: [
+          {
+            id: 1,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-1@u1",
+            status: "running",
+            turns: 1,
+            startedAt: Date.now() - 1000,
+          },
+        ],
+      }),
+    );
+    initTasks(tmpDir);
+    expect(interruptedTasks("u1").map((t) => t.id)).toEqual([1]);
+
+    // index.ts 那层关键字闸：只有「继续」这类短句放行给任务表，别的照常走大脑
+    expect(looksLikeResume("继续")).toBe(true);
+    expect(looksLikeResume(" 接着跑！")).toBe(true);
+    expect(looksLikeResume("帮我看看这个报错")).toBe(false);
+    expect(looksLikeResume("继续写个脚本")).toBe(false);
+    expect(looksLikeResume(undefined)).toBe(false);
+
+    // 放行 → 无编号也能续跑：injectTask 内部按「0 条在跑 + 1 条已中断」选中它
+    const resumed = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn("kiro");
+      conns.push(c);
+      c.ask.mockReturnValueOnce(resumed.promise);
+      return { ok: true, conn: c };
+    });
+    expect(injectTask("u1", "继续")).toBe("");
+    await vi.waitFor(() => expect(conns.length).toBe(1));
+    expect(conns[0].ask.mock.calls[0][1]).toBe("task-1@u1"); // 沿用原会话键
+    expect(conns[0].ask.mock.calls[0][3]).toEqual({ strictResume: true });
+    expect(has(pushed, "正在按 #1 号任务续跑")).toBe(true);
+    resumed.resolve("done");
+    await vi.waitFor(() => expect(has(pushed, "done")).toBe(true));
+  });
+
+  it("续跑接不上（会话没了）→ 回到「已中断」并如实报错，不假装续上", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 2 },
+        tasks: [
+          {
+            id: 1,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-1@u1",
+            status: "waiting",
+            turns: 1,
+            startedAt: 1,
+          },
+        ],
+      }),
+    );
+    initTasks(tmpDir);
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(
+        Promise.reject(
+          new Error(
+            "接不上原会话 sess-old（该 agent 不支持恢复、或这条会话已被它自己清理）。请用文字把当前进展重述一遍再继续。",
+          ),
+        ),
+      );
+      return { ok: true, conn: c };
+    });
+    injectTask("u1", "继续");
+    await vi.waitFor(() => expect(has(pushed, "这次接不上")).toBe(true));
+    expect(listTasks("u1")[0].status).toBe("interrupted"); // 回到可重试状态
+    expect(hasActiveTask("u1")).toBe(false);
+    // 会话指针保留（收尾不清）：用户重述进展后还能再试
+    expect(conns[0].sessions).toEqual([]);
+  });
+
+  it("「结束任务 <编号>」可清掉已中断任务的记录（不再占着编号）", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 3 },
+        tasks: [
+          {
+            id: 2,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-2@u1",
+            status: "running",
+            turns: 0,
+            startedAt: 1,
+          },
+        ],
+      }),
+    );
+    initTasks(tmpDir);
+    expect(stopTask("u1", 2)).toContain("清掉");
+    expect(listTasks("u1").length).toBe(0);
+    // 清理已落到磁盘：重新读回表里没有它
+    const onDisk = JSON.parse(fs.readFileSync(path.join(tmpDir, "tasks.json"), "utf-8"));
+    expect(onDisk.tasks).toEqual([]);
   });
 });

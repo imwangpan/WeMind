@@ -106,14 +106,19 @@ export function isOurProcess(pid: number | null | undefined, markerSets: string[
 /**
  * 我们自己的 CLI / wrapper 进程特征：命令行里同时含 `wemind` + `cli.js`。
  *
- * 这串必须同时覆盖**三种**安装方式（少一种 → 对应场景下 stop/list/单实例判断全失效）：
- *  - 源码仓库：`<node> D:\repo\WeMind\packages\wechat-daemon\dist\cli.js daemon`（由 marker 组合里的 `wemind` 命中仓库名 WeMind；注意大小写不敏感比较在下面已处理）；
+ * 这串必须同时覆盖**四种**安装方式（少一种 → 对应场景下 stop/list/单实例判断全失效）：
+ *  - 源码仓库（绝对路径）：`<node> D:\repo\WeMind\packages\wechat-daemon\dist\cli.js daemon`（由 marker 组合里的 `wemind` 命中仓库名 WeMind；注意大小写不敏感比较在下面已处理）；
+ *  - 源码仓库（**相对路径**）：`<node> packages/wechat-daemon/dist/cli.js daemon`（命令行里既没有仓库名也没有包名，只有源码目录名 → 靠第三组 marker `wechat-daemon` + `cli.js` 命中）。没有这一组时，「在仓库根目录手跑 CLI + daemon」会互相认不出（daemon 明明活着，CLI 却说没运行，控制桥也拒绝投递）；
  *  - 全局/本地安装：`<node> …/node_modules/@wemind/cli/dist/cli.js daemon`（npm 的 bin shim 最终 exec 的正是这个路径；Windows 上可能走 `…\@wemind\cli\dist\cli.js` 短路径。两种形态都命中 marker 里的 `wemind`——它同时是 scope 名与命令名）；
  *  - 源码开发期的 PowerShell wrapper：`pwsh -File …\scripts\run-daemon.ps1`。
  *
- * 注意**不能**再用 `wechat-daemon`：那是源码目录名，发布到 npm 后包目录叫 `@wemind/cli`，用目录名做特征会让「装出来的 wemind」永远匹配不上，从而 list 永远显示「已停止」。
+ * 注意**不能**用 `wechat-daemon` **替代** `wemind`：源码目录名在发布版里不存在（包目录叫 `@wemind/cli`），只有它会让「装出来的 wemind」永远匹配不上、list 永远显示「已停止」。它只作为**追加**的一组，补上「相对路径启动」这一种形态；并要求 `dist` 一起出现，把「别的项目里恰好有个叫 wechat-daemon 的目录」这类误命中面收窄（这串最终用于**杀进程**，宁可漏也要少误）。
  */
-export const CLI_PID_MARKERS: string[][] = [["wemind", "cli.js"], ["run-daemon.ps1"]];
+export const CLI_PID_MARKERS: string[][] = [
+  ["wemind", "cli.js"],
+  ["wechat-daemon", "dist", "cli.js"],
+  ["run-daemon.ps1"],
+];
 
 /**
  * 大脑进程特征：`<bin> <args…>`（如 `opencode acp`、`kiro-cli acp`）。

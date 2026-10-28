@@ -2,7 +2,44 @@
 
 本文件记录本 Fork 相对上游 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server) 的改动。
 
+## [1.2.0] 运行时切换大脑 · 多 worker 进程池 · 完整会话管理（2026-10-28）
+
+### Added
+
+- **运行时热切换对话大脑（微信 + CLI，不再重启 daemon）（2026-10-28）**：此前换大脑只能 `wemind brain set X --restart`——重启整个 daemon、打断在途任务、丢在途回合。现在微信 `切换大脑 [名]` / `AI 大脑 [名]` / `/brain` / `/ai brain`，CLI `wemind brain switch <预设|auto>`，**在同一个 daemon 进程里**换：预检（未知/不可用预设直接拒绝，不 spawn）→ `drain` 等在跑的回合结束（默认 30s，`WEMIND_SWITCH_DRAIN_MS`）→ 准备新沙箱 → `restart` + `initialize` 预热（硬上限 `WEMIND_SWITCH_TIMEOUT_MS` 默认 120s）→ **成功才写 `brain.json`**。失败**回滚**：槽位留旧大脑、清掉半截 pid 记录、回一句「已回滚到 X，下一条消息会自动重启它，不用手动处理」；持久化放最后，所以回滚无需撤销。同一目标的并发请求复用同一次切换（预热只做一遍）、切另一个目标直接拒绝（不排队，避免「连点两下」的歧义）。切换期间到达的用户消息会在 ACP 门口等新大脑就绪（有界等待，全程只 spawn 一次）。**`WEMIND_BRAIN` 陷阱**：环境变量优先级高于 `brain.json`，命令式切换绕开 env 生效，回执里会警告「重启后会回到环境变量指的大脑」。新增 `brain-switch.ts`、`acp-brain.ts` 的 `isTurnInFlight/beginSwitch/drainTurn/warmup` 与 `askBrain`→`runTurn` 拆分。
+- **多任务 / 多 agent 并行：worker 进程池（2026-10-28）**：任务侧此前是**单任务单例**（`activeTask` + 模块级 `child`/`taskSessions`/`pendingCwd`），做不到「a 大脑做任务 1、b 大脑做任务 2」。现在每条任务一条独立 ACP 连接（`worker-acp.ts` 从模块单例重写为 `class WorkerConn`，`worker-pool.ts` 管复用/回收）：
+  - **派发时指定 agent**：微信 `任务 <预设>：正文`（冒号前必须是**已知预设名**才算指定；不是预设名时——如 `任务 明天：去买菜`——不当成指定 agent，整句仍是派给任务侧的正文）、CLI `wemind task "…" --agent <预设>`；不指定则用**默认任务大脑**（`worker.agent ?? agent`）。
+  - **默认任务大脑（粘性）**：微信 `切换任务大脑 [名]` / `/ai task`、CLI `wemind brain switch <预设> --worker`；**不写 `brain.json`**（重启回到配置值，回执写明），有任务在跑且与目标 agent 不一致时重启空闲进程。
+  - **编号寻址**：任务编号按用户**单调递增、不复用**（避免「任务 2」在对话里指代漂移），跨重启不归零；`#<编号> 正文` / `wemind task-reply <编号>` 注入指定任务；只有一条任务时免编号（延续「回一句话就继续」的顺手）。
+  - **池**：进程常驻复用 + 空闲回收（并发上限 `WEMIND_MAX_WORKERS=3`、空闲进程上限 `WEMIND_IDLE_MAX=2`、空闲超 `WEMIND_WORKER_REAP_MS=5min` 回收）；取用顺序是「同 agent 空闲命中 → 回收最旧空闲腾位 → spawn」；`wemind stop` 一次杀光池里全部 worker（`workers.pid.json` 记录数组）。
+  - **任务列表**：微信 `任务列表` / `/tasks`、CLI `wemind task-list`（编号/agent/状态/轮次/已运行/最近输出），`结束任务 [编号]`、`结束全部任务`。
+- **任务「重启后续跑」（2026-10-28）**：任务表落盘 `tasks.json`（原子写、损坏降级为空表、不阻塞启动）。daemon 重启后**不自动 spawn**（3 个 agent 一起冷启动既重、也可能复现刚崩的原因），未完成的任务标为**「已中断」**并在 `任务列表` 可见；用户回「继续」/`#n` 才拉进程 + 按预设 `restore` 试 `session/load`→`session/resume` 续跑。两条诚实失败写进回执：agent 不支持恢复或会话已被其自己清理 →「这次接不上，请用文字重述」；半截回合的副作用可能已发生 → 先提示「可能有重复动作，注意核对」。
+- **完整会话管理（微信 + CLI）（2026-10-28）**：此前只存「当前一个」sessionId，开新会话旧的就失去引用、无处「加载旧会话」。现在 `新会话 [名字]`、`会话列表 [页]`、`恢复会话 <序号|名字|id前缀>`、`重命名会话 <序号> <名字>`、`删除会话 <序号>`，CLI 同名子命令（`wemind session …`）。新增登记表 `<数据目录>/session-registry.json`（派生元数据：名字/标题/轮次/最近使用），**指针表 `brain-sessions.json` 仍是「当前是哪个」的唯一权威**——登记表坏了最多导致「列表空」，绝不影响恢复（写失败只记日志、不拖垮回合）。`恢复会话` 是 **strict**：`session/load`/`resume` 都失败就如实报错、**不回退新建、不改指针**；目标已是当前会话时直接说「当前就在这条会话上」。列表显示「序号 / 名字或摘要 / 时间 / 轮次 / ←当前」，末尾提示「另有 N 条属于其它大脑的会话」（按**本人**统计，非 owner 只见自己的）。`删除会话` 只删 WeMind 的登记（若是当前会话同时清指针，下条消息自然开新的），回复写明「agent 自己那份历史归档不在 WeMind 手里」——ACP 没有可验证的 `session/delete`。
+- **会话交接（2026-10-28）**：跨大脑不自动迁移上下文，改为显式 `交接` / `/handoff` / `wemind brain handoff`（owner-only）：走一次大脑回合生成四节摘要（目标 / 已确认结论 / 未决问题 / 关键事实），落盘 `handoff.json`（TTL 24h，`WEMIND_HANDOFF_TTL_MS`）并回复给用户（超长另发 `.md`）。切换后**下一条用户消息**自动带上它——作为**前缀注入**（不额外占回合、不多一次模型调用），**该回合真正答成才消费**（`答话者 ≠ 来源大脑` 才算数，回滚到旧大脑时不吃掉摘要）；切**回**来源大脑不注入。会话标题会剥掉交接前缀，列表里不会全是「【交接摘要…」。
+- **CLI 控制桥：让 CLI 与微信走同一段代码（2026-10-28）**：切换大脑/开新会话/恢复会话都必须发生在 daemon 进程里（进程内的 ACP 连接、会话指针、任务表都是它的活状态）；CLI 另起进程改文件只能改「下次启动才读」的配置。新增 `control-bridge.ts`：CLI 原子写 `control-inbox/<ts>-<id>.json`，daemon 定期扫描执行并写 `control-out/<id>.json` 应答，CLI 短轮询打印——`wemind session {list,new,resume,rename,delete}`、`wemind brain switch|handoff`、`wemind task-list/task-reply/task-stop` 走桥，微信侧与 CLI 侧复用同一实现。**升级期可用性**：`control-out/.bridge` 记着 daemon 自己的 pid，pid 对不上就说明它在跑旧版本——写命令在**发出前**就拒绝并给出「重启一次」的命令（把 30s～165s 的静默等待换成一句能照做的话），`list`/`rename`/`delete`/`task-list` 则**降级**成直接读文件 + 一行说明（离线也能用，只是按「下次会用的那个大脑」列）。**安全边界**：桥只接受**预设名与纯数据**（target/ref/name/text/id/page），**没有 bin/args/shell 的位置**——就算被伪造（进程本就能写账号目录，task-inbox 同性质），最坏也只是「选一个已装的 agent 或清掉自己的会话」。
+- **帮助总览与 `/ai` 家族（2026-10-28）**：微信 `帮助` / `/help`、CLI `wemind help`（与微信**同表**，CLI 不列只在微信里存在的 MCP 加载/卸载），按角色裁剪（非 owner 看不到 owner-only 命令）。新增 `/ai` 家族前缀：`/ai`（列可选 agent + 当前对话大脑/默认任务大脑）、`/ai brain [名]`、`/ai task [名]`；中文（`切换大脑`、`切换任务大脑`）与旧斜杠（`/brain`、`/worker`）保留为等价别名。**非 owner 发 owner-only 命令 → 短提示拒绝，不转发给大脑**（也不再让大脑「意外回答」这类命令）。
+
+### Docs
+
+- **本次改造的文档同步（2026-10-28）**：`AGENTS.md`（关键文件表、硬约束、速查、已知坑、验收表）、`README.md`（口令表）、`repowiki/05`（命令表/派发优先级/额度）、`06`（会话管理、热切换、pid 身份）、`07`（**多 worker/进程池/任务编号**——该文原先写的是单 worker）、`08`（新文件与 JSON pid）、`09`（新 env）、`10`（pid 表/运维）、`11`（测试表）、`docs/ai/README.md` 事实状态表、`docs/ai/recipes/{run-e2e,debug-daemon,add-acp-agent}.md`、`docs/新手教程.md`、`docs/速查-数据目录与环境变量.md`、`docs/本地双入口-命令派发与看敲.md`（§3.3 控制桥）、`docs/使用指南-远程任务（worker）.md`、`docs/方案C-受控ACP工作机设计.md`（阶段 2 状态）。**7 条待实测**（会话删除是否存在、`session/load` 回放规模、各 agent 冷启动耗时、多任务并发下的 `ret=-2`、`taskkill /T /F` 杀池中特定进程、同 agent 并发共用配置目录、被强杀后各 agent 能否恢复该任务会话）记在 `docs/ai/recipes/run-e2e.md`。
+
+### Changed
+
+- **`wemind brain set` 不再整体覆盖 `brain.json`（2026-10-28）**：改为读-改-写（原先整体覆盖，新增的 `worker` 段会被抹掉），并新增 **`presets` 段**——按预设名保存启动覆盖（`--bin`/`--args`/`--shell`/`homeEnvVar`），换 agent 时把旧顶层覆盖迁移进去：否则「切走再切回」会丢 DSH 的 `--bin <绝对路径>`。同一 agent 再次 `set` 时沿用未给出的字段。`brain set <预设>` 现在在 daemon 在跑且**认控制桥**时**热应用**（走控制桥，等于 `brain switch`：先预热、成功才落盘，失败回滚）；带 `--bin`/`--args`/`--shell` 时仍是「只写盘 + 需重启才生效」（桥不接受这些字段），daemon 没跑/跑的是不认桥的旧版时同理（回执写明）。
+- **agent 不再在进程启动时冻结（2026-10-28）**：`acp-brain.ts`/`mcp-sandbox.ts`/`worker-acp.ts`/`worker-sandbox.ts` 里的模块级 agent 常量与沙箱路径常量全部下沉——新增 `agent-slot.ts`（懒解析 + 记忆化 + `seedSlots` 启动种入），brain 与 worker 的每个过程显式接收 `ag`（入口取一次、过程内不再读槽位，握手中途换 agent 因此不可能发生），沙箱路径改私有函数，`firstFrameMs`/心跳改为**每回合现算**（此前 import 期定死，切到 DSH 会继续用旧心跳）。顺手修掉一个真 bug：`agentConfigFor(worker)` 原本丢掉顶层 `presets`，导致「有 `worker.agent` 时 `presets[预设]` 查不到」、`--bin` 之类覆盖对 worker 静默失效。
+- **进程身份从「按配置猜」改为「按起进程时的记录」（2026-10-28）**：`manage.ts` 过去用**配置里**的 agent 算进程特征串，三种场景会失效：`brain set X` 不带 `--restart`、热切换窗口内、以及多任务/多 agent 并存（多 worker 之后这是常态）。现在 `brain.pid` 是 JSON 身份记录、worker 是 `workers.pid.json` **记录数组**（各含起进程时真实用的 bin/args/state/taskId），`manage.ts` 直接按记录算特征串与展示 live 状态，缺失时回退配置（兼容旧账号）；旧版 CLI 读新文件会拿到 `NaN` → 显示「已停止」且**不杀**（安全侧）。`task-state.json` 增补 `tasks` 数组并让顶层字段镜像最近一条，旧版 CLI 读到仍能显示、不会误判成「无任务」。
+- **`session-registry.json` 与任务表不并进既有文件（2026-10-28）**：`brain-sessions.json` 在关键路径（`ensureSession` → `session/load`）且已背了一层旧格式迁移，值是 string→object 要再迁一次还会波及 worker 孪生代码；所以会话登记表、任务表各自独立成文件，读失败一律降级（表→空、列表不可见）只记日志。写入一律 tmp + rename。
+
+### Fixed
+
+- **用相对路径手跑 CLI 时「daemon 明明活着却说未运行」（2026-10-28）**：`CLI_PID_MARKERS` 只有 `["wemind","cli.js"]`——`node packages/wechat-daemon/dist/cli.js daemon`（正是 `AGENTS.md` §3 教的写法，在仓库根直接跑）的命令行里既没有仓库名也没有包名，`isOurProcess()` 判否：`wemind list` 显示已停止、控制桥一律拒绝投递。追加一组 `["wechat-daemon","dist","cli.js"]`（要求 `dist` 同在，收窄误命中面——这串最终用于**杀进程**），单测补相对/绝对路径与反例。
+- **`wemind brain set X` 不带 `--restart` 时 `list`/`stop` 用错特征串（2026-10-28）**：markers 按**配置里**的 agent 算，配置已改而旧 agent 的进程还在跑时，`list` 显示「已停止」、`stop` 直接跳过（不杀）；多 agent 并存时更必然错。改按 `brain.pid`/`workers.pid.json` 记录里起进程时真实用的 bin/args 算（见上方「进程身份」条）。
+- **`wemind task-stop`/`stop` 与池化后的 worker 对齐（2026-10-28）**：`stop` 过去只杀单个 `worker.pid`，现在一次杀光 `workers.pid.json` 里全部记录（兼容旧的裸整数文件）；结束**在等回复**的任务时进程**回池**（不再杀），结束**正在跑**的那条仍只能力杀（ACP 回合没法优雅取消），空闲回收交给池。
+- **daemon 重启后回无编号「继续」其实没去续跑（2026-10-28）**：任务表的路由顺序（唯一在等的那条 → 唯一在跑的那条 → 0 条在跑且 1 条「已中断」则续跑）写在 `injectTask` 里，但微信侧的无前缀入口闸只放 `waiting` 的任务进去——于是重启提示说的「回『继续』可续跑」在微信里落空（CLI 的 `task-reply 继续` 不经过此闸，反而走得通）。现在补一层关键字闸 `looksLikeResume()`：**没有活跃任务 + 存在「已中断」任务 + 消息就是「继续 / 接着跑 / continue」这类短句**才放行进任务表；其余消息照常走大脑——不设这层闸的话，一条陈旧的中断任务会把之后的日常提问全吞掉。补单测（关键字正/负例 + 无编号续跑真的拉起进程并 `strictResume`）。
+
 ## [Unreleased] — fork
+
+> 本节是 **1.2.0 之前**的 fork 改动记录（按时间倒序，最新在前）：其中一部分已随 `1.1.1` 发布，其余随 `1.2.0` 一起发布——版本号以 `packages/wechat-daemon/package.json` 为单一来源。
 
 ### Added
 

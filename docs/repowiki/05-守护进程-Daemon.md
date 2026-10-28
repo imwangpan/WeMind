@@ -2,7 +2,7 @@
 
 > 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md)
 >
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28
 
 daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。本章聚焦 daemon 本体（`index.ts`）的运行逻辑；大脑、worker、沙箱在后续章节展开。
 
@@ -10,14 +10,24 @@ daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询�
 
 ```
 packages/wechat-daemon/src/
-├── index.ts            # 主入口：poller/worker 双循环、消息路由、回合编排、发送管理
-├── acp-brain.ts        # 默认大脑：常驻 ACP 进程（→ 第 6 章）
+├── index.ts            # 主入口：poller/worker 双循环、消息路由、回合编排、发送管理、控制桥扫描
+├── chat-commands.ts    # 命令表：解析 + 帮助**同表**驱动（无副作用模块）
+├── acp-brain.ts        # 默认大脑：常驻 ACP 进程、strict 会话恢复（→ 第 6 章）
+├── agent-slot.ts       # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
+├── brain-switch.ts     # 运行时热切换（预检/drain/预热/回滚）（→ 第 6 章）
 ├── brain-agents.ts     # ACP agent 预设与解析（→ 第 6 章）
 ├── mcp-sandbox.ts      # brain 沙箱：MCP 隔离 + 记忆继承（→ 第 6 章）
-├── worker-acp.ts       # 任务 worker 的 ACP 客户端（→ 第 7 章）
+├── worker-acp.ts       # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
+├── worker-pool.ts      # worker 进程池：复用/回收/上限（→ 第 7 章）
 ├── worker-sandbox.ts   # worker 沙箱（→ 第 7 章）
-├── task-manager.ts     # 任务状态机（→ 第 7 章）
-├── manage.ts           # 多账号 + 本地任务管理 CLI（→ 第 8、7 章）
+├── task-manager.ts     # 任务表：编号/注入消歧/停止（→ 第 7 章）
+├── task-store.ts       # 任务表落盘 tasks.json（重启后续跑）（→ 第 7 章）
+├── session-manager.ts  # 会话五条指令的实现层（→ 第 6 章）
+├── session-registry.ts # 会话登记表（派生元数据：名字/标题/轮次）（→ 第 6 章）
+├── handoff.ts          # 交接：摘要落盘 + 前缀注入 + 答成才消费（→ 第 6 章）
+├── control-bridge.ts   # CLI↔daemon 控制桥（请求/应答/.bridge 凭据）（→ 第 7 章）
+├── pid-record.ts       # brain.pid / workers.pid.json 身份记录
+├── manage.ts           # 多账号 + CLI（brain switch / session * / task-*）（→ 第 8、7 章）
 ├── image-reply.ts      # 从大脑回复提取图片引用
 └── md-reply.ts         # 长回复转 .md 文件
 ```
@@ -33,15 +43,18 @@ graph TD
     E --> F["ensureBrainHome() + ensureWorkerHome()<br/>准备两个沙箱"]
     F --> G["notifyStart 通知上线"]
     G --> H["注入 setTaskPush / setTaskTyping / setTaskStateSink"]
-    H --> I["清空 task-inbox + 启动扫描定时器(1s)"]
-    I --> J["pollerLoop（后台）"]
-    I --> K["workerLoop（前台 await）"]
+    H --> I["syncFromPointerMap：按指针表回填会话登记表<br/>（老账号没有 session-registry.json 时的首次迁移）"]
+    I --> J["clearControlDirs + markBridgeReady(自己的 pid)<br/>→ 清控制桥残留、写下「我认识桥」凭据"]
+    J --> K["读回 tasks.json：未完成任务标「已中断」（**不**自动 spawn）"]
+    K --> L["清空 task-inbox + 启动扫描定时器(1s)<br/>（同一个定时器也扫 control-inbox）"]
+    L --> M["pollerLoop（后台）"]
+    L --> N["workerLoop（前台 await）"]
 ```
 
 两个关键防御：
 
 - **全局异常处理器**：任何未捕获的 promise 拒绝/异常（多为瞬时网络 `fetch failed` 或回合内 send 被拒）只记录、不退出。此前的 `code=1` 静默崩溃就源于此类未捕获拒绝，会丢掉在途回合、把用户卡在心跳。
-- **PID 文件**：写 `daemon.pid` 供管理命令精确定位停止；`exit`/`SIGINT`/`SIGTERM` 时清理。
+- **PID 文件**：写 `daemon.pid` 供管理命令精确定位停止；`exit`/`SIGINT`/`SIGTERM` 时清理，并 `killWorkerPool()` 收掉池里全部 worker（Windows 上子进程不随父进程退出，漏掉就是一堆孤儿 agent 进程）。
 
 ## 5.3 poller / worker 解耦
 
@@ -79,11 +92,13 @@ worker 串行处理，尊重 ACP 单 session 串行约束。`token` 用消息自
 
 ```mermaid
 graph TD
-    M["出队消息"] --> C1{"parseControl?<br/>MCP/新会话指令"}
-    C1 -->|是| H1["handleControl<br/>（列出/加载/卸载 MCP、新会话）"]
+    M["出队消息"] --> C0{"是不是 owner-only 命令<br/>且发送者不是本人?"}
+    C0 -->|是| H0["短提示拒绝<br/>（**不转发给大脑**）"]
+    C0 -->|否| C1{"parseControl?<br/>MCP / 新会话 / 会话列表 / 恢复 / 重命名 / 删除 / 切脑 / 交接 / 帮助"}
+    C1 -->|是| H1["handleControl<br/>（各自处理；切脑/交接仅 owner）"]
     C1 -->|否| C2{"parseTaskControl?"}
-    C2 -->|结束任务| H2["stopTask"]
-    C2 -->|任务：/ &gt;| H3["有任务→注入<br/>无任务→dispatchTask"]
+    C2 -->|结束任务/任务列表/#n| H2["stopTask / 列表 / 注入指定编号"]
+    C2 -->|任务：/ &gt;/ 任务 &lt;预设&gt;：| H3["有任务→注入<br/>无任务或指定了预设→dispatchTask"]
     C2 -->|否| C3{"parseBrainEscape?<br/>问大脑 xxx"}
     C3 -->|是| H4["强制走 brain"]
     C3 -->|否| C4{"无前缀 + 非图片<br/>+ worker 在 waiting?"}
@@ -93,14 +108,25 @@ graph TD
 
 三种「明确性」：`任务：`/`>` 强制发 worker、`问大脑` 强制发 brain、无前缀按 worker 状态分流。worker 只在 **waiting**（刚停下问你）时才默认接管无前缀消息；它埋头跑（running）时大脑照常可用。图片消息始终走 brain。
 
-控制指令（`parseControl`）：
+**命令层（1.2.0 起）**：解析与帮助**同表驱动**（`chat-commands.ts` 的 `COMMAND_SPECS`），中文与斜杠双轨、`/ai` 是收敛前缀（`/ai` 列可选、`/ai brain X`、`/ai task X`），中文（`切换大脑`、`切换任务大脑`）与旧斜杠（`/brain`、`/worker`）是等价别名。`帮助`/`/help` 按角色裁剪（非 owner 看不到 owner-only 命令）。
 
-| 指令 | 作用 |
-|------|------|
-| `MCP` / `列出 MCP` | 列出可选与已激活的 MCP |
-| `加载 <名>` / `load <名>` | 激活某 MCP（重启 ACP 进程生效） |
-| `卸载 <名>` / `unload <名>` | 移除某 MCP |
-| `新会话` / `重置` / `/new` | 开启新 ACP 会话（清空多轮上下文） |
+**权限模型**：切脑与交接是 **owner-only**（账号本人），非本人发这类命令得到一句短提示、**不转发给大脑**（避免它「意外回答」一条它无权执行的命令）；任务类与会话类对**所有已授权用户**开放，但**只影响本人**（别人的会话永远不出现在你的列表里）。
+
+| 指令 | 作用 | 权限 |
+|------|------|------|
+| `MCP` / `列出 MCP` | 列出可选与已激活的 MCP | 已授权 |
+| `加载 <名>` / `load <名>` | 激活某 MCP（重启 ACP 进程生效） | 已授权 |
+| `卸载 <名>` / `unload <名>` | 移除某 MCP | 已授权 |
+| `切换大脑 [名]` · `/ai brain` · `/brain` | **热切换**对话大脑（§6.2） | owner |
+| `切换任务大脑 [名]` · `/ai task` · `/worker` | 设默认任务大脑（粘性，不落盘） | owner |
+| `AI` / `AI 列表` · `/ai` | 列可选 agent + 当前对话大脑 / 默认任务大脑 | owner |
+| `交接` · `/handoff` | 生成交接摘要（切走后第一条消息注入一次） | owner |
+| `新会话 [名字]` · `/new` | 开启新 ACP 会话（可命名） | 已授权 |
+| `会话列表 [页]` · `/sessions` | 本人的会话（当前大脑），末尾提示其它大脑另有 N 条 | 已授权 |
+| `恢复会话 <序号\|名字\|id前缀>` · `/resume` | strict 恢复（失败不改当前会话） | 已授权 |
+| `重命名会话 <序号> <名字>` · `/rename` | 给登记表改名 | 已授权 |
+| `删除会话 <序号>` · `/delete` | 删登记项（当前会话被删则同时清指针） | 已授权 |
+| `帮助` · `/help` | 全部指令，按角色裁剪 | 全部 |
 
 ## 5.5 回合编排（handleMessage）
 
@@ -190,11 +216,22 @@ graph TD
 
 `generateTitle` 由内容生成文件名（取首个 Markdown 标题或首个非空行，清洗为合法文件名）；`buildMdReply` 在内存里构造 buffer（正文无标题则前置一个 H1）。发文件失败时兜底回退为文本。
 
-## 5.9 本地命令文件桥
+## 5.9 本地命令文件桥与控制桥
 
-daemon 通过一个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s，**不挂在 poller 上**避免被 25s 长轮询阻塞）扫描 `task-inbox/*.json`，把本地 CLI 写入的命令分发到任务管理器（`dispatch`/`reply`/`stop`）。这是「本地终端入口」的服务端半边，详见 [7. 远程任务 Worker](07-远程任务-Worker.md#本地双入口文件桥)。
+daemon 通过一个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s，**不挂在 poller 上**避免被 25s 长轮询阻塞）扫描两个目录：
 
-启动时清空 `task-inbox/` 作废重启前残留命令（防重放）。
+| 目录 | 方向 | 用途 |
+|------|------|------|
+| `task-inbox/*.json` | **单向**（CLI 派活，结果从微信回） | 本地终端派发/回复/结束任务 → `dispatch`/`reply`/`stop` |
+| `control-inbox/*.json` | **双向**（daemon 写 `control-out/<id>.json` 应答） | 热切换大脑、会话四件套、任务列表/注入/停止、交接 —— CLI 要**当场知道成没成** |
+
+**控制桥**（`control-bridge.ts`）让 CLI 与微信**走同一段代码**：`handleControlRequest` 调的就是微信指令用的那几个函数（会话类命令以**账号本人**作为 userId）。要点：
+
+- **先删后做**：daemon 先 `unlink` 请求文件再执行（崩了不会重启后被重放）；`controlBusy` 保证一次只处理一条。
+- **应答即回执**：`{ id, at, ok, text }`，`ok = !text.startsWith("❌")`；CLI 端 `ok=false` 时置退出码 1，脚本能判成败。超时（默认 30s，`WEMIND_CONTROL_TIMEOUT_MS`）如实报「没等到回复」。
+- **`.bridge` 凭据**：daemon 启动时清空两个桥目录并写 `control-out/.bridge`（内容 = 自己的 pid）。CLI 据此判断对方是不是「认识桥的版本」——详见 [7. 远程任务 Worker](07-远程任务-Worker.md) §7.5。
+- **安全边界**：请求字段只有 `target`（预设名）/`ref`/`name`/`text`/`taskId`/`page`，**没有 `bin`/`args`/`shell` 的位置**（`parseControlRequest` 是唯一入口校验）。
+- 启动时清空 `task-inbox/` 作废重启前残留命令（防重放）。
 
 ---
 

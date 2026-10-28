@@ -1,6 +1,6 @@
 # 配方：接入一个新的 ACP Agent
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28
 >
 > 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)。
 
@@ -92,6 +92,11 @@ acme: {
 - `brain-agents.test.ts` 加断言；
 - `docs/接入其它-ACP-Agent.md` §5 预设表加一行。
 
+> **1.2.0 起，加预设不必再"挑角色"**：同一个预设同时可用于对话大脑与任务 worker（`resolveAgentFor(cfg, role)`），加完立刻可以
+> `wemind brain switch acme` 热切换、也可以在微信里 `任务 acme：…` 指定它干活——两者都不需要改代码、不需要重启。
+> 启动覆盖（`--bin`/`--args`/`--shell`）按**预设名**存在 `brain.json` 的 `presets` 段（`wemind brain set acme --bin …`），
+> 所以「切走再切回」不会丢；默认任务大脑是 `worker.agent ?? agent`。
+
 ---
 
 ## 3. 沙箱 / MCP / 记忆
@@ -145,7 +150,9 @@ wemind brain check
 3. 长任务 >30s → 不因首帧误杀；进度不刷屏；
 4. 发图 → 按 image 能力正确处理；
 5. 越界写 → 有权限请求则应答，不卡死；
-6. 两个账号 → 沙箱隔离。
+6. 两个账号 → 沙箱隔离；
+7. **热切换**（1.2.0）：从别的预设 `wemind brain switch acme` → 回执两段、daemon pid 不变、下一条消息由 acme 答；再切回去，旧上下文能 load 回来；
+8. **当 worker 用**（1.2.0）：`wemind task "…" --agent acme` → 任务跑通；跑完进程**回池**（`wemind list` 可见），5 分钟后回收。
 
 ---
 
@@ -158,6 +165,9 @@ wemind brain check
 - **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。
 - **committed-only + 15s 心跳 = 烧连发额度**：先调心跳，再考虑首帧。
 - **密钥不要写进预设**：daemon 进程环境提供。
+- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自预设字段——所以探针必须看，看完必须写进 `brain-agents.ts`。
+- **冷启动耗时待实测**：各 agent `initialize`/`session/new` 的真实耗时还没量（`docs/ai/recipes/run-e2e.md` §7.2 第 3 条）；若某 agent 超过 `REQ_TIMEOUT=30s`，需要在预设里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
+- **同 agent 并发 = 两个进程共用其配置目录**：多任务并行时会真实发生（不同 agent 各自 `configSubdir` 天然隔离）；新预设若把会话/缓存写在配置目录里，这条要实测。
 
 ---
 
@@ -166,4 +176,6 @@ wemind brain check
 - [`docs/接入-OpenCode.md`](../../接入-OpenCode.md) — 原生 ACP 的实测样板
 - [`docs/接入-DeepSeek.md`](../../接入-DeepSeek.md) — 缺 load、`image:false`、committed-only 的反例
 - [`docs/接入其它-ACP-Agent.md`](../../接入其它-ACP-Agent.md) — 通用 ACP 指南
+- [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md) — worker 侧（进程池、任务表）对新 agent 的要求
+- [`docs/ai/recipes/run-e2e.md`](run-e2e.md) — 验收分层与待实测清单
 - [`scripts/acp-probe.mjs`](../../../scripts/acp-probe.mjs) — 能力探针
