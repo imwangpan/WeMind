@@ -16,7 +16,7 @@
   ```bash
   wemind list   # 看到「运行中(pid …)」即可
   ```
-- 没在跑就启动：`wemind start <key|label>`（或 `scripts/run-all-daemons.ps1` 全部账号）。
+- 没在跑就启动：`wemind start [<key|label>]`（省略 = 默认账号；或 `scripts/run-all-daemons.ps1` 全部账号）。
 
 ---
 

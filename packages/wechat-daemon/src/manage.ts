@@ -731,8 +731,8 @@ function cmdDelete(sel: string): string {
   return `账号 ${key} 已删除（${stopMsg}，已移除目录与注册）。`;
 }
 
-function cmdStart(sel: string, runner?: string): string {
-  const key = resolveKey(sel);
+function cmdStart(sel?: string, runner?: string): string {
+  const key = pickKey(sel); // 省略账号 = 默认账号
   startDaemon(key, runner);
   return `已启动 daemon（账号 ${key}）。用 list 查看运行状态。`;
 }
@@ -762,8 +762,12 @@ async function taskOutcome(
     return `${fallback}\n（没等到 daemon 回执：它可能还在跑旧版本，或刚启动。用 task-list / task-status 核对实际状态。）`;
   return a.text || fallback;
 }
-/** 选账号：显式 key/label 优先，否则用默认账号。 */
-function pickKey(sel?: string): string {
+/**
+ * 选账号：显式 key/label 优先，否则用默认账号（`accounts.json` 的 `default`；缺失时回落第一个登记的账号，见 core 的 `getDefaultKey`）。
+ * `session`/`task*` 早就是这个口径；`start`/`stop` 也走这里——所以「省略账号」= 默认账号。
+ * 默认账号是可见的（`wemind list` 的 `[默认]`）、可改的（`wemind set-default`）；`logout`/`delete` 这类破坏性命令仍然必须显式指定，不走这里。
+ */
+export function pickKey(sel?: string): string {
   if (sel) return resolveKey(sel);
   const d = getDefaultKey();
   if (!d) throw new Error("无默认账号，请指定 <key|label> 或先 login");
@@ -1167,8 +1171,8 @@ export async function runManage(argv: string[]): Promise<void> {
       console.log(cmdStart(rest[0], runner));
       break;
     case "stop": {
-      const k = resolveKey(rest[0]);
-      console.log(stopDaemon(k));
+      const k = pickKey(rest[0]); // 省略账号 = 默认账号（回执带上解析到的账号，避免「静默换目标」）
+      console.log(`账号 ${k}：${stopDaemon(k)}`);
       break;
     }
     case "task":
@@ -1265,8 +1269,8 @@ export function helpText(): string {
 
   login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动归档（--start 顺带启动 daemon）
   list                           列出账号、别名、运行状态（含 brain 进程与 worker 池）
-  start <key|label>              启动某账号的 daemon
-  stop <key|label>               停止某账号的 daemon（连带 brain 与全部 worker 进程树）
+  start [key|label]              启动某账号的 daemon（省略 = 默认账号）
+  stop [key|label]               停止某账号的 daemon（连带 brain 与全部 worker 进程树；省略 = 默认账号）
   brain set <预设|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]
                                  改账号大脑**配置**（写 brain.json；daemon 需重启才生效）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
@@ -1285,6 +1289,8 @@ export function helpText(): string {
 
 ${renderHelp("owner", "cli", { sections: ["brain", "session", "task", "misc"] })}
 
-说明：key = 由微信 botId 派生的唯一标识（目录名）；label = 人类可读别名。多数命令可用 key 或 label。`;
+说明：key = 由微信 botId 派生的唯一标识（目录名）；label = 人类可读别名。多数命令可用 key 或 label。
+省略账号的命令（start/stop 与会话/任务类）用**默认账号**：首个登记的账号自动成为默认，可用 set-default 改、list 里看 [默认]。
+logout/delete 等破坏性命令仍必须显式指定账号。`;
 }
 // 入口由 cli.ts 调用 runManage(argv)；此处不再顶层自启。

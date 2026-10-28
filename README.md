@@ -497,7 +497,8 @@ wemind login --label 工作号 --start
 | ------------------------------ | ----------------------------------------------------------------------- |
 | `login [--label 名] [--start]` | **一条命令完成扫码登录**：自刷新二维码 + 自动归档（`--start` 顺带启动） |
 | `list`                         | 列出账号、别名、botId、运行状态                                         |
-| `start <key\|label>`           | 启动某账号的 daemon                                                     |
+| `start [<key\|label>]`         | 启动 daemon（省略账号 = 默认账号）                                      |
+| `stop [<key\|label>]`          | 停止 daemon + brain + 全部 worker 进程树（省略账号 = 默认账号）         |
 | `logout <key\|label>`          | 停 daemon + 通知下线 + 清凭证（保留目录，可重登）                       |
 | `delete <key\|label>`          | 停 daemon + 删除目录 + 移除注册                                         |
 | `label <key\|label> <新别名>`  | 改别名                                                                  |

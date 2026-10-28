@@ -1,5 +1,8 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { descendantPids, helpText } from "./manage.js";
 import { isAlive } from "./proc-identity.js";
@@ -39,6 +42,87 @@ describe("helpText（CLI 帮助面）", () => {
     ])
       expect(h).toContain(s);
     expect(h).not.toContain("（无 CLI）"); // CLI 帮助不列只在微信里存在的操作（加载/卸载 MCP）
+  });
+});
+
+/*
+ * 「省略账号 = 默认账号」：`start`/`stop` 走 pickKey（与 session/task 一致）。
+ * `WEMIND_ROOT` 是模块加载时定死的，所以要在设好 WEMIND_HOME 之后**重新加载模块**。
+ */
+describe("pickKey（省略账号 = 默认账号）", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-pickkey-"));
+  const prevHome = process.env.WEMIND_HOME;
+  let pickKey: typeof import("./manage.js").pickKey;
+
+  beforeAll(async () => {
+    process.env.WEMIND_HOME = home;
+    vi.resetModules();
+    ({ pickKey } = await import("./manage.js"));
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.WEMIND_HOME;
+    else process.env.WEMIND_HOME = prevHome;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const writeRegistry = (reg: unknown) =>
+    fs.writeFileSync(path.join(home, "accounts.json"), JSON.stringify(reg), "utf-8");
+
+  it("没有登记账号 → 报「无默认账号」（而不是旧的「需要 <key 或 label>」）", () => {
+    expect(() => pickKey()).toThrow(/无默认账号/);
+  });
+
+  it("省略 → 默认账号；显式 key / 别名优先；查不到 → 报错", () => {
+    writeRegistry({
+      default: "bbb",
+      accounts: {
+        aaa: {
+          key: "aaa",
+          botId: "a",
+          userId: "u",
+          baseUrl: "https://x",
+          label: "副号",
+          addedAt: 1,
+        },
+        bbb: {
+          key: "bbb",
+          botId: "b",
+          userId: "u",
+          baseUrl: "https://x",
+          label: "main",
+          addedAt: 2,
+        },
+      },
+    });
+    expect(pickKey()).toBe("bbb");
+    expect(pickKey("aaa")).toBe("aaa");
+    expect(pickKey("副号")).toBe("aaa");
+    expect(() => pickKey("nope")).toThrow(/未找到账号/);
+  });
+
+  it("default 字段缺失（老注册表）→ 回落第一个登记的账号", () => {
+    writeRegistry({
+      accounts: {
+        ccc: {
+          key: "ccc",
+          botId: "c",
+          userId: "u",
+          baseUrl: "https://x",
+          label: "ccc",
+          addedAt: 1,
+        },
+        ddd: {
+          key: "ddd",
+          botId: "d",
+          userId: "u",
+          baseUrl: "https://x",
+          label: "ddd",
+          addedAt: 2,
+        },
+      },
+    });
+    expect(pickKey()).toBe("ccc");
   });
 });
 

@@ -218,7 +218,7 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 1. **daemon 是升级前启动的旧版本**：**必须由它执行的**写命令（`session new`/`resume`、`brain switch|worker|handoff`）在**发出前**就拒绝，并给 `wemind stop <key> && wemind start <key>`；本来就是文件操作的 `session rename`/`delete` 照常直接改登记表（**不会**加说明行），`session list` 直接读登记表并附一行「按下次会用的那个大脑列」，`task-list`/`task-status` 从来不经过桥（读 `tasks.json`，只在 daemon 没跑时注明「上次快照」）。**按提示重启一次**即可——这不是故障。
 2. **`.bridge` 凭据对不上**：`control-out/.bridge` 里应是 daemon 自己的 pid，且等于 `daemon.pid`。手动改过/删过 `control-out/` 都会让它失配。
 3. **daemon 是手跑的老 dist**：`wemind list` 靠命令行特征认进程（`proc-identity.ts`）。用**相对路径**起 daemon（`node packages/wechat-daemon/dist/cli.js daemon`）在旧 dist 里会被判成「不是我们的进程」→ 显示「未运行」且桥拒绝。修法：`npm run build` 后重启（1.2.0 已补相对路径的特征，见 `AGENTS.md` §6）。
-4. **真没跑**：`wemind start <key>`；纯读命令（`session list`、`task-list`）不需要 daemon。
+4. **真没跑**：`wemind start [<key|label>]`（省略 = 默认账号）；纯读命令（`session list`、`task-list`）不需要 daemon。
 
 现场证据：`control-inbox/` 若堆着请求文件 = daemon 没在扫（没跑/不认桥）；排空后 `control-out/<id>.json` 会给出 `ok` 与 `text`。
 
