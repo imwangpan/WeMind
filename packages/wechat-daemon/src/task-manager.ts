@@ -24,6 +24,7 @@ import {
  *  - 派发时决定 agent（默认任务大脑，或 `任务 <agent 名>：正文` 指定）；每条任务一个 session key `task-<编号>@<userId>`；
  *  - 任务结束（`结束任务`）把连接**还回进程池**（同 agent 的下个任务直接复用），而不是杀掉；
  *  - 任务表写入磁盘（tasks.json）：daemon 重启后未完成的标「已中断」并在「任务列表」可见，回「继续」/`#n 继续` 才拉进程续跑；
+ *  - 一轮失败在**模型/账号侧**（余额、密钥、计费、模型不存在，见 `providerIssue()`）也直接转「已中断」：这类错误重试不会好，而停在「等你回复」会一直抢用户的无编号消息；
  *  - 编号跨重启不归零（nextId 存在表里，只增不减）。
  *
  * 依赖注入（push/typing/stateSink）保持不变：task-manager 不直接依赖发送层与 account，保持可测。
@@ -213,7 +214,7 @@ export const listTasks = (userId: string): Task[] =>
 /**
  * 像不像「继续跑」这句话。
  *
- * 只在一处用到：daemon 重启后留下的「已中断」任务，在没有活跃任务时要把无前缀消息放行进任务表（`injectTask` → `resumeTask`）。
+ * 只在一处用到：**「已中断」的任务**（daemon 重启留下的，或一轮失败在 provider 侧——见 `providerIssue()`）在没有活跃任务时要把无前缀消息放行进任务表（`injectTask` → `resumeTask`）。
  * 关键字这层闸不能省：中断任务会一直躺在表里，若见了任何消息都放行，一句「帮我查一下 X」会把陈旧的它唤醒。
  * 单条任务时 `#n 继续` 也走这条路（显式编号那条分支在解析层就分流了）。
  */
@@ -366,10 +367,22 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
   emitState();
   const got = await acquire(ag, task.id);
   if (!got.ok) {
+    const msg = `⚠️ 任务 #${task.id} 没起得来：${got.problem}`;
+    // 续跑（`strictResume`）起不来 ≠ 新派发起不来：新任务从没跑过，删掉是对；续跑的记录必须留着——
+    // 用户是照着「修好后回「继续」」的提示来的，删掉记录等于把编号和会话键一起丢了，还得重派一条。
+    if (task.strictResume === true) {
+      task.strictResume = false;
+      task.status = "interrupted";
+      task.lastOutput = msg;
+      persist();
+      emitState();
+      push(task.userId, `${msg}（任务记录还在，处理好后再回「继续」）`);
+      ackIf(task.ackId, msg);
+      return;
+    }
     tasks.delete(task.id);
     persist();
     emitState();
-    const msg = `⚠️ 任务 #${task.id} 没起得来：${got.problem}`;
     push(task.userId, msg);
     ackIf(task.ackId, msg); // 本地命令要的是「到底派上了没有」——这里才是答案
     return;
@@ -409,18 +422,31 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
       const why = String(e instanceof Error ? e.message : e);
       if (wasResume && why.includes("接不上")) {
         // 续跑失败（原会话接不上）：回到「已中断」并把话说清楚，而不是静默换一个空会话假装续上了。
-        // 当前会话记录**保留**（收尾处按「任务是否还在表里」决定要不要清），用户重述进展后还能再试。
+        // 当前会话记录**保留**（收尾处按「任务是否还在表里」决定要不要清）；但别再劝「重述一遍」——重述也是走 strictResume，接不上就是接不上，只能力尽于此。
         task.status = "interrupted";
+        task.lastOutput = `⚠️ #${task.id} 号任务这次接不上：${why}（这条任务的记录还在；要重来就「结束任务 ${task.id}」后重新派一条。）`;
         persist();
         emitState();
-        log(`task ${task.id} resume failed:`, why);
-        push(task.userId, `⚠️ #${task.id} 号任务这次接不上：${why}`);
+        log(`task ${task.id} resume failed（接不上，已转「已中断」）:`, why);
+        push(task.userId, task.lastOutput);
         break;
       }
       const label = labelOf(task);
       const resumeHint = label === "任务" ? "回复「继续」" : `回复「#${task.id} 继续」`;
+      const stopHint = `或「结束任务${label === "任务" ? "" : ` ${task.id}`}」终止。`;
       log(`task ${task.id} turn failed:`, why);
-      task.lastOutput = `⚠️【${label}】中断了（${reason(e)}）。${resumeHint}我从中断处恢复，或「结束任务${label === "任务" ? "" : ` ${task.id}`}」终止。`;
+      const prov = providerIssue(e);
+      if (prov) {
+        // 模型/账号侧的问题（余额、密钥、计费、模型不存在）：重试也不会好，而且这类任务若停在「等你回复」，用户下一条无编号消息会被它吞掉、只是又白失败一轮（真机踩过：一条余额不足的任务把「在吗」吃掉了）。转「已中断」——不在 liveTasks 里，就不再抢消息；用户修好账号后回「继续」/`#n 继续` 才续跑。
+        task.status = "interrupted";
+        task.lastOutput = `⚠️【${label}】中断了（${prov}）。这类错误重试也不会好——修好后${resumeHint}我从中断处恢复，${stopHint}`;
+        persist();
+        emitState();
+        log(`task ${task.id} provider issue（${prov}）→ 已转「已中断」，不再接管无编号消息`);
+        push(task.userId, task.lastOutput);
+        break;
+      }
+      task.lastOutput = `⚠️【${label}】中断了（${reason(e)}）。${resumeHint}我从中断处恢复，${stopHint}`;
       push(task.userId, task.lastOutput);
     } finally {
       clearInterval(ti); // 本轮结束停 typing
@@ -453,6 +479,51 @@ function reason(e: unknown): string {
   return "执行出错";
 }
 
+/**
+ * 像不像「等一会儿重试就会好」的限流/过载。**先判它**，像就一律不归类为账号问题。
+ *
+ * 为什么必须先判：Google 的**按分钟**限流原文是「Quota exceeded for quota metric '…requests per minute'…」（HTTP 429），只按关键字会把限流误判成额度问题、把任务提前转「已中断」——而文档口径是「限流不算」。这里宁可漏判一个限流（退回老行为：停在等你回复），也不让限流误触发。
+ * 判的是**文本里有没有限流语义**，**故意不看裸的状态码 `429`**：各家把 HTTP 状态塞进错文本的形态不一，而 OpenAI 的余额耗尽（「You exceeded your current quota, please check your plan and billing details」）本身就是 HTTP 429——按状态码判会把真正的账号问题放过。`overloaded` 是 Anthropic 的 529（过载，可重试）。
+ * `-32603` 本身**不**在这里判——只有它包着的 provider 文案算（DSH 的余额不足就是这样包出来的），所以本函数只看文本、不看 code。
+ */
+const RATE_LIMIT_LIKE =
+  /rate limit|rate_limit|ratelimit|too many requests|requests per minute|per minute|resource_exhausted|overloaded/i;
+
+/**
+ * 这一轮失败是不是「模型/账号侧」的问题（额度、余额、密钥、鉴权、计费、模型不存在）——这类错误重试也不会好，得等用户把账号修好。
+ *
+ * 为什么单独认这一类：**停在「等你回复」的任务会抢用户下一条无编号消息**（「谁在等就喂谁」）。一条余额不足的任务因此会不断吞掉日常消息、每次都白失败一轮（真机踩过：它把「在吗」吃掉了）。认出来就转「已中断」，用户修好账号后回「继续」/`#n 继续` 再续跑。
+ *
+ * 用关键字判（错误文本来自各 agent 的 provider，措辞不统一），**认不出的一律按老规矩停在「等你回复」**——宁可多抢一次，也不要把偶发失败误判成账号问题。限流（429/rate limit）不算（见上面的 `RATE_LIMIT_LIKE`）：等一会儿重试就会好，仍走老路。
+ */
+export function providerIssue(e: unknown): string | null {
+  const s = String(e instanceof Error ? e.message : e);
+  if (RATE_LIMIT_LIKE.test(s)) return null;
+  if (
+    /insufficient balance|balance is insufficient|insufficient[ _]funds|insufficient_quota|insufficient credits|credit balance|requires more credits|quota exceeded|exceeded your current quota|out of credits|余额不足|额度不足|欠费|请充值/i.test(
+      s,
+    )
+  )
+    return "额度/余额不足";
+  if (
+    /no api key|invalid api key|incorrect api key|api key not valid|invalid x-api-key|authentication required|unauthorized|not authenticated/i.test(
+      s,
+    )
+  )
+    return "密钥/鉴权有问题";
+  if (/payment required|"code"\s*:\s*402|billing/i.test(s)) return "计费问题";
+  // 「模型不存在」各家的写法都不同：OpenAI 的 model_not_found、Anthropic 的 no such model、
+  // DeepSeek 的 Model Not Exist、Gemini 的 `models/<名> is not found`、还有「The model '…' does not exist」。
+  // 中间那段用 [^\n]{0,80} 兜住带引号/带点的模型名（gpt-3.5-turbo 里有点，不能用 [^.]）。
+  if (
+    /model_not_found|no such model|unknown model|model[ _]?not[ _]?(?:found|exist)|model\S*\b[^\n]{0,80}\b(?:not found|does not exist)/i.test(
+      s,
+    )
+  )
+    return "模型不可用";
+  return null;
+}
+
 /** 续跑一条「已中断」的任务：按原 agent 拉进程 + session/load 恢复上下文，然后照常跑循环。 */
 function resumeTask(task: Task, instruction: string): string {
   const got = resolveTaskAgent(task.agent);
@@ -465,7 +536,7 @@ function resumeTask(task: Task, instruction: string): string {
   task.strictResume = true; // 续跑要求「上下文真的接上」：恢复失败要报错，不能静默换空会话
   void runTask(
     task,
-    `（这条任务在 daemon 重启时中断了，现在续跑；上下文按会话恢复。动手前先核对上一步是否已经产生副作用，避免重复。）\n${instruction}`,
+    `（这条任务上一轮没跑完就中断了，现在续跑；上下文按会话恢复。动手前先核对上一步是否已经产生副作用，避免重复。）\n${instruction}`,
   );
   return `⏳ 正在按 #${task.id} 号任务续跑（${got.ag.name}）。上一步可能已经改过文件或发过请求，核对时注意别重复动作。`;
 }

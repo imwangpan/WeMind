@@ -53,6 +53,7 @@ const {
   renderTaskList,
   initTasks,
   resetTasksForTest,
+  providerIssue,
   setTaskPush,
   setTaskStateSink,
   setTaskAckSink,
@@ -174,6 +175,86 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     await vi.waitFor(() => expect(has(pushed, "继续")).toBe(true));
     expect(has(pushed, "中断")).toBe(true);
     expect(has(pushed, "超时/卡住")).toBe(true);
+    // 超时这类「等一下重试就好」的失败仍停在「等你回复」：无编号消息照样喂给它（老规矩，别顺手改掉）
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
+    expect(interruptedTasks("u1").length).toBe(0);
+  });
+
+  it("provider 报错（余额不足）→ 转「已中断」，不再抢下一条无编号消息；回「继续」能续跑", async () => {
+    const r1 = deferred();
+    const r2 = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise).mockReturnValueOnce(r2.promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "做X");
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalledTimes(1));
+    r1.reject(
+      new Error(
+        '{"code":-32603,"message":"Internal error: turn failed: Insufficient Balance (request_id: x)"}',
+      ),
+    );
+    await vi.waitFor(() => expect(has(pushed, "额度/余额不足")).toBe(true));
+    expect(has(pushed, "重试也不会好")).toBe(true);
+    // 关键：不留在 waiting（否则下一条无编号消息会被它吞掉），而是「已中断」
+    await vi.waitFor(() => expect(interruptedTasks("u1").map((t) => t.id)).toEqual([1]));
+    expect(awaitingTasks("u1").length).toBe(0);
+    // 任务列表的「最近输出」也要是这条中断说明（别留着上一轮的旧输出，让人以为它跑完了）
+    expect(renderTaskList("u1")).toContain("额度/余额不足");
+    expect(renderTaskList("u1")).toContain("已中断");
+
+    // 显式「继续」→ 走续跑路径（strictResume），重新拉连接、带上「没跑完就中断了」的前缀
+    const r = injectTask("u1", "继续");
+    expect(r).toContain("正在按 #1 号任务续跑");
+    await vi.waitFor(() => expect(conns.length).toBe(2));
+    await vi.waitFor(() => expect(conns[1].ask).toHaveBeenCalledTimes(1));
+    expect(String(conns[1].ask.mock.calls[0][0])).toContain("上一轮没跑完就中断了");
+    expect(conns[1].ask.mock.calls[0][3]).toMatchObject({ strictResume: true });
+    await vi.waitFor(() => expect(hasActiveTask("u1")).toBe(true));
+  });
+
+  it("providerIssue：认清账号类错误，限流与普通错误不认（宁可不误判）", () => {
+    expect(providerIssue("Insufficient Balance (request_id: x)")).toBe("额度/余额不足");
+    expect(providerIssue("requires more credits, or use a smaller max_tokens")).toBe(
+      "额度/余额不足",
+    );
+    expect(providerIssue('no API key for provider route "deepseek-official"')).toBe(
+      "密钥/鉴权有问题",
+    );
+    expect(providerIssue("402 Payment Required")).toBe("计费问题");
+    expect(providerIssue("model_not_found: deepseek-xyz")).toBe("模型不可用");
+    expect(providerIssue("429 Too Many Requests / rate limit")).toBeNull();
+    expect(providerIssue("session/prompt idle timeout (idle=999ms)")).toBeNull();
+    expect(providerIssue("fetch failed")).toBeNull();
+
+    // 各家 provider 的真实措辞（2026-10-29 评审补的样本）
+    expect(providerIssue("Your credit balance is too low to access the API")).toBe("额度/余额不足");
+    expect(providerIssue("Authentication required.")).toBe("密钥/鉴权有问题"); // Qoder 实测原文（见 docs/接入-Qoder.md）
+    expect(providerIssue("models/gemini-2.0-flash is not found for API version v1beta")).toBe(
+      "模型不可用",
+    );
+    expect(providerIssue("The model `gpt-5.5` does not exist")).toBe("模型不可用");
+    expect(providerIssue('{"error":{"code":402,"message":"Insufficient balance"}}')).toBe(
+      "额度/余额不足",
+    );
+    expect(providerIssue('{"code":402,"message":"upstream rejected"}')).toBe("计费问题"); // 只认 JSON 里的 code，裸数字不行
+    expect(providerIssue("write failed: E:\\tmp\\402-report.txt")).toBeNull(); // 裸 402 可能是路径/行号，不能当计费
+    // 限流优先：Google 按分钟 429 与 Anthropic 过载都带「quota/credits」味道的字样，仍必须不归类
+    expect(
+      providerIssue(
+        "Quota exceeded for quota metric 'GenerateContentRequestsPerMinutePerProjectPerUser' and limit 'Generate requests per minute' of service 'generativelanguage.googleapis.com'",
+      ),
+    ).toBeNull();
+    expect(providerIssue("429 RESOURCE_EXHAUSTED: quota exceeded for this project")).toBeNull();
+    expect(providerIssue("Overloaded")).toBeNull();
+    // OpenAI 的余额耗尽虽然也是 HTTP 429，但文案是计费语义 → 仍要归类
+    expect(
+      providerIssue(
+        "429 You exceeded your current quota, please check your plan and billing details",
+      ),
+    ).toBe("额度/余额不足");
   });
 
   it("running 期间多次回话全部保留（按序累积，下一轮一并消费）", async () => {
@@ -532,7 +613,7 @@ describe("任务表写入磁盘与重启续跑", () => {
       c.ask.mockReturnValueOnce(
         Promise.reject(
           new Error(
-            "接不上原会话 sess-old（该 agent 不支持恢复、或这条会话已被它自己清理）。请用文字把当前进展重述一遍再继续。",
+            "接不上原会话 sess-old（该 agent 不支持恢复、或这条会话已被它自己清理）。重试还是同一个结果——想重来请结束这条任务后重新派一条（把进展写进新任务里）。",
           ),
         ),
       );
@@ -542,8 +623,39 @@ describe("任务表写入磁盘与重启续跑", () => {
     await vi.waitFor(() => expect(has(pushed, "这次接不上")).toBe(true));
     expect(listTasks("u1")[0].status).toBe("interrupted"); // 回到可重试状态
     expect(hasActiveTask("u1")).toBe(false);
-    // 会话当前会话记录保留（收尾不清）：用户重述进展后还能再试
+    expect(has(pushed, "结束任务 1")).toBe(true); // 给出真正的出路，而不是劝「重述一遍」
+    // 会话映射保留（登记/当前会话不动）：接不上是 agent 侧的会话没了，不是要伪造一次恢复
     expect(conns[0].sessions).toEqual([]);
+  });
+
+  it("续跑时进程起不来（agent 不可用/池满）→ 不删任务记录，仍留在「已中断」里可再试", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 2 },
+        tasks: [
+          {
+            id: 1,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-1@u1",
+            status: "interrupted",
+            turns: 1,
+            startedAt: 1,
+          },
+        ],
+      }),
+    );
+    initTasks(tmpDir);
+    acquire.mockImplementationOnce(async () => ({ ok: false, problem: "已达并发上限（3）" }));
+    injectTask("u1", "继续");
+    await vi.waitFor(() => expect(has(pushed, "没起得来")).toBe(true));
+    // 关键：记录还在（新派发起不来才该删——用户是照着「修好后回继续」来的，删掉等于把承诺作废）
+    expect(listTasks("u1").map((t) => t.id)).toEqual([1]);
+    expect(interruptedTasks("u1").map((t) => t.id)).toEqual([1]);
+    expect(has(pushed, "任务记录还在")).toBe(true);
+    expect(renderTaskList("u1")).toContain("没起得来"); // 最近输出说清为什么没动
   });
 
   it("「结束任务 <编号>」可清掉已中断任务的记录（不再占着编号）", () => {

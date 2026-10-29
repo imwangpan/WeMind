@@ -461,7 +461,7 @@ export class WorkerConn {
       }
       if (strictResume)
         throw new Error(
-          `接不上原会话 ${saved}（该 agent 不支持恢复、或这条会话已被它自己清理）。请用文字把当前进展重述一遍再继续。`,
+          `接不上原会话 ${saved}（该 agent 不支持恢复、或这条会话已被它自己清理）。重试还是同一个结果——想重来请结束这条任务后重新派一条（把进展写进新任务里）。`,
         );
     }
     const res = (await this.request(

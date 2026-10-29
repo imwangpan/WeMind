@@ -58,7 +58,7 @@ poller（长轮询，不被大脑阻塞）
   → 收到消息 / 逐条入队（**不合并**：一条消息 = 一次 prompt）
   → 指令拦截（帮助 / 切脑 / 交接 / 会话四件套 / 任务 / MCP / 问大脑 …；
      账号级指令（切脑/交接）由非登录者发 → 短提示拒绝，不进大脑；兜底校验，平台限制下正常不触发）
-  → 选择 brain 或 worker（多任务时按编号寻址；无编号按 waiting > running > 唯一已中断）
+  → 选择 brain 或 worker（多任务时按编号寻址；无编号按 waiting > running > 唯一已中断。**模型/账号侧报错的任务直接转「已中断」，不进 waiting、不接管无编号消息**）
   → askBrain(userId, text, onProgress, images)
        ├─ 等切换门（切换大脑进行中时有界等待）
        ├─ ensureProcess(ag)：懒启动 ACP agent，initialize

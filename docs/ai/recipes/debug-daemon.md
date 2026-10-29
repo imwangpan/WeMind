@@ -244,7 +244,8 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 | 任务列表为空但进程还在 | `workers.pid.json` | 进程**留着复用**是预期：任务结束不杀进程，空闲 5min（`WEMIND_WORKER_REAP_MS`）或超出 `WEMIND_IDLE_MAX`（默认 2）才回收 |
 | 池占资源多 | `wemind list` | 调小 `WEMIND_MAX_WORKERS` / `WEMIND_IDLE_MAX`；`wemind stop <key>` 一次杀光整池 |
 | 重启后状态「已中断」 | 日志 `restored tasks: interrupted=[…]` | **预期**：不自动拉起，回「继续」/`#n 继续` 才续跑 |
-| 续跑接不上 | 答复 | agent 不支持 load/resume 或会话已被它自己清理 → 会给「请用文字重述」，**不**改当前会话记录、不假装成功 |
+| 日常消息被任务吞掉（每次都白失败一轮） | `任务列表` 找 waiting 的任务 | 「谁在等就喂谁」是设计：有一条 waiting 就会接管无编号消息。**余额/密钥/计费/模型不存在**这类 provider 错误（`providerIssue()`）现在会让任务直接转「已中断」、不再接管；**限流 429 与超时仍会停在 waiting**（等一会儿重试就会好）——那时要么回它、要么 `结束任务`。日志见 `task <n> turn failed:` |
+| 续跑接不上 | 答复 | agent 不支持 load/resume 或会话已被它自己清理 → 会给「这次接不上」（重试还是同一结果，要重来就结束这条任务后重新派一条），**不**改当前会话记录、不假装成功 |
 | 同 agent 并发时行为怪 | 池信息 | 同一 agent 的两个 worker **共用它的配置目录**（等价"两个终端在同一个目录里跑"）——已知形态；不同 agent 各自子目录天然隔离 |
 | CLI 说「没等到 daemon 答复」 | `task-out/` | 命令照常执行（这一行只是答复丢了）：**老版 daemon 不认回结果通道**（重启一次即可），或 daemon 正在退出。查实际状态用 `task-list`/`task-status`——别把这一行当「没派上」 |
 | CLI 说「已发送」而不是「已派发」 | `task-out/`、`tasks.json` | 同上（等不到答复）：`task-out/` 里没有 `<命令 id>.json` 说明 daemon 没写答复；任务本身在 `tasks.json` 里能看到就是跑起来了。派发的答复**要等起进程**（冷启动可能几十秒），CLI 最多等 30s |
