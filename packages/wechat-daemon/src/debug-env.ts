@@ -2,7 +2,7 @@
 //
 // VS Code 的「智能自动附加」会给终端里每个 node 进程注入两个变量：
 //   NODE_OPTIONS=--require <…>/ms-vscode.js-debug/bootloader.js
-//   VSCODE_INSPECTOR_OPTIONS={"deferredMode":true,"autoAttachMode":"smart","aaPatterns":["d:/workspace/projects/WeMind/**",…],…}
+//   VSCODE_INSPECTOR_OPTIONS={"deferredMode":true,"autoAttachMode":"smart","aaPatterns":["<你的仓库>/**",…],…}
 // 被注入的进程会**等调试器接上才执行主脚本**。终端里前台的命令 VS Code 会接上，所以看着一切正常；但 `wemind start` 脱离出去的后台守护进程/daemon 不会被接——进程活着却一行 JS 都不跑：`daemon.log` 不更新、`wrapper.pid` 不写、daemon 根本起不来，答复却说「已启动」（2026-10-29 实测）。
 //
 // 修法：脱离式 spawn 时把 VS Code 自己注入的那段 `--require` 摘掉，其余 `NODE_OPTIONS` 原样保留（用户可能设了 `--max-old-space-size` 之类）；`VSCODE_INSPECTOR_OPTIONS` 一并删——它只对那个 bootloader 有意义。
