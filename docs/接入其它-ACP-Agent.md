@@ -73,7 +73,7 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 | 命令 | 作用 |
 |------|------|
 | `wemind brain [<key\|label>]` | 查看：配置、生效值、来源、二进制是否可用 |
-| `wemind brain set <agent 名\|auto> [--bin X] [--args "…"] [--shell\|--no-shell] [--restart] [<key\|label>]` | 写入 brain.json（`--restart` 顺带重启 daemon 立即生效） |
+| `wemind brain set <agent 名\|auto> [--bin X] [--args "…"] [--shell\|--no-shell] [--model X\|auto] [--restart] [<key\|label>]` | 写入 brain.json；daemon 在跑且认控制桥时，**只给 agent 名**会当场热切换（成功才写入磁盘，失败不改 brain.json）；带 `--bin`/`--args`/`--shell`/`--model` 不能由它当场应用（控制桥只认 agent 名）——重启后生效，或（除 `--shell` 外）随后 `wemind brain switch <同名 agent>` 当场应用；`--restart` 顺带重启 daemon 立即生效 |
 | `wemind brain unset [<key\|label>]` | 删除 brain.json，回退到自动探测/默认 |
 | `wemind brain check [<key\|label>]` | 真起一个进程跑 ACP 握手（`initialize` + `session/new`），验证「不仅找得到、而且能说 ACP」 |
 
@@ -190,6 +190,8 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `settingsBase` | 否 | 以 `realHome` 下该文件为基底生成沙箱设置：剥离 `mcpServers` / `enabledPlugins` / `providers` / `model`，强制 `general.enableAutoUpdate=false`（qoder 用 `settings.json`） |
 | `credentialFiles` | 否 | 需从 `realHome` 同步进沙箱配置目录的凭据文件（新者胜；DSH `.credentials.yaml`、qoder `.auth/user`） |
 | `identityFiles` | 否 | 必须与 `realHome` 完全一致的标识文件（内容不同即覆盖；qoder `.auth/machine_id`——被 agent 重新生成会导致永久认证失败） |
+| `model` | 否 | 默认模型（如 DSH 的 `'["deepseek-account","deepseek-flash"]'`，格式是 `[provider 路由, 模型名]`）：会话建立后经 `session/set_config_option { configId:"model", value }` 下发一次（显式覆盖以它为准）；**用户可用 `wemind brain set <agent 名> --model …` 覆盖**（写进 `brain.json` 的 `presets.<名>.model`）。解析优先级「本段 > `presets[agent 名]` > 真实 profile 的默认 > 预设兜底」，`--model auto`/`default` = 跟随真实 profile 的默认（见下行 `realProfile`），**读不到就不下发**（由 agent 用自己的默认，**不会**改用本行的预设值）；只有完全没写 model 时，读不到才用本行预设值兜底 |
+| `realProfile` | 否 | 该 agent **用户层 profile 的名字**（DSH：`"acp"`，对应真实 `<realHome>/profiles/acp/`）。沙箱在 `syncSettings` 里**原样复制**这份 `cordis.patch.yml`（agent 自己首次启动生成的往往是空壳 `[]`，不同步就连它的 provider 路由都不存在；WeMind 不追加任何条目——缺的配置由用户自己补，`wemind brain` 只提示），并由 `profile-model.ts` 从它读默认模型（优先用户写的 `- id: acp`，否则 `agent-default-model`）——用户日常怎么用，WeMind 就跟着怎么用 |
 
 ---
 
@@ -324,7 +326,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 ```text
 选择大脑（推荐，写入磁盘持久）：
-  wemind brain set <agent 名|auto> [--bin X] [--args "…"] [--restart]   # 写入 <数据目录>/brain.json
+  wemind brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--model X|auto] [--restart]   # 写入 <数据目录>/brain.json
   wemind brain / wemind brain check                                 # 查看 / 真机自检
   （未配置时默认 auto：按 kiro → opencode → gemini → deepseek → qoder 探测已安装者）
 

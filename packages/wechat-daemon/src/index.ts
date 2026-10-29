@@ -108,6 +108,7 @@ import {
   setTaskStateSink,
   setTaskAckSink,
   taskPoolSummary,
+  providerIssue,
   type TaskStateSnapshot,
 } from "./task-manager.js";
 import { clearTaskDirs, taskInboxDir, writeTaskAck } from "./task-inbox.js";
@@ -133,8 +134,30 @@ function classifyBrainError(e: unknown): "timeout" | "backend" | "other" {
   if (/idle timeout|no-first-frame|cap timeout|timeout/i.test(s)) return "timeout";
   return "other";
 }
+/**
+ * 一次大脑失败该怎么处置：provider 侧（余额/额度、密钥鉴权、计费、模型不存在）是**永久**错误——
+ * 重试只是又白失败一轮，何况每次重试都要先冷启动一个 agent 进程；这类只试 1 次，直接把原因告诉用户。
+ * 其余沿用老规矩：backend（`-32603`/限流等瞬时错误）3 次，timeout/其它 2 次。
+ */
+export function brainFailurePlan(e: unknown): { attemptLimit: number; category: string } {
+  const prov = providerIssue(e);
+  if (prov) return { attemptLimit: 1, category: `provider：${prov}` };
+  const cat = classifyBrainError(e);
+  return { attemptLimit: cat === "backend" ? 3 : 2, category: cat };
+}
 /** 按错误类型给用户的失败提示。 */
-function brainErrorMessage(e: unknown): string {
+export function brainErrorMessage(e: unknown): string {
+  const prov = providerIssue(e);
+  if (prov) {
+    // 余额/计费在 provider 侧处理完，重发消息即可（daemon 不用重启）；
+    // 密钥/模型类常常是刚在本机改过登录态或 brain.json——运行中的 daemon 不重读配置、也不重新同步凭据（槽位启动时种入），
+    // 必须重启一次才生效，所以这句提示要说全，否则用户会陷入「改了、重发、还是错」。
+    const hint =
+      prov === "密钥/鉴权有问题" || prov === "模型不可用"
+        ? "若刚在本机改过登录态或模型配置，还要重启一次 daemon（wemind stop && wemind start）才会读到。"
+        : "";
+    return `（这次没答上来：${prov}。这类问题重试不会好——把账号/模型处理好后把消息再发一次就行。${hint}）`;
+  }
   switch (classifyBrainError(e)) {
     case "backend":
       return "（模型后端临时出错了，自动重试多次仍失败，请稍后把消息再发一次）";
@@ -271,7 +294,14 @@ function setTaskBrain(target: string): string {
   const r = resolvePresetByName(key, agentConfigFor(cfg, "worker"));
   if (!r.ok) return `❌ ${r.problem}`;
   const cur = getAgent("worker");
-  if (cur.name === r.agent.name && cur.bin === r.agent.bin)
+  // 与 brain-switch 的 sameAgent 同一条判据（name/bin/args/model）：任一项不同都算一次真切换，
+  // 否则「改完再切」会被判成「已经是它」，新任务继续用旧二进制/旧参数/旧模型。
+  if (
+    cur.name === r.agent.name &&
+    cur.bin === r.agent.bin &&
+    cur.args.join("\u0000") === r.agent.args.join("\u0000") &&
+    cur.model === r.agent.model
+  )
     return `默认任务大脑已经是「${r.agent.name}」，无需切换。`;
   setAgent("worker", r.agent);
   const busy = hasActiveTask();
@@ -765,7 +795,7 @@ async function handleMessage(
     );
   };
 
-  // 带分类的重试：backend(模型后端瞬时错误 -32603 等)最多 3 次；timeout/other 最多 2 次
+  // 带分类的重试：provider 侧永久错误只试 1 次；backend(模型后端瞬时错误 -32603 等)最多 3 次；timeout/other 最多 2 次
   const runWithRetry = async (promptText: string, imgs: typeof images): Promise<string> => {
     let n = 0;
     while (true) {
@@ -773,12 +803,13 @@ async function handleMessage(
       try {
         return await attempt(promptText, imgs);
       } catch (e) {
-        const cat = classifyBrainError(e);
-        log(`brain error (try ${n}, ${cat}): ${String(e)}`);
-        const maxAttempts = cat === "backend" ? 3 : 2;
-        if (n < maxAttempts) {
+        const plan = brainFailurePlan(e);
+        log(`brain error (try ${n}, ${plan.category}): ${String(e)}`);
+        if (n < plan.attemptLimit) {
           sendProgress(
-            cat === "backend" ? "⚠️ 模型后端临时出错，正在重试…" : "⏳ 响应中断了，正在自动重试…",
+            plan.category === "backend"
+              ? "⚠️ 模型后端临时出错，正在重试…"
+              : "⏳ 响应中断了，正在自动重试…",
           );
           continue;
         }

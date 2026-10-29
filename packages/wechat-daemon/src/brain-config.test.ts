@@ -39,14 +39,20 @@ describe("loadBrainConfig（宽松归一化）", () => {
     write({
       agent: "opencode",
       args: "acp --verbose",
+      model: "auto",
       worker: { agent: "Qoder", bin: "C:\\x\\qodercli.exe", shell: true },
-      presets: { deepseek: { bin: " C:\\dsh\\dsh.cmd " } },
+      presets: {
+        deepseek: { bin: " C:\\dsh\\dsh.cmd ", model: ' ["deepseek-account","deepseek-flash"] ' },
+      },
     });
     const cfg = loadBrainConfig(dir)!;
     expect(cfg.agent).toBe("opencode");
     expect(cfg.args).toEqual(["acp", "--verbose"]);
+    expect(cfg.model).toBe("auto");
     expect(cfg.worker).toEqual({ agent: "Qoder", bin: "C:\\x\\qodercli.exe", shell: true });
-    expect(cfg.presets).toEqual({ deepseek: { bin: "C:\\dsh\\dsh.cmd" } });
+    expect(cfg.presets).toEqual({
+      deepseek: { bin: "C:\\dsh\\dsh.cmd", model: '["deepseek-account","deepseek-flash"]' },
+    });
   });
 
   it("worker 段缺 agent（只有 bin）视为无效，不写进配置", () => {
@@ -128,6 +134,32 @@ describe("mergeBrainConfig（读-改-写，不丢段）", () => {
     const next = mergeBrainConfig(existing, { agent: "deepseek" });
     expect(next.bin).toBe("C:\\dsh\\dsh.cmd");
     expect(next.args).toEqual(["--profile", "acp"]);
+  });
+
+  it("换 agent 时模型覆盖也迁进 presets（切回来仍按它建会话）", () => {
+    const existing: BrainConfig = {
+      agent: "deepseek",
+      model: '["deepseek-account","deepseek-flash"]',
+    };
+    const next = mergeBrainConfig(existing, { agent: "opencode" });
+    expect(next.model).toBeUndefined();
+    expect(next.presets).toEqual({
+      deepseek: { model: '["deepseek-account","deepseek-flash"]' },
+    });
+  });
+
+  it("只改模型：同一 agent 的其它覆盖沿用，presets 里合并而不是丢字段", () => {
+    const existing: BrainConfig = {
+      agent: "deepseek",
+      bin: "C:\\dsh\\dsh.cmd",
+      model: '["deepseek-account","deepseek-flash"]',
+    };
+    const next = mergeBrainConfig(existing, { agent: "deepseek", model: "auto" });
+    expect(next.bin).toBe("C:\\dsh\\dsh.cmd");
+    expect(next.model).toBe("auto"); // auto = 跟随 agent 默认，原样存
+    expect(next.presets!.deepseek).toEqual({ bin: "C:\\dsh\\dsh.cmd", model: "auto" });
+    // 再设一次不带 model：沿用 auto，不会被悄悄改回预设值
+    expect(mergeBrainConfig(next, { agent: "deepseek" }).model).toBe("auto");
   });
 });
 

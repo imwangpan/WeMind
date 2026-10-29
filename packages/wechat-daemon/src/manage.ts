@@ -51,6 +51,7 @@ import {
   type BrainConfig,
 } from "./brain-config.js";
 import { checkAgent } from "./brain-check.js";
+import { acpOverrideHint } from "./profile-model.js";
 import { readPidRecords, recordMarkers } from "./pid-record.js";
 import { CLI_VERSION, versionLine } from "./version.js";
 import { renderHelp } from "./chat-commands.js";
@@ -527,35 +528,55 @@ function describeBrain(key: string): string {
   const ag = resolveAgent(cfg);
   const problem = agentProblem(ag);
   const cfgLine = cfg
-    ? `brain.json → agent=${cfg.agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}${cfg.shell !== undefined ? ` shell=${cfg.shell}` : ""}`
+    ? `brain.json → agent=${cfg.agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}${cfg.shell !== undefined ? ` shell=${cfg.shell}` : ""}${cfg.model ? ` model=${cfg.model}` : ""}`
     : "（未设置 brain.json）";
-  return [
+  const lines = [
     `账号 ${key}`,
     `  配置：${cfgLine}`,
     `  请求：${ag.requestedKey}    来源：${BRAIN_SRC_LABEL[ag.source]}`,
-    `  生效：name=${ag.name}  bin=${ag.bin}  args=[${ag.args.join(" ")}]  shell=${ag.shell}  home_env=${ag.homeEnvVar ?? "(无)"}`,
+    `  生效：name=${ag.name}  bin=${ag.bin}  args=[${ag.args.join(" ")}]  shell=${ag.shell}  home_env=${ag.homeEnvVar ?? "(无)"}  model=${ag.model ?? "(agent 默认)"}`,
     `  可用：${problem ? `❌ ${problem}` : `✅ ${ag.binPath ?? ag.bin}`}`,
     `  可选 agent：${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
     `  自动探测顺序：${AUTO_PROBE_ORDER.join(" → ")}`,
-  ].join("\n");
+  ];
+  // 用户层 profile 缺 `- id: acp` 时给出「你自己补上」的提示（WeMind 只原样同步配置，不替 agent 合成）
+  const hint =
+    ag.realProfile && ag.realHome && ag.inherit
+      ? acpOverrideHint(ag.realHome, ag.realProfile)
+      : null;
+  if (hint) lines.push("", hint);
+  return lines.join("\n");
 }
 
-/** `wemind brain set <agent 名|auto>`：把选择按账号写入磁盘（可选 --bin/--args/--shell；--restart 立即重启 daemon）。 */
+/** `wemind brain set <agent 名|auto>`：把选择按账号写入磁盘（可选 --bin/--args/--shell/--model；--restart 立即重启 daemon）。 */
 async function cmdBrainSet(
   agentName: string,
   key: string,
-  opts: { bin?: string; args?: string; shell?: boolean; restart: boolean },
+  opts: { bin?: string; args?: string; shell?: boolean; model?: string; restart: boolean },
 ): Promise<string> {
   const agent = agentName.trim().toLowerCase();
   if (agent !== "auto" && !ACP_AGENT_PRESETS[agent])
     throw new Error(
       `未知 agent「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制用 --bin 搭配任一 agent）`,
     );
+  if (opts.model !== undefined) {
+    if (!opts.model.trim()) throw new Error("--model 缺少参数值（清空/跟随默认请写 --model auto）");
+    // auto 只是「自动探测」，解析时会被替换成探测到的具体 agent：写进 presets.auto 永远读不到，
+    // 顶层的 model 又会下发给探测出来的任意 agent（把 DSH 的模型值发给 opencode 之类）。
+    if (agent === "auto")
+      throw new Error(
+        "`auto` 是「自动探测」，不绑定具体 agent，不能配 --model；请指定具体 agent（如 brain set deepseek --model …）",
+      );
+  }
   const dir = accountDir(key);
-  const customized = opts.bin !== undefined || opts.args !== undefined || opts.shell !== undefined;
+  const customized =
+    opts.bin !== undefined ||
+    opts.args !== undefined ||
+    opts.shell !== undefined ||
+    opts.model !== undefined;
   // 只选 agent（没带自定义启动参数）+ 没要求重启时，写入磁盘和「热切换」其实是同一件事：daemon 在跑且认桥就交给它一次做完——
   // 它先启动新大脑、成功才写 brain.json（失败退回，盘上不留半截结果），这比「写入磁盘 + 等下次重启」对用户更实在（决策⑪）。
-  // 带 --bin/--args/--shell 则**不能**当场应用：控制桥只接受 agent 名（见 control-bridge.ts 的安全边界）。
+  // 带 --bin/--args/--shell/--model 则**不能**当场应用：控制桥只接受 agent 名（见 control-bridge.ts 的安全边界）。
   if (!opts.restart && !customized && bridgeReady(key)) {
     const r = await cmdBrainSwitch(agent, key, false);
     // 热切换失败时**没有写入磁盘**（持久化放最后，见 brain-switch.ts）：把这点说清楚，否则用户会以为 brain.json 已经改了。
@@ -567,10 +588,11 @@ async function cmdBrainSet(
   if (opts.bin) patch.bin = opts.bin;
   if (opts.args !== undefined) patch.args = opts.args.trim() ? opts.args.trim().split(/\s+/) : [];
   if (opts.shell !== undefined) patch.shell = opts.shell;
+  if (opts.model !== undefined) patch.model = opts.model.trim();
   // 读-改-写：保留 worker 段（任务侧独立选择）与 presets 段（按 agent 名存的启动覆盖），旧 agent 的覆盖自动迁移。
   const cfg = updateBrainConfig(patch, dir);
   const lines = [
-    `已设置 ${key} 的大脑：agent=${agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}`,
+    `已设置 ${key} 的大脑：agent=${agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}${cfg.model ? ` model=${cfg.model}` : ""}`,
     `配置文件：${brainConfigPath(dir)}`,
   ];
   if (opts.restart) {
@@ -582,8 +604,10 @@ async function cmdBrainSet(
       lines.push(`daemon 未在运行，未重启（用 wemind start ${key} 启动）。`);
     }
   } else if (customized && bridgeReady(key)) {
+    // --bin/--args/--model 的改动其实可以由 `brain switch <同名 agent>` 当场应用（sameAgent 按这几项判「是不是同一个」）；--shell 不在判据里，只能重启。
+    const viaSwitch = opts.bin !== undefined || opts.args !== undefined || opts.model !== undefined;
     lines.push(
-      `（带 --bin/--args/--shell 的改动不能当场应用：控制桥只认 agent 名。重启后生效——wemind stop ${key} && wemind start ${key}）`,
+      `（带 --bin/--args/--shell/--model 的改动不能由 brain set 当场应用：控制桥只认 agent 名。重启后生效——wemind stop ${key} && wemind start ${key}${viaSwitch ? `；不想重启的话，接着执行 wemind brain switch ${agent} 也能当场应用（它按 name/bin/args/model 判断是不是同一个，改过就会真切换）` : ""}）`,
     );
   } else if (daemonAlive(key)) {
     lines.push(
@@ -615,8 +639,16 @@ async function cmdBrainCheck(key: string): Promise<string> {
 /** brain 子命令派发：show（默认）/ set / unset / check。 */
 async function cmdBrain(rest: string[]): Promise<string> {
   const argv = [...rest];
-  const FLAGS = new Set(["--bin", "--args", "--shell", "--no-shell", "--restart"]);
+  const FLAGS = new Set(["--bin", "--args", "--shell", "--no-shell", "--model", "--restart"]);
   const takeFlag = (name: string): string | undefined => {
+    // 同时认 `--model X` 与 `--model=X`：以前只按整 token 匹配 `--model`，等号写法会被当成未知开关静默丢掉（命令还报成功）。
+    const eq = argv.find((t) => t.startsWith(`${name}=`));
+    if (eq !== undefined) {
+      const v = eq.slice(name.length + 1);
+      if (!v) throw new Error(`${name} 缺少参数值`);
+      argv.splice(argv.indexOf(eq), 1);
+      return v;
+    }
     const i = argv.indexOf(name);
     if (i < 0) return undefined;
     const v = argv[i + 1];
@@ -628,6 +660,7 @@ async function cmdBrain(rest: string[]): Promise<string> {
   };
   const bin = takeFlag("--bin");
   const argsOverride = takeFlag("--args");
+  const model = takeFlag("--model");
   const restart = argv.includes("--restart");
   if (restart) argv.splice(argv.indexOf("--restart"), 1);
   const shell = argv.includes("--shell") ? true : argv.includes("--no-shell") ? false : undefined;
@@ -635,6 +668,13 @@ async function cmdBrain(rest: string[]): Promise<string> {
     const i = argv.indexOf(f);
     if (i >= 0) argv.splice(i, 1);
   }
+  while (argv.includes("--worker")) argv.splice(argv.indexOf("--worker"), 1); // 只对 switch 有意义（用 rest 判断），不留成未知开关
+  // 未知开关直接报错：以前一律被 pos 的过滤静默丢掉，`--modle` 这种拼错会「看起来设置成功」。
+  const unknown = argv.filter((x) => x.startsWith("--"));
+  if (unknown.length)
+    throw new Error(
+      `未知参数：${unknown.join(" ")}（可用：--bin --args --shell --no-shell --model --restart）`,
+    );
   const pos = argv.filter((x) => x && !x.startsWith("--"));
   const first = (pos[0] || "").toLowerCase();
   const SUBCOMMANDS = new Set(["show", "set", "unset", "check", "switch", "handoff"]);
@@ -649,21 +689,27 @@ async function cmdBrain(rest: string[]): Promise<string> {
     case "set": {
       if (!pos[1])
         throw new Error(
-          '用法: brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]',
+          '用法: brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]',
         );
       return await cmdBrainSet(pos[1], pickKey(pos[2]), {
         bin,
         args: argsOverride,
         shell,
+        model,
         restart,
       });
     }
     case "switch": {
-      // 桥只接受**agent 名**（安全边界：见 control-bridge.ts）。带 --bin/--args/--shell 就走 set（只写入磁盘 + 需重启）。
-      if (bin !== undefined || argsOverride !== undefined || shell !== undefined)
+      // 桥只接受**agent 名**（安全边界：见 control-bridge.ts）。带 --bin/--args/--shell/--model 就走 set（只写入磁盘；--bin/--args/--model 可随后用同名 switch 当场应用，--shell 只能重启）。
+      if (
+        bin !== undefined ||
+        argsOverride !== undefined ||
+        shell !== undefined ||
+        model !== undefined
+      )
         throw new Error(
-          "`brain switch` 只接受 agent 名（换大脑是「换一个已装好的 agent」，不能带 --bin/--args）。\n" +
-            "需要自定义二进制用 `brain set <agent 名> --bin …`（那是配置变更，需要重启 daemon 生效）。",
+          "`brain switch` 只接受 agent 名（换大脑是「换一个已装好的 agent」，不能带 --bin/--args/--model）。\n" +
+            "需要自定义二进制用 `brain set <agent 名> --bin …`（那是配置变更，只写入磁盘——之后 `wemind brain switch <同名 agent>` 可当场应用，或重启 daemon）；换模型用 `brain set <agent 名> --model …`。",
         );
       if (!pos[1]) throw new Error("用法: brain switch <agent 名|auto> [--worker] [<key|label>]");
       const worker = rest.includes("--worker");
@@ -1273,8 +1319,8 @@ export function helpText(): string {
   list                           列出账号、别名、运行状态（含 brain 进程与 worker 池）
   start [key|label]              启动某账号的 daemon（省略 = 默认账号）
   stop [key|label]               停止某账号的 daemon（连带 brain 与全部 worker 进程树；省略 = 默认账号）
-  brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]
-                                 改账号大脑**配置**（写 brain.json；daemon 需重启才生效）
+  brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]
+                                 改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
   logout <key|label>             停 daemon + 通知下线 + 清凭证（保留目录，可重登）
   delete <key|label>             停 daemon + 删除目录 + 移除注册

@@ -167,13 +167,16 @@ graph TD
 
 ### 错误分类与重试
 
-`classifyBrainError` 把大脑错误分三类，按类型重试：
+`brainFailurePlan` 决定一次大脑失败要不要重试、重试几次；`brainErrorMessage` 给用户一句能照做的提示：
 
 | 类型 | 触发特征 | 最大尝试 | 失败提示 |
 |------|---------|---------|---------|
+| `provider：…` | 余额/额度不足、密钥/鉴权、计费、模型不存在（**永久错误**，`providerIssue()` 认，与任务侧同一张关键字表） | **1 次** | `这次没答上来：<原因>。这类问题重试不会好——把账号/模型处理好后，把消息再发一次就行`（其中「密钥/鉴权」「模型不可用」两类追加一句：刚在本机改过登录态或模型配置的，还要重启一次 daemon（`wemind stop && wemind start`）才会读到） |
 | `backend` | `-32603` / overloaded / rate limit / 429 / 503 | 3 次 | 模型后端临时出错 |
 | `timeout` | idle/no-first-frame/cap timeout | 2 次 | 处理超时被中断 |
 | `other` | 其它 | 2 次 | 通用出错 |
+
+为什么要单列 provider 一类：这类错误（如 DeepSeek 的 `Insufficient Balance`）被 agent 包成 `-32603 ... turn failed: …`，只按协议错误码看会当成「后端瞬时错误」——于是白重试 3 次，而**每次重试都要先冷启动一个 agent 进程**，最后给用户的还是「稍后把消息再发一次」这种没用的建议。判定**限流优先**（`rate limit`/`per minute`/`overloaded` 等一律不算 provider 问题，仍走 backend 重试），与任务侧同一口径。
 
 ## 5.6 连续发送上限管理（关键机制）
 

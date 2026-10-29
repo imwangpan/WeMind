@@ -101,7 +101,7 @@ WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文�
 - `initialize` 还带 `sessionCapabilities.{additionalDirectories,close,delete,fork,list,resume}` 与 `_meta["opencode/child-session-updates"]`——WeMind 不理会，无副作用。
 - `session/update` 会出现 `available_commands_update`、`usage_update`、`user_message_chunk`；WeMind 现有逻辑把它们当"活动"或忽略，**不报错**。
 - 未登录任何 provider 时 OpenCode 仍可用其**自带免费模型**（`session/new` 默认 `opencode/nemotron-3.5-super-vl-free`）完成对话。
-- **模型由 OpenCode 自己决定**：WeMind 不设置模型；若要固定模型，需写进沙箱 `opencode.json` 的 `model`。
+- **模型默认由 OpenCode 自己决定**：预设不带 `model`，WeMind 默认不下发；会话用它自己配置里的 `model`（沙箱 `opencode.json` 由你真实的 `~/.config/opencode/opencode.json` 作基底生成，手改沙箱那份会在下次启动被覆盖——要改就改真实那份）。也可以 `wemind brain set opencode --model '…'`（写入 `brain.json`，会话建立/恢复后经 `session/set_config_option` 下发，daemon 在跑时接着 `wemind brain switch opencode` 当场应用）——但 **OpenCode 是否接受这个 `configId` 尚未实测**（DSH/Qoder 已实测可用），下发失败会让该回合报错；稳妥做法仍是改真实 `opencode.json` 的 `model`。
 
 **隔离与 MCP 挂载（M2 实现前另做的决定性验证）**：
 - `OPENCODE_CONFIG_DIR` 只"追加"、**不能**替换默认 global，无法隔离 → 改用 **`XDG_CONFIG_HOME`**。

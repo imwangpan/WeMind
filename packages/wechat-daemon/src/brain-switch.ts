@@ -71,7 +71,14 @@ function envNote(key: string): string {
 }
 
 function sameAgent(a: ResolvedAgent, b: ResolvedAgent): boolean {
-  return a.name === b.name && a.bin === b.bin && a.args.join("\u0000") === b.args.join("\u0000");
+  return (
+    a.name === b.name &&
+    a.bin === b.bin &&
+    a.args.join("\u0000") === b.args.join("\u0000") &&
+    // 模型也算「是不是同一个」：`brain set --model` 只写盘，运行时应用新模型的唯一途径就是走一次真切换
+    // （restart → session/load → applyModel）。漏比 model 会让「改完再 switch」回「无需切换」，旧模型一直用下去。
+    a.model === b.model
+  );
 }
 
 /**

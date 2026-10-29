@@ -43,7 +43,8 @@ node scripts/acp-probe.mjs
 | `image:false` | 在 `askBrain` 前拦截图片，或换支持图片的 agent |
 | 正文非逐 token | 调 `firstFrameMs` + 心跳策略（见 M2） |
 | `mcpServers` 被拒绝 | MCP 只能走该 agent 自己的配置文件，或先不做动态 MCP |
-| 默认模型路由需要 API key / 桌面登录要切 account | 加 `model` agent 配置字段，并在 session 建立后 `session/set_config_option` |
+| 默认模型路由需要 API key / 桌面登录要切 account | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖 |
+| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：沙箱**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在），并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
 
 ---
 
@@ -82,6 +83,7 @@ acme: {
   // settingsBase: "settings.json",       // 以真实配置为基底（剥离 MCP/插件/providers/model、关自动更新）
   // credentialFiles: [".auth/user"],     // 登录态（新者胜）
   // identityFiles: [".auth/machine_id"], // 必须与真实目录一致（内容不同即覆盖）
+  // realProfile: "acp",                  // 该 agent 的用户层 profile 名——原样复制真实 profiles/<名>/cordis.patch.yml 并从它读默认模型（DSH）
 },
 ```
 
@@ -94,8 +96,8 @@ acme: {
 
 > **1.2.0 起，加 agent 不必再"挑角色"**：同一个 agent 同时可用于对话大脑与任务 worker（`resolveAgentFor(cfg, role)`），加完立刻可以
 > `wemind brain switch acme` 热切换、也可以在微信里 `任务 acme：…` 指定它干活——两者都不需要改代码、不需要重启。
-> 启动覆盖（`--bin`/`--args`/`--shell`）按**agent 名**存在 `brain.json` 的 `presets` 段（`wemind brain set acme --bin …`），
-> 所以「切走再切回」不会丢；默认任务大脑是 `worker.agent ?? agent`。
+> 启动覆盖（`--bin`/`--args`/`--shell`/`--model`）按**agent 名**存在 `brain.json` 的 `presets` 段（`wemind brain set acme --bin …`），
+> 所以「切走再切回」不会丢；`--model auto` = 跟随真实 profile 的默认（agent 配了 `realProfile` 时；读不到就不下发）；默认任务大脑是 `worker.agent ?? agent`。
 
 ---
 
@@ -106,6 +108,7 @@ acme: {
 - 记忆继承：`realHome` + `inheritDirs` / `inheritFiles`；单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
 - 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时沙箱。
 - 设置继承：`settingsBase` 会在 brain/worker 两个沙箱生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）。
+- **profile 继承**（`realProfile`，可选）：把真实 `<realHome>/profiles/<名>/cordis.patch.yml` **原样复制**进两个沙箱——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在；默认模型也从这份读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
 - 默认空 MCP；`wechat` 永久禁止（防它把消息发回自己）。
 - **每个 agent 只读自己的 catalog**；不要把 kiro 的文件指给 DSH。
 

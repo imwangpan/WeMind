@@ -6,6 +6,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import type { ResolvedAgent } from "./brain-agents.js";
 import { getAgent } from "./agent-slot.js";
 import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
+import { stripWechatMcpEntries } from "./profile-model.js";
 
 /**
  * brain 的 MCP 沙箱：brain 跑在独立配置目录下，默认不加载任何 MCP。
@@ -297,9 +298,38 @@ function syncSettingsBase(ag: ResolvedAgent): void {
   fs.writeFileSync(brainMcpJson(ag), JSON.stringify(settingsBase(ag), null, 2), "utf-8");
 }
 
+/** 继承真实 profile 的用户层（DSH：`profiles/<名>/cordis.patch.yml`，桌面端写 provider 目录与默认模型）。
+ *  **原样复制**——这份文件是用户自己的配置，WeMind 只镜像、不合成（`- id: acp` 这类覆盖由用户自己维护，
+ *  缺失时 `wemind brain` 会提示怎么补；见 `profile-model.ts` 的 `acpOverrideHint`），这样「终端 dsh」与「微信大脑」行为一致。
+ *  按内容同步（桌面端更新后覆盖）；**唯独剔除用户自己挂的微信 MCP 条目**（`stripWechatMcpEntries`）：
+ *  沙箱里的 MCP 只能是 WeMind 的激活集（`wechat` 永远不在里面），否则 agent 会拿同一个 bot token 起第二个消费者。 */
+function syncProfilePatch(ag: ResolvedAgent): void {
+  if (!ag.realProfile || !ag.realHome || !ag.inherit) return;
+  if (path.resolve(BRAIN_HOME) === path.resolve(ag.realHome)) return; // 沙箱就是真实目录时不自我覆盖
+  const src = path.join(ag.realHome, "profiles", ag.realProfile, "cordis.patch.yml");
+  const dst = path.join(BRAIN_HOME, "profiles", ag.realProfile, "cordis.patch.yml");
+  try {
+    if (!fs.existsSync(src)) return;
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    const raw = fs.readFileSync(src);
+    const { text, removed } = stripWechatMcpEntries(raw.toString("utf-8"));
+    if (removed.length) {
+      console.error(
+        `[wemind/wechat-daemon/mcp] 真实 profile 里的微信 MCP 已从大脑沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
+      );
+    }
+    const out = removed.length ? Buffer.from(text, "utf-8") : raw;
+    const same = fs.existsSync(dst) && fs.readFileSync(dst).equals(out);
+    if (!same) fs.writeFileSync(dst, out);
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** 继承真实配置目录的「非 MCP」设置（模型/免确认等），让大脑与日常使用同款配置；mcp 段保持沙箱权威。
- *  配了 `mcpViaAcp` 的 agent 没有文件式 MCP/settings 可继承，跳过（模型走 preset.model + set_config_option）。 */
+ *  配了 `mcpViaAcp` 的 agent 也仍有「profile 用户层」可继承（DSH 的 provider 目录/默认模型），只是 MCP 不写文件。 */
 function syncSettings(ag: ResolvedAgent): void {
+  syncProfilePatch(ag);
   if (ag.mcpViaAcp) return;
   if (ag.settingsBase && ag.realHome) {
     syncSettingsBase(ag); // 不依赖 inherit：沙箱硬化（关自动更新）与隔离始终生效

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config.js";
+import { readProfileDefaultModel } from "./profile-model.js";
 
 /**
  * ACP agent 与解析。
@@ -56,7 +57,8 @@ export type AcpAgentPreset = {
   credentialFiles?: string[]; // 需要从 realHome 同步进沙箱的凭据文件（相对配置目录；新者胜）
   identityFiles?: string[]; // 必须与 realHome 保持一致的标识文件（相对配置目录；内容不同即覆盖）
   settingsBase?: string; // 以 realHome 下该文件为基底生成沙箱设置（剥离 MCP/插件/自定义供应商并关自动更新）
-  model?: string; // 需要 session/set_config_option 选择的模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）
+  model?: string; // 默认模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）：经 session/set_config_option（agent 自己的 ACP 接口）在会话建立后下发一次；可用 brain.json / `brain set --model` 覆盖，`auto` = 跟随默认；配了 realProfile 时默认值优先从真实 profile 读
+  realProfile?: string; // 真实 home 里该 agent 的 profile 名（`profiles/<名>/cordis.patch.yml` 是用户/桌面端维护的用户层：沙箱**原样复制**、不追加条目，默认模型从它读——优先 `- id: acp`，否则 `agent-default-model`）；如 DSH 的 "acp"
   mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
 };
 
@@ -110,10 +112,21 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   },
   // DeepSeek Harness（官方 ACP profile）。
   // - 桌面端自带 `dsh.cmd`（只有 .cmd，没有无扩展名 dsh），故 binWin 必须写全；
-  // - DSH_HOME 指向 brain 沙箱；`.credentials.yaml` 由沙箱同步（桌面登录态，对应 deepseek-account 路由）；
+  // - DSH_HOME 指向 brain 沙箱；`.credentials.yaml` 由沙箱同步（桌面登录态）；
   // - 无 session/load，用 session/resume；image:false（收图需上层拦截）；
-  // - 默认模型路由是 deepseek-official（需 API key），这里显式选 deepseek-account 才能复用桌面登录。
-  // 详见 docs/接入-DeepSeek.md（含 0.2.1-rc.2 真机实测）。
+  // - **模型：跟着用户自己 dsh 的配置走（WeMind 只读、只复制，不替 agent 合成配置）。** 桌面端把 provider 目录与默认模型写进 `~/.dsh/profiles/<profile>/cordis.patch.yml`。
+  //   `dsh --profile acp` 的 ACP 桥插件（`@deepseek-ai/dsh-acp`）默认模型写死在它**自己的 bundle patch**里：`- id: acp` 的
+  //   `config: { provider: deepseek-official, model: deepseek-v4-flash }`；profile 用户层只覆盖 `llm-pi-ai` / `agent-default-model`，
+  //   `- id: acp` 要靠**用户自己**补（插件 README：a later patch can replace that row's complete config）——这就是
+  //   「agent-default-model 写着 magpie、session/new 仍报 deepseek-official、一 prompt 就 no API key」的原因（2026-10-29 拆开 app.asar 核实）。
+  //   所以 `realProfile: "acp"`：沙箱**原样复制**真实 profile 用户层（否则沙箱是空壳 `[]`，连 magpie 路由都没有；不追加条目），
+  //   缺 `- id: acp` 时由 `wemind brain` 提示用户补到真实 profile（`acpOverrideHint`）。
+  //   默认模型从这份配置读（优先 `- id: acp`，否则 `agent-default-model`）→ 用户日常用哪个模型，微信大脑就用哪个。
+  // - 读不到时回退到下面的 `model`（deepseek-account/deepseek-flash：同样显示为 DeepSeek-V4.1-Flash，走账号登录）；
+  //   显式换模型用 `wemind brain set deepseek --model "…"`，`--model auto` = 跟随真实 profile 的默认。
+  //   `set_config_option`（agent 自己的 ACP 接口）在会话建立后按同一个值下发一次：幂等，也是显式覆盖的通道。
+  // - magpie 路由走桌面端的本机模型网关（127.0.0.1:3425），**桌面端要在运行**——和用户日常 dsh 用 magpie 时的前提一样。
+  // 详见 docs/接入-DeepSeek.md（含 0.2.1-rc.2 / 0.2.1-rc.3 真机实测）。
   deepseek: {
     name: "deepseek",
     bin: "dsh",
@@ -129,6 +142,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     firstFrameMs: 60_000,
     heartbeatMs: 60_000,
     images: false,
+    realProfile: "acp",
     model: '["deepseek-account","deepseek-flash"]',
     mcpViaAcp: true, // 不写 mcp.json；激活集转成 ACP mcpServers 传给 session/new|resume
   },
@@ -250,6 +264,7 @@ export type ResolvedAgent = {
   identityFiles: string[];
   settingsBase?: string;
   model?: string;
+  realProfile?: string;
   mcpViaAcp: boolean;
   /** 请求的原始值（来自 env / brain.json / 缺省 `auto`）。 */
   requestedKey: string;
@@ -270,6 +285,12 @@ function envKeyFor(role: AgentRole): string | undefined {
       ? process.env.WEMIND_WORKER_BRAIN?.trim() || process.env.WEMIND_BRAIN?.trim()
       : process.env.WEMIND_BRAIN?.trim();
   return key || undefined;
+}
+
+/** 模型覆盖里的「跟随 agent 默认」写法（`brain set deepseek --model auto`）：不指定任何模型。 */
+function isDefaultModel(v: string): boolean {
+  const s = v.trim().toLowerCase();
+  return s === "auto" || s === "default";
 }
 
 /**
@@ -350,6 +371,18 @@ function resolveAgentCore(
     process.env.WEMIND_BRAIN_REAL_HOME?.trim() ||
     process.env.WECHAT_REAL_KIRO_HOME?.trim() ||
     preset.realHome;
+
+  // 模型：显式覆盖（本段 > presets[agent 名]）优先；`auto`/`default` 或没写 = 跟随默认——
+  // 配了 realProfile 的 agent（DSH）从用户真实 profile 读（优先 `- id: acp`，否则 `agent-default-model`；WeMind 只读不写，缺 `- id: acp` 由 `wemind brain` 提示用户补）；
+  // 读到的值经 `set_config_option` 下发；读不到时：`auto` = 不下发，没写 = 用内置预设值兜底。
+  const rawModel = overrideCfg?.model?.trim() || presetOv?.model?.trim() || "";
+  const explicitModel = rawModel && !isDefaultModel(rawModel) ? rawModel : "";
+  const derivedModel =
+    !explicitModel && preset.realProfile && realHome && inherit
+      ? readProfileDefaultModel(realHome, preset.realProfile)
+      : null;
+  const model =
+    explicitModel || derivedModel || (isDefaultModel(rawModel) ? undefined : preset.model);
   const dirsEnv = process.env.WEMIND_BRAIN_INHERIT_DIRS?.trim();
   const inheritDirs = dirsEnv
     ? dirsEnv.split(/[,\s]+/).filter(Boolean)
@@ -377,7 +410,8 @@ function resolveAgentCore(
     credentialFiles: preset.credentialFiles ?? [],
     identityFiles: preset.identityFiles ?? [],
     settingsBase: preset.settingsBase,
-    model: preset.model,
+    model,
+    realProfile: preset.realProfile,
     mcpViaAcp: preset.mcpViaAcp ?? false,
     requestedKey,
     source,
@@ -427,6 +461,7 @@ export function resolvePresetByName(
     if (cfg.args?.length) base.args = cfg.args;
     if (cfg.shell !== undefined) base.shell = cfg.shell;
     if (cfg.homeEnvVar) base.homeEnvVar = cfg.homeEnvVar;
+    if (cfg.model) base.model = cfg.model;
   }
   const agent = resolveAgentCore("brain", base, { ignoreEnv: true });
   const problem = agentProblem(agent);

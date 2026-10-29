@@ -28,8 +28,12 @@ const saved: Record<string, string | undefined> = {};
 for (const v of VARS) saved[v] = process.env[v];
 const savedPath = process.env.PATH;
 
+// 默认模型会从真实 `~/.dsh` 的 profile 读（deepseek 的 realProfile）：测试必须指向空 home，
+// 否则结果随开发机日常 dsh 的配置变化。要测「跟随真实 profile」的用例再显式指到 fixture。
+const emptyRealHome = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-nohome-"));
 function clearVars() {
   for (const v of VARS) delete process.env[v];
+  process.env.WEMIND_BRAIN_REAL_HOME = emptyRealHome;
 }
 
 afterEach(() => {
@@ -41,9 +45,29 @@ afterEach(() => {
 // 独立临时目录，用于「伪造 PATH」验证 auto 探测（不依赖宿主机的真实安装）。
 const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-test-"));
 const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-empty-"));
+// 伪造一份真实 dsh home：profiles/acp 的用户层带 agent-default-model（与桌面端写进去的形状一致）
+const profileHome = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-profile-"));
+fs.mkdirSync(path.join(profileHome, "profiles", "acp"), { recursive: true });
+fs.writeFileSync(
+  path.join(profileHome, "profiles", "acp", "cordis.patch.yml"),
+  [
+    "- id: llm-pi-ai # magpie",
+    "  config:",
+    "    providers:",
+    "      magpie: {}",
+    "- id: agent-default-model # magpie",
+    "  config:",
+    "    provider: magpie",
+    '    model: "auto/deepseek-v4.1-flash"',
+    "",
+  ].join("\n"),
+);
 afterAll(() => {
   fs.rmSync(fakeBin, { recursive: true, force: true });
   fs.rmSync(emptyBin, { recursive: true, force: true });
+  fs.rmSync(emptyRealHome, { recursive: true, force: true });
+  fs.rmSync(profileHome, { recursive: true, force: true });
+  if (saved.WEMIND_BRAIN_REAL_HOME === undefined) delete process.env.WEMIND_BRAIN_REAL_HOME;
 });
 
 describe("resolveAgent agent", () => {
@@ -97,6 +121,46 @@ describe("resolveAgent agent", () => {
     expect(ag.credentialFiles).toEqual([".credentials.yaml"]);
     expect(ag.model).toBe('["deepseek-account","deepseek-flash"]');
     expect(ag.mcpViaAcp).toBe(true); // MCP 走 session/new|resume 的 mcpServers，不写文件
+  });
+
+  it("模型可覆盖：presets[agent 名].model 优先于预设值（切走再切回也还在）", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "deepseek";
+    const cfg = {
+      agent: "opencode",
+      presets: { deepseek: { model: '["deepseek-account","deepseek-v4-pro"]' } },
+    };
+    expect(resolveAgent(cfg).model).toBe('["deepseek-account","deepseek-v4-pro"]');
+  });
+
+  it("模型写 auto/default：真实 profile 读不到时不下发（跟随 agent 自己的默认）", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "deepseek";
+    expect(resolveAgent({ agent: "deepseek", model: "auto" }).model).toBeUndefined();
+    expect(resolveAgent({ agent: "deepseek", model: "default" }).model).toBeUndefined();
+  });
+
+  it("默认模型跟随真实 profile 的 agent-default-model（ACP 桥不读那个键，值由 WeMind 补进沙箱并下发）", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "deepseek";
+    process.env.WEMIND_BRAIN_REAL_HOME = profileHome;
+    const derived = '["magpie","auto/deepseek-v4.1-flash"]';
+    expect(resolveAgent().model).toBe(derived); // 没写 = 跟随
+    expect(resolveAgent({ agent: "deepseek", model: "auto" }).model).toBe(derived); // auto = 跟随
+    // 显式值优先于真实 profile
+    expect(
+      resolveAgent({ agent: "deepseek", model: '["deepseek-account","deepseek-v4-pro"]' }).model,
+    ).toBe('["deepseek-account","deepseek-v4-pro"]');
+    // 关掉继承 = 不读真实 home → 回退预设值
+    process.env.WEMIND_BRAIN_INHERIT = "0";
+    expect(resolveAgent().model).toBe('["deepseek-account","deepseek-flash"]');
+  });
+
+  it("真实 profile 读不到时：没写用预设值兜底，auto 不下发", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "deepseek"; // clearVars 已把 REAL_HOME 指到空目录
+    expect(resolveAgent().model).toBe('["deepseek-account","deepseek-flash"]');
+    expect(resolveAgent({ agent: "deepseek", model: "auto" }).model).toBeUndefined();
   });
 
   it("qoder：原生 qodercli + QODER_CONFIG_DIR 沙箱 + settings.json + 凭据/标识文件", () => {
@@ -350,5 +414,28 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
       expect(r.agent.args).toEqual(["acp"]);
       expect(r.agent.bin).not.toBe("C:\\dsh\\dsh.cmd");
     }
+  });
+
+  it("模型覆盖跟着切换走：presets 里的 model 生效，顶层显式 auto 压过预设值", () => {
+    clearVars();
+    process.env.PATH = emptyBin; // PATH 上没有 dsh，只能靠 presets 段
+    const dsh = path.join(fakeBin, "dsh-model.cmd");
+    fs.writeFileSync(dsh, "");
+    const pro = '["deepseek-account","deepseek-v4-pro"]';
+    // 目标 agent 不是顶层那个 → 用 presets[deepseek].model
+    const r = resolvePresetByName("deepseek", {
+      agent: "opencode",
+      presets: { deepseek: { bin: dsh, model: pro } },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.agent.model).toBe(pro);
+    // 顶层（写入磁盘那个 agent）的显式 auto 优先：不指定，跟随 agent 默认
+    const r2 = resolvePresetByName("deepseek", {
+      agent: "deepseek",
+      model: "auto",
+      presets: { deepseek: { bin: dsh, model: pro } },
+    });
+    expect(r2.ok).toBe(true);
+    if (r2.ok) expect(r2.agent.model).toBeUndefined();
   });
 });

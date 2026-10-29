@@ -203,7 +203,7 @@ poller（长轮询，不被大脑阻塞）
 | DSH `0.2.1-rc.2` 接受图片 | ❌ 实测 | `image:false`；带图 `-32602` |
 | DSH `0.2.1-rc.2` 接受 stdio/HTTP MCP | ✅ 实测 | stdio：假 MCP 在 `session/new`/`resume` 均被模型真实调用（两个方法各调用 2 次）；HTTP 能力已广告、未实测 |
 | DSH 能保留多轮上下文（resume 后） | ✅ 实测 | PINEAPPLE：close + 强杀 + resume 后答出 |
-| DSH 默认模型路由可直接用 | ⚪ **不成立** | 默认 `deepseek-official` 需 `DEEPSEEK_API_KEY`；桌面登录是 `deepseek-account`，必须 `set_config_option` |
+| DSH 默认模型路由可直接用 | ⚪ **不成立** | 默认 `deepseek-official/deepseek-v4-flash` 需 `DEEPSEEK_API_KEY`（2026-10-29 用 `acp-probe` 在 `0.2.1-rc.3` 复测，空 home 与桌面登录态下默认值都是它）——根因是桥插件的 bundle patch 写死了 `- id: acp` 的 `provider/model`，用户 profile 只覆盖 `agent-default-model`（另一个服务的键），`- id: acp` 要用户自己写（插件 README 写明的覆盖点）。WeMind 侧**原样复制** `profiles/acp/cordis.patch.yml`、不追加条目（复制前剔除用户自己挂的微信 MCP 条目——跑 `wemind-mcp` 的或 `serverName: wechat` 的 mcp-client，防沙箱里的 agent 抢同一个 bot token）；读默认模型时优先 `- id: acp`、否则 `agent-default-model`（典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端在运行），会话建立后按它发 `set_config_option`（agent 自己的接口）；缺 `- id: acp` 时 `wemind brain` 给可粘贴的片段、由用户补到真实 profile；读不到才回退 `deepseek-account/deepseek-flash`；显式覆盖 `wemind brain set deepseek --model …`，`--model auto` = 跟随真实 profile 的默认 |
 | DSH 首帧很慢 | ⚪ **不成立**（短任务） | 实测 1.0–2.3s；长任务仍可能静默 |
 | DSH 会发 thought/tool/usage 帧 | ✅ 实测 | `agent_thought_chunk` / `tool_call` / `usage_update` |
 | 微信连发上限约 10 条 | ✅ 实测/代码 | `CONSEC_SEND_LIMIT=10`，预留最后一条 |

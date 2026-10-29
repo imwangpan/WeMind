@@ -6,6 +6,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import type { ResolvedAgent } from "./brain-agents.js";
 import { getAgent } from "./agent-slot.js";
 import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
+import { stripWechatMcpEntries } from "./profile-model.js";
 
 /**
  * worker 沙箱：与 brain 沙箱（mcp-sandbox.ts）并列，但 MCP 策略相反。
@@ -213,8 +214,35 @@ function syncSettingsBase(ag: ResolvedAgent): void {
   fs.writeFileSync(workerMcpJson(ag), JSON.stringify(settingsBase(ag), null, 2), "utf-8");
 }
 
+/** 继承真实 profile 的用户层（DSH：`profiles/<名>/cordis.patch.yml`，桌面端写 provider 目录与默认模型），**原样复制**。
+ *  逻辑同 brain 的 syncProfilePatch：WeMind 只镜像用户配置、不合成（`- id: acp` 由用户自己维护，缺失时 CLI 提示怎么补）；
+ *  **唯独剔除用户自己挂的微信 MCP 条目**（worker 的 MCP 也永远排除 `wechat`，防抢同一个 bot token）。 */
+function syncProfilePatch(ag: ResolvedAgent): void {
+  if (!ag.realProfile || !ag.realHome || !ag.inherit) return;
+  if (path.resolve(WORKER_HOME) === path.resolve(ag.realHome)) return;
+  const src = path.join(ag.realHome, "profiles", ag.realProfile, "cordis.patch.yml");
+  const dst = path.join(WORKER_HOME, "profiles", ag.realProfile, "cordis.patch.yml");
+  try {
+    if (!fs.existsSync(src)) return;
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    const raw = fs.readFileSync(src);
+    const { text, removed } = stripWechatMcpEntries(raw.toString("utf-8"));
+    if (removed.length) {
+      console.error(
+        `[wemind/wechat-daemon/mcp] 真实 profile 里的微信 MCP 已从 worker 沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
+      );
+    }
+    const out = removed.length ? Buffer.from(text, "utf-8") : raw;
+    const same = fs.existsSync(dst) && fs.readFileSync(dst).equals(out);
+    if (!same) fs.writeFileSync(dst, out);
+  } catch {
+    /* best-effort */
+  }
+}
+
 function syncSettings(ag: ResolvedAgent): void {
-  if (ag.mcpViaAcp) return; // 无文件式 settings/MCP 可继承；模型走 preset.model
+  syncProfilePatch(ag); // DSH 等：继承真实 profile 用户层（provider 目录 / 默认模型）；MCP 仍走 ACP 注入
+  if (ag.mcpViaAcp) return; // 无「配置文件式」的 MCP/settings 可继承（模型走 set_config_option）
   if (ag.settingsBase && ag.realHome) {
     syncSettingsBase(ag); // 不依赖 inherit：沙箱硬化（关自动更新）与隔离始终生效
     return;

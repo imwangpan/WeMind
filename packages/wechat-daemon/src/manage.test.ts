@@ -38,6 +38,7 @@ describe("helpText（CLI 帮助面）", () => {
       "wemind session delete",
       "wemind task-list",
       "wemind task-reply",
+      "--model", // brain set 可以覆盖模型（DSH 的模型路由不再是改源码才能换）
       "控制桥", // 说明「CLI 与微信走同一段代码」的那句
     ])
       expect(h).toContain(s);
@@ -123,6 +124,83 @@ describe("pickKey（省略账号 = 默认账号）", () => {
       },
     });
     expect(pickKey()).toBe("ccc");
+  });
+});
+
+/*
+ * `wemind brain set --model`：模型覆盖与 `--bin` 走同一条读-改-写路径（顶层与 presets[agent 名] 各写一份）。
+ * `WEMIND_HOME` 是模块加载时定死的，所以先指到临时目录、再重新加载模块（同 pickKey 那组）。
+ */
+describe("brain set --model（模型覆盖写入磁盘）", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brainmodel-"));
+  const prevHome = process.env.WEMIND_HOME;
+  let runManage: typeof import("./manage.js").runManage;
+
+  beforeAll(async () => {
+    process.env.WEMIND_HOME = home;
+    fs.writeFileSync(
+      path.join(home, "accounts.json"),
+      JSON.stringify({
+        default: "t1",
+        accounts: {
+          t1: { key: "t1", botId: "b", userId: "u", baseUrl: "https://x", label: "t1", addedAt: 1 },
+        },
+      }),
+      "utf-8",
+    );
+    vi.resetModules();
+    ({ runManage } = await import("./manage.js"));
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.WEMIND_HOME;
+    else process.env.WEMIND_HOME = prevHome;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const brainJson = () => JSON.parse(fs.readFileSync(path.join(home, "t1", "brain.json"), "utf-8"));
+
+  it("--model 写进顶层与 presets[agent]；不带 --model 时沿用；--model auto = 跟随 agent 默认", async () => {
+    const pro = '["deepseek-account","deepseek-v4-pro"]';
+    await runManage(["brain", "set", "deepseek", "--model", pro, "t1"]);
+    expect(brainJson()).toMatchObject({
+      agent: "deepseek",
+      model: pro,
+      presets: { deepseek: { model: pro } },
+    });
+
+    await runManage(["brain", "set", "deepseek", "t1"]); // 只改 agent，不带 --model：沿用
+    expect(brainJson().model).toBe(pro);
+
+    await runManage(["brain", "set", "deepseek", "--model", "auto", "t1"]);
+    expect(brainJson().model).toBe("auto"); // 原样存，解析层再翻成「跟随默认」
+  });
+
+  it("--model=VALUE 等号写法也认（以前会被静默丢掉，命令还报成功）", async () => {
+    const pro = '["deepseek-account","deepseek-v4-pro"]';
+    await runManage(["brain", "set", "deepseek", `--model=${pro}`, "t1"]);
+    expect(brainJson()).toMatchObject({ agent: "deepseek", model: pro });
+  });
+
+  it("空 --model 与 `set auto --model` 直接拒绝（不写盘）", async () => {
+    const before = fs.readFileSync(path.join(home, "t1", "brain.json"), "utf-8");
+    await expect(runManage(["brain", "set", "deepseek", "--model", "   ", "t1"])).rejects.toThrow(
+      /缺少参数值/,
+    );
+    await expect(runManage(["brain", "set", "deepseek", "--model=", "t1"])).rejects.toThrow(
+      /缺少参数值/,
+    );
+    // auto 只是「自动探测」，没有具体 agent 可绑模型（写进 presets.auto 永远读不到，顶层值会发给探测到的任意 agent）
+    await expect(runManage(["brain", "set", "auto", "--model", "x", "t1"])).rejects.toThrow(
+      /不能配 --model/,
+    );
+    expect(fs.readFileSync(path.join(home, "t1", "brain.json"), "utf-8")).toBe(before);
+  });
+
+  it("拼错的开关直接报错（以前被当未知参数静默过滤）", async () => {
+    await expect(runManage(["brain", "set", "deepseek", "--modle", "x", "t1"])).rejects.toThrow(
+      /未知参数/,
+    );
   });
 });
 

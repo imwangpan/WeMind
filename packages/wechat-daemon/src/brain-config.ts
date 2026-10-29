@@ -19,9 +19,9 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
  *   "presets": { "deepseek": { "bin": "C:\\…\\dsh.cmd" } } }
  * ```
  *
- * - 顶层 `agent`（可带 `bin`/`args`/`shell`/`homeEnvVar` 启动覆盖）＝**对话大脑**，历史语义不变；
+ * - 顶层 `agent`（可带 `bin`/`args`/`shell`/`homeEnvVar`/`model` 覆盖）＝**对话大脑**，历史语义不变；
  * - `worker` ＝任务 worker 的独立选择（**缺省＝跟随对话大脑**，与拆分角色之前完全一致）；
- * - `presets` ＝**按 agent 名存**的启动覆盖：`wemind brain set X --bin …` 写在这里，于是「切到 opencode 再切回 deepseek」不会丢掉 deepseek 的绝对路径（DSH 桌面端必须显式给 `dsh.cmd`）。
+ * - `presets` ＝**按 agent 名存**的启动覆盖：`wemind brain set X --bin …` 写在这里，于是「切到 opencode 再切回 deepseek」不会丢掉 deepseek 的绝对路径（DSH 桌面端必须显式给 `dsh.cmd`）。`--model` 同样存这里。
  *   顶层那些字段仍会同步写一份（兼容旧版本 CLI 读取），切换 agent 时旧 agent 的覆盖会被迁移进 `presets[旧 agent]`。
  */
 
@@ -39,6 +39,8 @@ export type AgentConfig = {
   shell?: boolean;
   /** 覆盖「配置目录环境变量名」（指向沙箱）。 */
   homeEnvVar?: string;
+  /** 覆盖模型值（会话建立后经 `session/set_config_option` 下发一次）；`auto` / `default` = 跟随默认（DSH 从真实 profile 读，优先 `- id: acp`、否则 `agent-default-model`；读不到就不下发）。 */
+  model?: string;
 };
 
 /** 按 agent 名保存的启动覆盖。 */
@@ -67,6 +69,7 @@ function normAgentFields(j: any): AgentConfig | null {
   else if (typeof j.args === "string" && j.args.trim()) cfg.args = j.args.trim().split(/\s+/);
   if (typeof j.shell === "boolean") cfg.shell = j.shell;
   if (typeof j.homeEnvVar === "string" && j.homeEnvVar.trim()) cfg.homeEnvVar = j.homeEnvVar.trim();
+  if (typeof j.model === "string" && j.model.trim()) cfg.model = j.model.trim();
   return cfg;
 }
 
@@ -79,6 +82,7 @@ function normPresetOverride(j: any): PresetOverride | null {
   else if (typeof j?.args === "string" && j.args.trim()) ov.args = j.args.trim().split(/\s+/);
   if (typeof j?.shell === "boolean") ov.shell = j.shell;
   if (typeof j?.homeEnvVar === "string" && j.homeEnvVar.trim()) ov.homeEnvVar = j.homeEnvVar.trim();
+  if (typeof j?.model === "string" && j.model.trim()) ov.model = j.model.trim();
   return Object.keys(ov).length ? ov : null;
 }
 
@@ -151,6 +155,7 @@ export function mergeBrainConfig(existing: BrainConfig | null, patch: BrainConfi
     if (existing?.args?.length) legacy.args = existing.args;
     if (existing?.shell !== undefined) legacy.shell = existing.shell;
     if (existing?.homeEnvVar) legacy.homeEnvVar = existing.homeEnvVar;
+    if (existing?.model) legacy.model = existing.model;
     if (Object.keys(legacy).length) presets[prev] = { ...presets[prev], ...legacy };
   }
 
@@ -159,6 +164,7 @@ export function mergeBrainConfig(existing: BrainConfig | null, patch: BrainConfi
   if (patch.args) next.args = patch.args;
   if (patch.shell !== undefined) next.shell = patch.shell;
   if (patch.homeEnvVar) next.homeEnvVar = patch.homeEnvVar;
+  if (patch.model) next.model = patch.model;
   // 同一个 agent 再设一次（如只改了 args）：没给的启动覆盖沿用原值——它们本来就属于这个 agent，
   // 丢掉会让「切走再切回」丢 --bin 的坑在原地重现。
   if (prev && prev === nextAgent) {
@@ -166,14 +172,16 @@ export function mergeBrainConfig(existing: BrainConfig | null, patch: BrainConfi
     if (!patch.args && existing?.args?.length) next.args = existing.args;
     if (patch.shell === undefined && existing?.shell !== undefined) next.shell = existing.shell;
     if (!patch.homeEnvVar && existing?.homeEnvVar) next.homeEnvVar = existing.homeEnvVar;
+    if (!patch.model && existing?.model) next.model = existing.model;
   }
 
-  if (next.bin || next.args?.length || next.shell !== undefined || next.homeEnvVar) {
+  if (next.bin || next.args?.length || next.shell !== undefined || next.homeEnvVar || next.model) {
     const ov: PresetOverride = { ...presets[nextAgent] };
     if (next.bin) ov.bin = next.bin;
     if (next.args?.length) ov.args = next.args;
     if (next.shell !== undefined) ov.shell = next.shell;
     if (next.homeEnvVar) ov.homeEnvVar = next.homeEnvVar;
+    if (next.model) ov.model = next.model;
     presets[nextAgent] = ov;
   }
   if (Object.keys(presets).length) next.presets = presets;

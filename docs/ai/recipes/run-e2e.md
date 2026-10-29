@@ -30,7 +30,7 @@ $env:ACP_ARGS = '["--profile","acp"]'
 $env:ACP_SHELL = "1"
 $env:ACP_HOME_ENV = "DSH_HOME"
 $env:ACP_HOME = "$env:TEMP\dsh-probe"
-$env:ACP_MODEL = '["deepseek-account","deepseek-flash"]'   # 桌面登录必须选 account
+$env:ACP_MODEL = '["deepseek-account","deepseek-flash"]'   # 桌面登录必须选 account（探针会显式 set_config_option）；想复现「跟随日常 dsh」，把你**真实**的 `~/.dsh/profiles/acp/cordis.patch.yml` 复制进 ACP_HOME、并去掉 ACP_MODEL——那份里要有你自己写的 `- id: acp`（`wemind brain` 会给片段），否则 dsh 仍会退回 deepseek-official（沙箱副本与之逐字节一致，复制哪份都行；需桌面端在运行）
 # 可选：把 ~/.dsh/.credentials.yaml 复制到 ACP_HOME（敏感文件，测完删除）
 node scripts/acp-probe.mjs
 ```

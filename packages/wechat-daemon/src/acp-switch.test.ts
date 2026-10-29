@@ -302,6 +302,31 @@ describe("槽位与假 agent 的一致性", () => {
       changed: true,
     });
   });
+
+  it("already 的判据含 model：同一个 agent、只改了模型 → 仍要切（否则新模型永远不生效）", async () => {
+    setup();
+    expect(await switchBrain("kiro", { userId: "u1", dir: dataDir })).toMatchObject({
+      ok: true,
+      changed: true,
+    });
+    // 槽位现在就是 kiro；磁盘上把 kiro 的覆盖加一个 model（模拟 `brain set --model` 只写盘）
+    const cfg = loadBrainConfig(dataDir)!;
+    saveBrainConfig({
+      ...cfg,
+      agent: "kiro",
+      presets: {
+        ...cfg.presets,
+        kiro: { ...cfg.presets!.kiro, model: '["deepseek-account","deepseek-v4-pro"]' },
+      },
+    });
+    const pre = preflightSwitch("kiro", dataDir);
+    expect(pre.ok).toBe(true);
+    expect(pre.ok === true && pre.already).toBe(false);
+    expect(await switchBrain("kiro", { userId: "u1", dir: dataDir })).toMatchObject({
+      ok: true,
+      changed: true,
+    });
+  });
 });
 
 describe("会话（ACP 侧写入 + 严格恢复）", () => {

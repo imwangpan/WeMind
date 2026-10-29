@@ -13,10 +13,11 @@
 | `wemind start` 立刻退出 / 日志 `FATAL 大脑不可用`（exit 78） | `wemind brain` | agent 未知、二进制不在 PATH、`binWin` 写错（如只有 `dsh.cmd`） |
 | daemon 在跑，但微信完全没反应 | `daemon.log` 有无 `turn start` / `prompt ok` | 没登录、你（登录者）不在白名单 `allowFrom` 里（异常情况）、bot token 被另一个消费者抢走 |
 | 反复「⏳ 响应中断了，正在自动重试…」 | `daemon.log` 的 `[wemind/wechat-daemon/acp]` | agent 启动失败、`initialize` 超时、参数不对、`.cmd` 没经 shell |
+| 只试一次就回「（这次没答上来：额度/余额不足…）」 | `brain error (try 1, provider：额度/余额不足)` | provider 侧的**永久**错误（余额/密钥/计费/模型不存在）不重试，按日志里的原因把账号或模型处理好（`providerIssue()` 认；限流仍走重试）；其中**密钥/鉴权**与**模型不可用**两类若是在本机改的登录态/模型配置，还要重启一次 daemon（`wemind stop && wemind start`，或 `wemind brain switch <同名 agent>`）才生效——运行中的 daemon 不重读 `brain.json`、不重新同步凭据 |
 | 回复突然停 / 「接近微信连续消息上限」 | 进度条数 | iLink 连发上限 ~10；回「继续」恢复 |
 | 重启后「它忘了」 | `session/load failed` / `session/resume` | agent 不支持 load，或 resume 参数/cwd 不对 |
 | 发图报错/重试 | `prompt FAIL` + `-32602` | agent `image:false`（如 DSH 官方） |
-| 桌面已登录但报 `no API key for ... deepseek-official` | agent 的 model / 路由 | DSH 默认路由要 API key；桌面登录对应 `deepseek-account`，需 `set_config_option` 切换 |
+| 桌面已登录但报 `no API key for ... deepseek-official` | agent 的 model / 路由 | DSH 默认路由要 API key：桥插件（`@deepseek-ai/dsh-acp`）的 bundle patch 写死了 `- id: acp` 的 `provider/model`，**这项该由用户自己写进真实 profile**（插件 README 写明的覆盖点）。WeMind 只**原样复制** `profiles/acp/cordis.patch.yml`（不追加条目），缺 `- id: acp` 时 `wemind brain` 会给可粘贴的片段；默认模型按「优先 `- id: acp`，否则 `agent-default-model`」读（典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端在运行），会话建立后发 `set_config_option`；**没写 `--model` 时**，沙箱没同步到真实那份（或读不到默认）才回退 `deepseek-account/deepseek-flash`；显式 `--model auto`/`default` 读不到时**不下发**（DSH 用回自带的 `deepseek-official/deepseek-v4-flash`，仍需 API key）——核对 `wemind brain` 的「生效」行 `model=` 与真实 profile 里有没有 `- id: acp` |
 | 多账号互相抢消息 | `list` / 进程 | 同一 bot token 起了多个 daemon，或 brain 加载了 `wechat` MCP |
 | worker 任务不动 | `wemind task-list` | worker 超时/权限/agent 不支持；看 `.../worker` 日志 |
 | 切换大脑失败 / 回滚 | 答复 + `wemind brain` | 目标 agent 不可用、新大脑启动超时（120s）、等在途回合结束超时（30s）、`WEMIND_BRAIN` 压着命令 |
@@ -198,10 +199,10 @@ prompt FAIL ... -32602 Invalid params: inline image prompts were not advertised
 -32603 Internal error: turn failed: llm-deepseek: no API key for provider route "deepseek-official"
 ```
 
-- `session/new` 默认模型是 `deepseek-official/*`，需要 `DEEPSEEK_API_KEY`；
-- 桌面端登录态是 `deepseek-account/*`，必须在 `session/new` 后用 `session/set_config_option` 切换：
-  `{ sessionId, configId: "model", value: "[\"deepseek-account\",\"deepseek-flash\"]" }`；
-- agent 层应加 `model` 字段；`resume` 会保留上次选择，但配置变更后要重设；
+- `session/new` 默认模型是 `deepseek-official/*`，需要 `DEEPSEEK_API_KEY`——原因不是「客户端不会选」，而是桥插件的 bundle patch 写死了 `- id: acp` 的 `provider/model`，而用户 profile 只覆盖 `agent-default-model`（另一个服务的键）；
+- 两条应对：① 在**真实 profile** 里补一条 `- id: acp`（`provider`/`model` 取自 `agent-default-model`）——开局就对、终端 dsh 与微信大脑同一个模型（`wemind brain` 会给可粘贴的片段；WeMind 只原样复制、不代改，见 AGENTS §4.14）；② 桌面端登录态 `deepseek-account/*` 可在 `session/new` 后用 `session/set_config_option` 切换：
+  `{ sessionId, configId: "model", value: "[\"deepseek-account\",\"deepseek-flash\"]" }`（显式覆盖走这条）；
+- agent 层应加 `model` 字段；`resume` 会保留上次选择，但配置变更后要重设；WeMind 侧解析优先级是「本段 > `presets[agent 名]` > 真实 profile 的默认（`realProfile`：优先 `- id: acp`，否则 `agent-default-model`）> 预设兜底」，`wemind brain set deepseek --model …` 写显式覆盖（`--model auto` = 跟随真实 profile 的默认），`wemind brain` 的「生效」行能看到当前值；
 - 如果坚持 official 路由，就配 `DEEPSEEK_API_KEY`（daemon 环境）。
 
 ### 3.8 切换大脑失败 / 回滚（1.2.0）
