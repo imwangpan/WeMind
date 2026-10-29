@@ -2,7 +2,7 @@
 
 本文件记录本 Fork 相对上游 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server) 的改动。
 
-## [1.2.0] 运行时切换大脑 · 多 worker 进程池 · 完整会话管理（2026-10-28）
+## [1.2.0] 运行时切换大脑 · 多 worker 进程池 · 完整会话管理（2026-10-30）
 
 ### Added
 
@@ -53,6 +53,7 @@
 - **改了模型再 `brain switch` 会谎报「无需切换」（2026-10-29）**：`brain-switch.ts` 的 `sameAgent()` 只比 name/bin/args，模型差异被判成「已经是它」→ `switchBrain` 直接回「当前对话大脑已经是「X」，无需切换。」，既不重启 ACP 子进程也不 `setAgent`——运行中的大脑一直用旧模型，而磁盘与 `wemind brain` 的「生效」行已经显示新值。现在 `sameAgent()` 把 `model` 纳入判据（name/bin/args/model）：模型变了就是一次真切换（restart → `session/load` → 重新下发 `session/set_config_option`）；`index.ts` 的 `setTaskBrain`（微信 `切换任务大脑`）也用同一组判据（顺带补上此前漏比的 `args`），但它的「切换」是换 worker 槽位 + 回收空闲连接——在跑/等回复的任务仍用旧 agent 跑完，**之后的新任务**建连时才下发 `session/set_config_option`。
 - **`brain set` 的参数解析三处漏网（2026-10-29）**：① `--model=VALUE` 等号写法整 token 匹配不到、被当未知开关**静默丢掉**而命令仍报成功——`takeFlag` 现在两种写法都认；② 未知开关（如拼错的 `--modle`）一律静默过滤——现在直接报错；③ 空 `--model`（`--model ""` / `--model=`）什么都不写却把命令切进「需重启」分支——现在报「缺少参数值」（要清空/跟随默认请写 `--model auto`）。另外 `brain set auto --model …` 的模型会被写进**永不读取**的 `presets.auto`（解析时 `auto` 换成探测到的具体 agent），而顶层那份却会作为「本段覆盖」下发给探测出来的**任意** agent——现在 `brain set auto` 带 `--model` 直接拒绝，提示指定具体 agent。
 - **provider 错误的提示对「密钥/模型」两类是死路（2026-10-29）**：`brainErrorMessage` 原先一律说「把账号/模型处理好后，把消息再发一次就行」——但运行中的 daemon 不重读 `brain.json`、也不重新同步凭据（槽位启动时种入），照做仍然失败。现在「密钥/鉴权有问题」「模型不可用」两类额外提示「刚改过登录态或模型配置的，还要重启一次 daemon（`wemind stop && wemind start`）才会读到」；余额/计费不改（provider 侧充值后重发即可）。
+- **`brain check` 在坏 profile 上假绿、缺条目的提示会教出非法 YAML、flow 式 `- id: acp` 被忽略（2026-10-29）**：① `wemind brain check` 的临时 home 原先不复制 `profiles/<名>/cordis.patch.yml`，而 daemon 的沙箱会复制——profile 写坏时自检仍报 ✅，daemon 却每条消息都起不来（DSH 启动即解析该文件，语法错直接 exit 1）。现在自检同样复制（并同样剔除微信 MCP），失败详情保留首行 `Error`（「failed to parse overlay … YAMLException」）而不是只剩栈尾。② profile 还是空壳 `[]` 时，`wemind brain` 对缺 `- id: acp` 的提示原先教「加到文件末尾」——`[]` 是已写完的 flow 根节点，后面再接块序列项是非法 YAML（实测 dsh 直接 `exit 1`）；现在提示「把 `[]` 那一行替换成这段」，读不到默认模型时给 `<provider>`/`<model>` 占位并说明怎么换。③ 用户把 `- id: acp` 写成 flow 式（`config: {provider: magpie, model: auto/x}`）时，读默认模型的定点解析原先不认，会拿 `agent-default-model` 的值覆盖用户显式选择；现在块式与 flow 式都认。
 
 ## [Unreleased] — fork
 

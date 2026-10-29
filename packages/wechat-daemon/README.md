@@ -1,6 +1,6 @@
 # @wemind/cli — 命令 `wemind`
 
-> **你的 AI 大脑，挂在微信上。** 常驻微信 Bot daemon：自己长轮询 iLink 收消息 → 调常驻 **ACP 大脑**生成回复 → 自动回发。支持**远程任务（worker）**、**多账号**、收发图/文件。
+> **你的 AI 大脑，挂在微信上。** 常驻微信 Bot daemon：自己长轮询 iLink 收消息 → 调常驻 **ACP 大脑**生成回复 → 自动回发。支持**运行时切换大脑**（免重启）、**多任务并行（worker 进程池）**、**完整会话管理**（列表/恢复/改名/删除）、**会话交接**、**多账号**、收发图/文件。
 
 [WeMind](https://github.com/imwangpan/WeMind) monorepo 的完整应用包；只依赖内核 `@wemind/wechat-ilink-core`（构建时已内联进单文件产物），不碰 MCP 层，可独立运行。
 
@@ -10,7 +10,7 @@
 
 ```bash
 npm i -g @wemind/cli     # 安装后得到 wemind 命令
-wemind version           # → wemind 1.1.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
+wemind version           # → wemind 1.2.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
 
 # 不安装、一次性运行（注意是包名 @wemind/cli，不是 wemind）
 npx -y @wemind/cli list
@@ -40,11 +40,13 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 | 命令 | 作用 |
 | --- | --- |
 | `wemind login [--label 名] [--start] [--runner builtin\|pm2]` | 扫码登录；`--start` 顺带拉起常驻 |
-| `wemind list` | 账号、别名、运行状态、当前大脑 |
+| `wemind list` | 账号、别名、运行状态、当前大脑、worker 池 |
 | `wemind start / stop <key\|label>` | 启停某账号的常驻 |
-| `wemind brain [show\|set\|unset\|check]` | 查看/切换/清除/自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`） |
-| `wemind task "<描述>" [--cwd 目录]` | 本地派发远程任务给 worker |
-| `wemind task-status / task-reply / task-stop` | 任务状态、回话续跑（`task-reply 继续`）、结束 |
+| `wemind brain [show\|set\|unset\|check]` | 查看 / 设置（写入磁盘）/ 清除 / 自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`） |
+| `wemind brain switch <agent 名\|auto>` | **热切换对话大脑**：daemon 在跑也不重启、不打断在途回合；失败自动回滚。`--worker` 设默认任务大脑；`wemind brain handoff` 生成交接摘要 |
+| `wemind session new [名字] / list / resume <ref> / rename <ref> <名> / delete <ref>` | 会话管理：新建 / 列表 / 严格恢复 / 改名 / 删除（`ref` = 序号、名字或 id 前缀） |
+| `wemind task "<描述>" [--agent 名] [--cwd 目录]` | 派发任务给 worker（多任务并行、按编号回话） |
+| `wemind task-list / task-reply <编号> "…" / task-stop [编号\|全部]` | 任务列表、回话续跑（`task-reply 继续`）、结束（在等回复的进程回池复用） |
 | `wemind allow / revoke / allowlist` | 授权管理（谁能驱动这个 bot） |
 | `wemind logout / delete / label / set-default` | 账号运维 |
 | `wemind version` / `wemind help` | 版本、完整帮助 |
@@ -143,7 +145,7 @@ npm version <type> --workspace @wemind/cli --no-git-tag-version && npm run check
 ```powershell
 npm run check:version    # 包名 / bin / lock / 无硬编码版本号
 npm run lint && npm run typecheck && npm run build && npm test
-npm pack --dry-run --workspace @wemind/cli    # 应看到 4 个文件：cli.js / cli.js.map / README.md / package.json
+npm pack --dry-run --workspace @wemind/cli    # 应看到 5 个文件：LICENSE / README.md / package.json / dist/cli.js / dist/cli.js.map
 ```
 
 > ⚠️ **`npm publish` 不会自动 build**。CI 会 build，但本地 `npm pack` 前必须先 `npm run build`，否则打出来是旧产物（`dist/` 在 `.gitignore` 里）。
@@ -155,7 +157,7 @@ npm pack --dry-run --workspace @wemind/cli    # 应看到 4 个文件：cli.js /
 ```powershell
 git add packages/wechat-daemon/package.json package-lock.json
 git add packages/wechat-daemon/src packages/wechat-ilink-core/src   # 有源码改动时
-git commit -m "chore: release @wemind/cli 1.1.1"
+git commit -m "chore: release @wemind/cli 1.2.0"   # 换成当前要发的版本
 git push origin main
 ```
 

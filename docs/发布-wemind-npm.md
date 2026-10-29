@@ -293,13 +293,21 @@ npx -y @wemind/cli list                   # 验证「npx 写全包名」这条�
 
 已装用户升级：`npm i -g @wemind/cli@latest`，然后 `wemind stop <账号> && wemind start <账号>`——**正在运行的 daemon 不会自动换代码**。
 
+### 6.7 发布成功后：同步「版本声明」与 CHANGELOG 日期
+
+这一步不在 npm 包里、也没有任何自动检查会拦，但漏了会立刻变成事实错误（「1.2.0 待发布」而它已经发了）。逐个改：
+
+- `AGENTS.md` 头部「适用版本 / 待发布」与文档索引那一行；`docs/ai/README.md`、`docs/repowiki/01-项目概览.md` 的版本状态；
+- `README.md` 页脚「文档版本」；本文件头部「当前线上版本」与 §0 速查（版本、包内容文件数、体积、日期）；
+- `CHANGELOG.md` 的段头日期用**实际发布日**（写这一节时可能还没发）。
+
 ---
 
 ## 7. 回滚与善后
 
 - npm 侧：24h 内可 `npm unpublish @wemind/cli@<ver>`（只在「包完全不可用」时用）；否则 `npm deprecate @wemind/cli@<ver> "原因"` 并尽快发补丁版。
 - 已装用户：`npm i -g @wemind/cli@<上一版>`。
-- 数据兼容：本方案**不改**任何 `~/.wemind/<账号>/` 文件的格式与路径，升级/回滚都不影响登录态、沙箱与会话。
+- 数据兼容：**1.2.0 起账号目录的文件格式有变化**——`brain.pid` 由裸整数改成 JSON 身份记录、新增 `workers.pid.json`（记录数组）/ `session-registry.json` / `tasks.json`，`brain.json` 多了 `worker` / `presets` 段。**升级方向有兼容**（旧 `brain.pid` 整数被宽容读取；`brain-sessions.json` 的旧键首次读取时自动迁移并回写）。**回滚到 1.1.x**：旧代码不认这些新文件，表现为 `list`/`stop` 把进程当「已停止」且不杀（安全侧：宁可不杀）、任务与会话登记看不到；但**登录态（`account.json`）与消息游标（`state.json`）不受影响**，`tasks.json` / `session-registry.json` 是派生/运行态数据，删掉只丢列表与「继续」续跑能力。重新升级回 1.2.0 即恢复。
 
 ---
 
