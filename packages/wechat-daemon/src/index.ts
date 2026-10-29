@@ -92,6 +92,7 @@ import {
 } from "./handoff.js";
 import { extractImages, resolveImageBytes } from "./image-reply.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
+import { PENDING_PUSH_MAX_TRIES, PendingPushes } from "./pending-push.js";
 import {
   dispatchTask,
   injectTask,
@@ -472,8 +473,67 @@ function budgetOf(to: string): SendBudget {
   }
   return b;
 }
+// 重启后旧 token 期间「必须送达」外发的挂起队列：任务结果、CLI 指令答复在用户发来下一条消息之前必然 -2（重试也还是旧 token），消息直接丢。先挂起，新 token 一到按序补发（见 poller 登记最新 token 的地方）。
+const pendingPushes = new PendingPushes();
+// 本进程**收到过**该用户消息 = 手里是这一进程拿到的 token。只有在这之前的 -2 才是「旧 token」；之后的 -2 属于限流，不该挂起（挂起只会把过时的答复拖到用户下一条消息，反而更乱）。
+const freshTokenUsers = new Set<string>();
+// 已入 replyChain、还没发完的外发条数（按收件人）。用户发来消息会重置连发计数，但这些「排在消息之后才上线路」的发送仍占服务端的额度，重置时不能一并清零（否则本回合会误以为额度还满，把最终的答案挤到限流上）。
+const inflightSends = new Map<string, number>();
+function trackInflight(to: string, delta: number): void {
+  const n = (inflightSends.get(to) ?? 0) + delta;
+  if (n > 0) inflightSends.set(to, n);
+  else inflightSends.delete(to);
+}
+// 一次补发最多几条：连发额度约 10 条，补发太多会把它吃光、把用户这条消息的正常答复挤到限流上；剩下的留给后续消息继续补。
+const PENDING_PUSH_BATCH = 5;
+
+/** -2（param_error）：既可能是限流、也可能是 token 还是旧的——两者都值得「等该用户下一条消息再试」。 */
+const isParamError = (e: unknown): boolean => e instanceof ILinkError && e.kind === "param_error";
+
+/** 一条外发失败 → 若是「重启后旧 token」造成的 -2（该用户还没在本进程发过消息），挂起等新 token 补发；限流与其它错误照旧只记日志。 */
+function holdUndelivered(to: string, text: string, e: unknown): void {
+  if (!isParamError(e) || freshTokenUsers.has(to)) return;
+  const n = pendingPushes.push(to, text);
+  log(`send -2（旧 token）→ 挂起，累计 ${n} 条，等该用户下一条消息补发（${to}）`);
+}
+
+/** 补发又失败：重新挂起，等该用户下一条消息再试（传输错误也重挂——这条还没送达）；试够 PENDING_PUSH_MAX_TRIES 次就放弃——防一条永远被服务端拒绝的内容每次发消息都拖着 replyChain。 */
+function requeueHeld(to: string, text: string, tries: number, e: unknown): void {
+  const n = tries + 1;
+  if (n >= PENDING_PUSH_MAX_TRIES) {
+    log(
+      `补发 ${n} 次仍失败 → 放弃这条挂起的推送（${to}）：${text.slice(0, 40)}（原因：${e instanceof Error ? e.message : String(e)}）`,
+    );
+    return;
+  }
+  const size = pendingPushes.push(to, text, n);
+  log(`补发 ${n} 次仍失败 → 重新挂起，累计 ${size} 条（${to}）`);
+}
+
+/** 新 token 到了：把该收件人挂起的文本按序补发；剩下的留给后续消息。补发量受两重限制：单轮 PENDING_PUSH_BATCH 条、且不越过本回合留给答复的连发额度（否则补发自己就会撞限流、还会把用户的答案挤掉）。 */
+function flushHeldPushes(account: AccountData, to: string, token: string): void {
+  // 给最终答案留最后两条额度（sendProgress 在 count ≥ 上限-2 时才发「接近上限」提示并停下，答案再占一条）。
+  const room = Math.max(0, CONSEC_SEND_LIMIT - 2 - budgetOf(to).count);
+  if (room === 0) {
+    log(`挂起 ${pendingPushes.size(to)} 条，但本回合连发额度已不够 → 留给后续消息补发（${to}）`);
+    return;
+  }
+  const held = pendingPushes.take(to, Math.min(PENDING_PUSH_BATCH, room));
+  if (held.length === 0) return;
+  const rest = pendingPushes.size(to);
+  log(
+    `新 token 已到 → 补发挂起消息 ${held.length} 条（${to}）${rest > 0 ? `，还有 ${rest} 条排在后续消息` : ""}`,
+  );
+  for (const item of held) {
+    budgetOf(to).count += 1;
+    void sendOrdered(account, to, token, item.text, MessageState.FINISH, token, (e) =>
+      requeueHeld(to, item.text, item.tries, e),
+    );
+  }
+}
 // 当前进行中回合（worker 串行，只有一个）：记录发往用户与所用 token（token 可被「继续」更新）。
 let activeTurn: { from: string; token: string | undefined } | null = null;
+// onError：「必须送达」的调用方（任务推送、指令答复）用它接管 -2 —— 没有更新的 token 时挂起，等用户下一条消息补发；不传则维持原来的「记日志就丢」。
 function sendOrdered(
   account: AccountData,
   to: string,
@@ -481,15 +541,20 @@ function sendOrdered(
   text: string,
   state: number = MessageState.FINISH,
   fallbackToken?: string,
+  onError?: (e: unknown) => void,
 ): Promise<void> {
-  replyChain = replyChain.then(async () => {
-    const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
-    if (wait > 0) await sleep(wait);
-    await reply(account, to, ctx, text, state, fallbackToken).catch((e) =>
-      handleSendError(e, account),
-    );
-    lastSendAt = Date.now();
-  });
+  trackInflight(to, 1);
+  replyChain = replyChain
+    .then(async () => {
+      const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
+      if (wait > 0) await sleep(wait);
+      await reply(account, to, ctx, text, state, fallbackToken).catch((e) => {
+        handleSendError(e, account);
+        onError?.(e);
+      });
+      lastSendAt = Date.now();
+    })
+    .finally(() => trackInflight(to, -1));
   return replyChain;
 }
 
@@ -507,7 +572,9 @@ function sendNotice(
   fallbackToken?: string,
 ): Promise<void> {
   budgetOf(to).count += 1;
-  return sendOrdered(account, to, ctx, text, MessageState.FINISH, fallbackToken);
+  return sendOrdered(account, to, ctx, text, MessageState.FINISH, fallbackToken, (e) =>
+    holdUndelivered(to, text, e),
+  );
 }
 
 /** 把长回复作为 .md 文件发送（走同一串行链+节流）；发文件失败则兜底回退为文本。 */
@@ -518,29 +585,32 @@ function sendMdOrdered(
   finalText: string,
   fallbackToken?: string,
 ): Promise<void> {
-  replyChain = replyChain.then(async () => {
-    const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
-    if (wait > 0) await sleep(wait);
-    const { fileName, data } = buildMdReply(finalText);
-    try {
-      await sendFile({
-        baseUrl: account.baseUrl,
-        token: account.botToken,
-        to,
-        data,
-        fileName,
-        kind: "file",
-        contextToken: ctx,
-      });
-      log(`final as md file: ${fileName} (${finalText.length} chars)`);
-    } catch (e) {
-      log("send md file failed, fallback to text:", String(e));
-      await reply(account, to, ctx, finalText, MessageState.FINISH, fallbackToken).catch((er) =>
-        handleSendError(er, account),
-      );
-    }
-    lastSendAt = Date.now();
-  });
+  trackInflight(to, 1);
+  replyChain = replyChain
+    .then(async () => {
+      const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
+      if (wait > 0) await sleep(wait);
+      const { fileName, data } = buildMdReply(finalText);
+      try {
+        await sendFile({
+          baseUrl: account.baseUrl,
+          token: account.botToken,
+          to,
+          data,
+          fileName,
+          kind: "file",
+          contextToken: ctx,
+        });
+        log(`final as md file: ${fileName} (${finalText.length} chars)`);
+      } catch (e) {
+        log("send md file failed, fallback to text:", String(e));
+        await reply(account, to, ctx, finalText, MessageState.FINISH, fallbackToken).catch((er) =>
+          handleSendError(er, account),
+        );
+      }
+      lastSendAt = Date.now();
+    })
+    .finally(() => trackInflight(to, -1));
   return replyChain;
 }
 
@@ -835,7 +905,10 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           log(
             `recv msg id=${m.message_id} ctx=…${m.context_token ? m.context_token.slice(-12) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`,
           );
-        if (m.context_token) state.contextTokens[`${account.botId}:${f}`] = m.context_token;
+        if (m.context_token) {
+          state.contextTokens[`${account.botId}:${f}`] = m.context_token;
+          freshTokenUsers.add(f); // 本进程拿到的 token——此后该用户的 -2 不再当「旧 token」挂起
+        }
       }
       let enq = false;
       for (const msg of news) {
@@ -860,10 +933,10 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           log("skip empty/unsupported message");
           continue;
         }
-        // 服务端按「距用户上一条消息」计连续发送数 → 任何来自 owner 的消息都重置服务端配额，故同步重置该用户计数 + 退出等待段。
+        // 服务端按「距用户上一条消息」计连续发送数 → 任何来自 owner 的消息都重置该用户计数 + 退出等待段。但已经进了 replyChain、会在本条消息之后才上线路的发送（补发、上一回合没发完的）仍占新窗口的额度，所以不能直接清零，而是把它们算进来。
         const b = budgetOf(from);
         const wasAwaiting = b.awaiting;
-        b.count = 0;
+        b.count = inflightSends.get(from) ?? 0;
         b.awaiting = false;
         // 「继续」且当前回合正处于「等待继续」段：换用本消息新 token 恢复，且仅作恢复信号、不入队
         if (text.trim() === "继续" && activeTurn && activeTurn.from === from && wasAwaiting) {
@@ -879,6 +952,15 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           contextToken: msg.context_token,
         });
         enq = true;
+      }
+      // 新 token 已到 → 补发旧 token 期间挂起的推送。等本批所有消息的计数重置都做完再补发（否则同一批里后一条消息的 reset 会把补发的计数抹掉）；每个发件人一次，用 state 里该用户最新的 token。补发先进 replyChain，排在本批消息触发的进度/答案之前（该循环全程同步，worker 来不及插进来）。
+      const flushTo = new Set<string>();
+      for (const msg of news) {
+        const from = msg.from_user_id ?? "";
+        if (!msg.context_token || flushTo.has(from) || !isAuthorized(from, owner)) continue;
+        flushTo.add(from);
+        const fresh = state.contextTokens[`${account.botId}:${from}`];
+        if (fresh) flushHeldPushes(account, from, fresh);
       }
       saveState(state);
       if (enq) notifyWorker();
@@ -1301,7 +1383,9 @@ export async function runDaemon(): Promise<void> {
     // task 推送也占用连续发送额度（与 brain 回合共用 budgetOf）：task 在后台运行，可能与 brain 回合并发，若不计数，本地 budget 会低估服务端真实连续发送数 → brain 的 sendProgress 误判「还能发」→ 撞 ret=-2 限流、结果丢失。
     // 注：task 推送是「本轮结果」（必须送达），故只累加计数、不被 awaiting 暂停（暂停只作用于可丢弃的 brain 进度提示）。
     budgetOf(to).count += 1;
-    void sendOrdered(account, to, tok, text, MessageState.FINISH, tok);
+    void sendOrdered(account, to, tok, text, MessageState.FINISH, tok, (e) =>
+      holdUndelivered(to, text, e),
+    );
   });
   // worker 跑一轮期间持续「正在输入中」（typing 不占连续发送上限），避免长任务静默让用户以为卡了
   setTaskTyping((to) => {

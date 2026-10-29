@@ -244,7 +244,32 @@ MCP
 | 6 | 同一 agent 两个进程共用配置目录是否互踩（kiro/opencode/qoder 各一次） | 同 agent 并发两条任务 | 是否要禁止同 agent 并发 |
 | 7 | 被强杀后各 agent 能否 `session/load\|resume` 回该任务会话（kiro/opencode/qoder/DSH 各一次） | ⑤ 的做法，四家各跑一遍 | 「重启后续跑」的**可行边界** |
 
----
+### 7.3 实测结论（2026-10-29，本机；deepseek DSH 0.2.1-rc.2 / opencode 2.0.32 / qoder 1.1.78）
+
+测量脚本：`%TEMP%\acp-measure.mjs`（起真进程 → `initialize`/`session/new` 计时 → 一轮 prompt → 在新会话上探 `session/delete` → **强杀** → 新进程 `session/load`，失败再 `session/resume` → 数回放帧 → 用第二问验证上下文是否还在）。三家全程**零反向请求**。
+
+| # | 结论 |
+|---|---|
+| 1 | **`session/delete` 存在性两家有、一家无**：opencode **有**（~8ms）、qoder **有**（130ms）；DSH **没有**（`-32601`）。当前实现「删除会话只删登记项、不动 agent 侧存档」因此仍是唯一可移植的默认；opencode/qoder 侧日后可以做成真删，但要有「删失败就只删登记项」的降级。 |
+| 2 | **`session/load` 回放**：opencode **857ms / 2 帧**、qoder **804ms / 3 帧**；DSH 无 `session/load`，`session/resume` **195ms / 0 帧**。回放帧在无 prompt 时本就被丢弃（`acp-brain.ts`），不会突然冒出旧正文；恢复等待远小于超时，不需要额外提示。 |
+| 3 | **冷启动**：DSH `initialize` **5834ms**（同进程第二次 2213ms）、`session/new` **50ms**；opencode `initialize` ~650ms、`session/new` ~800ms；qoder **1718ms / 1493ms**。全部远小于 `REQ_TIMEOUT=30s` → **暂不需要给 agent 加 `reqTimeoutMs`**。 |
+| 4 | **多任务并行推送到微信**：opencode + qoder 两条任务并行、结果都送达，**没有观察到限流型 `ret=-2`**。真机上出现的 `-2` 全部属于「daemon 重启后、用户下一条消息之前」的旧 `context_token`（见下方 7.4）——那条已修。 |
+| 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 wrapper+daemon+worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
+| 6 | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。 |
+| 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑未单独测（按同一 ACP 路径推断可用）。 |
+
+### 7.4 真机踩到的坑：重启后旧 `context_token`（2026-10-29 已修）
+
+现象：`taskkill` daemon（或 `wemind stop` 后再 `start`）之后，**在微信没发新消息之前**跑完的任务，结果一条都收不到；`daemon.log` 里是：
+
+```text
+send -2(限流或token失效) → 退避 1.5s 后重试
+send error: [sendMessage] errcode=-2 ... (prepare failed)
+```
+
+三条都失败（长结果、短结果、失败提示各一条），重试也没用——`reply()` 的重试传的还是同一个旧 token，`sendOrdered` 又把错误吞成了日志。根因不是长度也不是限流：**`state.contextTokens` 是从磁盘恢复的，重启后仍是上次运行的 token；新 token 只有该用户发来下一条消息时才到**。
+
+复现：`wemind stop <key> && wemind start <key>` → 不在微信发消息 → 本地 `wemind task "…"` 派一条短任务 → 等它跑完 → 结果没到（修复前）。修复后同样的步骤：日志出现「`send -2（旧 token）→ 挂起，累计 N 条`」→ 在微信发任意一条消息 → 日志「`新 token 已到 → 补发挂起消息 N 条`」→ 补发真的到达（排在那一批消息触发的进度/答案之前）。挂起只在「该用户本进程还没发过消息」时有意义（此后 `-2` 按限流处理、不挂起）；队列只在内存、每人上限 20 条、每轮最多补发 5 条且不越过本回合留给答复的额度、同一条最多补发 3 次（超过放弃并记日志）；daemon 再重启一次队列会丢，但结果仍在 `tasks.json`/`任务列表`。
 
 ## 8. 清理 / 回滚
 

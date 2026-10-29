@@ -167,6 +167,7 @@ worker 的微信侧路由在 `workerLoop` 内（详见 [5. daemon](05-daemon.md#
 - worker 每轮输出带 `🤖【任务】` 标记；跑一轮期间持续「正在输入中」（不占连续发送上限）。
 - 进度默认安静（只在轮次结束/中断/派发答复推文字），`WEMIND_WORKER_PROGRESS=1` 可开全程进度。
 - **连发额度是按用户共享的**：N 条任务的进度 + 对话大脑的回复算同一份约 10 条额度；结果推送复用既有 `ret=-2` 退避。扛不住就调小 `WEMIND_MAX_WORKERS`。
+- **重启后旧 token 期间的推送会挂起**：daemon 重启后 `state.contextTokens` 还是上次运行的，用户下一条消息到来前推送必然 `-2 (prepare failed)`；结果推送带 `onError`，失败即挂进 `pending-push.ts` 的内存队列（每人 20 条、每轮补发最多 5 条、同一条最多补发 3 次），等该用户下一条消息带来新 token 后按序补发（见 [05 daemon](05-daemon.md) 的「重启后的旧 token 与挂起补发」）。
 
 ### 重启后续跑（1.2.0）
 

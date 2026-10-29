@@ -112,7 +112,7 @@ iLink 有两个语义不同的错误字段：
 | `-2` | ret | 参数错误（Parameter error） | 检查请求参数 |
 | `-14` | errcode | 会话过期（Session expired） | 重新登录（本项目对该账号冷却 1 小时） |
 
-**关于 `-2` 的重要澄清**：官方定义是「参数错误」，**不是**「context_token 按时间过期」。常见诱因是 context_token 失效/不匹配，或被复用为**发送限流**（短时连续发送过多）。真正「按会话过期」的是 `-14`。
+**关于 `-2` 的重要澄清**：官方定义是「参数错误」，**不是**「context_token 按时间过期」。常见诱因是 context_token 失效/不匹配，或被复用为**发送限流**（短时连续发送过多）。真正「按会话过期」的是 `-14`。**daemon 重启后** `state.contextTokens` 里是上次运行留下的 token，用户下一条消息之前它必然失效——这类「必须送达」的推送由 daemon 挂起、等新 token 到达再补发（见 [05-daemon](05-daemon.md#串行发送链)）。
 
 模块提供：`classifyILinkCode`（归类为 `ok`/`param_error`/`session_expired`/`unknown`）、`describeILinkCode`（返回可读标签 + 处理建议）、`ILinkError` 类（携带 `code` + `kind`，消息可读如「参数错误(-2) — 检查请求参数」）。
 

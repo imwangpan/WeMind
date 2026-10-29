@@ -214,12 +214,13 @@ poller（长轮询，不被大脑阻塞）
 | **任务结束即杀进程** | ⚪ **已不成立（1.2.0）** | 结束「等你回复」的任务时进程**留着复用**（「正在跑」的那条只能力杀——回合没法优雅取消）；空闲超 `WEMIND_WORKER_REAP_MS`(5min) 回收；`wemind stop` 才杀光 |
 | **daemon 重启后任务全丢** | ⚪ **已不成立（1.2.0）** | `tasks.json` 读回 → 未完成标「已中断」→ 回「继续」才 `load`/`resume` 续跑（**不自动**） |
 | 会话只能保留「当前一条」 | ⚪ **已不成立（1.2.0）** | 登记表 + 五条会话指令（列表/新/恢复/改名/删除）；当前会话表仍是唯一权威 |
-| ACP 有 `session/delete` | ⚪ **待实测** | 仓库内无调用；`删除会话` 只删 WeMind 登记，回复里写明 agent 侧归档仍在 |
-| 各 agent `session/load` 会回放历史帧 | ⚪ **待实测** | 回放帧在无 prompt 时本就被丢弃（`acp-brain.ts`），恢复用严格语义 |
-| 被强杀后各 agent 能 `load`/`resume` 回该任务会话 | ⚪ **待实测** | 「重启后续跑」的可行边界由这条决定（kiro/opencode/qoder/DSH 各一次） |
-| 同 agent 两个 worker 共用配置目录不互踩 | ⚪ **待实测** | 不同 agent 各有 `configSubdir`；同 agent 并发等于「两个终端在同一配置目录」 |
-| 多任务并发时 `sendNotice` 会撞 `ret=-2` | ⚪ **待实测** | 额度按用户共享；需真机微信验 |
-| Windows `taskkill /T /F` 杀池中特定进程 | ⚪ **待实测** | 决定池回收/结束任务的清理是否干净 |
+| ACP 有 `session/delete` | ✅ **已实测（2026-10-29）**：opencode/qoder 有，DSH 没有（`-32601`） | 当前实现仍只删 WeMind 登记、回复写明 agent 侧归档仍在（三家里有一家没有，就不能依赖它） |
+| 各 agent `session/load` 会回放历史帧 | ✅ **已实测（2026-10-29）**：opencode 2 帧/857ms、qoder 3 帧/804ms；DSH 无 load，`resume` 0 帧/195ms | 回放帧在无 prompt 时本就被丢弃（`acp-brain.ts`）；时间远小于超时 |
+| 被强杀后各 agent 能 `load`/`resume` 回该任务会话 | ✅ **已实测（2026-10-29）**：DSH（resume）与 opencode（load）能接回同一 sessionId；qoder 任务续跑未单独测 | 「重启后续跑」对这些 agent 成立；接不上时的诚实文案仍保留 |
+| 同 agent 两个 worker 共用配置目录不互踩 | ⚪ **一轮样本未见互踩（2026-10-29）** | 不同 agent 各有 `configSubdir`；同 agent 并发等于「两个终端在同一配置目录」，长期风险仍在 |
+| 多任务并发时 `sendNotice` 会撞 `ret=-2` | ⚪ **未观察到限流型（2026-10-29）** | 真机里的 `-2` 全是重启后旧 token（见下一行）；额度仍按用户共享，压力大就调小并发 |
+| Windows `taskkill /T /F` 杀池中特定进程 | ⚪ **待实测** | daemon 强杀 + `wemind stop` 已验证无孤儿；「杀池中某个特定 pid」与「`session/load` 途中强杀」未单独测 |
+| **daemon 重启后、用户下一条消息前的外发** | ✅ **已确认会静默丢失（2026-10-29，已修）** | `state.contextTokens` 是上次运行留下的 token，任务结果/指令答复必然 `-2 (prepare failed)`；现在只在该用户本进程还没发过消息时挂进 `pending-push.ts`，等新 token 到达按序补发（每人 20 条、每轮 5 条且给答复留额度、同一条最多 3 次） |
 | 「多个微信账号之间有一个主号」 | ⚪ **不存在** | 一个微信账号 = 一个真人（扫码登录者）；N 个账号 = N 个 daemon，各有自己的 `brain.json`/会话表/沙箱/登录者，互不越界（README「多账号管理」、`repowiki/06` §6.2） |
 | 「切 daemon 大脑是跨账号权限」 | ⚪ **不是** | 微信侧只有**该账号的登录者**能切**它自己**那个 daemon（`OWNER_ONLY_KINDS`）；本机 CLI 才可指定任意账号（`wemind brain switch X <key\|label>`），因为「能在本机敲命令 = 机主」 |
 | 除登录者外还有谁能把消息发进 bot | ✅ **已确认：没有** | 微信平台限制——**必须扫码登录该 bot 才能给它发消息**，所以每个 bot 只有其登录者能发（用户 2026-10-29 确认）。`allowFrom` 因此是**兜底校验**（默认拒绝、默认只放行登录者）：防的是发送范围将来变化 / daemon 被接到别的入口；旧文档里「换个微信号验证」的写法已删 |

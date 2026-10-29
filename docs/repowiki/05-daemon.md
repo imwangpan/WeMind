@@ -205,6 +205,8 @@ graph TD
 
 `reply` 内置错误恢复：遇 `ret=-2`（param_error）退避 1.5s 后换该用户最新缓存 token 重试一次（限流靠等待恢复，token 失效靠换 token）；遇可重试传输错误退避 1.5s 重试一次。
 
+**重启后的旧 token 与挂起补发**：`state.contextTokens` 是从磁盘恢复的，daemon 启动后里面还是上次运行留下的 `context_token`，而新 token 只有该用户发来下一条消息时才到。这段时间里「不在某个回合内」的外发——任务结果（`setTaskPush`）与 CLI 指令答复（`sendNotice`）——必然 `ret=-2 (prepare failed)`，重试仍是同一个旧 token。这类「必须送达」的发送带一个 `onError`：**只在该用户本进程还没发过消息时**把失败的外发按收件人挂进 `pending-push.ts` 的内存队列（每人上限 20 条、超出丢最旧）；一旦本进程收到过该用户的消息（`freshTokenUsers`），之后的 `-2` 就当作限流、不再挂起——否则会把过时的答复拖到用户下一条消息，反而更乱。poller 在本批消息的计数重置**全部做完之后**调用 `flushHeldPushes`（每个发件人一次，用该用户最新的 token）：补发也算这条消息之后的连发数，所以要占额度，而且不能放在逐条处理里——同一批里后一条消息的 reset 会把补发的计数抹掉。补发量受两重限制：**每轮最多 5 条**、且**不越过本回合留给答复的额度**（`CONSEC_SEND_LIMIT - 2 - 已发数`，不够就先留在队列里）；剩下的留给后续消息。补发先进 `replyChain`，排在该批消息触发的进度/答案之前。另外，重置计数不再直接清零：已经进了 `replyChain`、会在本条消息之后才上线路的发送（上一回合没发完的、正在补发的）仍占新窗口额度，重置时按 `inflightSends` 把它们算进来——否则本回合会误以为额度还满，把最终答案挤到限流上。补发仍失败（任何原因——传输错误也说明没送达）就重新挂起，同一条最多补发 `PENDING_PUSH_MAX_TRIES=3` 次，之后放弃并记日志——防一条永远被服务端拒绝的内容每次发消息都拖着 `replyChain`。回合内的普通回复（进度/答案）不挂起——它们本来就带着刚到的 token；长回复的 `.md` 文件路径（`sendMdOrdered`）与图片（`sendImage`）同样不受此机制保护——它们几乎只出现在回合内。队列只在内存里，daemon 再重启一次就丢（任务结果仍保留在 `tasks.json`）。
+
 ## 5.7 收发富媒体
 
 - **收图**：poller 提取 `image_item` → `downloadImage` 下载解密 → `sniffMime` 嗅探 MIME → 作为 ACP image 块喂大脑。**前提是 agent 广告 `promptCapabilities.image:true`**（kiro/opencode 支持；DSH 官方 0.2.1-rc.2 实测为 false，带图会 `-32602`）。
