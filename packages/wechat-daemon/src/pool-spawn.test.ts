@@ -85,6 +85,19 @@ const spawnCount = (): number => {
   }
 };
 
+/**
+ * 等进程真的消失。POSIX 上 `kill()` 只是发信号（异步），紧接着 `isAlive()` 必然还看到活着——
+ * CI 的 ubuntu runner 上踩过；Windows 走 `taskkill /F`（同步）所以本机看不出来。
+ */
+const waitDead = async (pid: number | null, timeoutMs = 5_000): Promise<boolean> => {
+  const started = Date.now();
+  while (isAlive(pid)) {
+    if (Date.now() - started > timeoutMs) return false;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return true;
+};
+
 beforeEach(() => {
   resetPoolForTest();
   logFile = path.join(root, `spawns-${Date.now()}-${Math.random().toString(36).slice(2)}.log`);
@@ -161,7 +174,7 @@ describe("worker 进程池（真进程）", () => {
     release(gA.ok ? gA.conn : null!);
     release(gB.ok ? gB.conn : null!, { maxConcurrent: 2, idleMax: 1, idleMs: 0 }); // 两条都「过期」→ 收掉最旧的那条
     expect(poolSummary()).toEqual([{ agent: "opencode", busy: 0, idle: 1, taskIds: [] }]);
-    expect(isAlive(pidA)).toBe(false); // 被回收（真杀掉了）
+    expect(await waitDead(pidA)).toBe(true); // 被回收（真杀掉了；POSIX 信号异步，等它退）
     expect(isAlive(pidB)).toBe(true); // 留下的一条还活着
     // 再派 kiro：池里没有可复用的 → 起新进程（拿到的不是刚才那条）
     const gA2 = await acquire(a, 3);
@@ -199,7 +212,7 @@ describe("worker 进程池（真进程）", () => {
     killAll();
     expect(poolInfo()).toEqual([]);
     expect(fs.existsSync(WORKERS_PID_FILE)).toBe(false);
-    expect(pids.every((p) => !isAlive(p))).toBe(true);
+    expect(await Promise.all(pids.map((p) => waitDead(p)))).toEqual([true, true]);
   });
 
   it("起进程失败：不乱留记录、如实报错（bin 不存在）", async () => {

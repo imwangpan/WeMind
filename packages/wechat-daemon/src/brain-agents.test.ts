@@ -353,6 +353,9 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
     process.env.WEMIND_WORKER_BRAIN = "qoder";
+    // 不能依赖宿主机装了 opencode（CI 的 ubuntu runner 上没有）：伪造 PATH
+    fs.writeFileSync(path.join(fakeBin, "opencode"), "");
+    process.env.PATH = fakeBin;
     const r = resolvePresetByName("opencode");
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -407,6 +410,8 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
 
   it("不属于目标的顶层覆盖不会被沿用（切到别的 agent 时不拿旧 bin 去起）", () => {
     clearVars();
+    fs.writeFileSync(path.join(fakeBin, "opencode"), ""); // 同上：不依赖宿主机装没装
+    process.env.PATH = fakeBin;
     const cfg = { agent: "deepseek", bin: "C:\\dsh\\dsh.cmd", args: ["--profile", "acp"] };
     const r = resolvePresetByName("opencode", cfg);
     expect(r.ok).toBe(true);
