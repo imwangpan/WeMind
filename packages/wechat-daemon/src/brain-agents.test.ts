@@ -182,12 +182,12 @@ describe("resolveAgent 选择来源与优先级", () => {
     expect(ag.shell).toBe(false);
   });
 
-  it("未知预设：不再静默回退 kiro，known=false 且 agentProblem 报错", () => {
+  it("未知 agent：不再静默回退 kiro，known=false 且 agentProblem 报错", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "opencod"; // 拼错
     const ag = resolveAgent();
     expect(ag.known).toBe(false);
-    expect(agentProblem(ag)).toMatch(/未知大脑预设/);
+    expect(agentProblem(ag)).toMatch(/未知 agent/);
   });
 });
 
@@ -298,14 +298,14 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
     }
   });
 
-  it("未知预设 / 空名字 → ok:false，带上可选清单", () => {
+  it("未知 agent / 空名字 → ok:false，带上可选清单", () => {
     clearVars();
     const bad = resolvePresetByName("opencod");
     expect(bad.ok).toBe(false);
-    if (!bad.ok) expect(bad.problem).toMatch(/未知大脑预设/);
+    if (!bad.ok) expect(bad.problem).toMatch(/未知 agent/);
     const empty = resolvePresetByName("  ");
     expect(empty.ok).toBe(false);
-    if (!empty.ok) expect(empty.problem).toMatch(/需要指定预设名/);
+    if (!empty.ok) expect(empty.problem).toMatch(/需要指定 agent 名/);
   });
 
   it("二进制找不到 → ok:false + 可读原因（不 spawn）", () => {

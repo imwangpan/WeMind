@@ -19,13 +19,13 @@
 | 桌面已登录但报 `no API key for ... deepseek-official` | 预设的 model / 路由 | DSH 默认路由要 API key；桌面登录对应 `deepseek-account`，需 `set_config_option` 切换 |
 | 多账号互相抢消息 | `list` / 进程 | 同一 bot token 起了多个 daemon，或 brain 加载了 `wechat` MCP |
 | worker 任务不动 | `wemind task-list` | worker 超时/权限/agent 不支持；看 `.../worker` 日志 |
-| 切换大脑失败 / 回滚 | 回执 + `wemind brain` | 目标预设不可用、新大脑启动超时（120s）、等在途回合结束超时（30s）、`WEMIND_BRAIN` 压着命令 |
-| 微信里发命令被短拒 | 回执文案 | 账号级命令（切脑/交接）由**非登录者**发出——兜底校验，平台限制下正常不会出现 |
+| 切换大脑失败 / 回滚 | 答复 + `wemind brain` | 目标预设不可用、新大脑启动超时（120s）、等在途回合结束超时（30s）、`WEMIND_BRAIN` 压着命令 |
+| 微信里发命令被短拒 | 答复文案 | 账号级命令（切脑/交接）由**非登录者**发出——兜底校验，平台限制下正常不会出现 |
 | CLI 命令被拒 / 显示「daemon 未运行」 | `wemind list` | 真没跑；**或**升级 CLI 后没重启 daemon（`.bridge` 凭据对不上）；**或**手跑 daemon 时路径特征不匹配 |
-| 任务数超上限被拒 | 回执 | `WEMIND_MAX_WORKERS`（默认 3）到了；先 `结束任务 <编号>` 或调大 |
+| 任务数超上限被拒 | 答复 | `WEMIND_MAX_WORKERS`（默认 3）到了；先 `结束任务 <编号>` 或调大 |
 | `wemind start` 说「已启动」但 `list` 显示未运行、日志不更新 | 进程表里的 `cli.js _watchdog` 有没有子进程 | 从 **VS Code 集成终端**启动时被调试引导卡死（见 §3.12）；换普通终端，或升级到带 `stripVscodeDebugEnv` 的版本 |
 | 池里进程不回收 / 内存高 | `wemind list` | 空闲回收默认 5 分钟（`WEMIND_WORKER_REAP_MS`）；上限 `WEMIND_IDLE_MAX`（默认 2） |
-| 「恢复会话」失败且当前会话没变 | 回执 | **预期行为**（严格恢复）：agent 侧没有那条会话，或在途 load 超时；不会静默新建 |
+| 「恢复会话」失败且当前会话没变 | 答复 | **预期行为**（严格恢复）：agent 侧没有那条会话，或在途 load 超时；不会静默新建 |
 | 重启后任务显示「已中断」 | `wemind task-list` / 日志 `restored tasks:` | **预期行为**：不自动拉起，回「继续」才续跑 |
 
 ---
@@ -77,7 +77,7 @@ wemind session list <key|label>
 | `brain-sessions.json` | `<agent>:userId → sessionId`（按大脑分开存）；**「当前是哪个会话」的唯一权威** |
 | `session-registry.json` | 会话登记表（名字/标题/轮次；**派生**元数据，坏了只影响列表） |
 | `tasks.json` | 任务表（编号/agent/状态；重启后未完成的标「已中断」） |
-| `task-state.json` | 任务状态快照（顶层字段复制最近一条，供旧 CLI 读） |
+| `task-state.json` | 任务状态记录（顶层字段复制最近一条，供旧 CLI 读） |
 | `handoff.json` | 交接摘要（切脑后带上一次；24h TTL） |
 | `control-inbox/` / `control-out/` | CLI ↔ daemon 控制桥；`control-out/.bridge` = daemon 自己的 pid（认桥凭据） |
 | `brain-mcps.json` | 当前激活的 MCP |
@@ -123,7 +123,7 @@ wemind brain check
 ```
 
 - 预设未知 → `brain set` 会列出可选值；
-- 二进制找不到 → 安装，或 `brain set <预设> --bin <绝对路径>`；
+- 二进制找不到 → 安装，或 `brain set <agent 名> --bin <绝对路径>`；
 - Windows 只有 `.cmd` → 预设 `binWin` 必须是实际文件名（`dsh.cmd`）；`onPath()` 不会自动补 `.cmd`；
 - 自定义 agent → `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_HOME_ENV`。
 
@@ -193,16 +193,16 @@ prompt FAIL ... -32602 Invalid params: inline image prompts were not advertised
 
 ### 3.8 切换大脑失败 / 回滚（1.2.0）
 
-先分清**两段回执**：预检失败只有一条（没动任何东西），新大脑启动失败才有「已回滚到「旧大脑」」。
+先分清**两段答复**：预检失败只有一条（没动任何东西），新大脑启动失败才有「已回滚到「旧大脑」」。
 
 ```powershell
 wemind brain <key|label>                  # requested / source / 生效 bin
 Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain switch:|control\(cli\): brain.switch"
 ```
 
-| 回执/日志 | 原因 | 处置 |
+| 答复/日志 | 原因 | 处置 |
 |---|---|---|
-| `未知预设` / `不可用：…` | 预检拒绝，**没 spawn** | `wemind brain` 看预设名；`wemind brain check <预设>` 单独验 |
+| `未知 agent` / `不可用：…` | 预检拒绝，**没 spawn** | `wemind brain` 看 agent 名；`wemind brain check <agent 名>` 单独验 |
 | `当前有回合正在进行（等了 30 秒…）` | 等在途回合结束超时 | 稍后重发；长回合可调大 `WEMIND_SWITCH_DRAIN_MS` |
 | `新大脑启动超时（120s …）` | 目标 agent 起不来/太慢 | 查它单独能否 ACP（`scripts/acp-probe.mjs`）；调 `WEMIND_SWITCH_TIMEOUT_MS` |
 | `切换失败，已退回原来那个「X」：<原因>` | 握手/会话阶段失败 | 槽位仍是旧大脑，`brain.json` **未被改写**；下一条消息懒重建旧大脑（日志会再 `spawn`）——这是预期，不是"没起来" |
@@ -215,7 +215,7 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 
 `wemind list` 说「运行中」却仍拒绝，按这个顺序看：
 
-1. **daemon 是升级前启动的旧版本**：**必须由它执行的**写命令（`session new`/`resume`、`brain switch|worker|handoff`）在**发出前**就拒绝，并给 `wemind stop <key> && wemind start <key>`；本来就是文件操作的 `session rename`/`delete` 照常直接改登记表（**不会**加说明行），`session list` 直接读登记表并附一行「按下次会用的那个大脑列」，`task-list`/`task-status` 从来不经过桥（读 `tasks.json`，只在 daemon 没跑时注明「上次快照」）。**按提示重启一次**即可——这不是故障。
+1. **daemon 是升级前启动的旧版本**：**必须由它执行的**写命令（`session new`/`resume`、`brain switch|worker|handoff`）在**发出前**就拒绝，并给 `wemind stop <key> && wemind start <key>`；本来就是文件操作的 `session rename`/`delete` 照常直接改登记表（**不会**加说明行），`session list` 直接读登记表并附一行「按下次会用的那个大脑列」，`task-list`/`task-status` 从来不经过桥（读 `tasks.json`，只在 daemon 没跑时注明「上次记录」）。**按提示重启一次**即可——这不是故障。
 2. **`.bridge` 凭据对不上**：`control-out/.bridge` 里应是 daemon 自己的 pid，且等于 `daemon.pid`。手动改过/删过 `control-out/` 都会让它失配。
 3. **daemon 是手跑的老 dist**：`wemind list` 靠命令行特征认进程（`proc-identity.ts`）。用**相对路径**起 daemon（`node packages/wechat-daemon/dist/cli.js daemon`）在旧 dist 里会被判成「不是我们的进程」→ 显示「未运行」且桥拒绝。修法：`npm run build` 后重启（1.2.0 已补相对路径的特征，见 `AGENTS.md` §6）。
 4. **真没跑**：`wemind start [<key|label>]`（省略 = 默认账号）；纯读命令（`session list`、`task-list`）不需要 daemon。
@@ -226,31 +226,31 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 
 | 症状 | 看 | 说明 |
 |---|---|---|
-| 派不出去 | 回执 | 超出 `WEMIND_MAX_WORKERS`（默认 3）会被**派发时**拒绝；无编号消息在**多条任务**并存时回一份编号清单（`#编号` 指定） |
+| 派不出去 | 答复 | 超出 `WEMIND_MAX_WORKERS`（默认 3）会被**派发时**拒绝；无编号消息在**多条任务**并存时回一份编号清单（`#编号` 指定） |
 | 任务「跑」但一直没结果 | `.../worker` 日志 | 找 `exited code=` / `prompt FAIL`；worker 单轮硬上限 30min（`WEMIND_WORKER_CAP_MS`）、无帧 3min（`WEMIND_WORKER_IDLE_MS`） |
 | 任务列表为空但进程还在 | `workers.pid.json` | 进程**留着复用**是预期：任务结束不杀进程，空闲 5min（`WEMIND_WORKER_REAP_MS`）或超出 `WEMIND_IDLE_MAX`（默认 2）才回收 |
 | 池占资源多 | `wemind list` | 调小 `WEMIND_MAX_WORKERS` / `WEMIND_IDLE_MAX`；`wemind stop <key>` 一次杀光整池 |
 | 重启后状态「已中断」 | 日志 `restored tasks: interrupted=[…]` | **预期**：不自动拉起，回「继续」/`#n 继续` 才续跑 |
-| 续跑接不上 | 回执 | agent 不支持 load/resume 或会话已被它自己清理 → 会给「请用文字重述」，**不**改当前会话记录、不假装成功 |
+| 续跑接不上 | 答复 | agent 不支持 load/resume 或会话已被它自己清理 → 会给「请用文字重述」，**不**改当前会话记录、不假装成功 |
 | 同 agent 并发时行为怪 | 池信息 | 同一 agent 的两个 worker **共用它的配置目录**（等价"两个终端在同一个目录里跑"）——已知形态；不同 agent 各自子目录天然隔离 |
-| CLI 说「没等到 daemon 回执」 | `task-out/` | 命令照常执行（这一行只是回执丢了）：**老版 daemon 不认回结果通道**（重启一次即可），或 daemon 正在退出。查实际状态用 `task-list`/`task-status`——别把这一行当「没派上」 |
-| CLI 说「已投递」而不是「已派发」 | `task-out/`、`tasks.json` | 同上（等不到回执）：`task-out/` 里没有 `<命令 id>.json` 说明 daemon 没写回执；任务本身在 `tasks.json` 里能看到就是跑起来了。派发的回执**要等起进程**（冷启动可能几十秒），CLI 最多等 30s |
+| CLI 说「没等到 daemon 答复」 | `task-out/` | 命令照常执行（这一行只是答复丢了）：**老版 daemon 不认回结果通道**（重启一次即可），或 daemon 正在退出。查实际状态用 `task-list`/`task-status`——别把这一行当「没派上」 |
+| CLI 说「已发送」而不是「已派发」 | `task-out/`、`tasks.json` | 同上（等不到答复）：`task-out/` 里没有 `<命令 id>.json` 说明 daemon 没写答复；任务本身在 `tasks.json` 里能看到就是跑起来了。派发的答复**要等起进程**（冷启动可能几十秒），CLI 最多等 30s |
 
 ### 3.11 「恢复会话」失败（严格恢复，1.2.0）
 
 `恢复会话 <序号>` 走的是 **load → resume，都失败就如实报错**，**不回退新建、不改当前会话记录**。所以：
 
-- 回执说失败、而当前会话没变 → **这就是设计**，不是半成功；
+- 答复说失败、而当前会话没变 → **这就是设计**，不是半成功；
 - 常见原因：该 agent 不支持 `session/load`（走 `resume`）、会话已被 agent 自己清理、load 超时（冷启动慢）；
 - 列表里**看不到**那条会话 → 是登记表（`session-registry.json`）缺项，不是会话不存在：重启 daemon 会按当前会话表回填（日志 `session registry backfilled:`），或直接看 `brain-sessions.json`。
 
-### 3.12 `start` 回执「已启动」但 daemon 没起来（VS Code 终端注入，2026-10-29 修）
+### 3.12 `start` 答复「已启动」但 daemon 没起来（VS Code 终端注入，2026-10-29 修）
 
-症状：`wemind start` 打印「已启动自带看门狗…已启动 daemon」，但 `wemind list` 显示未运行；`daemon.log`、`wrapper.pid`、账号目录的 mtime 全都不更新；进程表里只有一个 `node …cli.js _watchdog`，**没有子进程**。
+症状：`wemind start` 打印「已启动自带看护进程…已启动 daemon」，但 `wemind list` 显示未运行；`daemon.log`、`wrapper.pid`、账号目录的 mtime 全都不更新；进程表里只有一个 `node …cli.js _watchdog`，**没有子进程**。
 
-原因：VS Code 集成终端的「智能自动附加」给终端里每个 node 进程注入 `NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` 和 `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true` 等）——被注入的进程**要等调试器接上才执行主脚本**。终端里的前台命令（`stop`/`list`/`start` 本体）会被接上，所以输出都正常；但 `start` **脱离出去的看门狗不会被接**，于是卡在「等调试器」里，既不写 `wrapper.pid` 也不拉 daemon。
+原因：VS Code 集成终端的「智能自动附加」给终端里每个 node 进程注入 `NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` 和 `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true` 等）——被注入的进程**要等调试器接上才执行主脚本**。终端里的前台命令（`stop`/`list`/`start` 本体）会被接上，所以输出都正常；但 `start` **脱离出去的看护进程不会被接**，于是卡在「等调试器」里，既不写 `wrapper.pid` 也不拉 daemon。
 
-处置：1.2.0 起 `watchdog-runner.ts` 的两次脱离式 spawn（看门狗、看门狗拉 daemon）都先过 `debug-env.ts` 的 `stripVscodeDebugEnv()`，已修。旧版本撞上时：换一个**非 VS Code 集成终端**（Windows Terminal / 普通 PowerShell）执行 `wemind start <key>`，或先清变量再跑：
+处置：1.2.0 起 `watchdog-runner.ts` 的两次脱离式 spawn（看护进程、看护进程拉 daemon）都先过 `debug-env.ts` 的 `stripVscodeDebugEnv()`，已修。旧版本撞上时：换一个**非 VS Code 集成终端**（Windows Terminal / 普通 PowerShell）执行 `wemind start <key>`，或先清变量再跑：
 
 ```powershell
 Remove-Item Env:VSCODE_INSPECTOR_OPTIONS -ErrorAction SilentlyContinue
@@ -258,7 +258,7 @@ $env:NODE_OPTIONS = $null
 wemind start <key>
 ```
 
-识别要点：卡死的看门狗只占一个 `cli.js _watchdog` 进程、无子进程；正常时它在 5 秒内就会写出 `wrapper.pid` 并拉出 `cli.js daemon`。
+识别要点：卡死的看护进程只占一个 `cli.js _watchdog` 进程、无子进程；正常时它在 5 秒内就会写出 `wrapper.pid` 并拉出 `cli.js daemon`。
 
 ---
 
@@ -269,7 +269,7 @@ wemind start <key>
 - 不要在同一 token 上同时跑 MCP 形态与 daemon；
 - 不要把 `WEMIND_BRAIN*` 写进系统 profile 当默认（用 `brain.json`）；
 - 不要在文档里把「未实测」写成「已支持」；
-- **不要手改 `control-inbox/` 里的请求去"加参数"**：桥只认预设名与纯数据，没有 `bin`/`args`/`shell` 字段——这是刻意的安全边界，不是缺功能；
+- **不要手改 `control-inbox/` 里的请求去"加参数"**：桥只认 agent 名与纯数据，没有 `bin`/`args`/`shell` 字段——这是刻意的安全边界，不是缺功能；
 - **不要为了切脑去删 `brain-sessions.json`**：删了是丢上下文，不是换大脑；换大脑用 `切换大脑` / `wemind brain switch`；
 - **不要把 `session-registry.json` 当权威**：它只是派生元数据；「当前是哪个会话」只认 `brain-sessions.json`。
 
@@ -281,6 +281,6 @@ wemind start <key>
 - [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)（槽位 / 热切换 / 会话管理 / 进程身份）
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md)（进程池 / 任务表）
 - [`docs/repowiki/10-部署与运维.md`](../../repowiki/10-部署与运维.md)
-- [`docs/本地双入口-命令派发与看敲.md`](../../本地双入口-命令派发与看敲.md)（控制桥协议）
+- [`docs/本地双入口-命令派发与查看回复.md`](../../本地双入口-命令派发与查看回复.md)（控制桥协议）
 - [`docs/ai/recipes/run-e2e.md`](run-e2e.md)（验收与待实测清单）
 - [`docs/daemon-常驻原理.md`](../../daemon-常驻原理.md)

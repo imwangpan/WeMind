@@ -18,12 +18,12 @@ import {
 } from "./task-store.js";
 
 /**
- * 任务表：**一条任务一条 worker 连接**，多条任务并行；编号按用户单调递增、永不复用（避免「任务2」在对话里指代漂移）。
+ * 任务表：**一条任务一条 worker 连接**，多条任务并行；编号按用户单调递增、永不复用（避免「任务2」在对话里指代变化）。
  *
  * 与改造前的差别（单任务单进程 → 任务表）：
- *  - 派发时决定 agent（默认任务大脑，或 `任务 <预设>：正文` 指定）；每条任务一个 session key `task-<编号>@<userId>`；
+ *  - 派发时决定 agent（默认任务大脑，或 `任务 <agent 名>：正文` 指定）；每条任务一个 session key `task-<编号>@<userId>`；
  *  - 任务结束（`结束任务`）把连接**还回进程池**（同 agent 的下个任务直接复用），而不是杀掉；
- *  - 任务表落盘（tasks.json）：daemon 重启后未完成的标「已中断」并在「任务列表」可见，回「继续」/`#n 继续` 才拉进程续跑；
+ *  - 任务表写入磁盘（tasks.json）：daemon 重启后未完成的标「已中断」并在「任务列表」可见，回「继续」/`#n 继续` 才拉进程续跑；
  *  - 编号跨重启不归零（nextId 存在表里，只增不减）。
  *
  * 依赖注入（push/typing/stateSink）保持不变：task-manager 不直接依赖发送层与 account，保持可测。
@@ -36,7 +36,7 @@ export type TaskStatus = StoredTaskStatus;
 export type Task = {
   id: number;
   userId: string;
-  /** 预设名（落盘这个；恢复时按名字重新解析，可能已经换了二进制或不可用）。 */
+  /** agent 名（写入磁盘这个；恢复时按名字重新解析，可能已经换了二进制或不可用）。 */
   agent: string;
   /** 会话键：`task-<编号>@<userId>`（worker-sessions.json 里 `<agent>:<key>`）。 */
   key: string;
@@ -48,9 +48,9 @@ export type Task = {
   /** 本次运行解析出的 agent（interrupted 任务在恢复前没有）。 */
   ag?: ResolvedAgent;
   conn?: WorkerConn;
-  /** 本地命令（`wemind task`）等着的回执 id：起进程有结果了才回，见 `setTaskAckSink`。 */
+  /** 本地命令（`wemind task`）等着的答复编号：起进程有结果了才回，见 `setTaskAckSink`。 */
   ackId?: string;
-  /** 回执里要不要带编号（带 `--agent`/`--cwd` 或已有别的任务时带）。 */
+  /** 答复里要不要带编号（带 `--agent`/`--cwd` 或已有别的任务时带）。 */
   numbered?: boolean;
   /** 下一轮是「从中断处续跑」：会话恢复失败要诚实报错，不能静默换空会话。 */
   strictResume?: boolean;
@@ -72,10 +72,10 @@ export function setTaskTyping(fn: (to: string) => void): void {
 }
 
 /**
- * 依赖注入：回执出口（CLI 写 `task-out/<id>.json`）。
+ * 依赖注入：答复出口（CLI 写 `task-out/<id>.json`）。
  *
  * 只在「本地命令问结果」时用到：`wemind task` 这类命令丢完命令就只能猜，
- * 猜出来的「已派发」在达上限被拒时会变成假消息。派发的回执**必须等起进程有结果**再回——
+ * 猜出来的「已派发」在达上限被拒时会变成假消息。派发的答复**必须等起进程有结果**再回——
  * 达上限/agent 起不来都是 acquire 阶段才知道的（dispatchTask 当场返回时还不知道）。
  */
 let ack: (id: string, text: string) => void = () => {};
@@ -83,7 +83,7 @@ export function setTaskAckSink(fn: (id: string, text: string) => void): void {
   ack = fn;
 }
 /**
- * 发一条回执（没有 id / 没有出口就当没这回事）。
+ * 发一条答复（没有 id / 没有出口就当没这回事）。
  *
  * **空文案也照发**：它是「命令已送达、没有额外要说的」这个信号——CLI 收到它就能立刻用自己那句话，
  * 而不是干等到超时才敢打印（超时是留给「老版 daemon 不认这条通道」的）。
@@ -97,7 +97,7 @@ function ackIf(id: string | undefined, text: string): void {
   }
 }
 
-/** 任务状态快照（落盘 task-state.json 供本地 `task-status` 读；顶层字段复制「最近一条」，旧版 CLI 仍能显示）。 */
+/** 任务状态记录（写入磁盘 task-state.json 供本地 `task-status` 读；顶层字段复制「最近一条」，旧版 CLI 仍能显示）。 */
 export type TaskStateSnapshot = {
   active: boolean;
   status: TaskStatus | "idle";
@@ -125,7 +125,7 @@ const tasks = new Map<number, Task>();
 let store: TaskStore = emptyTaskStore();
 let storeDir = DATA_DIR;
 
-/** 写盘时机：派发/每轮结束/waiting/停止（表很小，写多了也没关系；丢了才会真的影响续跑）。 */
+/** 写入磁盘时机：派发/每轮结束/waiting/停止（表很小，写多了也没关系；丢了才会真的影响续跑）。 */
 function persist(): void {
   store.tasks = [...tasks.values()].map((t) => {
     const s: StoredTask = {
@@ -253,7 +253,8 @@ function labelOf(task: Task): string {
 /** `任务列表`：编号 / agent / 状态 / 轮次 / 已运行 / 最近输出摘要。 */
 export function renderTaskList(userId: string): string {
   const all = listTasks(userId);
-  if (!all.length) return "📋 当前没有任务。派发：直接发「任务：正文」或「任务 <预设>：正文」。";
+  if (!all.length)
+    return "📋 当前没有任务。派发：直接发「任务：正文」或「任务 <agent 名>：正文」。";
   const lines = [`📋 任务（${all.length} 条）`];
   for (const t of all) {
     const age = t.startedAt ? since(Date.now() - t.startedAt) : "?";
@@ -275,7 +276,7 @@ export function renderTaskList(userId: string): string {
 
 // ---- 派发与续跑 ----
 /**
- * 回执文案：单任务（且没指定 agent、没指定 cwd）沿用改造前那句话——最常见路径不该变得啰嗦；
+ * 答复文案：单任务（且没指定 agent、没指定 cwd）沿用改造前那句话——最常见路径不该变得啰嗦；
  * 其余情况（指定了 agent / 已经有多条任务 / 本地派发）带上编号，因为这时编号才有用。
  */
 function ackFor(task: Task, numbered: boolean): string {
@@ -284,7 +285,7 @@ function ackFor(task: Task, numbered: boolean): string {
   return `✅ 已派发任务 #${task.id}（${task.agent} 执行）。看进展发「任务列表」，回话发「#${task.id} 正文」，收掉发「结束任务 ${task.id}」。`;
 }
 
-/** 解析「本任务用哪个 agent」：显式预设名优先，否则默认任务大脑。 */
+/** 解析「本任务用哪个 agent」：显式agent 名优先，否则默认任务大脑。 */
 function resolveTaskAgent(
   agentKey?: string,
 ): { ok: true; ag: ResolvedAgent } | { ok: false; problem: string } {
@@ -295,9 +296,9 @@ function resolveTaskAgent(
 }
 
 /**
- * 派发新任务（后台异步执行，立即返回回执文案，不阻塞调用方）。
- * `agentKey`：`任务 <预设>：正文` 指定的 agent；`cwd`：本地派发指定的任务工作目录。
- * `ackId` 给了就等起进程有结果再回执（成功＝真回执文案，达上限/起不来＝那句警告）。
+ * 派发新任务（后台异步执行，立即返回答复文案，不阻塞调用方）。
+ * `agentKey`：`任务 <agent 名>：正文` 指定的 agent；`cwd`：本地派发指定的任务工作目录。
+ * `ackId` 给了就等起进程有结果再答复（成功＝真答复文案，达上限/起不来＝那句警告）。
  */
 export function dispatchTask(
   to: string,
@@ -456,7 +457,7 @@ function reason(e: unknown): string {
 function resumeTask(task: Task, instruction: string): string {
   const got = resolveTaskAgent(task.agent);
   if (!got.ok) {
-    // 返回而不是 push：微信侧一样会看到（injectTask 的返回值由调用方当回执发出去），CLI 侧则能拿到真话，
+    // 返回而不是 push：微信侧一样会看到（injectTask 的返回值由调用方当答复发出去），CLI 侧则能拿到真话，
     // 否则「接不上」只进 daemon 日志、CLI 却报「已发送」。
     return `⚠️ 接不上 #${task.id} 号任务（原 agent「${task.agent}」现在用不了）：${got.problem}`;
   }
@@ -471,7 +472,7 @@ function resumeTask(task: Task, instruction: string): string {
 
 /**
  * 把用户消息送给任务。`id` 给定时只作用于那条任务；不给时：唯一一条 → 它；多条 → 回编号提示（不猜）。
- * 返回要额外回复的文案（空字符串＝只推给了任务，不需要额外回执）。
+ * 返回要额外回复的文案（空字符串＝只推给了任务，不需要额外答复）。
  * `ackId`（本地命令）：非空返回文案也回一份给 CLI——「没有 #9 号任务」这种话不能只进 daemon 日志。
  */
 export function injectTask(to: string, text: string, id?: number, ackId?: string): string {
@@ -528,7 +529,7 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
   const live = liveTasks(to);
   const intr = interruptedTasks(to);
   if (id === undefined && live.length === 0) {
-    // daemon 重启后内存无任务，但 task-state.json 可能残留 active/waiting（幽灵任务）→ 仍要落盘 idle
+    // daemon 重启后内存无任务，但 task-state.json 可能残留 active/waiting（幽灵任务）→ 仍要写入磁盘 idle
     persist();
     emitState();
     const hint = intr.length
@@ -594,7 +595,7 @@ export function shutdownTasks(): void {
   emitState();
 }
 
-/** 测试用：清空内存任务表与落盘路径（不落盘、不杀进程由调用方决定）。 */
+/** 测试用：清空内存任务表与写入磁盘路径（不写入磁盘、不杀进程由调用方决定）。 */
 export function resetTasksForTest(dir?: string): void {
   tasks.clear();
   store = emptyTaskStore();

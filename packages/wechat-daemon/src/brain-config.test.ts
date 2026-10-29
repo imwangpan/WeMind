@@ -85,7 +85,7 @@ describe("mergeBrainConfig（读-改-写，不丢段）", () => {
     expect(next.worker).toEqual({ agent: "gemini" });
   });
 
-  it("换 agent 时，旧 agent 的顶层启动覆盖迁进 presets[旧agent]（切回去不丢 --bin）", () => {
+  it("换 agent 时，旧 agent 的顶层启动覆盖迁进 presets[旧 agent]（切回去不丢 --bin）", () => {
     const existing: BrainConfig = {
       agent: "deepseek",
       bin: "C:\\dsh\\dsh.cmd",
@@ -98,7 +98,7 @@ describe("mergeBrainConfig（读-改-写，不丢段）", () => {
     });
   });
 
-  it("patch 带启动覆盖时同时写 presets[新agent] 与顶层（顶层供旧版本 CLI 读取）", () => {
+  it("patch 带启动覆盖时同时写 presets[新 agent] 与顶层（顶层供旧版本 CLI 读取）", () => {
     const next = mergeBrainConfig(null, {
       agent: "DeepSeek",
       bin: "C:\\dsh\\dsh.cmd",
@@ -131,7 +131,7 @@ describe("mergeBrainConfig（读-改-写，不丢段）", () => {
   });
 });
 
-describe("落盘往返", () => {
+describe("写入磁盘往返", () => {
   it("save/load 往返一致；updateBrainConfig 保留 worker 段；clear 删文件", () => {
     saveBrainConfig({ agent: "kiro", worker: { agent: "opencode" } }, dir);
     expect(loadBrainConfig(dir)).toEqual({ agent: "kiro", worker: { agent: "opencode" } });

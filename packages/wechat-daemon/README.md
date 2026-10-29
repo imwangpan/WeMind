@@ -53,14 +53,14 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 
 ## 常驻怎么跑
 
-`wemind start` 默认用**自带的跨平台看门狗**（builtin）：detached 拉起 `wemind _watchdog`，它循环执行 `wemind daemon`，进程退出 5 秒后自动重拉；单实例靠 `wrapper.pid` + 进程身份校验。也可以用 `--runner pm2`（或 `WEMIND_RUNNER=pm2`）交给 pm2——`wemind` 会在账号目录生成 `pm2.app.json`（5s 重拉、最多 50 次、退出码 78 停手、日志合并到 `daemon.log`，与 builtin 语义一致），再 `pm2 start` 它。
+`wemind start` 默认用**自带的跨平台看护进程**（builtin）：detached 拉起 `wemind _watchdog`，它循环执行 `wemind daemon`，进程退出 5 秒后自动重拉；单实例靠 `wrapper.pid` + 进程身份校验。也可以用 `--runner pm2`（或 `WEMIND_RUNNER=pm2`）交给 pm2——`wemind` 会在账号目录生成 `pm2.app.json`（5s 重拉、最多 50 次、退出码 78 停手、日志合并到 `daemon.log`，与 builtin 语义一致），再 `pm2 start` 它。
 
 开机自启：让系统在登录时执行一次 `wemind start <账号>` 即可（Windows 计划任务/启动文件夹、Linux systemd user service、macOS launchd）。**同一账号只用一套常驻方案**——两种 runner 同时跑会抢同一个 bot token。
 
 ## 数据与安全
 
 - 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标（读到哪条消息了）、`allowFrom.json` 授权清单、`brain-home/` 大脑沙箱、`daemon.log` 日志。
-- ⚠️ **daemon 会让大脑免确认执行工具**（kiro 预设 `--trust-all-tools`；qoder 预设 `--yolo`）：能给这个 bot 发消息的人，即可让大脑在本机执行任意工具（shell / 写文件）。唯一安全闸是**发件人授权（allowFrom）**：扫码登录者自动授权，**勿清空**。
+- ⚠️ **daemon 会让大脑免确认执行工具**（内置的 kiro 带 `--trust-all-tools`；内置的 qoder 带 `--yolo`）：能给这个 bot 发消息的人，即可让大脑在本机执行任意工具（shell / 写文件）。唯一安全闸是**发件人授权（allowFrom）**：扫码登录者自动授权，**勿清空**。
 - `account.json` 里 bot token 是明文（POSIX 上 chmod 600；Windows 请用目录权限或磁盘加密）。
 - 同一个 bot token **只能有一个消费者**：`wemind` daemon 与 `@wemind/wechat-mcp` 二选一，否则互相抢消息。
 
@@ -113,7 +113,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 | 参数 | 示例 | 什么时候用 |
 | --- | --- | --- |
 | `patch` | `1.0.0` → `1.0.1` | Bug 修复、兼容性改动（**最常用**） |
-| `minor` | `1.0.0` → `1.1.0` | 新增向后兼容的能力（如新增内置大脑预设、新增子命令） |
+| `minor` | `1.0.0` → `1.1.0` | 新增向后兼容的能力（如新增内置的大脑 agent、新增子命令） |
 | `major` | `1.0.0` → `2.0.0` | 不兼容改动（如删子命令、改数据目录布局、改 CLI 参数） |
 
 ### 第三步：升版本号（一条命令）

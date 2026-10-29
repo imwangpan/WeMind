@@ -322,7 +322,7 @@ export interface GetConfigResp {
   typing_ticket?: string;
 }
 
-// ===== 以下为 WeMind 本地（非协议）类型：落盘的账号/状态/二维码态 =====
+// ===== 以下为 WeMind 本地（非协议）类型：写入磁盘的账号/状态/二维码态 =====
 
 /** 本地持久化的账号凭证（account.json）。 */
 export interface AccountData {

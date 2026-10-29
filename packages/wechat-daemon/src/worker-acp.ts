@@ -61,7 +61,7 @@ function loadSessionMap(a: ResolvedAgent): Record<string, string> {
     return {};
   }
   const { map, migrated } = normalizeSessionMap(raw, a.name);
-  if (migrated) saveSessionMap(map); // 立即落盘，避免下次换 agent 时旧条目再被“继承”一次
+  if (migrated) saveSessionMap(map); // 立即写入磁盘，避免下次换 agent 时旧条目再被“继承”一次
   return map;
 }
 function saveSessionMap(m: Record<string, string>): void {
@@ -93,7 +93,7 @@ export class WorkerConn {
   private seenUpdateTypes = new Set<string>();
   private seenTools = new Set<string>();
   private cwd?: string; // 本任务的工作目录（spawn 时生效；子进程 cwd 不可中途改）
-  /** spawn 后立刻回调：池据此把 pid 身份记录落盘（`wemind stop` 靠它精确找到本进程）。 */
+  /** spawn 后立刻回调：池据此把 pid 身份记录写入磁盘（`wemind stop` 靠它精确找到本进程）。 */
   onSpawn?: (conn: WorkerConn) => void;
 
   constructor(agent: ResolvedAgent) {
@@ -472,7 +472,7 @@ export class WorkerConn {
     if (!res?.sessionId) throw new Error("session/new returned no sessionId");
     await this.applyModel(res.sessionId);
     this.sessions.set(key, res.sessionId);
-    // 重新读改写：多个连接并存时，别用陈旧的快照整张覆盖（会抹掉别的任务刚写的 key）
+    // 重新读改写：多个连接并存时，别用陈旧的记录整张覆盖（会抹掉别的任务刚写的 key）
     const fresh = loadSessionMap(this.agent);
     fresh[mapKey] = res.sessionId;
     saveSessionMap(fresh);

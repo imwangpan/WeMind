@@ -147,7 +147,7 @@ describe("收件箱 / 应答文件", () => {
   });
 
   it("「这个 daemon 认识桥」凭据：markBridgeReady 写的 pid 能读回，clear 后消失", () => {
-    expect(bridgePidOf(dir)).toBeNull(); // 没有凭据 = 旧版 daemon（CLI 据此拒绝投递）
+    expect(bridgePidOf(dir)).toBeNull(); // 没有凭据 = 旧版 daemon（CLI 据此拒绝发送）
     markBridgeReady(dir, 4321);
     expect(bridgePidOf(dir)).toBe(4321);
     clearControlDirs(dir); // daemon 重启会先清目录再写凭据

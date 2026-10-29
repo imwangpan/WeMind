@@ -144,7 +144,7 @@ describe("排序与裁剪", () => {
   });
 });
 
-describe("落盘与读写入口", () => {
+describe("写入磁盘与读写入口", () => {
   it("损坏文件 → 空表，不抛", () => {
     fs.writeFileSync(path.join(dir, "session-registry.json"), "{ 坏", "utf-8");
     expect(loadRegistry(dir).entries).toEqual([]);
@@ -211,7 +211,7 @@ describe("落盘与读写入口", () => {
     expect(titleOf("一".repeat(40))).toBe(`${"一".repeat(30)}…`);
   });
 
-  it("写盘失败不抛（登记表是派生元数据，绝不能拖垮回合）：目录位置被一个文件占住", () => {
+  it("写入磁盘失败不抛（登记表是派生元数据，绝不能拖垮回合）：目录位置被一个文件占住", () => {
     const blocked = path.join(dir, "占位");
     fs.writeFileSync(blocked, "x", "utf-8");
     expect(() => ensureEntry("kiro", "u1", "s1", { dir: blocked })).not.toThrow();

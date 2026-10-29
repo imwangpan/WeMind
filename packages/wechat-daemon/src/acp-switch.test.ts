@@ -124,7 +124,7 @@ afterEach(() => {
   restart(); // 杀掉本用例起的假 agent，别留给下一个用例
 });
 
-/** 落盘一份「脑=opencode，目标=kiro」的配置，两个预设都指向假 agent。返回当前槽位。 */
+/** 写入磁盘一份「脑=opencode，目标=kiro」的配置，两个 agent 都指向假 agent。返回当前槽位。 */
 function setup(modeCur = "ok", modeTarget = "ok") {
   saveBrainConfig({
     agent: "opencode",
@@ -135,11 +135,11 @@ function setup(modeCur = "ok", modeTarget = "ok") {
 }
 
 describe("preflightSwitch", () => {
-  it("未知预设：直接失败，不 spawn", async () => {
+  it("未知 agent：直接失败，不 spawn", async () => {
     setup();
     const pre = preflightSwitch("没这个", dataDir);
     expect(pre.ok).toBe(false);
-    expect(pre.ok === false && pre.problem).toContain("未知大脑预设");
+    expect(pre.ok === false && pre.problem).toContain("未知 agent");
     expect(spawnCount()).toBe(0);
   });
 
@@ -214,7 +214,7 @@ describe("switchBrain", () => {
     expect(fs.existsSync(sessionsFile)).toBe(false); // 没走到建会话
   });
 
-  it("已经是它：不重启进程、不 spawn，只把选择落盘", async () => {
+  it("已经是它：不重启进程、不 spawn，只把选择写入磁盘", async () => {
     setup();
     const before = spawnCount();
     const out = await switchBrain("opencode", { userId: "u1", dir: dataDir });
@@ -271,7 +271,7 @@ describe("switchBrain", () => {
     expect(getAgent("brain").name).toBe("kiro");
   });
 
-  it("WEMIND_BRAIN 压着时：切换照做，但回执如实警告重启后会回去", async () => {
+  it("WEMIND_BRAIN 压着时：切换照做，但答复如实警告重启后会回去", async () => {
     setup();
     process.env.WEMIND_BRAIN = "opencode";
     const out = await switchBrain("kiro", { userId: "u1", dir: dataDir });

@@ -9,7 +9,7 @@ import path from "node:path";
  * 甚至报成**上一条**任务的编号（`active` 本来就是 true），「回复不存在的编号」也会被报成「已发送」。
  * 回结果通道让 daemon 把**真实结果**写回来，CLI 打印的就是 daemon 的那句话。
  *
- * 兼容：老 daemon 不认这条通道（不会写回执），CLI 等不到就退回原来的「已投递」措辞并说明一句，
+ * 兼容：老 daemon 不认这条通道（不会写答复），CLI 等不到就退回原来的「已发送」措辞并说明一句，
  * 而不是把「没等到」当成「成功了」。
  */
 
@@ -30,7 +30,7 @@ function atomicWriteJson(fp: string, obj: unknown): void {
 }
 
 /**
- * 写一条命令进收件箱，返回它的回执 id（同时写进 `ack` 字段；老 daemon 忽略这个字段）。
+ * 写一条命令进收件箱，返回它的答复编号（同时写进 `ack` 字段；老 daemon 忽略这个字段）。
  * 文件名用同一个 id：带时间戳前缀，daemon 按名字排序即按时间排序。
  */
 export function writeTaskCmd(base: string, obj: Record<string, unknown>): string {
@@ -52,11 +52,11 @@ export function writeTaskAck(base: string, id: string | undefined, text: string)
       text,
     });
   } catch {
-    /* 回执写不进去不该影响命令本身（CLI 会回退到「已投递」措辞） */
+    /* 答复写不进去不该影响命令本身（CLI 会回退到「已发送」措辞） */
   }
 }
 
-/** CLI 侧：等这次命令的回执（读到即删，目录不留垃圾）。超时返回 null。 */
+/** CLI 侧：等这次命令的答复（读到即删，目录不留垃圾）。超时返回 null。 */
 export async function awaitTaskAck(
   base: string,
   id: string,

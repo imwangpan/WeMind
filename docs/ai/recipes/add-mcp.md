@@ -99,7 +99,7 @@ $env:WEMIND_MCP_CATALOG = "D:\wemind-data\mcp-catalog.json"
 
 ```powershell
 npm run build
-wemind brain set <预设> --restart
+wemind brain set <agent 名> --restart
 wemind brain check
 ```
 

@@ -21,7 +21,7 @@ import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config
  *  - `WEMIND_BRAIN_REAL_HOME`  覆盖被继承的真实配置目录（默认取预设 realHome）
  *  - `WEMIND_BRAIN_INHERIT_DIRS` 覆盖继承的子目录清单（逗号/空格分隔）
  *  - `KIRO_CLI_BIN`            旧的 kiro 专用覆盖（仅 kiro 预设、且未设 WEMIND_BRAIN_BIN 时仍生效）
- *  ② 账号级持久配置（`<数据目录>/brain.json`，见 brain-config.ts）：顶层 = 对话大脑，`worker` 段 = 任务 worker（缺省跟随顶层）；每段可带 `agent` / `bin` / `args` / `shell` / `homeEnvVar`，另有按预设名存启动覆盖的 `presets` 段。落盘后任何入口重启都能复现，切换用 `wemind brain set <预设>`。
+ *  ② 账号级持久配置（`<数据目录>/brain.json`，见 brain-config.ts）：顶层 = 对话大脑，`worker` 段 = 任务 worker（缺省跟随顶层）；每段可带 `agent` / `bin` / `args` / `shell` / `homeEnvVar`，另有按 agent 名存启动覆盖的 `presets` 段。写入磁盘后任何入口重启都能复现，切换用 `wemind brain set <agent 名>`。
  *  ③ `auto`（未配置时的兜底）：按 AUTO_PROBE_ORDER 取第一个二进制可解析的预设；一个都没有则标记 unavailable，由启动校验明确报错（不再「静默跑起来、第一条消息才炸」）。
  *  另：未知的 `WEMIND_BRAIN` 值不再静默回退 kiro，而是 `known:false`，交由启动校验报错。
  *
@@ -224,7 +224,7 @@ function locateBin(bin: string): string | null {
   return null;
 }
 
-/** daemon 因「大脑配置错误」退出时用的退出码；看门狗据此停止自动重启（配置错误需人工修，重拉无益）。 */
+/** daemon 因「大脑配置错误」退出时用的退出码；看护进程据此停止自动重启（配置错误需人工修，重拉无益）。 */
 export const BRAIN_CONFIG_EXIT_CODE = 78;
 
 export type ResolvedAgent = {
@@ -274,7 +274,7 @@ function envKeyFor(role: AgentRole): string | undefined {
 
 /**
  * 解析某角色要用的 ACP agent（核心实现，见文件头注释的三级优先级）。
- * 覆盖优先级：环境变量 > 本角色那段自带 > `presets[预设名]` > 预设默认。
+ * 覆盖优先级：环境变量 > 本角色那段自带 > `presets[<agent 名>]` > 预设默认。
  * `ignoreEnv`：命令驱动的切换（`resolvePresetByName`）必须绕开 `WEMIND_BRAIN*`，否则会出现「点了切换、env 却压着它」的假成功。
  */
 function resolveAgentCore(
@@ -298,7 +298,7 @@ function resolveAgentCore(
     key = "kiro";
   }
   const preset = ACP_AGENT_PRESETS[key];
-  // 按预设名存的启动覆盖：无论谁在用这个预设都适用（顶层覆盖只属于「落盘那个 agent」，切走后不该跟过去）。
+  // 按 agent 名存的启动覆盖：无论谁在用这个 agent 都适用（顶层覆盖只属于「写入磁盘那个 agent」，切走后不该跟过去）。
   const presetOv = cfg?.presets?.[key];
 
   // roleCfg 的 bin/args/shell/homeEnvVar 是**给该段所写那个 agent** 的启动覆盖；环境变量临时切到别的预设时不能沿用（否则会拿 deepseek 的 dsh.cmd 去起 qoder）。
@@ -313,7 +313,7 @@ function resolveAgentCore(
       ? shellEnv === "1" || shellEnv.toLowerCase() === "true"
       : (overrideCfg?.shell ?? presetOv?.shell ?? preset.shell ?? false);
 
-  // 二进制：env 覆盖 > (kiro 旧变量) > 本段覆盖 > presets[预设名] 覆盖 > PATH 解析 > 预设裸名。
+  // 二进制：env 覆盖 > (kiro 旧变量) > 本段覆盖 > presets[agent 名] 覆盖 > PATH 解析 > 预设裸名。
   // 经 shell 启动时用裸名（让 shell 从 PATH 解析，避免带空格的全路径在 shell 下出问题）。
   const envBin = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_BIN?.trim();
   const kiroBin =
@@ -400,28 +400,28 @@ export function resolveAgentFor(
   return resolveAgentCore(role, cfg ?? null);
 }
 
-/** 全部预设名（不含 `auto` 这个「不是预设的预设」）。 */
+/** 全部 agent 名（`auto` 不在其中：它只是「自动探测」的开关）。 */
 export function presetNames(): string[] {
   return Object.keys(ACP_AGENT_PRESETS);
 }
 
 /**
- * 按名字解析一个预设，**绕开环境变量**——供「切换大脑」这类命令使用。
+ * 按名字解析一个 agent，**绕开环境变量**——供「切换大脑」这类命令使用。
  *
  * 为什么绕开：`WEMIND_BRAIN` 优先级高于 brain.json，命令若也走 env 优先级，会出现「用户点了切换、看着成功，实际还是 env 指的那个」。
  * 命令语义 = 用户此刻的明确意图，应压过一次性环境覆盖（`resolvePresetByName` 的结果由调用方写进 brain.json）。
  * 同理，属于「别的 agent」的启动覆盖不会被沿用；但 `presets[名]` 里按名字存的覆盖会（切走再切回不丢 `--bin`）。
  *
- * 失败返回面向用户的原因（未知预设 / 该预设二进制找不到），成功返回可直接 spawn 的 agent。
+ * 失败返回面向用户的原因（未知 agent / 该 agent 二进制找不到），成功返回可直接 spawn 的 agent。
  */
 export function resolvePresetByName(
   name: string,
   cfg?: BrainConfig | null,
 ): { ok: true; agent: ResolvedAgent } | { ok: false; problem: string } {
   const key = (name ?? "").trim().toLowerCase();
-  if (!key) return { ok: false, problem: "需要指定预设名（或 `auto` 重新自动探测）。" };
+  if (!key) return { ok: false, problem: "需要指定 agent 名（或 `auto` 重新自动探测）。" };
   const base: BrainConfig = { agent: key, presets: cfg?.presets };
-  // 顶层启动覆盖只属于「落盘那个 agent」：目标就是它时带上（例如 `brain set deepseek --bin …` 后切回 deepseek）。
+  // 顶层启动覆盖只属于「写入磁盘那个 agent」：目标就是它时带上（例如 `brain set deepseek --bin …` 后切回 deepseek）。
   if (cfg?.agent?.trim().toLowerCase() === key) {
     if (cfg.bin) base.bin = cfg.bin;
     if (cfg.args?.length) base.args = cfg.args;
@@ -439,14 +439,14 @@ export function resolvePresetByName(
  */
 export function agentProblem(ag: ResolvedAgent): string | null {
   if (!ag.known)
-    return `未知大脑预设「${ag.requestedKey}」。可选：${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制可用 WEMIND_BRAIN_BIN 或 brain set --bin 指定）`;
+    return `未知 agent「${ag.requestedKey}」。可选：${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制可用 WEMIND_BRAIN_BIN 或 brain set --bin 指定）`;
   if (ag.requestedKey === "auto" && !ag.available)
-    return `自动探测未找到可用的大脑（已试：${AUTO_PROBE_ORDER.join("、")}）。请安装其中之一，或运行 \`wemind brain set <预设>\``;
+    return `自动探测未找到可用的大脑（已试：${AUTO_PROBE_ORDER.join("、")}）。请安装其中之一，或运行 \`wemind brain set <agent 名>\``;
   if (!ag.available)
     return ag.name === "deepseek"
       ? `找不到 DeepSeek 的「${ag.bin}」。桌面端通常有 dsh.cmd；把它的绝对路径传给 \`wemind brain set deepseek --bin "<...>\\dsh.cmd"\``
       : ag.name === "qoder"
         ? `找不到 Qoder CLI 的「${ag.bin}」。官方安装会放在 ~/.qoder/bin/qodercli/ 并加入 PATH；确认后重开终端，或 \`wemind brain set qoder --bin "<...>\\qodercli.exe"\``
-        : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <预设>\` 切换`;
+        : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <agent 名>\` 切换`;
   return null;
 }

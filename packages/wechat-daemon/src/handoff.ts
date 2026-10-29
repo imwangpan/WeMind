@@ -33,7 +33,7 @@ export const HANDOFF_HEAD = "【交接摘要 · 来自 ";
 
 export type Handoff = {
   version: number;
-  /** 由哪个大脑写的（预设名，小写）。 */
+  /** 由哪个大脑写的（agent 名，小写）。 */
   fromAgent: string;
   /** 给谁写的（微信 userId）。 */
   userId: string;

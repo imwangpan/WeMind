@@ -13,7 +13,7 @@ import {
 } from "./session-registry.js";
 
 /**
- * 会话管理的**操作层**：把「新会话 / 列表 / 恢复 / 重命名 / 删除」拼成一句回执。
+ * 会话管理的**操作层**：把「新会话 / 列表 / 恢复 / 重命名 / 删除」拼成一句答复。
  *
  * 为什么单独成模块（而不是写在 index.ts 的 handleControl 里）：
  *  - 恢复是**有副作用的两步**（严格恢复的 load → 成功才改当前会话记录），值得单独钉测试；
@@ -33,7 +33,7 @@ export type CreateFn = (userId: string) => Promise<void>;
 
 /** 会话操作的最小上下文：谁、哪个大脑、哪个数据目录。 */
 export type SessionCtx = {
-  /** 当前对话大脑的预设名（登记表按 agent 分开存）。 */
+  /** 当前对话大脑的agent 名（登记表按 agent 分开存）。 */
   agent: string;
   /** 会话属于谁（微信 userId / CLI 的登录者）。 */
   userId: string;
@@ -114,12 +114,12 @@ export function renameSessionCmd(c: SessionCtx, ref: string, name: string): stri
 
 /**
  * `删除会话 <ref>`：只删登记项；删的若是当前会话则**同时清当前会话记录**（下一条消息自然开新的）。
- * agent 自己那份历史归档不在 WeMind 手里（ACP 无可验证的 session/delete），如实写在回执里。
+ * agent 自己那份历史记录不在 WeMind 手里（ACP 无可验证的 session/delete），如实写在答复里。
  */
 export function deleteSessionCmd(c: SessionCtx, ref: string): string {
   const dir = c.dir ?? DATA_DIR;
   const r = deleteSession(c.agent, c.userId, ref, { dir });
   if (!r.ok) return `❌ ${r.error}`;
   const tail = r.clearedPointer ? "它就是当前会话，下一条消息会开一个新的。" : "当前会话没有变。";
-  return `✅ 已从列表删除：${labelOf(r.entry)}。${tail}\n（agent 自己那份历史归档不在 WeMind 手里、仍留在它的存储里；这里删掉的是 WeMind 的列表登记。）`;
+  return `✅ 已从列表删除：${labelOf(r.entry)}。${tail}\n（agent 自己那份历史记录不在 WeMind 手里、仍留在它的存储里；这里删掉的是 WeMind 的列表登记。）`;
 }

@@ -62,7 +62,7 @@ export type AcquirePlan =
   | { kind: "spawn"; reap: string[] }
   | { kind: "reject"; problem: string };
 
-/** agent 身份键：同一个预设但启动参数不同（如 `--bin` 改过）必须算两个进程。 */
+/** agent 身份键：同一个 agent 但启动参数不同（如 `--bin` 改过）必须算两个进程。 */
 export function agentKey(ag: ResolvedAgent): string {
   return `${ag.name}|${ag.bin}|${ag.args.join(" ")}`;
 }
@@ -141,12 +141,12 @@ function info(e: Entry): ConnInfo {
   return i;
 }
 
-/** 池内快照（只读；判定一律走这个 + 纯函数）。 */
+/** 池内记录（只读；判定一律走这个 + 纯函数）。 */
 export function poolInfo(): ConnInfo[] {
   return [...entries.values()].filter((e) => e.conn.isAlive()).map(info);
 }
 
-/** 落盘 pid 身份记录：`wemind stop` 据此精确找到全部 worker（多 agent 并存时新记录显得必要）。 */
+/** 写入磁盘 pid 身份记录：`wemind stop` 据此精确找到全部 worker（多 agent 并存时新记录显得必要）。 */
 function writeRecords(): void {
   const recs: PidRecord[] = [];
   for (const e of entries.values()) {

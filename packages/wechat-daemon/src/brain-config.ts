@@ -6,11 +6,11 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 /**
  * 账号级「大脑」持久配置（brain.json）。
  *
- * 背景：此前「用哪个大脑」只存在于进程环境变量 `WEMIND_BRAIN`（见 brain-agents.ts），是个**临时态**——换个入口重启（登录自启、pm2、看门狗、`cli.js start`、另一个 shell）就丢，静默退回默认预设；而默认预设（kiro）的二进制不一定装了 → 直到第一条消息才报错（历史上表现为「⏳ 响应中断了，正在自动重试…」）。
+ * 背景：此前「用哪个大脑」只存在于进程环境变量 `WEMIND_BRAIN`（见 brain-agents.ts），是个**临时态**——换个入口重启（登录自启、pm2、看护进程、`cli.js start`、另一个 shell）就丢，静默退回默认预设；而默认预设（kiro）的二进制不一定装了 → 直到第一条消息才报错（历史上表现为「⏳ 响应中断了，正在自动重试…」）。
  *
- * 这里把选择**按账号落盘**，成为单一事实来源：
+ * 这里把选择**按账号写入磁盘**，成为单一事实来源：
  *   - 任何入口重启都能复现（不依赖启动者的 shell）；
- *   - 切换是一等命令（`wemind brain set <预设>`），而不是「改环境变量 + 记得重开终端」；
+ *   - 切换是一等命令（`wemind brain set <agent 名>`），而不是「改环境变量 + 记得重开终端」；
  *   - 环境变量 `WEMIND_BRAIN*` 仍为**一次性覆盖**（优先级更高），临时试别的 agent 不受影响。
  *
  * 文件形如 `~/.wemind/<账号>/brain.json`：
@@ -21,15 +21,15 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
  *
  * - 顶层 `agent`（可带 `bin`/`args`/`shell`/`homeEnvVar` 启动覆盖）＝**对话大脑**，历史语义不变；
  * - `worker` ＝任务 worker 的独立选择（**缺省＝跟随对话大脑**，与拆分角色之前完全一致）；
- * - `presets` ＝**按预设名存**的启动覆盖：`wemind brain set X --bin …` 写在这里，于是「切到 opencode 再切回 deepseek」不会丢掉 deepseek 的绝对路径（DSH 桌面端必须显式给 `dsh.cmd`）。
- *   顶层那些字段仍会同步写一份（兼容旧版本 CLI 读取），切换 agent 时旧 agent 的覆盖会被迁移进 `presets[旧agent]`。
+ * - `presets` ＝**按 agent 名存**的启动覆盖：`wemind brain set X --bin …` 写在这里，于是「切到 opencode 再切回 deepseek」不会丢掉 deepseek 的绝对路径（DSH 桌面端必须显式给 `dsh.cmd`）。
+ *   顶层那些字段仍会同步写一份（兼容旧版本 CLI 读取），切换 agent 时旧 agent 的覆盖会被迁移进 `presets[旧 agent]`。
  */
 
 export type AgentRole = "brain" | "worker";
 
 /** 一个角色的 agent 选择与其启动覆盖。 */
 export type AgentConfig = {
-  /** 预设名（见 brain-agents.ts 的 ACP_AGENT_PRESETS），或 `auto`（自动探测）。 */
+  /** agent 名（见 brain-agents.ts 的 ACP_AGENT_PRESETS），或 `auto`（自动探测）。 */
   agent: string;
   /** 覆盖二进制（绝对路径或 PATH 上的名字）。 */
   bin?: string;
@@ -41,13 +41,13 @@ export type AgentConfig = {
   homeEnvVar?: string;
 };
 
-/** 按预设名保存的启动覆盖。 */
+/** 按 agent 名保存的启动覆盖。 */
 export type PresetOverride = Omit<AgentConfig, "agent">;
 
 export type BrainConfig = AgentConfig & {
   /** 任务 worker 的独立选择；缺省＝跟随对话大脑。 */
   worker?: AgentConfig;
-  /** 预设名 → 启动覆盖。 */
+  /** agent 名 → 启动覆盖。 */
   presets?: Record<string, PresetOverride>;
 };
 
@@ -127,18 +127,18 @@ export function agentConfigFor(cfg: BrainConfig | null, role: AgentRole): BrainC
   if (!cfg) return null;
   if (role === "brain") return cfg;
   if (!cfg.worker?.agent) return cfg; // 没有独立 worker 段：worker 沿用顶层整段（含 presets）
-  // presets 是**账号级**的「按预设名存的启动覆盖」，与「用哪一段选 agent」无关，必须跟着走：
+  // presets 是**账号级**的「按 agent 名存的启动覆盖」，与「用哪一段选 agent」无关，必须跟着走：
   // 否则 worker 段的存在会让 presets 查不到，`--bin` 之类的覆盖对 worker 静默失效。
   return cfg.presets ? { ...cfg.worker, presets: cfg.presets } : cfg.worker;
 }
 
 /**
- * 合并一次「设配置」（`wemind brain set` / 切换命令落盘）：
+ * 合并一次「设配置」（`wemind brain set` / 切换命令写入磁盘）：
  *  - patch 的顶层字段整体替换顶层；
  *  - 保留 existing 的 worker 段（除非 patch 自带）——旧实现整体覆盖写会把 worker 段删掉；
- *  - agent 变了 → 把 existing 顶层还带着的启动覆盖（它们属于**旧** agent）迁进 `presets[旧agent]`，
+ *  - agent 变了 → 把 existing 顶层还带着的启动覆盖（它们属于**旧** agent）迁进 `presets[旧 agent]`，
  *    避免「切到 opencode 再切回 deepseek」丢掉 deepseek 的 `--bin`；agent 没变则沿用未给定的覆盖；
- *  - patch 自带的启动覆盖同时写进 `presets[新agent]`（并被顶层同步一份，兼容旧版本 CLI）。
+ *  - patch 自带的启动覆盖同时写进 `presets[新 agent]`（并被顶层同步一份，兼容旧版本 CLI）。
  */
 export function mergeBrainConfig(existing: BrainConfig | null, patch: BrainConfig): BrainConfig {
   const prev = existing?.agent?.trim().toLowerCase() ?? "";
@@ -183,7 +183,7 @@ export function mergeBrainConfig(existing: BrainConfig | null, patch: BrainConfi
   return next;
 }
 
-/** 读-改-写一步到位（manage.ts 用）：返回落盘后的配置。 */
+/** 读-改-写一步到位（manage.ts 用）：返回写入磁盘后的配置。 */
 export function updateBrainConfig(patch: BrainConfig, dir: string = DATA_DIR): BrainConfig {
   const next = mergeBrainConfig(loadBrainConfig(dir), patch);
   saveBrainConfig(next, dir);

@@ -48,7 +48,7 @@ WeMind 把「个人微信」变成一个 AI Agent 的输入输出通道。它基
 | 7 | [远程任务 Worker](07-远程任务-Worker.md) | 受控 ACP 工作机、任务状态机、微信/本地双入口、中断恢复 |
 | 8 | [数据存储与多账号](08-数据存储与多账号.md) | 数据目录布局、账号注册表、授权清单、文件清单速查 |
 | 9 | [配置项与环境变量](09-配置项与环境变量.md) | 全部环境变量分类速查表 |
-| 10 | [部署与运维](10-部署与运维.md) | 常驻三层进程树、看门狗、Windows 自启、pm2 跨平台、多账号 |
+| 10 | [部署与运维](10-部署与运维.md) | 常驻三层进程树、看护进程、Windows 自启、pm2 跨平台、多账号 |
 | 11 | [开发指南](11-开发指南.md) | 构建顺序、测试、CI、代码约定、贡献流程 |
 
 > 📄 **一页速查**：数据目录改根/迁移、`WEMIND_HOME` / `WECHAT_DATA_DIR` 等环境变量的具体操作（含初次运行指定路径、运行后迁移） → [速查-数据目录与环境变量.md](../速查-数据目录与环境变量.md)（对应 [第 8 章](08-数据存储与多账号.md)、[第 9 章](09-配置项与环境变量.md)）。
@@ -63,7 +63,7 @@ WeMind 把「个人微信」变成一个 AI Agent 的输入输出通道。它基
 | 语言 / 运行时 | TypeScript / Node.js >= 20（Node 24 验证，兼容 Bun） |
 | 仓库结构 | npm workspaces monorepo（3 个 package） |
 | 后端渠道 | 腾讯 iLink / 微信 ClawBot（`ilinkai.weixin.qq.com`） |
-| 默认 AI 大脑 | `auto`：按 `kiro → opencode → gemini → deepseek → qoder` 探测；落盘在 `<数据目录>/brain.json` |
+| 默认 AI 大脑 | `auto`：按 `kiro → opencode → gemini → deepseek → qoder` 探测；写入磁盘在 `<数据目录>/brain.json` |
 | 数据目录 | `~/.wemind/<account>/`（独立于代码仓库） |
 | 许可证 | MIT |
 

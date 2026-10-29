@@ -182,7 +182,7 @@ MCP
 | 13 | 热切换 | 不重启 daemon 换大脑，在途回合跑完 |
 | 14 | 切换回滚 | 坏 bin 被拒，旧大脑继续答，`brain.json` 未变 |
 | 15 | 多任务并行 | 两条不同 agent 同时跑且都出结果 |
-| 16 | 任务上限 | 第三条被拒且提示清楚（CLI 回执＝拒绝原因，不是「已派发」） |
+| 16 | 任务上限 | 第三条被拒且提示清楚（CLI 答复＝拒绝原因，不是「已派发」） |
 | 17 | 中断续跑 | 重启后标「已中断」，回「继续」接上 |
 | 18 | 会话四件套 | 列表 / 恢复 / 重命名 / 删除 与权限都对 |
 | 19 | 交接 | 摘要只带上一次，切回来源不带上 |
@@ -190,25 +190,25 @@ MCP
 
 ### 7.1 控制面九项（1.2.0 新增，手工）
 
-按顺序跑；每项都**先看 `wemind list` + `wemind brain`**，再看微信回执。日志关键字：`switch`、`drain`、`warmup`、`rollback`、`pool`、`reap`。
+按顺序跑；每项都**先看 `wemind list` + `wemind brain`**，再看微信答复。日志关键字：`switch`、`drain`、`warmup`、`rollback`、`pool`、`reap`。
 
-**① 切脑（`wemind brain switch <预设>` / 微信 `切换大脑 <预设>`）**
+**① 切脑（`wemind brain switch <agent 名>` / 微信 `切换大脑 <agent 名>`）**
 
 1. 记下当前大脑（`wemind brain`）；
-2. 切换到一个**已装且能起**的另一个预设；
-3. 期望：回执两段（「正在切换…」+「已切换」）；`brain.json` 已更新；**daemon pid 不变**（没重启）；下一条消息由新大脑答。
+2. 切换到一个**已装且能起**的另一个 agent；
+3. 期望：答复两段（「正在切换…」+「已切换」）；`brain.json` 已更新；**daemon pid 不变**（没重启）；下一条消息由新大脑答。
 
-**② 切脑失败退回**：把目标预设的 bin 改成一个不存在的路径（`wemind brain set <预设> --bin <坏路径> --restart` 或手改 `brain.json` 的 `presets` 段），再切过去。
+**② 切脑失败退回**：把目标预设的 bin 改成一个不存在的路径（`wemind brain set <agent 名> --bin <坏路径> --restart` 或手改 `brain.json` 的 `presets` 段），再切过去。
 
-期望：回执写明「切换失败，已退回原来那个「旧大脑」」；`brain.json` **未被改写**；旧大脑**还能继续答**（下一条消息即验证）；`wemind brain` 显示的仍是旧大脑。
+期望：答复写明「切换失败，已退回原来那个「旧大脑」」；`brain.json` **未被改写**；旧大脑**还能继续答**（下一条消息即验证）；`wemind brain` 显示的仍是旧大脑。
 
-**③ 多任务并行**：`任务 kiro：…` + `任务 opencode：…` 同时发出（或微信端 `任务 <预设>：正文` 两条）。
+**③ 多任务并行**：`任务 kiro：…` + `任务 opencode：…` 同时发出（或微信端 `任务 <agent 名>：正文` 两条）。
 
 期望：两条都出结果；`wemind task-list` 显示两行不同 agent；`wemind list` 显示池里有对应进程。
 
 **④ 任务上限**：把 `WEMIND_MAX_WORKERS` 调成 2，派第三条。
 
-期望：**派发时**即被拒并提示上限（不是静默排队）；已跑的两条不受影响。**CLI 的回执必须是那句拒绝原因**（`⚠️ 任务 #3 没起得来：…上限…`），不能报「已派发」——这条回执由 daemon 在 `acquire` 之后写进 `task-out/<命令 id>.json`（1.2.0 补的回结果通道，见 `docs/本地双入口-命令派发与看敲.md` §3.1b）；`task-reply 9 "…"` 回复一个不存在的编号时同理，应回「没有 #9 号任务」而不是「已发送」。若 daemon 是**旧版本**（不写回执），CLI 会退回「已投递…」并附一句「没等到 daemon 回执」——这也是预期行为，不是故障。
+期望：**派发时**即被拒并提示上限（不是静默排队）；已跑的两条不受影响。**CLI 的答复必须是那句拒绝原因**（`⚠️ 任务 #3 没起得来：…上限…`），不能报「已派发」——这条答复由 daemon 在 `acquire` 之后写进 `task-out/<命令 id>.json`（1.2.0 补的回结果通道，见 `docs/本地双入口-命令派发与查看回复.md` §3.1b）；`task-reply 9 "…"` 回复一个不存在的编号时同理，应回「没有 #9 号任务」而不是「已发送」。若 daemon 是**旧版本**（不写答复），CLI 会退回「已发送…」并附一句「没等到 daemon 答复」——这也是预期行为，不是故障。
 
 **⑤ 任务中断续跑**：派一条长任务 → 跑到一半 `taskkill /PID <daemon> /T /F`（或 `wemind stop <key>`）→ 重启 daemon。
 
@@ -218,15 +218,15 @@ MCP
 
 期望：暗号回来；列表里 `←当前` 指对了；`恢复会话` 一个不存在的 id → **失败且当前会话不变**（严格恢复，不回退新建）；`删除会话` 删当前会话后，下一条消息开新的；非 owner 用户只看得到自己的会话。
 
-**⑦ 交接**：在当前大脑聊几轮 → `交接` → `切换大脑 <新预设>` → 问一个**只有旧上下文能答**的问题。
+**⑦ 交接**：在当前大脑聊几轮 → `交接` → `切换大脑 <新 agent>` → 问一个**只有旧上下文能答**的问题。
 
 期望：新大脑答得出；`handoff.json` 被消费（第二条**不再**重复带上）；切**回**来源大脑时摘要不带上（留着下次切走用）。
 
-**⑧ CLI 热切换**：daemon 在跑时执行 `wemind brain switch <预设>`、`wemind brain set <预设>`（纯预设名，应等价于热切换）、`wemind session new/list/rename/delete`。
+**⑧ CLI 热切换**：daemon 在跑时执行 `wemind brain switch <agent 名>`、`wemind brain set <agent 名>`（纯 agent 名，应等价于热切换）、`wemind session new/list/rename/delete`。
 
-期望：全部经控制桥生效（`control-out/<id>.json` 有应答、`control-inbox/` 排空）；微信里 `会话列表` 能看到 CLI 改的名字；故意切到一个坏 bin 的预设 → 回执「已回滚」且 `brain.json` **未变**（`brain set` 这条会说清「没有落盘」）。对**旧版** daemon：需要 daemon 执行的命令（`session new`/`resume`、`brain switch`、`brain set <预设>`）应在**发出前**拒绝并给出 `wemind stop <key> && wemind start <key>`，`session list`/`rename`/`delete`/`task-list` 照常（list 附一行说明）——两者都不算失败，算预期行为。
+期望：全部经控制桥生效（`control-out/<id>.json` 有应答、`control-inbox/` 排空）；微信里 `会话列表` 能看到 CLI 改的名字；故意切到一个坏 bin 的预设 → 答复「已回滚」且 `brain.json` **未变**（`brain set` 这条会说清「没有写入磁盘」）。对**旧版** daemon：需要 daemon 执行的命令（`session new`/`resume`、`brain switch`、`brain set <agent 名>`）应在**发出前**拒绝并给出 `wemind stop <key> && wemind start <key>`，`session list`/`rename`/`delete`/`task-list` 照常（list 附一行说明）——两者都不算失败，算预期行为。
 
-**⑨ 切换窗口内 stop**：切换刚回执成功、约 1 秒内执行 `wemind stop <key>`，然后 `wemind list` / 任务管理器看有没有残留 ACP 子进程。
+**⑨ 切换窗口内 stop**：切换刚答复成功、约 1 秒内执行 `wemind stop <key>`，然后 `wemind list` / 任务管理器看有没有残留 ACP 子进程。
 
 期望：**已知窗口**，可能漏杀新起的 ACP 子进程——记录现象即可，不要当成新缺陷；下次 `start` 前手工确认没有孤儿。
 
@@ -251,8 +251,8 @@ MCP
 ```powershell
 wemind stop <key>                 # 一次杀光 daemon + brain + 全部 worker
 # 换回大脑（1.2.0）：
-wemind brain switch kiro          # daemon 在跑 → 热切换；没跑 → 只写盘，下次启动生效
-wemind brain set kiro --restart <key>   # 老写法：写盘 + 重启 daemon（仍可用）
+wemind brain switch kiro          # daemon 在跑 → 热切换；没跑 → 只写入磁盘，下次启动生效
+wemind brain set kiro --restart <key>   # 老写法：写入磁盘 + 重启 daemon（仍可用）
 ```
 
 清空对话记忆（**不是**回滚，是重置）：
@@ -276,6 +276,6 @@ wemind brain set kiro --restart <key>   # 老写法：写盘 + 重启 daemon（�
 - [`docs/repowiki/05-守护进程-Daemon.md`](../../repowiki/05-守护进程-Daemon.md)
 - [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)（槽位 / 热切换 / 会话管理 / 进程身份）
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md)（进程池 / 任务编号）
-- [`docs/本地双入口-命令派发与看敲.md`](../../本地双入口-命令派发与看敲.md)（控制桥）
+- [`docs/本地双入口-命令派发与查看回复.md`](../../本地双入口-命令派发与查看回复.md)（控制桥）
 - [`docs/ai/recipes/debug-daemon.md`](debug-daemon.md)
 - [`scripts/acp-probe.mjs`](../../../scripts/acp-probe.mjs)

@@ -55,7 +55,7 @@ describe("saveAccountTo（按目录写凭证）", () => {
     expect(fs.existsSync(path.join(dir, "account.json"))).toBe(true);
   });
 
-  it("POSIX 下文件权限收敛到 600（Windows 无 chmod 语义，跳过）", () => {
+  it("POSIX 下文件权限统一为 600（Windows 无 chmod 语义，跳过）", () => {
     if (process.platform === "win32") return;
     const dir = tmpDir();
     saveAccountTo(dir, ACCOUNT);

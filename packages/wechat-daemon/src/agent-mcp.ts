@@ -1,6 +1,6 @@
 /**
  * MCP 配置的「格式」适配：不同 ACP agent 把 MCP server 定义放在不同文件、不同结构里。
- * 本模块只做纯数据的组织/解析（无文件 IO），便于单测；沙箱模块负责落盘。
+ * 本模块只做纯数据的组织/解析（无文件 IO），便于单测；沙箱模块负责写入磁盘。
  *
  * - `kiro`：独立文件 `settings/mcp.json`，结构 `{ "mcpServers": { 名: {command,args,env} } }`
  * - `opencode`：主配置 `opencode.json`，结构 `{ "mcp": { "servers": { 名: {type,command,environment} } } }`（与 model 等共处一文件）

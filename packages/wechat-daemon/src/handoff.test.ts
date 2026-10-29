@@ -59,7 +59,7 @@ describe("takeHandoffFor（要不要注入）", () => {
   });
 });
 
-describe("落盘", () => {
+describe("写入磁盘", () => {
   it("往返：字段齐；过期后 load 返回 null（文件还在，但不可用）", () => {
     saveHandoff(mk(), dir);
     const back = loadHandoff(dir, 1500);

@@ -128,7 +128,7 @@ describe("任务指令", () => {
     expect(parseTaskCommand("> 继续干")).toEqual({ kind: "toWorker", text: "继续干" });
   });
 
-  it("指定 agent：冒号前必须是已知预设名", () => {
+  it("指定 agent：冒号前必须是已知 agent 名", () => {
     expect(parseTaskCommand("任务 kiro：写个脚本")).toEqual({
       kind: "toWorker",
       text: "写个脚本",
@@ -146,7 +146,7 @@ describe("任务指令", () => {
     });
   });
 
-  it("★ 冒号前不是预设名 → 整串都是正文（不能误判成指定 agent）", () => {
+  it("★ 冒号前不是 agent 名 → 整串都是正文（不能误判成指定 agent）", () => {
     expect(parseTaskCommand("任务 明天：去买菜")).toEqual({
       kind: "toWorker",
       text: "明天：去买菜",

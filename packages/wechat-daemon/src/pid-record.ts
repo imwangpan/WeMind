@@ -22,7 +22,7 @@ export type PidState = "busy" | "idle";
 
 export type PidRecord = {
   pid: number;
-  /** 预设名。 */
+  /** agent 名。 */
   agent: string;
   /** 起进程时真实用的二进制与参数（算特征串用）。 */
   bin: string;
@@ -33,7 +33,7 @@ export type PidRecord = {
   /** 池中状态（worker）；brain 恒为 busy。 */
   state: PidState;
   startedAt: number;
-  /** 最近一次写盘时间（状态变化时刷新）。 */
+  /** 最近一次写入磁盘时间（状态变化时刷新）。 */
   writtenAt: number;
   /** 来自旧版「裸 pid」文件：没有 bin/args，判定需回退到配置。 */
   legacy?: boolean;

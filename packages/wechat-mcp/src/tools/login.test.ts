@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 // mock core：login 依赖的协议/存储函数桩化。
-// DATA_DIR 用真实临时目录：二维码 PNG/TXT 的落盘与「文件缺失时重渲染」都要真的读写文件。
+// DATA_DIR 用真实临时目录：二维码 PNG/TXT 的写入磁盘与「文件缺失时重渲染」都要真的读写文件。
 // 目录必须在 vi.hoisted 里创建——vi.mock 工厂会被提升到 import 之前，引用普通顶层变量会 TDZ 报错。
 const m = vi.hoisted(() => ({
   dataDir: undefined as unknown as string,
@@ -21,7 +21,7 @@ const m = vi.hoisted(() => ({
   clearQrState: vi.fn(),
   resetState: vi.fn(),
 }));
-// 用 getter 而不是取值快照：登录模块在 import 时就绑定 DATA_DIR，若这里给快照，会拿到 hoisted 阶段的 undefined。getter 保证每次读到的都是最新值。
+// 用 getter 而不是取值记录：登录模块在 import 时就绑定 DATA_DIR，若这里给记录，会拿到 hoisted 阶段的 undefined。getter 保证每次读到的都是最新值。
 m.dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-login-"));
 vi.mock("@wemind/wechat-ilink-core", () => ({
   ...m,
@@ -110,7 +110,7 @@ describe("checkQrcodeStatus 正常态（保持原行为）", () => {
     });
   });
 
-  it("confirmed 但服务端数据不全 → 抛错且不落盘半份凭证", async () => {
+  it("confirmed 但服务端数据不全 → 抛错且不写入磁盘半份凭证", async () => {
     m.pollQRStatus.mockResolvedValue({ status: "confirmed", bot_token: "bt" });
     await expect(checkQrcodeStatus()).rejects.toThrow(/凭证数据不完整/);
     expect(m.saveAccount).not.toHaveBeenCalled();

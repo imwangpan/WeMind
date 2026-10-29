@@ -90,19 +90,19 @@ poller（长轮询，不被大脑阻塞）
 | **brain** | 对话大脑，`acp-brain.ts`，每用户一个 session |
 | **worker** | 远程任务执行器，`worker-acp.ts` 的 `class WorkerConn`，**一条任务一条连接**（进程池复用） |
 | **agent 槽位（agent-slot）** | `agent-slot.ts`：`getAgent("brain"\|"worker")` 懒解析 + 记忆化；`setAgent` 供热切换改写（取代了模块常量） |
-| **热切换 / brain-switch** | `brain-switch.ts`：预检 → 等回合结束 → 启动新大脑 → **成功才落盘**；失败退回 |
+| **热切换 / brain-switch** | `brain-switch.ts`：预检 → 等回合结束 → 启动新大脑 → **成功才写入磁盘**；失败退回 |
 | **drain / 等在途回合结束** | 切换/停止前「等在跑的回合自然结束」的门（默认 30s，超时=诚实失败，不砍回合） |
 | **启动新大脑 / warmup** | 切脑时先把新 agent 起起来跑 `initialize` + 建会话，成功才对外宣布切换完成 |
 | **当前会话表** | `brain-sessions.json`（键 `<agent>:<userId>`）——**「当前是哪个会话」的唯一权威** |
 | **会话登记表** | `session-registry.json`：名字/标题/轮次/最近使用（派生元数据，坏了只导致列表空） |
 | **严格恢复** | `恢复会话` 的语义：`load`/`resume` 都失败就如实报错，**不回退 `new`、不改当前会话记录** |
-| **交接 / handoff** | `handoff.ts`：摘要落盘（TTL 24h），切走后**下一条消息作为前缀带上**、**答成才消费**、切回来源不带上 |
+| **交接 / handoff** | `handoff.ts`：摘要写入磁盘（TTL 24h），切走后**下一条消息作为前缀带上**、**答成才消费**、切回来源不带上 |
 | **任务编号** | 按用户单调递增、**不复用**、跨重启不归零；多任务并存时无编号消息必须报出编号清单 |
-| **默认任务大脑** | `worker.agent ?? agent`；`切换任务大脑`/`--worker` 可在**进程内**覆盖它（**不落盘**，重启回到配置值）；`任务 <预设>：`/`--agent` **只对那一条任务生效**，不改它 |
+| **默认任务大脑** | `worker.agent ?? agent`；`切换任务大脑`/`--worker` 可在**进程内**覆盖它（**不写入磁盘**，重启回到配置值）；`任务 <agent 名>：`/`--agent` **只对那一条任务生效**，不改它 |
 | **进程池 / worker-pool** | `worker-pool.ts`：同 agent 空闲复用 → 回收最旧腾位 → spawn；并发 `WEMIND_MAX_WORKERS`、空闲 `WEMIND_IDLE_MAX`、回收 `WEMIND_WORKER_REAP_MS` |
-| **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收预设名与纯数据**（无 `bin`/`args`/`shell`） |
+| **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收 agent 名与纯数据**（无 `bin`/`args`/`shell`） |
 | **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
-| **preset / 预设** | `ACP_AGENT_PRESETS` 里的一条：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
+| **preset / 预设** | 用户面写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）；代码里指 `ACP_AGENT_PRESETS` 里的一条：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
 | **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |
 | **WORKER_HOME** | worker 的沙箱目录 |
 | **configSubdir** | agent 配置目录相对沙箱根的子路径（kiro 空；opencode `opencode`） |
@@ -130,7 +130,7 @@ poller（长轮询，不被大脑阻塞）
 | **stdin / stdout / stderr** | 标准输入 / 标准输出 / 标准错误 | 说明语境时用中文，引用代码/参数时保留原文（`stdio: ["ignore", logFd, logFd]`）。 |
 | **CLI** | 指**程序**时译「**命令行工具**」；指**形态/界面**时译「**命令行界面**」 | command-line interface 的首字母缩写。<br>**判断方法**：能「安装、运行」（如 `wemind` 是 CLI）→ 命令行工具；说「相比 GUI」（图形界面）这种对比 → 命令行界面。中文技术写作里**保留 CLI** 也完全可接受，尤其 `kiro-cli`、`claude-code` 这类名字里的 CLI 绝不能翻。<br>**别译**：❌「客户端」（CLI 与 client 是两回事：`@wemind/cli` 是命令行工具，MCP 客户端才是 client）、❌「命令行程序包」。 |
 | **daemon** | **守护进程** / 常驻进程 | 后台长期运行、无人值守的进程。本文也直接用 `daemon`（因为大量专名如 daemon 形态、`wechat-daemon` 目录依赖它）。 |
-| **watchdog** | **看门狗** | 外层监督循环：子进程退出后自动重拉。本文有 `runWatchdog()`、`wrapper.pid`。<br>**别译**：❌「监视器」（过泛）。 |
+| **watchdog** | **看护进程** | 外层监督循环：子进程退出后自动重拉。本文有 `runWatchdog()`、`wrapper.pid`。<br>**别译**：❌「监视器」（过泛）。 |
 | **wrapper** | **包装进程** / 外层 | 包在真正业务进程外面、负责保活/传参的那一层（`wrapper.pid`）。 |
 
 #### B. 协议与协议实现（最容易混淆的一组）
@@ -156,7 +156,7 @@ poller（长轮询，不被大脑阻塞）
 |---|---|---|
 | **brain** | **对话大脑** / `brain` | 常驻 ACP 进程，负责日常聊天问答（每用户一个 session）。因为大量代码/路径名含 brain，正文也直接写 `brain`。 |
 | **worker** | **任务工作机** / `worker` | 独立 ACP 进程，跑漫长任务，单 session，可「继续」续跑。 |
-| **preset** | **预设** | `ACP_AGENT_PRESETS` 里的一条配置：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承、能力覆盖等。 |
+| **preset** | **预设**（用户面写「agent 名」） | `ACP_AGENT_PRESETS` 里的一条配置：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承、能力覆盖等。 |
 | **sandbox** | **沙箱** | 隔离目录（`BRAIN_HOME` / `WORKER_HOME`），让 agent 读到的是干净配置而非你的真实配置。 |
 | **fallback / degrade** | **回退 / 降级（退化）** | 如「agent 缺 `session/load` 时**退化为** `session/new`（上下文丢失但能继续用）」。 |
 | **activation set** | **激活集** | 当前 brain 实际加载的 MCP 名单（`brain-mcps.json`），默认空。 |
@@ -208,7 +208,7 @@ poller（长轮询，不被大脑阻塞）
 | DSH 会发 thought/tool/usage 帧 | ✅ 实测 | `agent_thought_chunk` / `tool_call` / `usage_update` |
 | 微信连发上限约 10 条 | ✅ 实测/代码 | `CONSEC_SEND_LIMIT=10`，预留最后一条 |
 | 15s 心跳会占连发额度 | ✅ 代码 | `index.ts` `heartbeat` + `sendProgress`；DSH 有帧时通常不触发 |
-| **切大脑要重启 daemon** | ⚪ **已不成立（1.2.0）** | `brain-switch.ts` 进程内切换：等在途回合结束 → 启动新大脑 → 成功才落盘；失败退回 |
+| **切大脑要重启 daemon** | ⚪ **已不成立（1.2.0）** | `brain-switch.ts` 进程内切换：等在途回合结束 → 启动新大脑 → 成功才写入磁盘；失败退回 |
 | **agent 在进程启动时冻结** | ⚪ **已不成立（1.2.0）** | `agent-slot.ts` 槽位 + 过程内显式传 `ag`；心跳/首帧每回合现算 |
 | **任务只能有一条（单任务单进程）** | ⚪ **已不成立（1.2.0）** | 任务表 + `class WorkerConn` + `worker-pool.ts`；编号按用户递增不复用 |
 | **任务结束即杀进程** | ⚪ **已不成立（1.2.0）** | 结束「等你回复」的任务时进程**留着复用**（「正在跑」的那条只能力杀——回合没法优雅取消）；空闲超 `WEMIND_WORKER_REAP_MS`(5min) 回收；`wemind stop` 才杀光 |
@@ -222,7 +222,7 @@ poller（长轮询，不被大脑阻塞）
 | Windows `taskkill /T /F` 杀池中特定进程 | ⚪ **待实测** | 决定池回收/结束任务的清理是否干净 |
 | 「多个微信账号之间有一个主号」 | ⚪ **不存在** | 一个微信账号 = 一个真人（扫码登录者）；N 个账号 = N 个 daemon，各有自己的 `brain.json`/会话表/沙箱/登录者，互不越界（README「多账号管理」、`repowiki/06` §6.2） |
 | 「切 daemon 大脑是跨账号权限」 | ⚪ **不是** | 微信侧只有**该账号的登录者**能切**它自己**那个 daemon（`OWNER_ONLY_KINDS`）；本机 CLI 才可指定任意账号（`wemind brain switch X <key\|label>`），因为「能在本机敲命令 = 机主」 |
-| 除登录者外还有谁能把消息发进 bot | ✅ **已确认：没有** | 微信平台限制——**必须扫码登录该 bot 才能给它发消息**，所以每个 bot 只有其登录者能发（用户 2026-10-29 确认）。`allowFrom` 因此是**兜底闸门**（默认拒绝、默认只放行登录者）：防的是投递范围将来变化 / daemon 被接到别的入口；旧文档里「换个微信号验证」的写法已删 |
+| 除登录者外还有谁能把消息发进 bot | ✅ **已确认：没有** | 微信平台限制——**必须扫码登录该 bot 才能给它发消息**，所以每个 bot 只有其登录者能发（用户 2026-10-29 确认）。`allowFrom` 因此是**兜底校验**（默认拒绝、默认只放行登录者）：防的是发送范围将来变化 / daemon 被接到别的入口；旧文档里「换个微信号验证」的写法已删 |
 
 > **规矩**：新增 agent 接入文档时，必须写清「已实测 / 仅代码 / 未验证」，并给版本与日期。
 

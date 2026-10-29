@@ -6,7 +6,7 @@ import path from "node:path";
 import { brainSessionMapPath, readSessionMap, writeSessionMap } from "./session-map.js";
 
 /**
- * 会话管理操作层（session-manager）：把「新会话 / 列表 / 恢复 / 重命名 / 删除」拼成回执。
+ * 会话管理操作层（session-manager）：把「新会话 / 列表 / 恢复 / 重命名 / 删除」拼成答复。
  *
  * 这里**不**起 ACP 进程：`create`/`resume` 是注入的（真实现在 acp-brain，由 acp-switch.test.ts 用假 agent 覆盖）。
  * 要钉死的是顺序与失败语义——尤其是「恢复失败**不**动当前会话记录」「删除**只**删登记」这两条对用户的承诺。
@@ -171,7 +171,7 @@ describe("恢复会话", () => {
 });
 
 describe("重命名 / 删除", () => {
-  it("重命名：按序号寻址，回执给「旧标签 → 新名字」，命名后可用新名字寻址", () => {
+  it("重命名：按序号寻址，答复给「旧标签 → 新名字」，命名后可用新名字寻址", () => {
     seed("s1", { title: "原始标题", at: 1_000_000 });
     const r = renameSessionCmd({ agent: AG, userId: "u1", dir }, "1", "项目A");
     expect(r).toContain("原始标题");
@@ -194,7 +194,7 @@ describe("重命名 / 删除", () => {
     const r = deleteSessionCmd({ agent: AG, userId: "u1", dir }, "当前");
     expect(r).toContain("✅");
     expect(r).toContain("下一条消息会开一个新的");
-    expect(r).toContain("agent 自己那份历史归档不在 WeMind 手里");
+    expect(r).toContain("agent 自己那份历史记录不在 WeMind 手里");
     expect(cur("u1")).toBeUndefined(); // 当前会话记录清了
     expect(loadRegistry(dir).entries.map((e) => e.sessionId)).toEqual(["s2"]); // 只删了这一条
   });

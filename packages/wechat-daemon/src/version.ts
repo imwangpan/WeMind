@@ -4,7 +4,7 @@ import { readOwnVersion } from "@wemind/wechat-ilink-core";
  * CLI 版本号与包身份（`wemind version` / `wemind --version` / help 头部）。
  *
  * **版本号唯一来源是 `package.json`**，这里在运行时读它，不再手写常量。
- * 为什么：以前版本号散落在 package.json 和本文件两处，`npm version` 只会改前者，漏改本文件会导致「发了 1.2.0、`wemind version` 还报 1.1.0」这种极难排查的漂移。
+ * 为什么：以前版本号散落在 package.json 和本文件两处，`npm version` 只会改前者，漏改本文件会导致「发了 1.2.0、`wemind version` 还报 1.1.0」这种极难排查的不一致。
  * 现在 `npm run release:patch|minor|major` 一步到位，本文件自动跟着变。
  *
  * 查找逻辑在 `@wemind/wechat-ilink-core` 的 `readOwnVersion()`（与 MCP 包共用一份）：

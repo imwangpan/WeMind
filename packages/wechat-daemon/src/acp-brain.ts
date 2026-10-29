@@ -76,7 +76,7 @@ const hintedSessions = new Set<string>(); // 已带上「可发图」约定提�
 
 // ---- 并发门（切脑用）----
 // 一回合是一段长异步（可能几分钟）：热切换必须先**等在跑的回合结束**，绝不在整回合上持锁。
-// 反过来，切换期间新回合要在门口等（有界），否则会与启动新大脑时**双起进程**（看门狗/重试也走这条路）。
+// 反过来，切换期间新回合要在门口等（有界），否则会与启动新大脑时**双起进程**（看护进程/重试也走这条路）。
 let turnInFlight = false; // 有回合正在跑（askBrain / newSession 全程）
 let switching = false; // 正在切换大脑
 const SWITCH_WAIT_MS = Number(process.env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000; // 回合等切换的上限，与切换自身的启动新大脑的上限一致
@@ -163,7 +163,7 @@ function loadSessionMap(ag: ResolvedAgent): Record<string, string> {
     return {};
   }
   const { map, migrated } = normalizeSessionMap(raw, ag.name);
-  if (migrated) saveSessionMap(map); // 立即落盘，避免下次换 agent 时旧条目再被“继承”一次
+  if (migrated) saveSessionMap(map); // 立即写入磁盘，避免下次换 agent 时旧条目再被“继承”一次
   return map;
 }
 function saveSessionMap(m: Record<string, string>): void {

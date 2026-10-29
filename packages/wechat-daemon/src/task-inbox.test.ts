@@ -13,8 +13,8 @@ import {
 } from "./task-inbox.js";
 
 /**
- * 任务收件箱的两个方向：命令（CLI 写、daemon 读）与回执（daemon 写、CLI 读）。
- * 回结果通道的存在理由见 task-inbox.ts 头部注释——「没等到回执」必须能与「回执说失败」区分开。
+ * 任务收件箱的两个方向：命令（CLI 写、daemon 读）与答复（daemon 写、CLI 读）。
+ * 回结果通道的存在理由见 task-inbox.ts 头部注释——「没等到答复」必须能与「答复说失败」区分开。
  */
 
 let dir = "";
@@ -51,7 +51,7 @@ describe("收命令通道：写命令文件", () => {
   });
 });
 
-describe("回结果通道：写回执与短轮询", () => {
+describe("回结果通道：写答复与短轮询", () => {
   it("往返：daemon 写、CLI 读到原文并删掉（目录不留垃圾）", async () => {
     const id = writeTaskCmd(dir, { kind: "dispatch", text: "做X" });
     writeTaskAck(dir, id, "✅ 已派发任务 #3（kiro 执行）。");
@@ -62,25 +62,25 @@ describe("回结果通道：写回执与短轮询", () => {
   });
 
   it("ok 由文案决定：以 ❌ 开头的算失败（CLI 这才有办法给退出码/着色）", async () => {
-    writeTaskAck(dir, "x1", "❌ 不能用「nope」跑任务：没有这个预设");
+    writeTaskAck(dir, "x1", "❌ 不能用「nope」跑任务：没有这个 agent");
     writeTaskAck(dir, "x2", "🛑 任务 #2 已结束。");
     expect((await awaitTaskAck(dir, "x1", 1000, 20))?.ok).toBe(false);
     expect((await awaitTaskAck(dir, "x2", 1000, 20))?.ok).toBe(true);
   });
 
-  it("等不到就超时返回 null（老 daemon 不认这条通道 → CLI 退回「已投递」措辞）", async () => {
+  it("等不到就超时返回 null（老 daemon 不认这条通道 → CLI 退回「已发送」措辞）", async () => {
     const t0 = Date.now();
     expect(await awaitTaskAck(dir, "从未写过", 300, 50)).toBeNull();
     expect(Date.now() - t0).toBeGreaterThanOrEqual(250);
   });
 
-  it("id 为空时静默不写（没有请求方，别在目录里留无主回执）", () => {
+  it("id 为空时静默不写（没有请求方，别在目录里留无主答复）", () => {
     writeTaskAck(dir, undefined, "❌ 不认识的任务命令：whoops");
     expect(files(taskOutDir(dir))).toEqual([]);
   });
 
-  it("回执目录写不进去也不抛（回执丢了不该影响命令本身）", () => {
-    // 拿一个「回执目录其实是文件」的布局把 mkdir 逼失败
+  it("答复目录写不进去也不抛（答复丢了不该影响命令本身）", () => {
+    // 拿一个「答复目录其实是文件」的布局把 mkdir 逼失败
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(taskOutDir(dir), "占位", "utf-8");
     expect(() => writeTaskAck(dir, "any", "✅ 已派发")).not.toThrow();
@@ -90,7 +90,7 @@ describe("回结果通道：写回执与短轮询", () => {
 describe("清理", () => {
   it("clearTaskDirs 清掉两个通道的残留并重建收件箱（防重放）", () => {
     writeTaskCmd(dir, { kind: "dispatch", text: "旧命令" });
-    writeTaskAck(dir, "old", "旧回执");
+    writeTaskAck(dir, "old", "旧答复");
     clearTaskDirs(dir);
     expect(files(taskInboxDir(dir))).toEqual([]);
     expect(files(taskOutDir(dir))).toEqual([]);

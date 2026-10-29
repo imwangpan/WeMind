@@ -14,17 +14,17 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
  * 与既有 task-inbox 的分工：task-inbox 是**单向**（CLI 派活，结果从微信回）；控制桥要**回话**（CLI 要打印成功/失败），
  * 所以多了 out 目录与轮询。
  *
- * **安全边界**：桥只接受**预设名与纯数据**（target/ref/name/text/id/page），**绝不接受 bin/args/shell**——
+ * **安全边界**：桥只接受**agent 名与纯数据**（target/ref/name/text/id/page），**绝不接受 bin/args/shell**——
  * 就算被伪造（进程能写账号目录，task-inbox 本来也是这个性质），最坏也只是「选一个已装的 agent 或清掉自己的会话」，
  * 不能借此让 daemon 执行任意程序。`parseControlRequest` 是唯一的入口校验。
  */
 
 export type ControlKind =
-  /** 热切换对话大脑（写盘 + 启动新大脑 + 失败退回）。 */
+  /** 热切换对话大脑（写入磁盘 + 启动新大脑 + 失败退回）。 */
   | "brain.switch"
-  /** 设默认任务大脑（本次运行内一直生效，不落盘）。 */
+  /** 设默认任务大脑（本次运行内一直生效，不写入磁盘）。 */
   | "brain.worker"
-  /** 生成交接摘要（落盘，返回摘要正文）。 */
+  /** 生成交接摘要（写入磁盘，返回摘要正文）。 */
   | "brain.handoff"
   | "session.new"
   | "session.list"
@@ -53,7 +53,7 @@ export type ControlRequest = {
   id: string;
   kind: ControlKind;
   at: number;
-  /** 预设名（brain.switch / brain.worker）。 */
+  /** agent 名（brain.switch / brain.worker）。 */
   target?: string;
   /** 会话引用：序号 / 名字 / id 前缀（session.resume / rename / delete）。 */
   ref?: string;

@@ -26,7 +26,7 @@ import {
  */
 
 export type SessionEntry = {
-  /** 所属大脑（预设名，小写）。 */
+  /** 所属大脑（agent 名，小写）。 */
   agent: string;
   /** 会话属于谁（微信 userId）；登记表按人隔离，别人的会话列不出来。 */
   userId: string;

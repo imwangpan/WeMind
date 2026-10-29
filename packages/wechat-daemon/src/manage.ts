@@ -77,7 +77,7 @@ import { awaitTaskAck, writeTaskCmd as writeTaskCommand } from "./task-inbox.js"
  * WeMind 多账号管理 CLI。
  * 账号 key = 由微信 botId 派生的唯一标识；每个账号独立目录 ~/.wemind/<key>。
  * label = 人类可读别名（可改、可重复）；管理命令可用 key 或 label 选择账号。
- * 推荐用 `login` 一条命令完成：自刷新二维码 → 扫码 → 自动归档（→ 可选自动启动）。
+ * 推荐用 `login` 一条命令完成：自刷新二维码 → 扫码 → 自动登记（→ 可选自动启动）。
  */
 
 const BASE = process.env.WEMIND_ILINK_BASE?.trim() || "https://ilinkai.weixin.qq.com";
@@ -247,7 +247,7 @@ function startDaemon(key: string, runner?: string): void {
   // 发布后 tsdown 把 manage.ts 内联进 dist/cli.js，两者恰好相同；但若将来拆成多 chunk，argv[1] 才是「用户装的那个 bin」，dirname(import.meta.url) 可能是 dist/chunks/ 下。
   const cliPath =
     process.argv[1] || path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
-  // start 前先停现有任何 runner（pm2 app / builtin 看门狗），避免同账号双跑抢 token
+  // start 前先停现有任何 runner（pm2 app / builtin 看护进程），避免同账号双跑抢 token
   stopDaemon(key);
   const useRunner = (runner || process.env.WEMIND_RUNNER || "builtin").toLowerCase();
   console.log((useRunner === "pm2" ? pm2Start(key, cliPath) : watchdogStart(key, cliPath)).msg);
@@ -318,7 +318,7 @@ function stopDaemon(key: string): string {
   return parts.length ? parts.join("；") : "无运行中的进程";
 }
 
-/** 把 STAGING 的登录按 botId 归档 + 登记。 */
+/** 把 STAGING 的登录按 botId 收进账号目录 + 登记。 */
 function finalizeStaging(label?: string): { key: string; msg: string } {
   const acc = readAccount(STAGING);
   if (!acc?.botId) throw new Error(`staging 无有效登录（${STAGING}）`);
@@ -352,7 +352,7 @@ function finalizeStaging(label?: string): { key: string; msg: string } {
     label: label || key,
   });
   if (acc.userId) addAllowFrom(acc.userId, dest); // 配对：扫码登录者自动授权
-  return { key, msg: `已归档：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}` };
+  return { key, msg: `已登录：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}` };
 }
 
 /**
@@ -376,7 +376,7 @@ async function loadQrCode(): Promise<typeof import("qrcode")> {
   return qrcodeMod;
 }
 
-/** 一条命令完成扫码登录：自刷新二维码 + 终端码 + 自动开图 + 自动归档（→ 可选自动启动）。 */
+/** 一条命令完成扫码登录：自刷新二维码 + 终端码 + 自动开图 + 自动登记（→ 可选自动启动）。 */
 async function cmdLogin(
   label: string | undefined,
   autoStart: boolean,
@@ -437,7 +437,7 @@ async function cmdLogin(
           /* ignore */
         }
       }
-      console.log("\n登录成功，归档中…");
+      console.log("\n登录成功，正在登记…");
       const { key, msg } = finalizeStaging(label);
       console.log(msg);
       if (autoStart) {
@@ -535,12 +535,12 @@ function describeBrain(key: string): string {
     `  请求：${ag.requestedKey}    来源：${BRAIN_SRC_LABEL[ag.source]}`,
     `  生效：name=${ag.name}  bin=${ag.bin}  args=[${ag.args.join(" ")}]  shell=${ag.shell}  home_env=${ag.homeEnvVar ?? "(无)"}`,
     `  可用：${problem ? `❌ ${problem}` : `✅ ${ag.binPath ?? ag.bin}`}`,
-    `  预设：${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
+    `  可选 agent：${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
     `  自动探测顺序：${AUTO_PROBE_ORDER.join(" → ")}`,
   ].join("\n");
 }
 
-/** `wemind brain set <预设|auto>`：把选择按账号落盘（可选 --bin/--args/--shell；--restart 立即重启 daemon）。 */
+/** `wemind brain set <agent 名|auto>`：把选择按账号写入磁盘（可选 --bin/--args/--shell；--restart 立即重启 daemon）。 */
 async function cmdBrainSet(
   agentName: string,
   key: string,
@@ -549,25 +549,25 @@ async function cmdBrainSet(
   const agent = agentName.trim().toLowerCase();
   if (agent !== "auto" && !ACP_AGENT_PRESETS[agent])
     throw new Error(
-      `未知预设「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制用 --bin 搭配任一预设）`,
+      `未知 agent「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制用 --bin 搭配任一 agent）`,
     );
   const dir = accountDir(key);
   const customized = opts.bin !== undefined || opts.args !== undefined || opts.shell !== undefined;
-  // 只选预设（没带自定义启动参数）+ 没要求重启时，落盘和「热切换」其实是同一件事：daemon 在跑且认桥就交给它一次做完——
-  // 它先启动新大脑、成功才写 brain.json（失败退回，盘上不留半截结果），这比「写盘 + 等下次重启」对用户更实在（决策⑪）。
-  // 带 --bin/--args/--shell 则**不能**当场应用：控制桥只接受预设名（见 control-bridge.ts 的安全边界）。
+  // 只选预设（没带自定义启动参数）+ 没要求重启时，写入磁盘和「热切换」其实是同一件事：daemon 在跑且认桥就交给它一次做完——
+  // 它先启动新大脑、成功才写 brain.json（失败退回，盘上不留半截结果），这比「写入磁盘 + 等下次重启」对用户更实在（决策⑪）。
+  // 带 --bin/--args/--shell 则**不能**当场应用：控制桥只接受 agent 名（见 control-bridge.ts 的安全边界）。
   if (!opts.restart && !customized && bridgeReady(key)) {
     const r = await cmdBrainSwitch(agent, key, false);
-    // 热切换失败时**没有落盘**（持久化放最后，见 brain-switch.ts）：把这点说清楚，否则用户会以为 brain.json 已经改了。
+    // 热切换失败时**没有写入磁盘**（持久化放最后，见 brain-switch.ts）：把这点说清楚，否则用户会以为 brain.json 已经改了。
     return r.startsWith("❌")
-      ? `${r}\n（brain.json **没有被改写**：换大脑失败就不写盘——这是「失败就退回原来那个」的代价。想强制写入再重启：wemind brain set ${agent} --restart）`
+      ? `${r}\n（brain.json **没有被改写**：换大脑失败就不写入磁盘——这是「失败就退回原来那个」的代价。想强制写入再重启：wemind brain set ${agent} --restart）`
       : r;
   }
   const patch: BrainConfig = { agent };
   if (opts.bin) patch.bin = opts.bin;
   if (opts.args !== undefined) patch.args = opts.args.trim() ? opts.args.trim().split(/\s+/) : [];
   if (opts.shell !== undefined) patch.shell = opts.shell;
-  // 读-改-写：保留 worker 段（任务侧独立选择）与 presets 段（按预设名存的启动覆盖），旧 agent 的覆盖自动迁移。
+  // 读-改-写：保留 worker 段（任务侧独立选择）与 presets 段（按 agent 名存的启动覆盖），旧 agent 的覆盖自动迁移。
   const cfg = updateBrainConfig(patch, dir);
   const lines = [
     `已设置 ${key} 的大脑：agent=${agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}`,
@@ -583,7 +583,7 @@ async function cmdBrainSet(
     }
   } else if (customized && bridgeReady(key)) {
     lines.push(
-      `（带 --bin/--args/--shell 的改动不能当场应用：控制桥只认预设名。重启后生效——wemind stop ${key} && wemind start ${key}）`,
+      `（带 --bin/--args/--shell 的改动不能当场应用：控制桥只认 agent 名。重启后生效——wemind stop ${key} && wemind start ${key}）`,
     );
   } else if (daemonAlive(key)) {
     lines.push(
@@ -649,7 +649,7 @@ async function cmdBrain(rest: string[]): Promise<string> {
     case "set": {
       if (!pos[1])
         throw new Error(
-          '用法: brain set <预设|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]',
+          '用法: brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]',
         );
       return await cmdBrainSet(pos[1], pickKey(pos[2]), {
         bin,
@@ -659,13 +659,13 @@ async function cmdBrain(rest: string[]): Promise<string> {
       });
     }
     case "switch": {
-      // 桥只接受**预设名**（安全边界：见 control-bridge.ts）。带 --bin/--args/--shell 就走 set（只写盘 + 需重启）。
+      // 桥只接受**agent 名**（安全边界：见 control-bridge.ts）。带 --bin/--args/--shell 就走 set（只写入磁盘 + 需重启）。
       if (bin !== undefined || argsOverride !== undefined || shell !== undefined)
         throw new Error(
-          "`brain switch` 只接受预设名（换大脑是「换一个已装好的 agent」，不能带 --bin/--args）。\n" +
-            "需要自定义二进制用 `brain set <预设> --bin …`（那是配置变更，需要重启 daemon 生效）。",
+          "`brain switch` 只接受 agent 名（换大脑是「换一个已装好的 agent」，不能带 --bin/--args）。\n" +
+            "需要自定义二进制用 `brain set <agent 名> --bin …`（那是配置变更，需要重启 daemon 生效）。",
         );
-      if (!pos[1]) throw new Error("用法: brain switch <预设|auto> [--worker] [<key|label>]");
+      if (!pos[1]) throw new Error("用法: brain switch <agent 名|auto> [--worker] [<key|label>]");
       const worker = rest.includes("--worker");
       return await cmdBrainSwitch(pos[1], pickKey(pos[2]), worker);
     }
@@ -738,17 +738,17 @@ function cmdStart(sel?: string, runner?: string): string {
 }
 
 // ===== 本地任务命令（文件桥）：写 task-inbox/*.json，由 daemon 扫描执行；状态读 task-state.json，结果读 task-out/*.json =====
-/** 原子写一个命令文件到收件箱（临时文件 + rename，避免 daemon 读到半截）；返回本次命令的回执 id。 */
+/** 原子写一个命令文件到收件箱（临时文件 + rename，避免 daemon 读到半截）；返回本次命令的答复编号。 */
 function writeTaskCmd(key: string, obj: Record<string, unknown>): string {
   return writeTaskCommand(accountDir(key), obj);
 }
 
 /**
- * 等这次命令的回执（daemon 把真实结果写进 `task-out/<id>.json`）。
+ * 等这次命令的答复（daemon 把真实结果写进 `task-out/<id>.json`）。
  * 三种情形分得很清楚：
- *  - 有回执、有文案 → 打印 daemon 的那句话（失败原因、「没有 #9 号任务」这类只有它知道的事）；
- *  - 有回执、文案为空 → 命令成功但没有额外要说的，用调用方自己那句话（**立刻**，不干等）；
- *  - 没有回执 → 老版 daemon 不认这条通道（或它正在退出）：回退到「已投递」措辞并说明一句，
+ *  - 有答复、有文案 → 打印 daemon 的那句话（失败原因、「没有 #9 号任务」这类只有它知道的事）；
+ *  - 有答复、文案为空 → 命令成功但没有额外要说的，用调用方自己那句话（**立刻**，不干等）；
+ *  - 没有答复 → 老版 daemon 不认这条通道（或它正在退出）：回退到「已发送」措辞并说明一句，
  *    不把「没等到」当成「成功了」——达上限被拒与「派发成功」在旧措辞里长得一模一样。
  */
 async function taskOutcome(
@@ -759,7 +759,7 @@ async function taskOutcome(
 ): Promise<string> {
   const a = await awaitTaskAck(accountDir(key), ackId, timeoutMs);
   if (!a)
-    return `${fallback}\n（没等到 daemon 回执：它可能还在跑旧版本，或刚启动。用 task-list / task-status 核对实际状态。）`;
+    return `${fallback}\n（没等到 daemon 答复：它可能还在跑旧版本，或刚启动。用 task-list / task-status 核对实际状态。）`;
   return a.text || fallback;
 }
 /**
@@ -790,7 +790,7 @@ function daemonAlive(key: string): boolean {
 
 /**
  * daemon 活着**且认识控制桥**（升级 CLI 后没重启的旧 daemon 在这里判为不可用）。
- * 决定「走桥还是走文件」都该问这个而不是 daemonAlive：对旧 daemon 投递只会白等到超时。
+ * 决定「走桥还是走文件」都该问这个而不是 daemonAlive：对旧 daemon 发送只会白等到超时。
  */
 function bridgeReady(key: string): boolean {
   const dir = accountDir(key);
@@ -803,14 +803,14 @@ function bridgeReady(key: string): boolean {
  */
 async function viaBridge(key: string, req: Omit<ControlRequest, "id" | "at">): Promise<string> {
   const dir = accountDir(key);
-  // 先验「在跑的这个 daemon 认不认识桥」：升级 CLI 后 daemon 常常还在跑旧版本，径直投递只会干等到超时。
+  // 先验「在跑的这个 daemon 认不认识桥」：升级 CLI 后 daemon 常常还在跑旧版本，径直发送只会干等到超时。
   // 凭据是 daemon 启动时写的 control-out/.bridge（内容 = 它自己的 pid）——pid 对上才算数。
   const dpid = readPid(dir, "daemon.pid");
   if (bridgePidOf(dir) !== dpid)
     throw new Error(
-      `账号 ${key} 的 daemon 还在跑**旧版本**（不认识控制桥），换大脑/会话命令投递过去只会白等超时。\n` +
+      `账号 ${key} 的 daemon 还在跑**旧版本**（不认识控制桥），换大脑/会话命令发送过去只会白等超时。\n` +
         `重启一次即可：wemind stop ${key} && wemind start ${key}\n` +
-        `（只想改配置不动进程：wemind brain set <预设>，但它要等下次启动才生效。）`,
+        `（只想改配置不动进程：wemind brain set <agent 名>，但它要等下次启动才生效。）`,
     );
   const full: ControlRequest = { id: newRequestId(), at: Date.now(), ...req };
   writeControlRequest(full, dir);
@@ -824,19 +824,19 @@ async function viaBridge(key: string, req: Omit<ControlRequest, "id" | "at">): P
 }
 
 /**
- * `brain switch <预设|auto>`：**热切换**——daemon 在跑就走控制桥（不重启、不打断在途回合）；
+ * `brain switch <agent 名|auto>`：**热切换**——daemon 在跑就走控制桥（不重启、不打断在途回合）；
  * daemon 没在跑就只写 brain.json（下次启动生效）。
- * `--worker` 设默认任务大脑：那是 daemon 进程内才有的状态（不落盘），没有 daemon 就没有意义，必须先启动。
+ * `--worker` 设默认任务大脑：那是 daemon 进程内才有的状态（不写入磁盘），没有 daemon 就没有意义，必须先启动。
  */
 async function cmdBrainSwitch(agentName: string, key: string, worker: boolean): Promise<string> {
   const agent = agentName.trim().toLowerCase();
   if (agent !== "auto" && !ACP_AGENT_PRESETS[agent])
     throw new Error(
-      `未知预设「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
+      `未知 agent「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
     );
   const dir = accountDir(key);
   if (worker) {
-    requireDaemonAlive(key); // 「默认任务大脑」是进程内状态，不落盘
+    requireDaemonAlive(key); // 「默认任务大脑」是进程内状态，不写入磁盘
     return await viaBridge(key, { kind: "brain.worker", target: agent });
   }
   if (daemonAlive(key)) return await viaBridge(key, { kind: "brain.switch", target: agent });
@@ -992,11 +992,11 @@ async function cmdTask(
   sel?: string,
   agentKey?: string,
 ): Promise<string> {
-  if (!text) throw new Error('用法: task "<任务描述>" [--cwd 目录] [--agent 预设] [<key|label>]');
+  if (!text) throw new Error('用法: task "<任务描述>" [--cwd 目录] [--agent <名字>] [<key|label>]');
   const key = pickKey(sel);
   requireDaemonAlive(key);
   const useCwd = cwd || process.cwd();
-  // 回执等 daemon：**起进程有结果之后**它才发（达上限/agent 起不来是那时才知道的），
+  // 答复等 daemon：**起进程有结果之后**它才发（达上限/agent 起不来是那时才知道的），
   // 所以这里不能自己编「已派发」——旧写法轮询 task-state.json 的 active，会把「达上限被拒」和
   // 甚至上一条任务的编号报成成功。
   const ackId = writeTaskCmd(key, {
@@ -1008,8 +1008,8 @@ async function cmdTask(
   return await taskOutcome(
     key,
     ackId,
-    `已投递任务（cwd=${useCwd}）。看进展用 task-list。`,
-    // 派发的回执要等「起进程有结果」：冷启动一个 agent 可能要几十秒，等得久一点好过说假话
+    `已发送任务（cwd=${useCwd}）。看进展用 task-list。`,
+    // 派发的答复要等「起进程有结果」：冷启动一个 agent 可能要几十秒，等得久一点好过说假话
     30_000,
   );
 }
@@ -1048,7 +1048,7 @@ const STATUS_ZH: Record<string, string> = {
 /**
  * 读任务表（daemon 没跑也能读：文件就是唯一真相）。
  * 先看 `tasks.json`——那是任务表的**持久**副本（重启后也在，编号跨重启不归零）；
- * 老版本只写过 `task-state.json`（状态快照），仍兼容读它。
+ * 老版本只写过 `task-state.json`（状态记录），仍兼容读它。
  */
 function readTaskRows(key: string): WmTaskRow[] | null {
   const dir = accountDir(key);
@@ -1073,7 +1073,7 @@ function cmdTaskList(sel?: string): string {
   // 任务表是 daemon 的活状态：它没在跑（或还在跑旧版）时，表里的「运行中」只是上次留下的，别当成现在时。
   const stale = daemonAlive(key)
     ? ""
-    : "\n（daemon 未运行：以下状态是它上次留下的快照；未完成的任务会在下次启动时标为「已中断」，回「继续」可续跑。）";
+    : "\n（daemon 未运行：以下状态是它上次留下的记录；未完成的任务会在下次启动时标为「已中断」，回「继续」可续跑。）";
   if (!rows.length) return `账号 ${key}：当前没有任务。${stale}`;
   const lines = [`账号 ${key} 任务（${rows.length} 条）：`];
   for (const t of rows) {
@@ -1171,7 +1171,7 @@ export async function runManage(argv: string[]): Promise<void> {
       console.log(cmdStart(rest[0], runner));
       break;
     case "stop": {
-      const k = pickKey(rest[0]); // 省略账号 = 默认账号（回执带上解析到的账号，避免「静默换目标」）
+      const k = pickKey(rest[0]); // 省略账号 = 默认账号（答复带上解析到的账号，避免「静默换目标」）
       console.log(`账号 ${k}：${stopDaemon(k)}`);
       break;
     }
@@ -1223,7 +1223,7 @@ export async function runManage(argv: string[]): Promise<void> {
       const { msg } = finalizeStaging(label);
       console.log(msg);
       break;
-    } // 兼容旧流程（staging 已有登录时归档）
+    } // 兼容旧流程（staging 已有登录时直接收进账号目录）
     case "allow": {
       const k = resolveKey(rest[0]);
       const uid = rest[1];
@@ -1269,11 +1269,11 @@ export function helpText(): string {
   return `WeMind 多账号管理（wemind v${CLI_VERSION}）
 用法: wemind <command>            其余：wemind version | help
 
-  login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动归档（--start 顺带启动 daemon）
+  login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动登记（--start 顺带启动 daemon）
   list                           列出账号、别名、运行状态（含 brain 进程与 worker 池）
   start [key|label]              启动某账号的 daemon（省略 = 默认账号）
   stop [key|label]               停止某账号的 daemon（连带 brain 与全部 worker 进程树；省略 = 默认账号）
-  brain set <预设|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]
+  brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--restart] [<key|label>]
                                  改账号大脑**配置**（写 brain.json；daemon 需重启才生效）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
   logout <key|label>             停 daemon + 通知下线 + 清凭证（保留目录，可重登）

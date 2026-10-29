@@ -37,7 +37,7 @@ node scripts/acp-probe.mjs
 
 | 探针结果 | 结论 |
 |---|---|
-| 全部符合 WeMind 现有假设 | 加预设即可（kiro/opencode 路线） |
+| 全部符合 WeMind 现有假设 | 加 agent 即可（kiro/opencode 路线） |
 | 无 `session/load`，有 `resume` | 加 `restore: "resume"` + 客户端兜底 |
 | 有反向请求 | 先做 M2 应答器，否则会挂到超时 |
 | `image:false` | 在 `askBrain` 前拦截图片，或换支持图片的 agent |
@@ -60,7 +60,7 @@ node scripts/acp-probe.mjs
 
 ---
 
-## 2. 加预设（`brain-agents.ts`）
+## 2. 加 agent（`brain-agents.ts`）
 
 ```ts
 acme: {
@@ -87,14 +87,14 @@ acme: {
 
 同时：
 
-- `AUTO_PROBE_ORDER` 末尾追加该预设（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；
+- `AUTO_PROBE_ORDER` 末尾追加该 agent（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；
 - `AcpAgentPreset` / `ResolvedAgent` 透传新字段；
 - `brain-agents.test.ts` 加断言；
 - `docs/接入其它-ACP-Agent.md` §5 预设表加一行。
 
-> **1.2.0 起，加预设不必再"挑角色"**：同一个预设同时可用于对话大脑与任务 worker（`resolveAgentFor(cfg, role)`），加完立刻可以
+> **1.2.0 起，加 agent 不必再"挑角色"**：同一个 agent同时可用于对话大脑与任务 worker（`resolveAgentFor(cfg, role)`），加完立刻可以
 > `wemind brain switch acme` 热切换、也可以在微信里 `任务 acme：…` 指定它干活——两者都不需要改代码、不需要重启。
-> 启动覆盖（`--bin`/`--args`/`--shell`）按**预设名**存在 `brain.json` 的 `presets` 段（`wemind brain set acme --bin …`），
+> 启动覆盖（`--bin`/`--args`/`--shell`）按**agent 名**存在 `brain.json` 的 `presets` 段（`wemind brain set acme --bin …`），
 > 所以「切走再切回」不会丢；默认任务大脑是 `worker.agent ?? agent`。
 
 ---
@@ -151,7 +151,7 @@ wemind brain check
 4. 发图 → 按 image 能力正确处理；
 5. 越界写 → 有权限请求则应答，不卡死；
 6. 两个账号 → 沙箱隔离；
-7. **热切换**（1.2.0）：从别的预设 `wemind brain switch acme` → 回执两段、daemon pid 不变、下一条消息由 acme 答；再切回去，旧上下文能 load 回来；
+7. **热切换**（1.2.0）：从别的预设 `wemind brain switch acme` → 答复两段、daemon pid 不变、下一条消息由 acme 答；再切回去，旧上下文能 load 回来；
 8. **当 worker 用**（1.2.0）：`wemind task "…" --agent acme` → 任务跑通；跑完进程**留着复用**（`wemind list` 可见），5 分钟后回收。
 
 ---
@@ -167,7 +167,7 @@ wemind brain check
 - **密钥不要写进预设**：daemon 进程环境提供。
 - **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自预设字段——所以探针必须看，看完必须写进 `brain-agents.ts`。
 - **冷启动耗时待实测**：各 agent `initialize`/`session/new` 的真实耗时还没量（`docs/ai/recipes/run-e2e.md` §7.2 第 3 条）；若某 agent 超过 `REQ_TIMEOUT=30s`，需要在预设里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
-- **同 agent 并发 = 两个进程共用其配置目录**：多任务并行时会真实发生（不同 agent 各自 `configSubdir` 天然隔离）；新预设若把会话/缓存写在配置目录里，这条要实测。
+- **同 agent 并发 = 两个进程共用其配置目录**：多任务并行时会真实发生（不同 agent 各自 `configSubdir` 天然隔离）；新 agent 若把会话/缓存写在配置目录里，这条要实测。
 
 ---
 

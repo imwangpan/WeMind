@@ -17,7 +17,7 @@
 - 假 stdio MCP（echo 工具，被调用时写标记文件）：`session/new` 挂载成功，模型调用工具 → 标记文件第 1 次 `called`，回答 `ok`；
 - `session/resume` 带同一 `mcpServers` → 模型再次调用 → 标记文件第 2 次 `called`，回答 `okPINEAPPLE`（上下文保留）；
 - **坏条目回滚验证**：起不来的 MCP 让 `session/new` 直接失败（`mcp-client: initial connection or tool synchronization failed`）——因此 `addMcp` 预校验拒绝无法转换的定义，`toAcpMcpServers` 跳过坏条目并记日志；
-- **微信侧全链路 ✅（2026-10-24，用户实测）**：`MCP` 列出 test-echo → `加载 test-echo` → 下一条消息 `session/resume ok ... mcp=[test-echo]`（**微信侧 resume 也由此验证**），模型调用工具回答 `MCP-OK`（调用记录落盘）→ `卸载 test-echo` 激活集回空；
+- **微信侧全链路 ✅（2026-10-24，用户实测）**：`MCP` 列出 test-echo → `加载 test-echo` → 下一条消息 `session/resume ok ... mcp=[test-echo]`（**微信侧 resume 也由此验证**），模型调用工具回答 `MCP-OK`（调用记录写入磁盘）→ `卸载 test-echo` 激活集回空；
 - 单测：`agent-mcp.test.ts`（转换/跳过/排除/预校验）、`brain-agents.test.ts`（mcpViaAcp 解析），全量 136 tests 通过。
 
 **遗留**：HTTP MCP 未真机实测（`http:true` 已广告）；catalog 默认来源仍是 `~/.dsh/settings/mcp.json`（不存在 → 需 `WEMIND_MCP_CATALOG` 指向中立文件）。
@@ -40,7 +40,7 @@
 ## M5 · 加固与覆盖（除标注外均完成）
 
 1. **worker E2E** ✅ 2026-10-24：`task "create hello.txt" --cwd <临时目录>` → 文件内容 `hello` + 输出 `DONE`；`task-reply "read hello.txt"` → 输出 `hello`；`task-stop` → idle。日志：`[wemind/wechat-daemon/worker] spawn deepseek ... → model set → session/new → prompt ok`（2305ms / 1575ms）。
-   - **微信派发亦已实测 ✅**（2026-10-24）：`任务：在 D:\... 创建文件` → worker 正常 spawn（`mcp=[test-echo]`，全量继承 catalog）→ 目标目录在工作区（cwd=用户主目录）外被沙箱拒绝 → 模型两次 `session/request_permission` 申请提权 → **应答器默认拒绝、不卡死**，agent 如实汇报阻塞并 waiting。任务本身未完成属**沙箱按设计工作**，非 bug。顺带发现并修复：daemon 重启后 `task-stop` 不清 `task-state.json` 的幽灵 waiting 状态（已修，`stopTask` 无活跃任务时也落盘 idle）。
+   - **微信派发亦已实测 ✅**（2026-10-24）：`任务：在 D:\... 创建文件` → worker 正常 spawn（`mcp=[test-echo]`，全量继承 catalog）→ 目标目录在工作区（cwd=用户主目录）外被沙箱拒绝 → 模型两次 `session/request_permission` 申请提权 → **应答器默认拒绝、不卡死**，agent 如实汇报阻塞并 waiting。任务本身未完成属**沙箱按设计工作**，非 bug。顺带发现并修复：daemon 重启后 `task-stop` 不清 `task-state.json` 的幽灵 waiting 状态（已修，`stopTask` 无活跃任务时也写入磁盘 idle）。
    - **运维注意**：微信派发的 worker cwd 默认是用户主目录——跨盘/工作区外的写入会被 `workspace-write` 拒绝（提权默认拒绝）；且此时 `TEMP` 在工作区内，DSH 的 pwsh 工具会报 `Windows ACL temp root must be outside the workspace`。跨盘任务建议本地 `task --cwd <目标目录>` 派发或设 `WEMIND_WORKER_CWD`。
 2. **图片**（待上游）：官方 `image:false`；**微信侧友好拒绝已实测 ✅（2026-10-24）**——发图收到「当前大脑暂不支持看图…」，日志 `image unsupported by current brain; rejected gracefully`，无 `-32602` 重试。官方打开 `image` 后移除拦截并回归。
 3. **多账号** ✅ 机制已验证（2026-10-24）：两个独立数据目录各跑一轮 brain → 各自 `brain-home`/`worker-home` 均有独立 `.credentials.yaml`，`brain-sessions.json` 的 sessionId 不同，均正常回答；双**真机微信**账号（需第二个扫码登录）待用户需要时再验。

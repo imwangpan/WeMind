@@ -1,7 +1,7 @@
 import { ACP_AGENT_PRESETS } from "./brain-agents.js";
 
 /**
- * 微信指令表：**解析与帮助是同一张表**（一处改动不会让「帮助里写的」和「真正认的」漂移）。
+ * 微信指令表：**解析与帮助是同一张表**（一处改动不会让「帮助里写的」和「真正认的」不一致）。
  *
  * 为什么独立成模块：`manage.ts`（CLI 侧）要用它渲染 `wemind help`，而 `manage.ts` **不能** import `index.ts`
  * （那会把 daemon、长轮询、账户状态全拖进每次 CLI 调用）。所以这里保持**无副作用**：不读环境、不碰磁盘、
@@ -9,11 +9,11 @@ import { ACP_AGENT_PRESETS } from "./brain-agents.js";
  *
  * 解析规则（与既有 parseControl/parseTaskControl 一致，**整串锚定**）：
  *  - 「整串锚定」意味着 `帮助我写代码`、`mcp 是什么`、`任务很重要` 都是**普通消息**（照旧转给大脑）；
- *  - `任务 <预设>：正文` 里的「冒号前」必须**恰好是一个已知预设名**才算指定 agent，
+ *  - `任务 <agent 名>：正文` 里的「冒号前」必须**恰好是一个已知 agent 名**才算指定 agent，
  *    所以 `任务 明天：去买菜`、`> nav: 去某地` 仍是普通内容（不会因为带冒号就被误当成指定 agent）；
  *  - `#<数字> 正文` 只在 `#`/`＃` 后跟纯数字时才寻址（`#abc 你好` 是普通消息；`#1 号文件在哪` 说的是「1 号文件」，
  *    数字后紧跟「号」也按普通消息，见 task.reply 的 match）；
- *  - 中文写法与斜杠写法**等价**；`/ai` 家族是收敛入口（`/ai`、`/ai brain X`、`/ai task X`）。
+ *  - 中文写法与斜杠写法**等价**；`/ai` 家族是统一入口（`/ai`、`/ai brain X`、`/ai task X`）。
  */
 
 export type ChatCommand =
@@ -35,7 +35,7 @@ export type ChatCommand =
   | { kind: "brain"; target?: string }
   /** 切默认任务大脑（本次运行内一直生效；不写 brain.json）。 */
   | { kind: "workerBrain"; target?: string }
-  /** 生成切换用摘要并落盘。 */
+  /** 生成切换用摘要并写入磁盘。 */
   | { kind: "handoff" }
   | { kind: "help" };
 
@@ -66,7 +66,7 @@ export type CommandSection = "session" | "task" | "brain" | "mcp" | "misc";
 export type CommandSpec<C> = {
   id: string;
   section: CommandSection;
-  /** 仅登录者可用（兜底校验：微信平台只投递登录者的消息，正常不会触发）。 */
+  /** 仅登录者可用（兜底校验：微信平台只发送登录者的消息，正常不会触发）。 */
   ownerOnly?: boolean;
   /** 帮助里的中文写法。 */
   zh: string;
@@ -78,7 +78,7 @@ export type CommandSpec<C> = {
   match: (t: string) => C | null;
 };
 
-/** 预设定名集合（小写）：`任务 <预设>：正文` 的判定表；`auto` 也算（自动探测）。 */
+/** 预设定名集合（小写）：`任务 <agent 名>：正文` 的判定表；`auto` 也算（自动探测）。 */
 function agentTokenOk(token: string): boolean {
   const k = token.trim().toLowerCase();
   return k === "auto" || Object.prototype.hasOwnProperty.call(ACP_AGENT_PRESETS, k);
@@ -179,7 +179,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     zh: "删除会话 <序号|名字|id前缀>",
     slash: "/delete <同上>",
     cli: "wemind session delete <ref>",
-    brief: "只删登记（agent 侧归档不动）",
+    brief: "只删登记（agent 侧的历史记录不动）",
     match: (t) => {
       const m = t.match(/^(?:删除会话|删会话|\/delete|\/del)\s+([\s\S]+)$/i);
       return m ? { kind: "delete", ref: m[1].trim() } : null;
@@ -199,9 +199,9 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     id: "agent.brain",
     section: "brain",
     ownerOnly: true,
-    zh: "切换大脑 [预设|auto]",
-    slash: "/brain [预设|auto]、/ai brain [预设|auto]",
-    cli: "wemind brain switch <预设|auto>",
+    zh: "切换大脑 [agent 名|auto]",
+    slash: "/brain [agent 名|auto]、/ai brain [agent 名|auto]",
+    cli: "wemind brain switch <agent 名|auto>",
     brief: "换对话大脑，不用重启（失败自动退回原来那个）",
     match: (t) => {
       const m = t.match(/^(?:切换大脑|ai\s*大脑|\/brain|\/ai\s+brain)(?:\s+([\s\S]+))?$/i);
@@ -214,9 +214,9 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     id: "agent.workerBrain",
     section: "brain",
     ownerOnly: true,
-    zh: "切换任务大脑 [预设|auto]",
-    slash: "/worker [预设|auto]、/ai task [预设|auto]",
-    cli: "wemind brain switch <预设> --worker",
+    zh: "切换任务大脑 [agent 名|auto]",
+    slash: "/worker [agent 名|auto]、/ai task [agent 名|auto]",
+    cli: "wemind brain switch <agent 名> --worker",
     brief: "设默认任务大脑（本次运行内一直生效，不写 brain.json）",
     match: (t) => {
       const m = t.match(
@@ -252,22 +252,22 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
   {
     id: "task.dispatch",
     section: "task",
-    zh: "任务 [<预设>：]正文",
-    slash: "/task [<预设>] 正文",
-    cli: 'wemind task "正文" [--agent <预设>]',
-    brief: "派发新任务；带预设名即指定 agent（只影响这一条）",
+    zh: "任务 [<agent 名>：]正文",
+    slash: "/task [<agent 名>] 正文",
+    cli: 'wemind task "正文" [--agent <名字>]',
+    brief: "派发新任务；带 agent 名就由它执行（只影响这一条）",
     match: (t) => {
-      // ① `任务：正文` / `task: 正文`（沿用旧写法，无预设）
+      // ① `任务：正文` / `task: 正文`（沿用旧写法，不带 agent 名）
       let m = t.match(/^(?:任务|task)[:：]\s*([\s\S]+)$/i);
       if (m) return { kind: "toWorker", text: m[1].trim() };
-      // ② `任务 <预设>：正文` —— 冒号前必须恰好是已知预设名，否则整串都是正文
+      // ② `任务 <agent 名>：正文` —— 冒号前必须恰好是已知 agent 名，否则整串都是正文
       m = t.match(/^(?:任务|task)\s+(\S+?)[:：]\s*([\s\S]+)$/i);
       if (m) {
         if (agentTokenOk(m[1]))
           return { kind: "toWorker", text: m[2].trim(), agentToken: m[1].toLowerCase() };
         return { kind: "toWorker", text: t.replace(/^(?:任务|task)\s+/i, "").trim() };
       }
-      // ③ `/task <预设> 正文`（斜杠形式用空格分隔，预设名同样必须命中）
+      // ③ `/task <agent 名> 正文`（斜杠形式用空格分隔，agent 名同样必须命中）
       m = t.match(/^\/task\s+(\S+)\s+([\s\S]+)$/i);
       if (m && agentTokenOk(m[1]))
         return { kind: "toWorker", text: m[2].trim(), agentToken: m[1].toLowerCase() };

@@ -84,7 +84,7 @@ beforeEach(() => {
   resetTasksForTest(tmpDir);
   resetSlotsForTest();
   setSlotAgent("worker", AG("kiro"));
-  // 显式 `agentKey`（`任务 <预设>：`）走的是真实预设解析 + 可用性预检：把用到的预设指向本机 node（不 spawn，池是 mock 的）
+  // 显式 `agentKey`（`任务 <agent 名>：`）走的是真实预设解析 + 可用性预检：把用到的预设指向本机 node（不 spawn，池是 mock 的）
   fs.writeFileSync(
     path.join(tmpDir, "brain.json"),
     JSON.stringify({
@@ -199,7 +199,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     await vi.waitFor(() => expect(has(pushed, "done")).toBe(true));
   });
 
-  it("cwd 透传给连接；状态写盘回调 走 running→waiting→idle，且快照带 tasks 数组", async () => {
+  it("cwd 透传给连接；状态写入磁盘回调 走 running→waiting→idle，且记录带 tasks 数组", async () => {
     const r1 = deferred();
     acquire.mockImplementationOnce(async () => {
       const c = fakeConn();
@@ -222,7 +222,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
 });
 
 describe("多任务与编号", () => {
-  it("可并行派发多条：编号递增、回执带编号、按编号发话互不串台", async () => {
+  it("可并行派发多条：编号递增、答复带编号、按编号发话互不串台", async () => {
     const a1 = deferred();
     const a2 = deferred();
     acquire
@@ -368,7 +368,7 @@ describe("多任务与编号", () => {
       problem: "同时运行的任务数已达上限（3 个）",
     }));
     const ack = dispatchTask("u1", "做X");
-    expect(ack).toContain("已派"); // 回执先发（编号已分配，之后才有结果）
+    expect(ack).toContain("已派"); // 答复先发（编号已分配，之后才有结果）
     await vi.waitFor(() => expect(has(pushed, "已达上限")).toBe(true));
     expect(hasActiveTask("u1")).toBe(false);
     expect(listTasks("u1").length).toBe(0);
@@ -398,11 +398,11 @@ describe("多任务与编号", () => {
     dispatchTask("u1", "这条用 opencode", { agentKey: "opencode" });
     await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalled());
     expect(listTasks("u1")[0]?.agent).toBe("opencode");
-    expect(getAgent("worker").name).toBe("kiro"); // 回归护栏：`任务 <预设>：` 不再顺带改进程内默认
+    expect(getAgent("worker").name).toBe("kiro"); // 回归护栏：`任务 <agent 名>：` 不再顺带改进程内默认
   });
 });
 
-describe("任务表落盘与重启续跑", () => {
+describe("任务表写入磁盘与重启续跑", () => {
   it("重启后未完成的标「已中断」，编号接着排不归零；回「继续」才拉进程续跑（strictResume）", async () => {
     // 模拟上次运行留下的一条 running 任务
     fs.writeFileSync(
@@ -453,7 +453,7 @@ describe("任务表落盘与重启续跑", () => {
     expect(conn7.ask.mock.calls[0][1]).toBe("task-7@u1"); // 沿用原会话键
     expect(conn7.ask.mock.calls[0][3]).toEqual({ strictResume: true });
     expect(conn7.ask.mock.calls[0][0]).toContain("中断");
-    // 续跑提示走**返回值**（微信侧把它当回执发出去、CLI 侧当回执收下），不再只 push
+    // 续跑提示走**返回值**（微信侧把它当答复发出去、CLI 侧当答复收下），不再只 push
     expect(r7).toContain("正在按 #7 号任务续跑");
     // 续跑里的 agent 已被确认为「kiro」
     expect(listTasks("u1").find((t) => t.id === 7)?.ag?.name).toBe("kiro");
@@ -498,7 +498,7 @@ describe("任务表落盘与重启续跑", () => {
       c.ask.mockReturnValueOnce(resumed.promise);
       return { ok: true, conn: c };
     });
-    expect(injectTask("u1", "继续")).toContain("正在按 #1 号任务续跑"); // 续跑提示即回执（两个入口共用）
+    expect(injectTask("u1", "继续")).toContain("正在按 #1 号任务续跑"); // 续跑提示即答复（两个入口共用）
     await vi.waitFor(() => expect(conns.length).toBe(1));
     expect(conns[0].ask.mock.calls[0][1]).toBe("task-1@u1"); // 沿用原会话键
     expect(conns[0].ask.mock.calls[0][3]).toEqual({ strictResume: true });
@@ -575,12 +575,12 @@ describe("任务表落盘与重启续跑", () => {
 });
 
 /**
- * CLI 侧的回执：`wemind task` 这类命令丢完命令就再也看不见结果，于是只能自己编「已派发」——
+ * CLI 侧的答复：`wemind task` 这类命令丢完命令就再也看不见结果，于是只能自己编「已派发」——
  * 达上限被拒、agent 起不来都会被报成成功（甚至报成上一条任务的编号，因为 `active` 本来就是 true）。
- * 这里钉死「回执等起进程有结果」「失败回执就是失败」。
+ * 这里钉死「答复等起进程有结果」「失败答复就是失败」。
  */
-describe("本地命令的回执（daemon 说了才算）", () => {
-  it("派发成功：**起进程之后**才回执「已派发 #1」", async () => {
+describe("本地命令的答复（daemon 说了才算）", () => {
+  it("派发成功：**起进程之后**才答复「已派发 #1」", async () => {
     const r = dispatchTask("u1", "做X", { agentKey: "kiro", ackId: "ack-1" });
     expect(r).toContain("已派发任务 #1"); // dispatchTask 当场返回的文案仍给微信侧用
     expect(acks.length).toBe(0); // 进程还没起来 → 还不能说「派上了」
@@ -590,7 +590,7 @@ describe("本地命令的回执（daemon 说了才算）", () => {
     expect(acks[0].text).toContain("kiro");
   });
 
-  it("达上限被拒：回执是那句警告（不是「已派发」），任务也不留在表里", async () => {
+  it("达上限被拒：答复是那句警告（不是「已派发」），任务也不留在表里", async () => {
     acquire.mockImplementationOnce(async () => ({
       ok: false,
       problem:
@@ -604,7 +604,7 @@ describe("本地命令的回执（daemon 说了才算）", () => {
     expect(listTasks("u1").length).toBe(0);
   });
 
-  it("正文为空 / agent 用不了：当场回执，不派也不占编号", () => {
+  it("正文为空 / agent 用不了：当场答复，不派也不占编号", () => {
     dispatchTask("u1", "   ", { ackId: "ack-3" });
     expect(acks[0].text).toContain("空");
     dispatchTask("u1", "做X", { agentKey: "不存在的预设", ackId: "ack-4" });
@@ -612,12 +612,12 @@ describe("本地命令的回执（daemon 说了才算）", () => {
     expect(listTasks("u1").length).toBe(0);
   });
 
-  it("回复：编号不存在 → 回执带上那句「没有 #9 号任务」（原先只进 daemon 日志）", () => {
+  it("回复：编号不存在 → 答复带上那句「没有 #9 号任务」（原先只进 daemon 日志）", () => {
     expect(injectTask("u1", "继续", 9, "ack-5")).toContain("没有 #9 号任务");
     expect(acks[0]).toEqual({ id: "ack-5", text: "没有 #9 号任务。发「任务列表」看现有编号。" });
   });
 
-  it("回复成功（送进 waiting 的任务）：回执是空文案——CLI 据此**立刻**用自己的措辞，不干等超时", async () => {
+  it("回复成功（送进 waiting 的任务）：答复是空文案——CLI 据此**立刻**用自己的措辞，不干等超时", async () => {
     const r1 = deferred();
     acquire.mockImplementationOnce(async () => {
       const c = fakeConn();
@@ -634,12 +634,12 @@ describe("本地命令的回执（daemon 说了才算）", () => {
     expect(acks).toEqual([{ id: "ack-7", text: "" }]); // 空文案＝「已送达，无别的话」；不写空行、不让人干等
   });
 
-  it("结束：回执就是 daemon 的真实结果（含「没有 #9 号在跑的任务」这类否定答案）", () => {
+  it("结束：答复就是 daemon 的真实结果（含「没有 #9 号在跑的任务」这类否定答案）", () => {
     expect(stopTask("u1", 9, "ack-8")).toContain("没有 #9 号在跑的任务");
     expect(acks[0].text).toContain("没有 #9 号在跑的任务");
   });
 
-  it("没有 ackId 时一切照旧（微信侧指令本来就有自己的回执）", () => {
+  it("没有 ackId 时一切照旧（微信侧指令本来就有自己的答复）", () => {
     expect(dispatchTask("u1", "做X")).toContain("已派");
     expect(injectTask("u1", "继续", 9)).toContain("没有 #9 号任务");
     expect(stopTask("u1", 9)).toContain("没有 #9 号在跑的任务");

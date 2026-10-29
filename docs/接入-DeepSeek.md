@@ -21,7 +21,7 @@
   - 未观察到反向请求；stdio `mcpServers` 被 `session/new` 接受；stdout 会混入一行非 JSON 日志（当前客户端会忽略）。
 - **微信 E2E 已通（2026-10-24）**：`spawn deepseek` → 旧 opencode session 不可 resume（`-32602 session is not resumable`）→ 回退 `session/new` → `model set` → `prompt ok` → 用户收到「你好！很高兴见到你 😊」。**后续微信侧 `session/resume ok ... mcp=[test-echo]` 亦已实证**（M3 微信链路测试中）。
 - **Worker E2E 已通（2026-10-24）**：`task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok`（2.3s，含 tool_call）→ `hello.txt`；`task-reply` 第二轮读文件输出 `hello`；`task-stop` 后 idle。
-- **微信侧动态 MCP + 图片拒绝已实测（2026-10-24）**：`MCP`/`加载 test-echo`/调用（答 `MCP-OK`，调用记录落盘）/`卸载` 全链路通过；发图收到友好拒绝（`image unsupported by current brain; rejected gracefully`）。
+- **微信侧动态 MCP + 图片拒绝已实测（2026-10-24）**：`MCP`/`加载 test-echo`/调用（答 `MCP-OK`，调用记录写入磁盘）/`卸载` 全链路通过；发图收到友好拒绝（`image unsupported by current brain; rejected gracefully`）。
 - 工作量：**M0 冒烟 0.5 人日；MVP 2–3 人日；含 MCP/worker/记忆继承的完整对齐 5–7 人日**。
 - 最大未决项从「凭据隔离」变成「**模型路由 + 凭据来源**」：桌面登录可用，但需把 `DSH_HOME` 的 `.credentials.yaml` 带进沙箱（或改用 `DEEPSEEK_API_KEY`），并显式选 `deepseek-account` 路由（§8 R1/R18）。
 
@@ -146,7 +146,7 @@
 
 ### 3.3 裸 API：DeepSeek OpenAI 兼容接口
 
-- 只需要「聊天」时，写一个 `api-brain.ts`：`stream: true` 的 `chat/completions`、每用户历史落盘、图片走 `image_url`。
+- 只需要「聊天」时，写一个 `api-brain.ts`：`stream: true` 的 `chat/completions`、每用户历史写入磁盘、图片走 `image_url`。
 - 但 WeMind 的 `askBrain` 契约背后是「会自己用工具的 agent」；裸 API 要补齐工具循环（读文件、跑命令、搜网页、MCP），否则和 kiro/opencode 不是同一档能力。
 - 现状：仓库里**没有** `Brain` 接口抽象（`acp-brain.ts` 直接暴露 `askBrain`/`newSession`/`restart`，`index.ts` 直接调用），所以方案 C 还需要一次接口抽取 + 调用方改造，**不是「加个文件」**。
 
@@ -214,7 +214,7 @@
         │    cwd=DSH_HOME=<数据目录>/brain-home
         │    会话：session/new | session/resume
         │    MCP：session/new 的 mcpServers（按激活集）
-        └─ worker：同一预设的独立进程
+        └─ worker：同一个 agent 的独立进程
              cwd=任务目录，DSH_HOME=<数据目录>/worker-home
 ```
 
@@ -383,7 +383,7 @@ deepseek: {
 
 4. **`wemind brain check` 放宽**：`checkAgent(ag)` 默认 20s → 60s，否则 DSH/`npx` 冷启动会误报。**已落地**（`brain-check.ts:18` 默认 `60_000`）；`WEMIND_BRAIN_CHECK_MS` 是当初设想的 env 覆盖，**当前没有实现**——要改超时只能改代码或直接调用 `checkAgent(ag, ms)`。
 
-5. **（可选）`session/close`**：`restart()` / `newSession()` 杀进程前先发 `session/close`，让 DSH 干净落盘；失败忽略。
+5. **（可选）`session/close`**：`restart()` / `newSession()` 杀进程前先发 `session/close`，让 DSH 干净写入磁盘；失败忽略。
 
 6. **静默期心跳适配（重要）**：`index.ts` 的 heartbeat 每 15s 在 `lastProgressAt` 超过 15s 时发一条进度，而 `lastProgressAt` 只靠 `session/update` 帧刷新。官方 DSH 没有逐 token 帧，纯推理阶段会连续发「还在思考/仍在处理」，约 8 条后触发 `CONSEC_SEND_LIMIT=10` 的「接近上限」并进入 `awaiting`，最终答案要等用户回「继续」才恢复。建议：
    - 预设加 `heartbeatMs`（如 60s）或 `progressMode: "committed"`；
@@ -529,7 +529,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | R4 | 反向请求 `session/request_permission` 无人应答 | 整轮卡死到超时 | M2 通用应答器；默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才放行 |
 | R5 | DSH 不读 kiro 式 MCP 文件；catalog 来源不同 | 动态 MCP 不可用/配错 | M3 按 agent 各自的 catalog；DSH 用 `WEMIND_MCP_CATALOG` 或 `mcpViaAcp`；stdio 已实测接受 |
 | R6 | 第三方 `deepseek-acp` 供应链 / 维护 | 长期不可控 | 只作冒烟/回退；锁版本；不默认启用 |
-| R7 | 版本是 RC，ACP 面可能漂移 | 升级即坏 | 锁 `0.2.1-rc.2`；升级先跑 M0 脚本；文档记录版本 |
+| R7 | 版本是 RC，ACP 行为可能变化 | 升级即坏 | 锁 `0.2.1-rc.2`；升级先跑 M0 脚本；文档记录版本 |
 | R8 | Node ≥22（社区包明确；官方以安装包为准），而仓库声明 ≥20 | 旧环境起不来 | 文档标注；`agentProblem` 加 `minNode` 检查；M0 记录 |
 | R9 | DSH 的 Windows ACL 沙箱只限制普通 NTFS 写，不限制读/网络/进程可见性 | 微信侧提示注入可外带本机文件 | `allowFrom` 登录者白名单；专用 OS 账号；`workspace-write`；不要把敏感目录设为 worker cwd |
 | R10 | 模型/路由选择 | 不选就落到 official 路由，需 API key | 预设 `model` + `session/set_config_option`；桌面登录用 `deepseek-account` |
@@ -593,7 +593,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | **微信端到端** | 收到「你好」→ `spawn deepseek` → 旧 opencode session `resume` 失败 → `session/new` → `model set` → `prompt ok` 693ms → 回复「你好！很高兴见到你 😊」 | — | **E2E 通过** |
 | **worker E2E** | `task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok` 2305ms（tool_call）→ `hello.txt`；`task-reply` 第二轮 1575ms → `hello`；`task-stop` idle | — | **worker E2E 通过** |
 | **M3：MCP via ACP** | 假 stdio MCP 经 `toAcpMcpServers()` 转换：`session/new` 挂载 → 模型调用（标记文件记到 `called`）答 `ok`；`session/resume` 再挂 → 再调用答 `okPINEAPPLE`；坏 MCP → `session/new` 回滚（`initial connection or tool synchronization failed`） | — | **M3 通过**（HTTP 未实测） |
-| **M3：微信侧全链路** | 用户实测：`MCP` 列出 test-echo → `加载` → 下一条消息 `session/resume ok ... mcp=[test-echo]`，模型调用工具答 `MCP-OK`（调用记录落盘）→ `卸载` 激活集回空 | — | **微信侧通过**（含微信侧 `resume` 首次实证） |
+| **M3：微信侧全链路** | 用户实测：`MCP` 列出 test-echo → `加载` → 下一条消息 `session/resume ok ... mcp=[test-echo]`，模型调用工具答 `MCP-OK`（调用记录写入磁盘）→ `卸载` 激活集回空 | — | **微信侧通过**（含微信侧 `resume` 首次实证） |
 | **M4：记忆/技能** | 真实 `~/.dsh` 放测试 skill（KIWANO）+ `AGENTS.md` 规则（MANGO-42）→ brain/worker 沙箱均可读，回答均 `CODEWORD=MANGO-42 SECRET=KIWANO`；现场已还原 | — | **M4 通过** |
 | **M5：多账号机制** | 双数据目录各跑一轮：brain-home/worker-home 凭据各自独立，session id 不同，均答 `OK` | — | **机制通过**（双真机微信待需要时验） |
 | **M5：model 失败路径** | 非法 model → `-32602 unknown model option`，随后默认路由明确报 no API key | — | 失败不静默 |
