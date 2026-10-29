@@ -1,6 +1,6 @@
 # WeMind CLI 化设计（可发布的 `wemind` 命令）
 
-> 状态：设计定稿（2026-06-24）；**已实现**（2026-10 复核：`wemind login/start/stop/list/task/daemon`、自带看护进程与 pm2 双 runner 均已落地）。唯一未落地项：`wemind service install` 自动化（见 §10 阶段 2，按需排期）。
+> 状态：设计定稿（2026-06-24）；**已实现**（2026-10 复核：`wemind login/start/stop/list/task/daemon`、自带后台守护进程与 pm2 双 runner 均已落地）。唯一未落地项：`wemind service install` 自动化（见 §10 阶段 2，按需排期）。
 >
 > **命名更新（2026-10-26）**：发布包名定为 **`@wemind/cli`**（收进已注册的 `@wemind` scope），**命令名仍为 `wemind`**；因此 `npx` 需写全包名 `npx -y @wemind/cli`，`npm i -g` 后命令不变。详见 [`docs/发布-wemind-npm.md`](发布-wemind-npm.md)。
 
@@ -18,7 +18,7 @@
 ## 2. 决策记录（2026-06-24 拍板）
 
 1. **两入口**：`@wemind/wechat-mcp`（轻）+ `wemind`（完整）。
-2. **常驻**：**先方案 a（`wemind start` 封装 pm2）**，后续再迭代到方案 b（自带看护进程、去外部依赖）。
+2. **常驻**：**先方案 a（`wemind start` 封装 pm2）**，后续再迭代到方案 b（自带后台守护进程、去外部依赖）。
 3. **目录**：内部 `packages/wechat-daemon/` 保留不改名，仅改对外发布 `name` 为 `wemind`。
 4. **旧脚本**：`run-daemon.ps1` / `ecosystem.config.cjs` 保留，给「从源码仓库跑」的开发者。
 
@@ -90,16 +90,16 @@
 5. `npm run build` / `typecheck` / `test` 全过。
 6. 真机冒烟：`npm i -g pm2` → 本地 `node dist/cli.js login` → `start` → `list` 见 pm2 进程 → 微信收发验证 → `stop`。
 
-## 10. 方案 b（自带看护进程）— 阶段 1 已实现 ✅
+## 10. 方案 b（自带后台守护进程）— 阶段 1 已实现 ✅
 
-去掉 pm2 依赖：`wemind start` 默认用自带的跨平台 Node 看护进程常驻；与 pm2（方案 a）**共存**，靠 runner 选择——`wemind start [--runner builtin|pm2]`（或环境变量 `WEMIND_RUNNER`，默认 `builtin`）。
+去掉 pm2 依赖：`wemind start` 默认用自带的跨平台 Node 后台守护进程常驻；与 pm2（方案 a）**共存**，靠 runner 选择——`wemind start [--runner builtin|pm2]`（或环境变量 `WEMIND_RUNNER`，默认 `builtin`）。
 
-**阶段 1（已实现，Windows 真机验证通过）**——核心看护进程：
+**阶段 1（已实现，Windows 真机验证通过）**——核心后台守护进程：
 
-- `watchdog-runner.ts`：`runWatchdog()`（看护进程循环本体，由 `cli.js _watchdog` 调用——单实例守卫 → `for(;;)` 拉起 `cli.js daemon`、退出 5s 重拉、stdout/err 并入 `daemon.log`）；`watchdogStart()`（detached spawn + unref 脱离启动）。移植自 `run-daemon.ps1` 的 while 逻辑。
+- `watchdog-runner.ts`：`runWatchdog()`（后台守护进程循环本体，由 `cli.js _watchdog` 调用——单实例守卫 → `for(;;)` 拉起 `cli.js daemon`、退出 5s 重拉、stdout/err 并入 `daemon.log`）；`watchdogStart()`（detached spawn + unref 脱离启动）。移植自 `run-daemon.ps1` 的 while 逻辑。
 - `cli.ts`：新增 `_watchdog` 子命令分发。
 - `manage.ts`：`--runner` 解析；`startDaemon(key, runner)` 按 runner 分发，**start 前先 `stopDaemon` 清现有任何 runner**（防同账号双跑抢 token）；`cmdStart`/`cmdLogin` 透传 runner。
 - **单实例**：`wrapper.pid` + 存活检查（`process.kill(pid,0)`），零依赖、复用现有停止句柄；竞态由「start 前先 stop」压低（选型对比 pid 文件 vs proper-lockfile：前者零依赖且一份文件兼作停止句柄，后者原子但加依赖且仍需额外 pid，本场景竞态罕见，故选 pid 文件）。
 - `stop`/`list` 无需改：现有 `stopDaemon`（pm2 delete + 杀 wrapper/daemon/brain pid）与 `daemon.pid` 存活检查同时覆盖两种 runner。
 
-**阶段 2（开机自启 — 文档化方案已落实）**——跨平台开机自启**采用文档方案**而非自研：新手教程给出 Windows 启动文件夹 / 计划任务、Linux systemd user service、macOS launchd 三平台调 `wemind start` 的具体配置（`wemind start` 内部 builtin 看护进程负责崩溃重拉，自启层只需开机拉起一次）。自研 `wemind service install` 自动化留按需排期 + 对应系统实测。
+**阶段 2（开机自启 — 文档化方案已落实）**——跨平台开机自启**采用文档方案**而非自研：新手教程给出 Windows 启动文件夹 / 计划任务、Linux systemd user service、macOS launchd 三平台调 `wemind start` 的具体配置（`wemind start` 内部 builtin 后台守护进程负责崩溃重拉，自启层只需开机拉起一次）。自研 `wemind service install` 自动化留按需排期 + 对应系统实测。

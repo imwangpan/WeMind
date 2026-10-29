@@ -12,7 +12,7 @@ import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./a
  * 通过对话指令（加载/卸载/列出）动态调整「激活集」，从全局 MCP 目录取定义写入沙箱。
  * DATA_DIR 从 core 导入（支持 WECHAT_DATA_DIR 覆盖，便于多账号隔离）。
  *
- * 按 agent 适配（见 brain-agents.ts 预设与 docs/接入-OpenCode.md）：
+ * 按 agent 适配（见 brain-agents.ts 里的 agent 配置与 docs/接入-OpenCode.md）：
  * - 配置目录：kiro = 沙箱根（KIRO_HOME）；opencode = <沙箱>/opencode（XDG_CONFIG_HOME）。
  * - MCP 文件：kiro = settings/mcp.json（{mcpServers}）；opencode = opencode.json（mcp.servers）。
  * kiro 行为与改造前完全一致（默认值即 kiro 约定）。
@@ -183,7 +183,7 @@ function saveActive(list: string[]): void {
 }
 
 /** 按激活集从目录取定义，写入沙箱 MCP 配置（默认空）。保留配置里其它键（如 opencode 的 model）。
- *  `mcpViaAcp` 预设（DSH）不写文件——激活集经 activeMcpServers() 转成 ACP mcpServers 随 session 下发。 */
+ *  配了 `mcpViaAcp` 的 agent（DSH）不写文件——激活集经 activeMcpServers() 转成 ACP mcpServers 随 session 下发。 */
 function applySandbox(ag: ResolvedAgent): void {
   if (ag.mcpViaAcp) return;
   const cat = loadCatalog(ag);
@@ -197,7 +197,7 @@ function applySandbox(ag: ResolvedAgent): void {
   fs.writeFileSync(file, JSON.stringify(next, null, 2), "utf-8");
 }
 
-/** brain 当前应挂载的 ACP mcpServers（mcpViaAcp 预设用）：激活集 → catalog 定义 → ACP 声明。
+/** brain 当前应挂载的 ACP mcpServers（配了 mcpViaAcp 的 agent 用）：激活集 → catalog 定义 → ACP 声明。
  *  跳过不可转换的坏条目并记日志——官方 DSH 的 session/new 遇到起不来的 MCP 会回滚整个会话。 */
 export function activeMcpServers() {
   const ag = getAgent("brain");
@@ -298,7 +298,7 @@ function syncSettingsBase(ag: ResolvedAgent): void {
 }
 
 /** 继承真实配置目录的「非 MCP」设置（模型/免确认等），让大脑与日常使用同款配置；mcp 段保持沙箱权威。
- *  `mcpViaAcp` 预设没有文件式 MCP/settings 可继承，跳过（模型走 preset.model + set_config_option）。 */
+ *  配了 `mcpViaAcp` 的 agent 没有文件式 MCP/settings 可继承，跳过（模型走 preset.model + set_config_option）。 */
 function syncSettings(ag: ResolvedAgent): void {
   if (ag.mcpViaAcp) return;
   if (ag.settingsBase && ag.realHome) {

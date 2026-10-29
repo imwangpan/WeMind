@@ -247,7 +247,7 @@ function startDaemon(key: string, runner?: string): void {
   // 发布后 tsdown 把 manage.ts 内联进 dist/cli.js，两者恰好相同；但若将来拆成多 chunk，argv[1] 才是「用户装的那个 bin」，dirname(import.meta.url) 可能是 dist/chunks/ 下。
   const cliPath =
     process.argv[1] || path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
-  // start 前先停现有任何 runner（pm2 app / builtin 看护进程），避免同账号双跑抢 token
+  // start 前先停现有任何 runner（pm2 app / builtin 后台守护进程），避免同账号双跑抢 token
   stopDaemon(key);
   const useRunner = (runner || process.env.WEMIND_RUNNER || "builtin").toLowerCase();
   console.log((useRunner === "pm2" ? pm2Start(key, cliPath) : watchdogStart(key, cliPath)).msg);
@@ -553,7 +553,7 @@ async function cmdBrainSet(
     );
   const dir = accountDir(key);
   const customized = opts.bin !== undefined || opts.args !== undefined || opts.shell !== undefined;
-  // 只选预设（没带自定义启动参数）+ 没要求重启时，写入磁盘和「热切换」其实是同一件事：daemon 在跑且认桥就交给它一次做完——
+  // 只选 agent（没带自定义启动参数）+ 没要求重启时，写入磁盘和「热切换」其实是同一件事：daemon 在跑且认桥就交给它一次做完——
   // 它先启动新大脑、成功才写 brain.json（失败退回，盘上不留半截结果），这比「写入磁盘 + 等下次重启」对用户更实在（决策⑪）。
   // 带 --bin/--args/--shell 则**不能**当场应用：控制桥只接受 agent 名（见 control-bridge.ts 的安全边界）。
   if (!opts.restart && !customized && bridgeReady(key)) {

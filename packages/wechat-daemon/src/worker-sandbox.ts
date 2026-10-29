@@ -95,7 +95,7 @@ function loadCatalog(ag: ResolvedAgent): Record<string, unknown> {
 }
 
 /** worker 继承全量 MCP：复制 catalog 全部 server，去掉排除集与 disabled:true 的。
- *  `mcpViaAcp` 预设（DSH）不写文件——全量集合经 workerMcpServers() 转成 ACP mcpServers 随 session 下发。 */
+ *  配了 `mcpViaAcp` 的 agent（DSH）不写文件——全量集合经 workerMcpServers() 转成 ACP mcpServers 随 session 下发。 */
 function applyWorkerSandbox(ag: ResolvedAgent): void {
   if (ag.mcpViaAcp) return;
   const cat = loadCatalog(ag);
@@ -114,7 +114,7 @@ function applyWorkerSandbox(ag: ResolvedAgent): void {
   fs.writeFileSync(file, JSON.stringify(next, null, 2), "utf-8");
 }
 
-/** worker 当前应挂载的 ACP mcpServers（mcpViaAcp 预设用）：全量 catalog（除排除集/disabled/坏条目）→ ACP 声明。 */
+/** worker 当前应挂载的 ACP mcpServers（配了 mcpViaAcp 的 agent 用）：全量 catalog（除排除集/disabled/坏条目）→ ACP 声明。 */
 export function workerMcpServers(forAgent?: ResolvedAgent) {
   const ag = forAgent ?? getAgent("worker");
   const cat = loadCatalog(ag);

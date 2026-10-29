@@ -46,7 +46,7 @@ afterAll(() => {
   fs.rmSync(emptyBin, { recursive: true, force: true });
 });
 
-describe("resolveAgent 预设", () => {
+describe("resolveAgent agent", () => {
   it("显式 kiro：沿用 kiro 约定（沙箱根 / settings/mcp.json / 格式 kiro）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
@@ -138,7 +138,7 @@ describe("resolveAgent 预设", () => {
 });
 
 describe("resolveAgent 选择来源与优先级", () => {
-  it("brain.json（cfg）可选中预设，来源 file", () => {
+  it("brain.json（cfg）可选中 agent，来源 file", () => {
     clearVars();
     const ag = resolveAgent({ agent: "opencode" });
     expect(ag.name).toBe("opencode");
@@ -154,7 +154,7 @@ describe("resolveAgent 选择来源与优先级", () => {
     expect(ag.source).toBe("env");
   });
 
-  it("brain.json 的 bin/args 覆盖预设细节", () => {
+  it("brain.json 的 bin/args 覆盖 agent 细节", () => {
     clearVars();
     const ag = resolveAgent({
       agent: "opencode",
@@ -167,7 +167,7 @@ describe("resolveAgent 选择来源与优先级", () => {
     expect(ag.homeEnvVar).toBe("OC_HOME");
   });
 
-  it("环境变量切到别的预设时，不再沿用 brain.json 里旧 agent 的 bin/args/shell", () => {
+  it("环境变量切到别的 agent 时，不再沿用 brain.json 里旧 agent 的 bin/args/shell", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "qoder";
     const ag = resolveAgent({
@@ -192,7 +192,7 @@ describe("resolveAgent 选择来源与优先级", () => {
 });
 
 describe("resolveAgent auto 探测", () => {
-  it("选中 PATH 上第一个可用的预设（伪造 opencode）", () => {
+  it("选中 PATH 上第一个可用的 agent（伪造 opencode）", () => {
     clearVars();
     fs.writeFileSync(path.join(fakeBin, "opencode"), "");
     process.env.PATH = fakeBin;
@@ -254,7 +254,7 @@ describe("resolveAgentFor（对话大脑 / 任务 worker 两个角色）", () =>
     expect(resolveAgentFor({ agent: "opencode" }, "worker").name).toBe("kiro");
   });
 
-  it("worker 段的 bin/args 只作用于 worker，且不会串给别的预设", () => {
+  it("worker 段的 bin/args 只作用于 worker，且不会串给别的 agent", () => {
     clearVars();
     const cfg = {
       agent: "kiro",
@@ -266,7 +266,7 @@ describe("resolveAgentFor（对话大脑 / 任务 worker 两个角色）", () =>
     expect(resolveAgentFor(cfg, "brain").bin).not.toBe("/opt/oc");
   });
 
-  it("env 切到别的预设时，worker 段的 bin/args 也不沿用", () => {
+  it("env 切到别的 agent 时，worker 段的 bin/args 也不沿用", () => {
     clearVars();
     process.env.WEMIND_WORKER_BRAIN = "qoder";
     const cfg = { agent: "kiro", worker: { agent: "deepseek", bin: "C:\\dsh\\dsh.cmd" } };
@@ -277,12 +277,12 @@ describe("resolveAgentFor（对话大脑 / 任务 worker 两个角色）", () =>
 });
 
 describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => {
-  it("预设定名表可见（帮助/报错都靠它）", () => {
+  it("全部 agent 名可见（帮助/报错都靠它）", () => {
     const names = presetNames();
     expect(names).toContain("kiro");
     expect(names).toContain("deepseek");
     expect(names).toContain("opencode");
-    expect(names).not.toContain("auto"); // auto 是「不是预设的预设」，不进列表
+    expect(names).not.toContain("auto"); // auto 只是「自动探测」开关，不是 agent，不进列表
   });
 
   it("无视 WEMIND_BRAIN*：命令点名 opencode 就是 opencode", () => {
@@ -341,7 +341,7 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
     }
   });
 
-  it("不属于目标的顶层覆盖不会被沿用（切到别的预设时不拿旧 bin 去起）", () => {
+  it("不属于目标的顶层覆盖不会被沿用（切到别的 agent 时不拿旧 bin 去起）", () => {
     clearVars();
     const cfg = { agent: "deepseek", bin: "C:\\dsh\\dsh.cmd", args: ["--profile", "acp"] };
     const r = resolvePresetByName("opencode", cfg);

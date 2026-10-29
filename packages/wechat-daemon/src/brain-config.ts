@@ -6,7 +6,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 /**
  * 账号级「大脑」持久配置（brain.json）。
  *
- * 背景：此前「用哪个大脑」只存在于进程环境变量 `WEMIND_BRAIN`（见 brain-agents.ts），是个**临时态**——换个入口重启（登录自启、pm2、看护进程、`cli.js start`、另一个 shell）就丢，静默退回默认预设；而默认预设（kiro）的二进制不一定装了 → 直到第一条消息才报错（历史上表现为「⏳ 响应中断了，正在自动重试…」）。
+ * 背景：此前「用哪个大脑」只存在于进程环境变量 `WEMIND_BRAIN`（见 brain-agents.ts），是个**临时态**——换个入口重启（登录自启、pm2、后台守护进程、`cli.js start`、另一个 shell）就丢，静默退回默认 agent；而默认 agent（kiro）的二进制不一定装了 → 直到第一条消息才报错（历史上表现为「⏳ 响应中断了，正在自动重试…」）。
  *
  * 这里把选择**按账号写入磁盘**，成为单一事实来源：
  *   - 任何入口重启都能复现（不依赖启动者的 shell）；
@@ -70,7 +70,7 @@ function normAgentFields(j: any): AgentConfig | null {
   return cfg;
 }
 
-/** 宽松归一化一条预设覆盖；全空返回 null。 */
+/** 宽松归一化一条配置覆盖；全空返回 null。 */
 function normPresetOverride(j: any): PresetOverride | null {
   const ov: PresetOverride = {};
   if (typeof j?.bin === "string" && j.bin.trim()) ov.bin = j.bin.trim();

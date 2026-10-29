@@ -116,7 +116,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 1. **一个 token 一个消费者**：MCP 形态与 daemon 形态二选一；brain 的 MCP 沙箱永久禁止 `wechat`（防它把消息发回自己）。
 2. **ACP 是最小方法集，不是「所有 agent 都一样」**：
    - `session/load` 不是通用能力；DSH 只有 `session/resume`，缺失时会退化为 `session/new`；
-   - **image / restore(load|resume) / mcpViaAcp 目前来自「预设字段」，不来自 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。所以接新 agent 时必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进 `brain-agents.ts` 的预设；不要以为代码会自动适配；
+   - **image / restore(load|resume) / mcpViaAcp 目前来自「agent 配置字段」，不来自 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。所以接新 agent 时必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进 `brain-agents.ts` 的 agent；不要以为代码会自动适配；
    - agent 可能发反向请求（`session/request_permission`、`fs/*`、`terminal/*`）。`acp-brain.ts` / `worker-acp.ts` 已内置应答器：权限请求默认拒绝，未知 method 回 `-32601`；可信部署可设 `WEMIND_ACP_AUTO_ALLOW=1` 放行一次性权限。
 3. **brain 是一个 ACP 进程、worker 是 N 个（进程池）**：协议改动要同步 `acp-brain.ts` 和 `worker-acp.ts`（后者已类化，别再把状态写在模块级）。
 4. **MCP 按 agent 分派**：kiro 读 `settings/mcp.json`；opencode 读 `opencode.json` 的 `mcp.servers`；DSH 走 ACP `session/new` 的 `mcpServers`。**不要让 A 读 B 的配置文件**。
@@ -124,7 +124,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 6. **Windows `.cmd`/`.bat` 必须经 shell**：统一用 `spawnAgent()`，不要直接 `spawn(bin,args,{shell:true})`（DEP0190 + 注入面）。
 7. **数据按账号隔离**：默认 `~/.wemind/<账号>/`；不要跨账号共用 `brain-sessions.json` / `brain-home`。**一个账号一个 daemon、各有自己的「登录者」**（扫码登录它的那个微信号；不是「主号」，账号之间没有任何隶属关系）：换大脑是**账号级**的，微信侧只有该账号的登录者能切**它自己**那个 daemon，本机 CLI 可用 `key|label` 指定任意账号（范围/限制/两入口区别见 README「多账号管理」与 `docs/repowiki/06`）。
 8. **切换大脑写入磁盘用 `wemind brain set`**；环境变量 `WEMIND_BRAIN*` 是一次性覆盖，不要写进 profile。
-9. **不要把密钥写进预设/源码**；`DEEPSEEK_API_KEY` 等由 daemon 进程环境提供。
+9. **不要把密钥写进 agent/源码**；`DEEPSEEK_API_KEY` 等由 daemon 进程环境提供。
 10. **注释按段落换行，不按行宽折行**：一段一行（多长都不手工断开，编辑器/阅读器自己折行），只有语义上属于不同段落时才另起一行；列表项 / 标题 / 代码围栏 / 分隔线 / 用法表 / 独立命令行各自成行，「标签：内容」行（`用法：` / `退出码：` / `注意：`）另起一行。缩进保留原样——它表达层级，不是折行标记。`oxfmt` 不重排注释，所以别把英文注释按 120 列折回来。
 11. **控制桥只接受「agent 名 + 纯数据」**：`control-bridge.ts` 的请求字段只有 `target`（agent 名）/`ref`/`name`/`text`/`taskId`/`page`，**没有也不可能有 `bin`/`args`/`shell`**——伪造请求最坏只能「选一个已装的 agent 或清掉自己的会话」，绝不能让 daemon 执行任意程序。`wemind brain set` 带 `--bin/--args/--shell` 时**不走桥**（只写入磁盘 + 需重启），这是刻意的边界，不要为了「顺手当场应用」把它拆掉。
 12. **「当前是哪个会话」的唯一权威是 `brain-sessions.json`（当前会话表）**：`session-registry.json` 只是**派生元数据**（名字/标题/轮次），坏了最多导致列表空——它的写失败只许记日志，**不得**抛出拖垮回合；`恢复会话` 是**严格恢复**：load/resume 都失败就如实报错、**不回退新建、不改当前会话记录**（宁可报错，也不要「假恢复」）。
@@ -136,7 +136,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 
 | 任务 | 从这里开始 |
 |---|---|
-| 新增 ACP agent 预设 | `brain-agents.ts` 的 `ACP_AGENT_PRESETS`；按 [`docs/ai/recipes/add-acp-agent.md`](docs/ai/recipes/add-acp-agent.md) |
+| 新增 ACP agent | `brain-agents.ts` 的 `ACP_AGENT_PRESETS`；按 [`docs/ai/recipes/add-acp-agent.md`](docs/ai/recipes/add-acp-agent.md) |
 | 改 ACP 协议/自愈/超时 | `acp-brain.ts` + `worker-acp.ts`（两边同步） |
 | 改**热切换**（等在途回合结束/启动新大脑/回滚） | `brain-switch.ts` + `acp-brain.ts`（`beginSwitch/drainTurn/warmup`）；答复在 `index.ts` 的 `AI`/`切换大脑` 分支 |
 | 改**多任务/进程池/编号** | `worker-pool.ts`（策略纯函数 `planAcquire/planReap`）+ `worker-acp.ts`（`WorkerConn`）+ `task-manager.ts` + `task-store.ts` |
@@ -157,7 +157,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 
 - **默认大脑不是 kiro**：未配置时是 `auto`，按 `kiro → opencode → gemini → deepseek → qoder` 探测；写入磁盘配置在 `<数据目录>/brain.json`。
 - **DeepSeek 已内置 agent**：官方 DSH `dsh --profile acp`；桌面端通常要用 `wemind brain set deepseek --bin "<...>\dsh.cmd"` 落绝对路径，并依赖 `DSH_HOME` 沙箱里的 `.credentials.yaml`（从 `~/.dsh` 同步）。微信 brain/worker E2E、动态 MCP（`mcpViaAcp`）、记忆/技能继承均已验证。详见 [`docs/接入-DeepSeek.md`](docs/接入-DeepSeek.md)。
-- **「无需改代码」有边界**：只对满足「有 `session/load`、不发反向请求、首帧快、MCP 走配置文件」的 agent 成立。DSH 不满足，但已用预设字段 + M2 适配补齐。
+- **「无需改代码」有边界**：只对满足「有 `session/load`、不发反向请求、首帧快、MCP 走配置文件」的 agent 成立。DSH 不满足，但已用 agent 配置字段 + M2 适配补齐。
 - **仓库没有 `Brain` 接口（当前建议）**：ACP agent 本身就是大脑边界；目前只有 ACP 一种实现，当前建议先不抽接口，避免增加间接层。等真的要做「裸 API 大脑」时再抽 `ask/newSession/restart` 契约，并同步 `index.ts` 调用方。
 - **会话映射按大脑分开存**：`brain-sessions.json` 键为 `<agent>:<userId>`、`worker-sessions.json` 为 `<agent>:task`；换大脑不会再拿旧 agent 的 sessionId 去 `session/load`（Qoder 回 `-32602 INVALID_SESSION_IDENTIFIER`，DSH 回 `-32601`），切回原大脑仍能恢复上下文。旧格式（裸 `userId` / `task`）首次读取时自动迁移并回写（`session-map.ts`）。
 - **`wemind brain check` 默认 60s**：冷启动慢的 agent 仍可能误报；这是已知项，不要把它当「agent 不可用」的唯一证据。
@@ -172,7 +172,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 - **切脑与 `wemind stop` 的窄窗口（2026-10-28，已知项）**：切换的 `restart()` 与新进程写 pid 记录之间约 1s，此刻执行 `wemind stop` 可能漏杀新起的 ACP 子进程（与既有的 `/加载` 触发 `restart()` 同类形态，不是本次新引入）。
 - **多任务共享同一份微信额度（2026-10-28）**：连发上限（约 10 条）是**按用户**计的，N 条任务的进度 + 对话大脑的回复都算同一份额度。worker 进度默认安静、结果推送走既有 ret=-2 退避；扛不住就调小 `WEMIND_MAX_WORKERS`。
 - **同 agent 并发 = 两个终端在同一个配置目录里跑（2026-10-28）**：不同 agent 各有 `configSubdir` 天然隔离；同一 agent 的两个 worker 进程共用其配置目录（会话/缓存文件是否互踩**待实测**）。
-- **VS Code 集成终端里 `wemind start` 会「假启动」（2026-10-29 修）**：VS Code 的「智能自动附加」给终端里每个 node 注入 `NODE_OPTIONS=--require <…>/ms-vscode.js-debug/bootloader.js` + `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true`），被注入的进程要**等调试器接上才执行主脚本**；终端里的前台命令会被接上（`stop`/`list` 看着一切正常），但 `start` **脱离出去的看护进程不会被接** → 进程活着、一行 JS 不跑：答复说「已启动」，实际 `daemon.log` / `wrapper.pid` 不更新、daemon 没起（`wemind list` 显示未运行，进程表里只有一个没有子进程的 `cli.js _watchdog`）。现在 `watchdog-runner.ts` 的两次脱离式 spawn 都过 `debug-env.ts` 的 `stripVscodeDebugEnv()`：只摘 VS Code 自己那段 `--require`，用户其它 `NODE_OPTIONS` 原样保留。同一注入也是「本机跑测试偶发超时」的原因——测试用 `NODE_OPTIONS=` 前缀跑。
+- **VS Code 集成终端里 `wemind start` 会「假启动」（2026-10-29 修）**：VS Code 的「智能自动附加」给终端里每个 node 注入 `NODE_OPTIONS=--require <…>/ms-vscode.js-debug/bootloader.js` + `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true`），被注入的进程要**等调试器接上才执行主脚本**；终端里的前台命令会被接上（`stop`/`list` 看着一切正常），但 `start` **脱离出去的后台守护进程不会被接** → 进程活着、一行 JS 不跑：答复说「已启动」，实际 `daemon.log` / `wrapper.pid` 不更新、daemon 没起（`wemind list` 显示未运行，进程表里只有一个没有子进程的 `cli.js _watchdog`）。现在 `watchdog-runner.ts` 的两次脱离式 spawn 都过 `debug-env.ts` 的 `stripVscodeDebugEnv()`：只摘 VS Code 自己那段 `--require`，用户其它 `NODE_OPTIONS` 原样保留。同一注入也是「本机跑测试偶发超时」的原因——测试用 `NODE_OPTIONS=` 前缀跑。
 - **权限口径（2026-10-29 统一，平台事实已确认）**：**必须扫码登录该 bot 才能给它发消息**（微信平台限制），所以每个 bot 只有它的**登录者**（扫码登录它的那个微信号）能发。文档一律用「**登录者**」与「**登录者白名单**（`allowFrom`，**默认拒绝**；它是**兜底校验**，正常只含登录者一个 userId，防发送范围变化/别的入口）」，作用范围写成「**整个账号（仅登录者）**」/「**登录者的会话**」/「**登录者的任务**」；**禁用**「账号本人 / 授权用户 / **主号 / 主账号**」——「主号」会被读成「多个微信账号之间有一个有权限的主号」，`label` 只是别名（示例统一用 `工作号`）。**一个微信账号 = 一个真人、一个 daemon**：微信侧换大脑只能由该账号的登录者切**它自己**那个（`OWNER_ONLY_KINDS`），本机 CLI 才能用 `key|label` 指定任意账号（范围/限制/两入口区别见 README「多账号管理」与 `docs/repowiki/06`「多账号下的范围、两个入口」）。
 - **本次待实测（2026-10-28，先量再写进文档）**：① ACP 是否有 `session/delete`；② 各 agent `session/load` 是否回放历史帧、规模多大；③ 各 agent 冷启动 `initialize`/`session/new` 真实耗时（对 `REQ_TIMEOUT=30s` 的余量）；④ 多任务并行时两条以上 `sendNotice` 是否撞 `ret=-2`；⑤ Windows `taskkill /T /F` 在 `session/load` 途中、以及**杀掉池中某个特定进程**时的行为；⑥ 同 agent 两进程共用配置目录是否互踩；⑦ 被强杀后各 agent 能否 `session/load|resume` 回该任务会话（「重启后续跑」的可行边界由这条决定）。清单在 [`docs/ai/recipes/run-e2e.md`](docs/ai/recipes/run-e2e.md)。
 

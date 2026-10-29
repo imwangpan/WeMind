@@ -1,6 +1,6 @@
 # 跨平台常驻方案（pm2）
 
-WeMind 的 daemon 本体是纯 Node.js，**跨平台**；只有「常驻外壳」（看护进程 + 自启）原先是 Windows + PowerShell 7 专属（`scripts/run-daemon.ps1` + 计划任务）。本文给出一份 **Windows / Linux / macOS 通用**的常驻方案，用 [pm2](https://pm2.keymetrics.io/)。
+WeMind 的 daemon 本体是纯 Node.js，**跨平台**；只有「常驻外壳」（后台守护进程 + 自启）原先是 Windows + PowerShell 7 专属（`scripts/run-daemon.ps1` + 计划任务）。本文给出一份 **Windows / Linux / macOS 通用**的常驻方案，用 [pm2](https://pm2.keymetrics.io/)。
 
 > 配置文件：仓库根的 `ecosystem.config.cjs`（多账号动态生成）。
 > 常驻底层原理见 [daemon-常驻原理.md](daemon-常驻原理.md)。
@@ -13,7 +13,7 @@ pm2 是 Node 生态的进程管理器，**一个工具同时顶替**原来那套
 
 | 能力 | 原 Windows 方案 | pm2 |
 |------|----------------|-----|
-| 崩溃自动重拉（看护进程） | `run-daemon.ps1` 的 `while` 循环 | `autorestart`（内置） |
+| 崩溃自动重拉（后台守护进程） | `run-daemon.ps1` 的 `while` 循环 | `autorestart`（内置） |
 | 开机自启 | 计划任务 / 启动文件夹 VBS | `pm2 startup` + `pm2 save` |
 | 单实例 | 命名 Mutex | 按 app 名天然唯一 |
 | 脱离终端 | 计划任务 / `Start-Process` | pm2 守护化（内置） |
@@ -120,7 +120,7 @@ pm2 save                       # 保存当前列表（改动后记得存，否�
 
 可在 `ecosystem.config.cjs` 各 app 的 `env` 里加（或系统级设置）：
 
-- `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_HOME_ENV` —— 选/配 ACP agent（见 docs/接入其它-ACP-Agent.md）。**更省心**：用 `wemind brain set <agent 名> [--bin <绝对路径>]` 把选择落到账号 `brain.json`——pm2 / 看护进程 / 手动启动都读它，无需在 `env` 里配；
+- `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_HOME_ENV` —— 选/配 ACP agent（见 docs/接入其它-ACP-Agent.md）。**更省心**：用 `wemind brain set <agent 名> [--bin <绝对路径>]` 把选择落到账号 `brain.json`——pm2 / 后台守护进程 / 手动启动都读它，无需在 `env` 里配；
 - `WECHAT_OWNER_ID` —— 覆盖「登录者」（默认取扫码登录者的 userId；`allowFrom` 登录者白名单是兜底）；
 - `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` —— 大脑回合空闲/硬超时。
 
@@ -158,7 +158,7 @@ loginctl enable-linger $USER                                # 允许未登录也
 
 `~/Library/LaunchAgents/com.wemind.<key>.plist`：`ProgramArguments` = `node .../dist/index.js`，加 `EnvironmentVariables.WECHAT_ACCOUNT=<key>`、`KeepAlive=true`、`RunAtLoad=true`，然后 `launchctl load`。
 
-> systemd `Restart=always` / launchd `KeepAlive` 就是看护进程；`enable` / `RunAtLoad` 就是自启；服务单元天然单实例——和 pm2 等价，只是手写 unit。
+> systemd `Restart=always` / launchd `KeepAlive` 就是后台守护进程；`enable` / `RunAtLoad` 就是自启；服务单元天然单实例——和 pm2 等价，只是手写 unit。
 
 ---
 

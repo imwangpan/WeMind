@@ -55,11 +55,11 @@
 
 `worker-acp.ts` 是同一套逻辑的「任务执行」副本（独立进程、独立 session、更长超时），所以**大脑侧的任何协议适配都要同步到 worker**。
 
-### 2.2 预设与沙箱
+### 2.2 agent 与沙箱
 
-- 预设表：`packages/wechat-daemon/src/brain-agents.ts` 的 `ACP_AGENT_PRESETS`。
+- agent 表：`packages/wechat-daemon/src/brain-agents.ts` 的 `ACP_AGENT_PRESETS`。
 - 选择优先级：`WEMIND_BRAIN`（env）> `<数据目录>/brain.json` > `auto`（`kiro → opencode → gemini → deepseek → qoder`）。
-- 沙箱：`BRAIN_HOME`（默认 `<数据目录>/brain-home`），通过预设的 `homeEnvVar` 指向 agent 的配置目录；`configSubdir` 决定配置目录在沙箱内的相对位置。
+- 沙箱：`BRAIN_HOME`（默认 `<数据目录>/brain-home`），通过 agent 的 `homeEnvVar` 指向 agent 的配置目录；`configSubdir` 决定配置目录在沙箱内的相对位置。
 - MCP：brain 默认空；微信指令「加载/卸载」改激活集，重启 ACP 生效；`wechat` 永久禁止（防它把消息发回自己）。**传输方式按 agent 分派**：kiro/opencode 写各自的配置文件；DSH 走 ACP `session/new` 的 `mcpServers`；catalog 也按 agent 各自的约定读取（详见 §5.3 M3）。
 - 记忆继承：`mirrorRealKiro()` 把 `realHome` 下的 `inheritDirs` 目录 junction 进沙箱，`inheritFiles` 单文件拷入。
 
@@ -88,7 +88,7 @@
 **事实（截至 2026-10-24）**：
 
 - npm 最新 `@deepseek-ai/dsh@0.2.1-rc.2`，bin `dsh`；依赖 `@deepseek-ai/dsh-acp-app` / `@deepseek-ai/dsh-acp` 同版本。
-- **桌面端已自带 CLI**：安装在 `<DeepSeek Harness 安装目录>` 下的 `resources\runtime\cli\bin\dsh.cmd`（常见为 `$env:LOCALAPPDATA\Programs\DeepSeek Harness\...`；安装器也可能把它放在其它盘/目录，用 `Get-Command dsh` 或实际安装位置确认）。`dsh --version` 输出 **0.2.1-rc.2**；**该目录只有 `dsh.cmd`（没有无扩展名的 `dsh`）**，所以预设的 `binWin` 要写 `dsh.cmd`（或 `WEMIND_BRAIN_BIN` 指向实际绝对路径），否则 `onPath("dsh")` 找不到。
+- **桌面端已自带 CLI**：安装在 `<DeepSeek Harness 安装目录>` 下的 `resources\runtime\cli\bin\dsh.cmd`（常见为 `$env:LOCALAPPDATA\Programs\DeepSeek Harness\...`；安装器也可能把它放在其它盘/目录，用 `Get-Command dsh` 或实际安装位置确认）。`dsh --version` 输出 **0.2.1-rc.2**；**该目录只有 `dsh.cmd`（没有无扩展名的 `dsh`）**，所以 agent 的 `binWin` 要写 `dsh.cmd`（或 `WEMIND_BRAIN_BIN` 指向实际绝对路径），否则 `onPath("dsh")` 找不到。
 - 启动：`dsh --profile acp`，stdio 上的纯 ACP JSON-RPC；`dsh --profile acp --help` 打印帮助后退出，不占 stdin/stdout。
 - 随附 profile 默认用 `deepseek-official` + `deepseek-v4-flash` 建会话；实测 `session/new` 返回的 `configOptions` 含 `model`（`deepseek-official/deepseek-v4-flash`、`deepseek-account/deepseek-flash`、`deepseek-account/deepseek-v4-pro`）和 `reasoning_effort`（默认 `high`）。
 - 官方 ACP 的定位是 **automation-only**：只暴露标准 ACP v1，不提供 DSH 专属的编辑器呈现（标题、计划卡片、终端卡片、elicitation 等）。
@@ -186,13 +186,13 @@
 | 7 | `session/load` 自愈恢复 | ❌ `-32601`（有 `session/resume`） | ✅ | **新增 `session/resume` 兜底；实测 resume 后上下文保留** |
 | 8 | 反向请求不应答 | 🟡 本轮未观察到；权限请求可能存在 | ⚠️ 可能发 permission | **仍建议新增通用应答器** |
 | 9 | MCP 配置来源 | 无 kiro 式文件；走 ACP `mcpServers`（stdio 实测接受，`http:true`） | 走 ACP `mcpServers` | **按 agent 自己的 catalog；DSH 用中立 catalog + `mcpViaAcp`** |
-| 10 | 首帧 25s | ✅ 实测 1.0–2.3s（简单/工具）；纯推理仍可能静默 | ✅ | **预设 `firstFrameMs` 60s 兜底（≤ idle）** |
-| 11 | Windows 启动 | `dsh.cmd` → shell | `npx.cmd` → shell | 预设 `shell: true` |
+| 10 | 首帧 25s | ✅ 实测 1.0–2.3s（简单/工具）；纯推理仍可能静默 | ✅ | **配置里的 `firstFrameMs` 60s 兜底（≤ idle）** |
+| 11 | Windows 启动 | `dsh.cmd` → shell | `npx.cmd` → shell | 配置里的 `shell: true` |
 | 12 | 进程树清理 | `taskkill /T` 已有 | 同 | 直接复用 |
 | 13 | `wemind brain check` 20s | ✅ 实测握手 1–2s；首次冷启动仍建议放宽 | ⚠️ npx 更慢 | 放宽到 60s |
-| 14 | `auto` 探测 | ⚠️ 只有 `dsh.cmd`，`onPath("dsh")` 找不到 | npx 不参与 | 预设 `binWin: "dsh.cmd"`，或让 `onPath` 补试 `.cmd` |
-| 15 | 静默期 15s 心跳 | 🟡 有 thought/usage/tool 帧，通常能刷新；极端纯推理仍可能静默 | ✅ 流式帧持续刷新 | **预设 `heartbeatMs` / `progressMode: "committed"` 兜底** |
-| 16 | **模型/认证路由** | ⚠️ 默认 `deepseek-official` 需 API key；桌面登录是 `deepseek-account`，**必须显式选** | ✅ `DEEPSEEK_API_KEY` | **新增 `model` 预设字段 + `session/set_config_option`** |
+| 14 | `auto` 探测 | ⚠️ 只有 `dsh.cmd`，`onPath("dsh")` 找不到 | npx 不参与 | 配置里的 `binWin: "dsh.cmd"`，或让 `onPath` 补试 `.cmd` |
+| 15 | 静默期 15s 心跳 | 🟡 有 thought/usage/tool 帧，通常能刷新；极端纯推理仍可能静默 | ✅ 流式帧持续刷新 | **配置里的 `heartbeatMs` / `progressMode: "committed"` 兜底** |
+| 16 | **模型/认证路由** | ⚠️ 默认 `deepseek-official` 需 API key；桌面登录是 `deepseek-account`，**必须显式选** | ✅ `DEEPSEEK_API_KEY` | **新增 `model` agent 配置字段 + `session/set_config_option`** |
 
 **结论**：官方方案要补 **5 类**：模型路由、`session/resume`、图片（硬缺口）、反向请求、首帧/心跳。前 2 类已实测可行，图片取决于官方后续是否打开 `image`。社区方案只差反向请求/心跳，但引入第三方依赖。**若微信收图是必保功能，短期内只能选 B 或对官方禁用收图。**
 
@@ -202,7 +202,7 @@
 
 ### 5.1 选型结论
 
-1. **主方案 A（已实现）**：官方 `dsh --profile acp` 作为 `deepseek` 预设，长期维护。
+1. **主方案 A（已实现）**：官方 `dsh --profile acp` 作为 `deepseek` agent，长期维护。
 2. **暂不采用 B**：社区 `deepseek-acp` 仅备查；按你的要求先只走官方 DSH，不引入第三方依赖。
 3. **不做 C**（除非明确只要聊天）。
 
@@ -233,7 +233,7 @@
    & $dsh --profile acp --help
    ```
 
-   > 只有 `dsh.cmd`（无无扩展名 `dsh`），所以 WeMind 预设要写 `binWin: "dsh.cmd"`，或让 `onPath` 对 `.cmd` 补试。
+   > 只有 `dsh.cmd`（无无扩展名 `dsh`），所以 WeMind agent 要写 `binWin: "dsh.cmd"`，或让 `onPath` 对 `.cmd` 补试。
 
 2. 用 `scripts/acp-probe.mjs`（换行 JSON-RPC、`clientCapabilities:{}`；`ACP_BIN`/`ACP_ARGS` 指到 dsh）驱动 `dsh --profile acp`，逐项记录：
    - `initialize` 返回的 `agentCapabilities`（是否广告 `loadSession`、`session/resume`、`promptCapabilities.image`、`mcpCapabilities`）；
@@ -268,7 +268,7 @@
 
 **产出**：一份实测记录（版本、命令、返回帧、update 类型、耗时、异常），作为本文的「已实测」附录。
 
-#### M1 · 预设 + 沙箱（0.5–1 人日）✅ 已实现
+#### M1 · agent + 沙箱（0.5–1 人日）✅ 已实现
 
 在 `brain-agents.ts` 增加：
 
@@ -300,7 +300,7 @@ deepseek: {
   1. 桌面登录态：`ensureBrainHome()` 会把真实的 `~/.dsh/.credentials.yaml` **新者胜同步**进 `BRAIN_HOME`（本轮实测可行；注意这是敏感文件，Windows 无 600 权限，沙箱目录要收紧）；
   2. API Key：`DEEPSEEK_API_KEY` 由 daemon 环境提供，并把 `model` 设成 `deepseek-official/deepseek-v4-flash`。
 - **模型必须显式选**：默认 `deepseek-official` 需要 API key；桌面登录只对应 `deepseek-account`。不选就会 `no API key`，不是「桌面没登录」。
-- **不要**把 `DEEPSEEK_API_KEY` 写进预设的 `env`（会把密钥固化进源码/构建产物）；daemon 继承进程环境即可。
+- **不要**把 `DEEPSEEK_API_KEY` 写进 agent 的 `env`（会把密钥固化进源码/构建产物）；daemon 继承进程环境即可。
 - `configSubdir` 留空：`DSH_HOME` 本身就是 home。
 - MCP 走 `mcpViaAcp: true`：**不写任何 MCP 配置文件**，激活集由 `toAcpMcpServers()` 转成 `session/new|resume` 的 `mcpServers` 下发（见 M3）。每个 agent 只读自己的 MCP 配置；DSH 的 catalog 用 `WEMIND_MCP_CATALOG` 指向中立文件。
 - `AUTO_PROBE_ORDER` 末尾追加 `"deepseek"`（不要插到 kiro/opencode 前面，避免老用户装了就悄悄换大脑）；`auto` 仍优先 kiro/opencode。
@@ -368,7 +368,7 @@ deepseek: {
 
    注意：**必须应答**，否则 DSH 会一直等；默认拒绝比默认放行安全。
 
-3. **首帧超时按预设覆盖**：
+3. **首帧超时按配置覆盖**：
 
    ```ts
    const FIRST_FRAME_MS =
@@ -386,7 +386,7 @@ deepseek: {
 5. **（可选）`session/close`**：`restart()` / `newSession()` 杀进程前先发 `session/close`，让 DSH 干净写入磁盘；失败忽略。
 
 6. **静默期心跳适配（重要）**：`index.ts` 的 heartbeat 每 15s 在 `lastProgressAt` 超过 15s 时发一条进度，而 `lastProgressAt` 只靠 `session/update` 帧刷新。官方 DSH 没有逐 token 帧，纯推理阶段会连续发「还在思考/仍在处理」，约 8 条后触发 `CONSEC_SEND_LIMIT=10` 的「接近上限」并进入 `awaiting`，最终答案要等用户回「继续」才恢复。建议：
-   - 预设加 `heartbeatMs`（如 60s）或 `progressMode: "committed"`；
+   - agent 加 `heartbeatMs`（如 60s）或 `progressMode: "committed"`；
    - committed 模式下只发一条「该大脑完成后一次性返回」的说明，后续不再按 15s 刷；
    - 不要用假 `activity` 掩盖真实卡死；`WECHAT_BRAIN_CAP_MS` 仍兜底。
 
@@ -399,7 +399,7 @@ DSH 不读 kiro/opencode 的 MCP 配置文件；它自己的 MCP 通过 ACP `ses
    - opencode `{ type:"local", command:[...], environment }` → 拆 `command[0]` / `args` / `env`；
    - `{ url }` → `{ name, type:"http", url, headers }`；
    - 始终排除 `wechat`；**坏条目进 `skipped` 并记日志**（`isConvertibleToAcp` 供 `addMcp` 预校验）。
-2. 预设 `mcpViaAcp: true`：`applySandbox`/`syncSettings` 跳过文件写入；`ensureSession` 把激活集（`activeMcpServers()`）/ worker 全量（`workerMcpServers()`）转成 `mcpServers` 传给 `session/new` / `session/resume`。
+2. 配置里的 `mcpViaAcp: true`：`applySandbox`/`syncSettings` 跳过文件写入；`ensureSession` 把激活集（`activeMcpServers()`）/ worker 全量（`workerMcpServers()`）转成 `mcpServers` 传给 `session/new` / `session/resume`。
 3. **catalog 按 agent 各自的约定读取，不跨 agent 借文件**：DSH 用 `WEMIND_MCP_CATALOG` 指向中立 kiro 格式文件（默认 `~/.dsh/settings/mcp.json` 不存在 → 未设 catalog 时为空）。
 4. **坏条目防护**：官方 `session/new` 遇到起不来的 MCP 会回滚整个会话（实测 `mcp-client: initial connection or tool synchronization failed`）——`addMcp` 预校验拒绝无法转换的定义。
 
@@ -413,11 +413,11 @@ DSH 的布局（官方文档）：
 - 用户技能：`$DSH_HOME/skills`（另有 `~/.agents/skills`）；
 - 项目技能：`<projectRoot>/.dsh/skills`、`<projectRoot>/.agents/skills`。
 
-预设用 `realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGENTS.md"]` 复用 `mirrorRealKiro()`。**验收**：真实 `~/.dsh` 放测试 skill（secret `KIWANO`）+ `AGENTS.md` 规则（`MANGO-42`）→ brain/worker 两沙箱均可读，回答均 `CODEWORD=MANGO-42 SECRET=KIWANO`；验证后已还原。共享根 `~/.agents` 默认不被沙箱影响（`DSH_AGENTS_HOME` 不指向沙箱）。
+agent 用 `realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGENTS.md"]` 复用 `mirrorRealKiro()`。**验收**：真实 `~/.dsh` 放测试 skill（secret `KIWANO`）+ `AGENTS.md` 规则（`MANGO-42`）→ brain/worker 两沙箱均可读，回答均 `CODEWORD=MANGO-42 SECRET=KIWANO`；验证后已还原。共享根 `~/.agents` 默认不被沙箱影响（`DSH_AGENTS_HOME` 不指向沙箱）。
 
 #### M5 · 验证与文档 ✅（除图片/双真机账号外完成）
 
-- `brain-agents.test.ts`：deepseek 预设断言（含 `mcpViaAcp`）；`agent-mcp.test.ts`：`toAcpMcpServers` 转换/跳过/预校验。
+- `brain-agents.test.ts`：deepseek agent 断言（含 `mcpViaAcp`）；`agent-mcp.test.ts`：`toAcpMcpServers` 转换/跳过/预校验。
 - 全量 136 tests 通过；`set_config_option` 失败路径真机验证（非法 model → `-32602 unknown model option` → 默认路由明确报 no API key）。
 - `scripts/doctor.ps1` 升级守卫：dsh 版本 ≠ 0.2.1-rc.2 时提示先跑 `scripts/acp-probe.mjs` 回归。
 - 多账号机制验证：双数据目录各自沙箱/凭据/session 独立；双真机微信账号待需要时再验。
@@ -428,7 +428,7 @@ DSH 的布局（官方文档）：
 | 阶段 | 内容 | 人日 |
 |---|---|---|
 | M0 | 官方/社区冒烟、决策门 | 0.5 |
-| M1 | 预设 + 沙箱 | 0.5–1 |
+| M1 | agent + 沙箱 | 0.5–1 |
 | M2 | **model 选择** / resume / 反向请求 / 首帧 / 心跳 / 图片拦截 / check 超时 | 1–2 |
 | M3 | MCP via ACP（✅ 已实现并验证） | 1–2 |
 | M4 | skills / AGENTS.md 继承 | 0.5 |
@@ -442,17 +442,17 @@ DSH 的布局（官方文档）：
 
 | 文件 | 改动 | 阶段 |
 |---|---|---|
-| `packages/wechat-daemon/src/brain-agents.ts` | 新增 `deepseek` 预设（`binWin: "dsh.cmd"`）；`AcpAgentPreset` 增 `model?` / `restore?` / `firstFrameMs?` / `heartbeatMs?` / `images?` / `credentialFile?`；`ResolvedAgent` 透传；`AUTO_PROBE_ORDER` 末尾加 `deepseek` | M1 |
-| `packages/wechat-daemon/src/acp-brain.ts` | `session/set_config_option` 选 model；`session/resume` 兜底；反向请求应答器；首帧按预设覆盖；图片能力拦截；导出 `supportsImages`/`heartbeatMs` | M2 |
+| `packages/wechat-daemon/src/brain-agents.ts` | 新增 `deepseek` agent（`binWin: "dsh.cmd"`）；`AcpAgentPreset` 增 `model?` / `restore?` / `firstFrameMs?` / `heartbeatMs?` / `images?` / `credentialFile?`；`ResolvedAgent` 透传；`AUTO_PROBE_ORDER` 末尾加 `deepseek` | M1 |
+| `packages/wechat-daemon/src/acp-brain.ts` | `session/set_config_option` 选 model；`session/resume` 兜底；反向请求应答器；首帧按配置覆盖；图片能力拦截；导出 `supportsImages`/`heartbeatMs` | M2 |
 | `packages/wechat-daemon/src/worker-acp.ts` | 同步上述协议项（独立副本） | M2 |
-| `packages/wechat-daemon/src/index.ts` | 静默心跳按预设放宽（`heartbeatMs` / `progressMode`）；收到图片但 agent `image:false` 时友好提示 | M2 |
+| `packages/wechat-daemon/src/index.ts` | 静默心跳按 agent 配置放宽（`heartbeatMs` / `progressMode`）；收到图片但 agent `image:false` 时友好提示 | M2 |
 | `packages/wechat-daemon/src/brain-check.ts` | 默认超时 20s → 60s（**无可用的 env 覆盖**，只能改代码） | M2 |
 | `packages/wechat-daemon/src/agent-mcp.ts` | `toAcpMcpServers()` 三种格式转换 | M3 |
 | `packages/wechat-daemon/src/mcp-sandbox.ts` | `mcpViaAcp` 时跳过文件写入/`syncKiroSettings`；暴露 `activeMcpServers()` | M3 |
-| `packages/wechat-daemon/src/brain-agents.test.ts` | 预设断言 | M5 |
+| `packages/wechat-daemon/src/brain-agents.test.ts` | agent 断言 | M5 |
 | `packages/wechat-daemon/src/agent-mcp.test.ts` | 转换单测 | M5 |
 | `docs/接入-DeepSeek.md` | 本文（已补真机实测附录） | M0/M5 |
-| `docs/接入其它-ACP-Agent.md` / `README.md` | 预设表 + 使用说明 | M5 |
+| `docs/接入其它-ACP-Agent.md` / `README.md` | agent 表 + 使用说明 | M5 |
 
 ---
 
@@ -479,10 +479,10 @@ $env:DEEPSEEK_API_KEY = "sk-..."
 # 把 ~/.dsh/.credentials.yaml 复制/链入 BRAIN_HOME（沙箱），或让 DSH_HOME 直接指向真实 ~/.dsh
 ```
 
-> - **必须选对路由**：桌面登录态只对 `deepseek-account` 有效；不显式选 model 时会落到 `deepseek-official`，报 `no API key`。预设里写 `model: '["deepseek-account","deepseek-flash"]'`。
+> - **必须选对路由**：桌面登录态只对 `deepseek-account` 有效；不显式选 model 时会落到 `deepseek-official`，报 `no API key`。agent 里写 `model: '["deepseek-account","deepseek-flash"]'`。
 > - `DEEPSEEK_API_KEY` 必须对 **daemon 进程**可见。用 `scripts/run-daemon.ps1` / pm2 启动时，请写进脚本/`ecosystem.config.cjs` 的 `env`，不要依赖交互式 shell。
 > - `.credentials.yaml` 是敏感文件；复制进 `BRAIN_HOME` 后要收紧该目录权限（Windows 没有 POSIX 600，建议专用 OS 账号 + 目录 ACL）。
-> - 桌面端 CLI 只有 `dsh.cmd`（无无扩展名 `dsh`）：预设用 `binWin: "dsh.cmd"`；若想用绝对路径，`WEMIND_BRAIN_BIN` 指向上面的 `dsh.cmd`。
+> - 桌面端 CLI 只有 `dsh.cmd`（无无扩展名 `dsh`）：agent 用 `binWin: "dsh.cmd"`；若想用绝对路径，`WEMIND_BRAIN_BIN` 指向上面的 `dsh.cmd`。
 
 ### 7.2 切换与自检
 
@@ -525,20 +525,20 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 |---|---|---|---|
 | R1 | **凭据来源**：`DSH_HOME` 指向沙箱后，真实 `.credentials.yaml` 不可见 | 桌面登录态用不了，必须 API Key | 实测：把 `.credentials.yaml` 复制进沙箱即可；或用 `DEEPSEEK_API_KEY`。敏感文件，收紧目录权限 |
 | R2 | 当前代码只调 `session/load`，DSH 返回 `-32601` | 自愈后**静默新建会话**，多轮记忆丢失 | 实现 `session/resume` 兜底；**已实测 resume 保留 PINEAPPLE 上下文（含 `taskkill /T /F` 强杀）** |
-| R3 | 官方只发「已提交」正文；纯推理阶段可能无帧 | 首帧误杀 + 心跳刷屏 | 实测首帧 1–2.3s，有 thought/tool/usage 帧；预设 `firstFrameMs` 60s、`heartbeatMs` 60s 兜底 |
+| R3 | 官方只发「已提交」正文；纯推理阶段可能无帧 | 首帧误杀 + 心跳刷屏 | 实测首帧 1–2.3s，有 thought/tool/usage 帧；配置里的 `firstFrameMs` 60s、`heartbeatMs` 60s 兜底 |
 | R4 | 反向请求 `session/request_permission` 无人应答 | 整轮卡死到超时 | M2 通用应答器；默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才放行 |
 | R5 | DSH 不读 kiro 式 MCP 文件；catalog 来源不同 | 动态 MCP 不可用/配错 | M3 按 agent 各自的 catalog；DSH 用 `WEMIND_MCP_CATALOG` 或 `mcpViaAcp`；stdio 已实测接受 |
 | R6 | 第三方 `deepseek-acp` 供应链 / 维护 | 长期不可控 | 只作冒烟/回退；锁版本；不默认启用 |
 | R7 | 版本是 RC，ACP 行为可能变化 | 升级即坏 | 锁 `0.2.1-rc.2`；升级先跑 M0 脚本；文档记录版本 |
 | R8 | Node ≥22（社区包明确；官方以安装包为准），而仓库声明 ≥20 | 旧环境起不来 | 文档标注；`agentProblem` 加 `minNode` 检查；M0 记录 |
 | R9 | DSH 的 Windows ACL 沙箱只限制普通 NTFS 写，不限制读/网络/进程可见性 | 微信侧提示注入可外带本机文件 | `allowFrom` 登录者白名单；专用 OS 账号；`workspace-write`；不要把敏感目录设为 worker cwd |
-| R10 | 模型/路由选择 | 不选就落到 official 路由，需 API key | 预设 `model` + `session/set_config_option`；桌面登录用 `deepseek-account` |
-| R11 | 桌面端 CLI 只有 `dsh.cmd`，无无扩展名 `dsh` | `onPath("dsh")` 找不到，`auto`/预设判不可用 | 预设 `binWin: "dsh.cmd"`；或让 `onPath` 对 `.cmd` 补试；`WEMIND_BRAIN_BIN` 绝对路径兜底 |
+| R10 | 模型/路由选择 | 不选就落到 official 路由，需 API key | 配置里的 `model` + `session/set_config_option`；桌面登录用 `deepseek-account` |
+| R11 | 桌面端 CLI 只有 `dsh.cmd`，无无扩展名 `dsh` | `onPath("dsh")` 找不到，`auto`/agent 判不可用 | 配置里的 `binWin: "dsh.cmd"`；或让 `onPath` 对 `.cmd` 补试；`WEMIND_BRAIN_BIN` 绝对路径兜底 |
 | R12 | 多账号 / pm2 环境变量传递 | key 不生效 | 文档给 pm2 / `Start-Process -Environment` 示例 |
 | R13 | 成本与长上下文 | 账单/延迟 | 限制 `allowFrom`；观察 usage；`WECHAT_BRAIN_CAP_MS` 兜底 |
 | R14 | Windows `dsh.cmd` 经 shell 的引号/元字符 | 启动失败 | 复用现有 `spawnAgent` 的逐参数引号；`WEMIND_BRAIN_BIN` 可指向绝对路径 |
 | R15 | **官方 `image:false`**，带图 prompt `-32602` | 微信收图/看图功能不可用 | M1 拦截并友好提示；若要保留收图，短期选 B `deepseek-acp` 或等官方 |
-| R16 | 静默期心跳每 15s 一条 | 约 8 条后触发 10 条连发上限，最终答案要等用户回「继续」 | 预设 `heartbeatMs` / committed 模式；实测有 thought/usage 帧，触发概率降低 |
+| R16 | 静默期心跳每 15s 一条 | 约 8 条后触发 10 条连发上限，最终答案要等用户回「继续」 | 配置里的 `heartbeatMs` / committed 模式；实测有 thought/usage 帧，触发概率降低 |
 | R17 | `session/resume` 不重放历史更新 | WeMind 不需要回放；只要上下文在即可 | **已实测上下文保留**（PINEAPPLE）；只拼新回合 chunk |
 | R18 | **默认模型路由与桌面登录不匹配** | 桌面已登录仍报 `no API key for deepseek-official` | 必须 `session/set_config_option` 到 `deepseek-account/*`；或改用 API key |
 | R19 | DSH stdout 混入非 JSON 日志行 | 严格解析器可能报错/卡住 | 当前客户端忽略非 JSON；新增解析器要保持容错 |
@@ -548,7 +548,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 
 ## 9. 决策建议
 
-- **M1/M2 已实现**：`deepseek` 预设（`dsh.cmd` + `DSH_HOME` + `.credentials.yaml` 同步 + `model` 选择）、`resume` 兜底、反向请求应答、`firstFrameMs`/`heartbeatMs`、图片拦截。
+- **M1/M2 已实现**：`deepseek` agent（`dsh.cmd` + `DSH_HOME` + `.credentials.yaml` 同步 + `model` 选择）、`resume` 兜底、反向请求应答、`firstFrameMs`/`heartbeatMs`、图片拦截。
 - **M0 已真机验证**：`initialize` / `session/new` / prompt / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 图片（-32602）/ stdio MCP 均已验；代码级集成测试 `A1=STORED`、`A2=PINEAPPLE` 通过；**微信 E2E 已通过**（`spawn deepseek` → `model set` → `prompt ok` → 收到回复）。
 - **B 暂不采用**：按你的要求先只走官方 DSH；社区 `deepseek-acp` 仅保留在文档里备查。
 - **若「微信收图」是必保功能**：官方当前 `image:false`，当前实现会友好拒绝；把「官方打开 image」作为跟进项，再讨论是否值得引入 B。

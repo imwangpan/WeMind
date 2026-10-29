@@ -1,6 +1,6 @@
 # 6. ACP 大脑与沙箱
 
-> 上一页：[5. 守护进程 Daemon](05-守护进程-Daemon.md) ｜ 下一页：[7. 远程任务 Worker](07-远程任务-Worker.md)
+> 上一页：[5. daemon](05-daemon.md) ｜ 下一页：[7. 远程任务 Worker](07-远程任务-Worker.md)
 >
 > **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28 ｜ 代码以当前 `main` 为准。
 
@@ -68,7 +68,7 @@ graph TD
 - **每用户一个 ACP session**，映射持久化到 `brain-sessions.json`（键 `<agent>:<userId>`，按大脑分开存：切换 agent 后各自的会话互不覆盖，切回去仍能恢复），跨进程重建保上下文。这张**当前会话表是「当前是哪个会话」的唯一权威**。
 - 另有**会话登记表** `session-registry.json`（`session-registry.ts`）：每个成功回合记录 `turns+1` 与首条用户消息的标题（`titleOf`，剥掉交接前缀）、`lastUsedAt` 刷新；每 (agent,userId) 上限 50 条，淘汰**未命名**最旧、**绝不淘汰当前会话记录当前指向的那条**；daemon **启动时**按当前会话表回填一次（`syncFromPointerMap`，把功能上线前就存在的老会话补齐——运行中删掉它不会自动重建，下次启动才补）。它只是**派生元数据**——坏了最多导致「列表空」，写失败只记日志（不拖垮回合）。
 - 会话管理指令（微信与 CLI 同源，实现层 `session-manager.ts`）：`新会话 [名字]` / `会话列表 [页]` / `恢复会话 <序号|名字|id前缀>` / `重命名会话 <序号> <名字>` / `删除会话 <序号>`；CLI 为 `wemind session new|list|resume|rename|delete`。
-- **`恢复会话` 是严格恢复**：`resumeSession(userId, sessionId)` 按预设试 `session/load` → `session/resume`，**都失败就如实报错、不回退 `session/new`、不改当前会话记录**（宁可报错，也不要「假恢复」）；成功才写当前会话记录 + 刷新登记表。目标已是当前会话时直接回「当前就在这条会话上」（省一次往返）。
+- **`恢复会话` 是严格恢复**：`resumeSession(userId, sessionId)` 按该 agent 支持的方式试 `session/load` → `session/resume`，**都失败就如实报错、不回退 `session/new`、不改当前会话记录**（宁可报错，也不要「假恢复」）；成功才写当前会话记录 + 刷新登记表。目标已是当前会话时直接回「当前就在这条会话上」（省一次往返）。
 - `会话列表` 只列**本人 + 当前大脑**的会话，末尾提示「另有 N 条属于其它大脑的会话，切回该大脑后可恢复」。
 - `删除会话` 只删 WeMind 的登记（若是当前会话则同时清当前会话记录，下条消息自然开新的）；回复会写明「agent 自己那份历史记录不在 WeMind 手里」——ACP 没有可验证的 `session/delete`（**待实测**）。
 - `newSession(userId)`：丢弃旧 session（含磁盘映射），重建全新会话（对应微信指令「新会话」）。
@@ -103,7 +103,7 @@ graph TD
 | | 微信 `切换大脑 X` | 本机 CLI `wemind brain switch X [<key\|label>]` |
 | --- | --- | --- |
 | 作用对象 | **消息进来的那个账号**（daemon 是哪个就切哪个） | **任意账号**（省略 = 默认账号）；`--worker`（设默认任务大脑）走另一条桥命令 `brain.worker` |
-| 谁能做 | 仅该账号**登录者**（微信平台只发送登录者本人的消息；代码里另有兜底校验：非登录者会被短提示拒绝、不进大脑，见 [5. Daemon](05-守护进程-Daemon.md) §5.4 的权限模型） | 能在本机写 `~/.wemind/<key>/control-inbox/` 的人（= 机主）；不走微信、也不经微信侧「只认登录者」那道门 |
+| 谁能做 | 仅该账号**登录者**（微信平台只发送登录者本人的消息；代码里另有兜底校验：非登录者会被短提示拒绝、不进大脑，见 [5. daemon](05-daemon.md) §5.4 的权限模型） | 能在本机写 `~/.wemind/<key>/control-inbox/` 的人（= 机主）；不走微信、也不经微信侧「只认登录者」那道门 |
 | daemon 在跑 | 进程内热切换（上面的流程） | 经控制桥转给**同一个** `switchBrain`；CLI 超时自动放大到 等在途回合结束+启动新大脑+15s |
 | daemon 没跑 | —（没有 daemon 就没有微信侧） | `brain switch` 退化为「只写该账号的 `brain.json` + 注明下次启动生效」；`--worker` 必须先有 daemon（这个设置只存在进程内） |
 | 写入磁盘 | 成功才写该账号的 `brain.json` | 同上（同一段代码） |
@@ -122,13 +122,13 @@ graph TD
 
 > **心跳注意**：`index.ts` 每 `HEARTBEAT_MS` 检查 `lastProgressAt`，只有 `session/update` 帧会刷新它。纯推理/committed-only 的 agent 长时间无帧时，会连续发「还在思考」，占微信约 10 条连发额度。
 >
-> 默认是 15s，但**三层可覆盖**（优先级从高到低）：`WECHAT_BRAIN_HEARTBEAT_MS` env → 预设 `heartbeatMs`（DSH 已设为 60s）→ 15s 兜底。接新 agent 时优先在预设里设 `heartbeatMs`，而不是让用户配 env。
+> 默认是 15s，但**三层可覆盖**（优先级从高到低）：`WECHAT_BRAIN_HEARTBEAT_MS` env → 配置里的 `heartbeatMs`（DSH 已设为 60s）→ 15s 兜底。接新 agent 时优先在 agent 里设 `heartbeatMs`，而不是让用户配 env。
 
 每个会话首轮会带上一段「可发图」系统提示，告诉大脑：需要发图时用 Markdown `![](图片链接或本地绝对路径)`，并提示**服务器从中国大陆下载图片**，优先选可直链下载的源（如 `raw.githubusercontent.com`），避开被墙或带热链保护的图床。该提示只影响「发图」；「收图」取决于 agent 的 `image` 能力。
 
 ## 6.3 brain 的 MCP 沙箱（mcp-sandbox.ts）
 
-大脑跑在一个独立沙箱（`BRAIN_HOME`，默认 `<数据目录>/brain-home`，由预设的 `homeEnvVar` 指向），目的有三：
+大脑跑在一个独立沙箱（`BRAIN_HOME`，默认 `<数据目录>/brain-home`，由 agent 的 `homeEnvVar` 指向），目的有三：
 
 1. **隔离** —— 大脑的配置/会话与你本机日常用的 agent 分开；
 2. **杜绝回环** —— 默认不加载 `wechat` 自身 MCP（否则 bot 用同一 token 长轮询、与 daemon 抢消息）；
@@ -158,11 +158,11 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 
 `settings/` 里**除 `mcp.json` 外**的文件（尤其 `cli.json`，含 `chat.defaultModel` —— 决定大脑用哪个模型！）会同步进沙箱。**只有 `mcp.json` 隔离 curated**（防 `wechat` 回环），`sessions`（brain 自有会话）保持沙箱本地。
 
-预设带 `settingsBase` 时（qoder）走另一条分支：读真实目录的该文件作基底，删除 `mcpServers` / `enabledPlugins` / `providers` / `model`，并强制 `general.enableAutoUpdate=false`，再写入沙箱配置目录；MCP 仍由 `applySandbox()` 权威覆盖。
+agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的该文件作基底，删除 `mcpServers` / `enabledPlugins` / `providers` / `model`，并强制 `general.enableAutoUpdate=false`，再写入沙箱配置目录；MCP 仍由 `applySandbox()` 权威覆盖。
 
 > 一个被修复的坑：早期 brain 沙箱缺 `chat.defaultModel`，大脑用 kiro 默认模型而非用户配置的模型，导致「同样任务比直接用 kiro 问题多」。修复后继承真实 settings。**注意：换模型后旧 ACP 会话可能仍绑旧模型，需在微信发「新会话」重建。**
 
-`ensureBrainHome()` 启动时按顺序执行：`syncSettings`（含 `settingsBase` 基底生成）→ `applySandbox`（写 curated mcp.json；`mcpViaAcp` 预设如 DSH 跳过文件，改由 `activeMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发）→ `mirrorRealKiro` → `syncCredentials`（`credentialFiles` 新者胜 + `identityFiles` 内容不同即覆盖）。
+`ensureBrainHome()` 启动时按顺序执行：`syncSettings`（含 `settingsBase` 基底生成）→ `applySandbox`（写 curated mcp.json；配了 `mcpViaAcp` 的 agent 如 DSH 跳过文件，改由 `activeMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发）→ `mirrorRealKiro` → `syncCredentials`（`credentialFiles` 新者胜 + `identityFiles` 内容不同即覆盖）。
 
 ## 6.4 可配置的 agent（brain-agents.ts）
 
@@ -174,7 +174,7 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 
 内置 agent：
 
-| 预设 | agent | 类型 | 状态 | 启动 |
+| agent | agent | 类型 | 状态 | 启动 |
 |------|-------|------|------|------|
 | `kiro` | kiro-cli | 原生 ACP | ✅ 已实测 | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
 | `opencode` | OpenCode | 原生 ACP | ✅ 已实测 | `opencode acp`，`XDG_CONFIG_HOME` |
@@ -194,16 +194,16 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 |----|------|------|
 | 环境变量 | `WEMIND_BRAIN` / `_BIN` / `_ARGS` / `_HOME_ENV` / `_SHELL` / `_INHERIT` / `_REAL_HOME` / `_INHERIT_DIRS` / `KIRO_CLI_BIN`；worker 侧 `WEMIND_WORKER_BRAIN` | 一次性覆盖（临时试别的 agent，别写进 profile） |
 | 账号配置 | `<数据目录>/brain.json`：`{ agent, bin?, args?, shell?, homeEnvVar?, worker?: {…}, presets?: { <agent 名>: {…} } }` | **持久选择**，任何入口重启都复现 |
-| `auto` | 未配置时按 `kiro → opencode → gemini → deepseek → qoder` 探测第一个可用预设 | 缺省兜底 |
+| `auto` | 未配置时按 `kiro → opencode → gemini → deepseek → qoder` 探测第一个可用 agent | 缺省兜底 |
 
-- **`presets` 段（1.2.0 新增）**：按**agent 名**保存启动覆盖（`--bin`/`--args`/`--shell`/`homeEnvVar`）。因为顶层那几个字段是「当前 agent 的覆盖」，切走再切回就会丢（典型：DSH 的 `--bin <绝对路径>`）——换 agent 时旧覆盖自动迁进 `presets[旧预设]`，同一 agent 再次 `set` 时沿用未给出的字段。
-- **`worker` 段**：默认任务大脑（`{agent, bin?, args?, shell?, homeEnvVar?}`）。它也带 `presets` 查找上下文——`agentConfigFor("worker")` 会把顶层的 `presets` 带进 worker 段，否则「有 `worker.agent` 时 `presets[预设]` 查不到」、`--bin` 之类覆盖会静默失效。
+- **`presets` 段（1.2.0 新增）**：按**agent 名**保存启动覆盖（`--bin`/`--args`/`--shell`/`homeEnvVar`）。因为顶层那几个字段是「当前 agent 的覆盖」，切走再切回就会丢（典型：DSH 的 `--bin <绝对路径>`）——换 agent 时旧覆盖自动迁进 `presets[旧 agent]`，同一 agent 再次 `set` 时沿用未给出的字段。
+- **`worker` 段**：默认任务大脑（`{agent, bin?, args?, shell?, homeEnvVar?}`）。它也带 `presets` 查找上下文——`agentConfigFor("worker")` 会把顶层的 `presets` 带进 worker 段，否则「有 `worker.agent` 时 `presets[agent]` 查不到」、`--bin` 之类覆盖会静默失效。
 - 切换用 CLI：`wemind brain set <agent 名|auto> [--bin X] [--args "…"] [--restart]`、`wemind brain unset`、`wemind brain`（查看）、`wemind brain check`（真起进程跑 ACP 握手）、**`wemind brain switch <agent 名|auto> [--worker]`（运行时换大脑，见 §6.2）**。`brain set` 现在是**读-改-写**（早期版本是整体覆盖，会把 `worker`/`presets` 段抹掉），并且**在 daemon 在跑且认控制桥时，纯 agent 名会立刻当场应用（不用重启）**（等价 `brain switch`：先启动新大脑、成功才写入磁盘）；带 `--bin`/`--args`/`--shell` 时仍是「只写入磁盘 + 需重启生效」——控制桥刻意不接受这些字段（安全边界，见 §7.5）。daemon 没跑（或跑的是不认桥的旧版）时同样是「写入磁盘 + 下次启动生效」，答复会写明。
-- **启动即校验**：daemon 起来时先解析并校验二进制；不可用则 `[wemind/wechat-daemon] FATAL 大脑不可用：…` 并以退出码 78 退出（看护进程据此停止自动重启，不再每 5s 刷屏）；未知 agent 名也不再静默回退 kiro。
+- **启动即校验**：daemon 起来时先解析并校验二进制；不可用则 `[wemind/wechat-daemon] FATAL 大脑不可用：…` 并以退出码 78 退出（后台守护进程据此停止自动重启，不再每 5s 刷屏）；未知 agent 名也不再静默回退 kiro。
 
 | 环境变量 | 作用 |
 |----------|------|
-| `WEMIND_BRAIN` | 选预设（默认 `auto`） |
+| `WEMIND_BRAIN` | 选 agent（默认 `auto`） |
 | `WEMIND_BRAIN_BIN` | 覆盖二进制 |
 | `WEMIND_BRAIN_ARGS` | 覆盖启动参数（空格分隔） |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖配置目录环境变量名 |

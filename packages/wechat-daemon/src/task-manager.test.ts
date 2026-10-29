@@ -84,7 +84,7 @@ beforeEach(() => {
   resetTasksForTest(tmpDir);
   resetSlotsForTest();
   setSlotAgent("worker", AG("kiro"));
-  // 显式 `agentKey`（`任务 <agent 名>：`）走的是真实预设解析 + 可用性预检：把用到的预设指向本机 node（不 spawn，池是 mock 的）
+  // 显式 `agentKey`（`任务 <agent 名>：`）走的是真实 agent 解析 + 可用性预检：把用到的 agent 指向本机 node（不 spawn，池是 mock 的）
   fs.writeFileSync(
     path.join(tmpDir, "brain.json"),
     JSON.stringify({
@@ -607,7 +607,7 @@ describe("本地命令的答复（daemon 说了才算）", () => {
   it("正文为空 / agent 用不了：当场答复，不派也不占编号", () => {
     dispatchTask("u1", "   ", { ackId: "ack-3" });
     expect(acks[0].text).toContain("空");
-    dispatchTask("u1", "做X", { agentKey: "不存在的预设", ackId: "ack-4" });
+    dispatchTask("u1", "做X", { agentKey: "不存在的 agent", ackId: "ack-4" });
     expect(acks[1].text.startsWith("❌")).toBe(true);
     expect(listTasks("u1").length).toBe(0);
   });

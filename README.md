@@ -2,15 +2,15 @@
 
 > _Your AI mind, reachable on WeChat. —— 你的 AI 大脑，在微信上随时可达。_
 
-WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态（均已发布到 npm）：一个 MCP Server 子包（`@wemind/wechat-mcp`），和一个常驻守护进程（`@wemind/cli`）。
+WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态（均已发布到 npm）：一个 MCP Server 子包（`@wemind/wechat-mcp`），和一个常驻 daemon（`@wemind/cli`）。
 
 | 形态 | 怎么装 | 适合 |
 | --- | --- | --- |
 | **MCP Server**（`wemind-mcp`） | `npx -y @wemind/wechat-mcp` | 在 Claude Desktop / Cursor / OpenCode / Kiro 等已有客户端里让 AI 收发你的微信 |
-| **常驻守护进程**（命令 `wemind`） | `npm i -g @wemind/cli` | 要一个自己常驻、7×24 自动回复、还能远程派任务的微信 AI 助手 |
+| **常驻 daemon**（命令 `wemind`） | `npm i -g @wemind/cli` | 要一个自己常驻、7×24 自动回复、还能远程派任务的微信 AI 助手 |
 
 ```bash
-# 常驻守护进程的典型三步
+# 常驻 daemon 的典型三步
 npm i -g @wemind/cli
 wemind login --label 工作号 --start    # 微信扫码登录 + 启动常驻
 wemind list                          # 查看运行状态
@@ -65,7 +65,7 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 | [RepoWiki 首页](docs/repowiki/README.md)                 | 按角色的阅读导航 + 章节目录                             |
 | [系统架构](docs/repowiki/02-系统架构.md)                 | 三包协作、两种接入形态、poller/worker 解耦、双 ACP 进程 |
 | [iLink 协议内核](docs/repowiki/03-iLink-协议内核.md)     | HTTP 客户端、协议类型、错误码、收发图加解密             |
-| [守护进程 Daemon](docs/repowiki/05-守护进程-Daemon.md)   | 消息路由、回合编排、连续发送上限管理                    |
+| [daemon](docs/repowiki/05-daemon.md)   | 消息路由、回合编排、连续发送上限管理                    |
 | [ACP 大脑与沙箱](docs/repowiki/06-ACP-大脑与沙箱.md)     | 常驻 ACP 进程、MCP 沙箱、记忆继承、换大脑               |
 | [远程任务 Worker](docs/repowiki/07-远程任务-Worker.md)   | 受控工作机、任务状态机、微信/本地双入口                 |
 | [配置项与环境变量](docs/repowiki/09-配置项与环境变量.md) | 全部 env 速查表                                         |
@@ -95,7 +95,7 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 | --------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
 | `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（内联进 mcp-server）       |
 | `@wemind/wechat-mcp`        | `packages/wechat-mcp`        | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入                                 | **已发布**（bin: `wemind-mcp`） |
-| `@wemind/cli`               | `packages/wechat-daemon`     | 独立常驻守护进程：长轮询 + 常驻 ACP 大脑自动收发                                             | **已发布**（命令 `wemind`）     |
+| `@wemind/cli`               | `packages/wechat-daemon`     | 独立常驻 daemon：长轮询 + 常驻 ACP 大脑自动收发                                             | **已发布**（命令 `wemind`）     |
 
 > 📌 上表「发布」列指的是**该子包**是否发布到 npm：对外发布的是 `@wemind/wechat-mcp`（MCP 形态）与 `@wemind/cli`（完整应用 CLI，命令 `wemind`）两个入口。两者共用同一个 bot token 时**只能二选一**。
 
@@ -260,11 +260,11 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 - **服务稳定性**：这是腾讯新开放的插件功能，官方条款保留随时停服的权利，请勿用于关键业务。
 - 需要较新的微信客户端并启用 ClawBot 插件。
 
-## 守护进程（daemon）：脱离 IDE/终端常驻自动收发
+## daemon：脱离 IDE/终端常驻自动收发
 
-> 📦 **作为 `wemind` CLI 使用**：本守护进程已发布为 **`@wemind/cli`**，装完得到 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`；常驻默认用自带看护进程，也可 `--runner pm2`）。`npm i -g @wemind/cli` 后即可全局使用；包名与命令名不同，`npx` 请写 `npx -y @wemind/cli`。发布与版本约定见 [`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)；也可以按下文从源码运行。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**。
+> 📦 **作为 `wemind` CLI 使用**：本 daemon 已发布为 **`@wemind/cli`**，装完得到 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`；常驻默认用自带后台守护进程，也可 `--runner pm2`）。`npm i -g @wemind/cli` 后即可全局使用；包名与命令名不同，`npx` 请写 `npx -y @wemind/cli`。发布与版本约定见 [`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)；也可以按下文从源码运行。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**。
 
-`packages/wechat-daemon/` 提供一个独立守护进程：自己长轮询 iLink 收消息 →
+`packages/wechat-daemon/` 提供一个独立 daemon：自己长轮询 iLink 收消息 →
 调 **常驻 ACP agent**（JSON-RPC over stdio；未配置时 `auto` 探测 kiro/opencode/gemini/deepseek/qoder）当大脑生成回复 → 自动回发。
 进程常驻、原生多轮记忆，回复从 `agent_message_chunk` 流式拼接（天然无 ANSI/工具旁白）；
 带**存活检测**（进程不在自动重启）。运行时只依赖第三方 `qrcode`（登录画码时才加载），内核 `@wemind/wechat-ilink-core` 已内联进产物，不碰 MCP 那层，是一个完全独立、可单独运行的包。
@@ -476,7 +476,7 @@ Register-ScheduledTask -TaskName "wemind-daemon" -Action $action -Trigger (New-S
 
 > **注意 · node 由版本管理器管理时**：若 `node` 由 **fnm / nvm / Volta** 这类「只往交互 shell 注入 PATH」的工具管理，登录任务/服务（`-NoProfile`、无 shell 注入）的持久 PATH 里通常**没有 node**：wrapper 会找不到它，且 daemon 拉起的大脑（如 `opencode acp`）也解析不到。`scripts/run-daemon.ps1` 已内置回退（fnm `%APPDATA%\fnm\aliases\default`、Volta、`C:\Program Files\nodejs`）并把命中目录**前置进 PATH**；若安装位置不在其中，请改脚本候选或直接用绝对路径的 node 启动。另：PS7 若只以 WindowsApps 别名存在（无 `C:\Program Files\PowerShell\7\pwsh.exe`），优先走上面的 VBS 退路。
 
-> 常驻底层原理（三层进程树、wrapper 看护进程循环、单实例 Mutex、开机自启、多账号隔离、pid 链与故障恢复）详见 [docs/daemon-常驻原理.md](docs/daemon-常驻原理.md)。
+> 常驻底层原理（三层进程树、wrapper 后台守护进程循环、单实例 Mutex、开机自启、多账号隔离、pid 链与故障恢复）详见 [docs/daemon-常驻原理.md](docs/daemon-常驻原理.md)。
 >
 > **跨平台（Windows/Linux/macOS）常驻**：用 pm2 + 根目录 `ecosystem.config.cjs` 即可，详见 [docs/跨平台常驻-pm2.md](docs/跨平台常驻-pm2.md)。上面的 PowerShell 方案为 Windows 专用，二者对同一账号**只用一套**。
 
@@ -553,13 +553,13 @@ npx -y @wemind/cli version          # 不想全局装：注意写全包名，npx
 这是微信**连续发送上限（约 10 条）**的保护：进度消息也占额度。回复「继续」即可接着来；长任务建议拆小。
 
 **两个 bot 抢消息 / 同一条消息回两遍**
-同一 bot token **只能有一个消费者**。检查是否同时跑了 `wemind` 守护进程和 `@wemind/wechat-mcp`，或同一账号被启用了两套常驻（pm2 + 内置看护进程），二选一。
+同一 bot token **只能有一个消费者**。检查是否同时跑了 `wemind` daemon 和 `@wemind/wechat-mcp`，或同一账号被启用了两套常驻（pm2 + 内置后台守护进程），二选一。
 
 **改了代码/升级后行为没变**
 正在运行的 daemon 不会自动换代码：`wemind stop <账号> && wemind start <账号>`。
 
 **安全提示**
-守护进程用 `--trust-all-tools`（内置的 kiro），**消息一旦被接受**即可让 AI 在本机执行工具。**微信平台只发送登录者本人的消息**（必须扫码登录该 bot 才能给它发消息），代码里另有**登录者白名单（allowFrom）**作为兜底：默认拒绝、默认只放行「登录者」（扫码登录这个 bot 的那个微信号，登录时自动写入），**请勿清空**。详见 [安全说明](#安全说明) 与[守护进程一节的「安全（务必读）」](#守护进程daemon脱离-ide终端常驻自动收发)。
+daemon 用 `--trust-all-tools`（内置的 kiro），**消息一旦被接受**即可让 AI 在本机执行工具。**微信平台只发送登录者本人的消息**（必须扫码登录该 bot 才能给它发消息），代码里另有**登录者白名单（allowFrom）**作为兜底：默认拒绝、默认只放行「登录者」（扫码登录这个 bot 的那个微信号，登录时自动写入），**请勿清空**。详见 [安全说明](#安全说明) 与[daemon 一节的「安全（务必读）」](#daemon脱离-ide终端常驻自动收发)。
 
 更多排障：[docs/ai/recipes/debug-daemon.md](docs/ai/recipes/debug-daemon.md) ｜ 面向新手的完整 FAQ：[docs/新手教程.md](docs/新手教程.md) §常见问题
 

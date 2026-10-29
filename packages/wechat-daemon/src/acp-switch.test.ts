@@ -78,7 +78,7 @@ function handle(f) {
 `,
 );
 
-/** 让某预设指向假 agent（bin 用当前 node，args 带上脚本与模式）。 */
+/** 让某个 agent 指向假 agent（bin 用当前 node，args 带上脚本与模式）。 */
 function presetArgs(mode: string): { bin: string; args: string[] } {
   return { bin: process.execPath, args: [FAKE, mode] };
 }
@@ -143,7 +143,7 @@ describe("preflightSwitch", () => {
     expect(spawnCount()).toBe(0);
   });
 
-  it("预设有名无实（bin 找不到）：失败并说明怎么修，不 spawn", async () => {
+  it("agent 有名无实（bin 找不到）：失败并说明怎么修，不 spawn", async () => {
     saveBrainConfig({
       agent: "opencode",
       presets: { opencode: presetArgs("ok"), kiro: { bin: path.join(root, "没有这个.exe") } },

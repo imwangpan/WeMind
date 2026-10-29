@@ -1,4 +1,4 @@
-# 5. 守护进程 Daemon（wemind）
+# 5. daemon（wemind）
 
 > 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md)
 >
@@ -15,7 +15,7 @@ packages/wechat-daemon/src/
 ├── acp-brain.ts        # 默认大脑：常驻 ACP 进程、严格会话恢复（→ 第 6 章）
 ├── agent-slot.ts       # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
 ├── brain-switch.ts     # 运行时换大脑（预检/等在途回合结束/启动新大脑/回滚）（→ 第 6 章）
-├── brain-agents.ts     # ACP agent 预设与解析（→ 第 6 章）
+├── brain-agents.ts     # ACP agent 与解析（→ 第 6 章）
 ├── mcp-sandbox.ts      # brain 沙箱：MCP 隔离 + 记忆继承（→ 第 6 章）
 ├── worker-acp.ts       # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
 ├── worker-pool.ts      # worker 进程池：复用/回收/上限（→ 第 7 章）
@@ -98,7 +98,7 @@ graph TD
     C1 -->|是| H1["handleControl<br/>（各自处理；切脑/交接仅登录者）"]
     C1 -->|否| C2{"parseTaskControl?"}
     C2 -->|结束任务/任务列表/#n| H2["stopTask / 列表 / 发给指定编号"]
-    C2 -->|任务：/ &gt;/ 任务 &lt;预设&gt;：| H3["有任务→发给它<br/>无任务或指定了预设→dispatchTask"]
+    C2 -->|任务：/ &gt;/ 任务 &lt;agent&gt;：| H3["有任务→发给它<br/>无任务或指定了 agent→dispatchTask"]
     C2 -->|否| C3{"parseBrainEscape?<br/>问大脑 xxx"}
     C3 -->|是| H4["强制走 brain"]
     C3 -->|否| C4{"无前缀 + 非图片<br/>+ worker 在 waiting?"}

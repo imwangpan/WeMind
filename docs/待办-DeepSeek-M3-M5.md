@@ -1,7 +1,7 @@
 # 待办：DeepSeek（官方 DSH）后续 M3–M5
 
 > **状态（2026-10-24 更新）**：**M3 ✅ 已实现并真机验证；M4 ✅ 已验收（现场已还原）；M5 除「图片（上游限制）」与「双真机微信账号」外均完成。**
-> **已完成**：M1（预设/沙箱/凭据）、M2（model 选择、resume 兜底、反向请求、首帧/心跳、图片拦截）、M5-1（worker E2E）。
+> **已完成**：M1（agent/沙箱/凭据）、M2（model 选择、resume 兜底、反向请求、首帧/心跳、图片拦截）、M5-1（worker E2E）。
 > **现行入口**：[`docs/接入-DeepSeek.md`](接入-DeepSeek.md)。
 
 ---
@@ -10,7 +10,7 @@
 
 **目标**：让微信里的「加载/卸载 MCP」对 DeepSeek 生效，且不要求 DSH 读 kiro 的文件。
 
-**现状**：已实现。预设 `mcpViaAcp: true`；`applySandbox`/`syncSettings` 跳过文件写入；`agent-mcp.ts` 新增 `toAcpMcpServers()`（kiro/opencode/remote → ACP stdio/HTTP 声明，坏条目进 skipped）；`activeMcpServers()`/`workerMcpServers()` 把（brain 激活集 / worker 全量除排除集）转换后随 `session/new|resume` 下发；`addMcp` 加载前预校验。
+**现状**：已实现。配置里的 `mcpViaAcp: true`；`applySandbox`/`syncSettings` 跳过文件写入；`agent-mcp.ts` 新增 `toAcpMcpServers()`（kiro/opencode/remote → ACP stdio/HTTP 声明，坏条目进 skipped）；`activeMcpServers()`/`workerMcpServers()` 把（brain 激活集 / worker 全量除排除集）转换后随 `session/new|resume` 下发；`addMcp` 加载前预校验。
 
 **验证（真机，dsh 0.2.1-rc.2）**：
 

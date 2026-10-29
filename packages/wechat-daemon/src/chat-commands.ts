@@ -78,7 +78,7 @@ export type CommandSpec<C> = {
   match: (t: string) => C | null;
 };
 
-/** 预设定名集合（小写）：`任务 <agent 名>：正文` 的判定表；`auto` 也算（自动探测）。 */
+/** 可作为 agent 名的集合（小写）：`任务 <agent 名>：正文` 的判定表；`auto` 也算（自动探测）。 */
 function agentTokenOk(token: string): boolean {
   const k = token.trim().toLowerCase();
   return k === "auto" || Object.prototype.hasOwnProperty.call(ACP_AGENT_PRESETS, k);

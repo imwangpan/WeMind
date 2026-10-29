@@ -198,7 +198,7 @@ MCP
 2. 切换到一个**已装且能起**的另一个 agent；
 3. 期望：答复两段（「正在切换…」+「已切换」）；`brain.json` 已更新；**daemon pid 不变**（没重启）；下一条消息由新大脑答。
 
-**② 切脑失败退回**：把目标预设的 bin 改成一个不存在的路径（`wemind brain set <agent 名> --bin <坏路径> --restart` 或手改 `brain.json` 的 `presets` 段），再切过去。
+**② 切脑失败退回**：把目标 agent 的 bin 改成一个不存在的路径（`wemind brain set <agent 名> --bin <坏路径> --restart` 或手改 `brain.json` 的 `presets` 段），再切过去。
 
 期望：答复写明「切换失败，已退回原来那个「旧大脑」」；`brain.json` **未被改写**；旧大脑**还能继续答**（下一条消息即验证）；`wemind brain` 显示的仍是旧大脑。
 
@@ -224,7 +224,7 @@ MCP
 
 **⑧ CLI 热切换**：daemon 在跑时执行 `wemind brain switch <agent 名>`、`wemind brain set <agent 名>`（纯 agent 名，应等价于热切换）、`wemind session new/list/rename/delete`。
 
-期望：全部经控制桥生效（`control-out/<id>.json` 有应答、`control-inbox/` 排空）；微信里 `会话列表` 能看到 CLI 改的名字；故意切到一个坏 bin 的预设 → 答复「已回滚」且 `brain.json` **未变**（`brain set` 这条会说清「没有写入磁盘」）。对**旧版** daemon：需要 daemon 执行的命令（`session new`/`resume`、`brain switch`、`brain set <agent 名>`）应在**发出前**拒绝并给出 `wemind stop <key> && wemind start <key>`，`session list`/`rename`/`delete`/`task-list` 照常（list 附一行说明）——两者都不算失败，算预期行为。
+期望：全部经控制桥生效（`control-out/<id>.json` 有应答、`control-inbox/` 排空）；微信里 `会话列表` 能看到 CLI 改的名字；故意切到一个坏 bin 的 agent → 答复「已回滚」且 `brain.json` **未变**（`brain set` 这条会说清「没有写入磁盘」）。对**旧版** daemon：需要 daemon 执行的命令（`session new`/`resume`、`brain switch`、`brain set <agent 名>`）应在**发出前**拒绝并给出 `wemind stop <key> && wemind start <key>`，`session list`/`rename`/`delete`/`task-list` 照常（list 附一行说明）——两者都不算失败，算预期行为。
 
 **⑨ 切换窗口内 stop**：切换刚答复成功、约 1 秒内执行 `wemind stop <key>`，然后 `wemind list` / 任务管理器看有没有残留 ACP 子进程。
 
@@ -238,7 +238,7 @@ MCP
 |---|---|---|---|
 | 1 | ACP 是否有 `session/delete` | `scripts/acp-probe.mjs` 或手发该 method，看是否 `-32601` | 「删除会话」到底能不能删 agent 侧存档（当前按「不能」设计） |
 | 2 | 各 agent `session/load` 是否回放历史帧、规模多大 | 长会话 load 后看帧数与耗时 | 恢复会话的等待时长与提示文案 |
-| 3 | 各 agent 冷启动 `initialize`/`session/new` 真实耗时 | 空 HOME 起一次计时 | 对 `REQ_TIMEOUT=30s` 的余量；是否要给预设加 `reqTimeoutMs` |
+| 3 | 各 agent 冷启动 `initialize`/`session/new` 真实耗时 | 空 HOME 起一次计时 | 对 `REQ_TIMEOUT=30s` 的余量；是否要给 agent 加 `reqTimeoutMs` |
 | 4 | 多任务并行时两条以上 `sendNotice` 是否撞 `ret=-2` | 真机微信并发派 2–3 条任务 | 进度/结果推送是否需要进一步退避 |
 | 5 | Windows `taskkill /T /F` 在 `session/load` 途中、以及**杀池中某个特定进程**时的行为 | 分别在 load 中、空闲时杀单个 pid | 回收策略与孤儿检测 |
 | 6 | 同一 agent 两个进程共用配置目录是否互踩（kiro/opencode/qoder 各一次） | 同 agent 并发两条任务 | 是否要禁止同 agent 并发 |
@@ -273,7 +273,7 @@ wemind brain set kiro --restart <key>   # 老写法：写入磁盘 + 重启 daem
 
 - [`docs/新手教程.md`](../../新手教程.md)
 - [`docs/使用指南-远程任务（worker）.md`](../../使用指南-远程任务（worker）.md)（多任务、编号、续跑）
-- [`docs/repowiki/05-守护进程-Daemon.md`](../../repowiki/05-守护进程-Daemon.md)
+- [`docs/repowiki/05-daemon.md`](../../repowiki/05-daemon.md)
 - [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)（槽位 / 热切换 / 会话管理 / 进程身份）
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md)（进程池 / 任务编号）
 - [`docs/本地双入口-命令派发与查看回复.md`](../../本地双入口-命令派发与查看回复.md)（控制桥）

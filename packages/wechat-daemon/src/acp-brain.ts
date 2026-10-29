@@ -40,7 +40,7 @@ const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 120_000; // �
 const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 900_000; // 单回合硬上限 15min。实测重任务(联网核实)需 ~6.5min；context_token 无时间 TTL(官方)，长回合用本消息 token 仍可送达。卡死由 idle/首帧超时兜底
 const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 身份记录（JSON，见 pid-record.ts）；跨入口用同一文件名
 
-/** 首帧超时：env 覆盖 > 预设覆盖（DSH 实测首帧 1–4s，兜底 60s）> 默认 25s。
+/** 首帧超时：env 覆盖 > 配置覆盖（DSH 实测首帧 1–4s，兜底 60s）> 默认 25s。
  *  按 agent 算而不是模块常量——热切换后新 agent 的启动快慢与旧的不同。 */
 function firstFrameMs(ag: ResolvedAgent): number {
   return Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || ag.firstFrameMs || 25_000;
@@ -76,7 +76,7 @@ const hintedSessions = new Set<string>(); // 已带上「可发图」约定提�
 
 // ---- 并发门（切脑用）----
 // 一回合是一段长异步（可能几分钟）：热切换必须先**等在跑的回合结束**，绝不在整回合上持锁。
-// 反过来，切换期间新回合要在门口等（有界），否则会与启动新大脑时**双起进程**（看护进程/重试也走这条路）。
+// 反过来，切换期间新回合要在门口等（有界），否则会与启动新大脑时**双起进程**（后台守护进程/重试也走这条路）。
 let turnInFlight = false; // 有回合正在跑（askBrain / newSession 全程）
 let switching = false; // 正在切换大脑
 const SWITCH_WAIT_MS = Number(process.env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000; // 回合等切换的上限，与切换自身的启动新大脑的上限一致
@@ -345,7 +345,7 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   reset();
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (ag.homeEnvVar) env[ag.homeEnvVar] = BRAIN_HOME; // 把 brain 沙箱目录传给 agent
-  // 预设声明的额外环境变量（%HOME% → 沙箱根），如 opencode 的 OPENCODE_DISABLE_PROJECT_CONFIG
+  // 配置里声明的额外环境变量（%HOME% → 沙箱根），如 opencode 的 OPENCODE_DISABLE_PROJECT_CONFIG
   for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", BRAIN_HOME);
   const proc = spawnAgent(ag, { cwd: BRAIN_HOME, env });
   child = proc;
@@ -370,7 +370,7 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   dlog("initialized");
 }
 
-/** 按预设选择模型路由（如 DSH 的 deepseek-account）；没有 model 的 agent 跳过。 */
+/** 按配置选模型路由（如 DSH 的 deepseek-account）；没有 model 的 agent 跳过。 */
 async function applyModel(ag: ResolvedAgent, sid: string): Promise<void> {
   if (!ag.model) return;
   try {
@@ -389,12 +389,12 @@ async function applyModel(ag: ResolvedAgent, sid: string): Promise<void> {
 async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string> {
   const existing = userSessions.get(userId);
   if (existing) return existing;
-  // mcpViaAcp 预设（DSH）：激活集随 session 下发；其余 agent 传空（走各自沙箱配置文件）
+  // 配了 mcpViaAcp 的 agent（DSH）：激活集随 session 下发；其余 agent 传空（走各自沙箱配置文件）
   const mcpServers = ag.mcpViaAcp ? activeMcpServers() : [];
   const map = loadSessionMap(ag);
   const saved = map[keyOf(ag, userId)];
   if (saved) {
-    // 预设指定 resume（DSH）；其余仍先 load，失败再试 resume，最后 new
+    // agent 指定 resume（DSH）；其余仍先 load，失败再试 resume，最后 new
     const methods: Array<"load" | "resume"> =
       ag.restore === "resume" ? ["resume"] : ["load", "resume"];
     for (const method of methods) {
@@ -580,12 +580,12 @@ export function restart(): void {
   reset();
 }
 
-/** 当前大脑是否接受图片输入（预设能力；默认 true）。 */
+/** 当前大脑是否接受图片输入（配置里的能力；默认 true）。 */
 export function supportsImages(): boolean {
   return getAgent("brain").images;
 }
 
-/** 当前预设的静默期心跳覆盖（默认 undefined → 15s）。按回合取：热切换后心跳随之改变。 */
+/** 当前 agent 的静默期心跳覆盖（默认 undefined → 15s）。按回合取：热切换后心跳随之改变。 */
 export function heartbeatMs(): number | undefined {
   return getAgent("brain").heartbeatMs;
 }

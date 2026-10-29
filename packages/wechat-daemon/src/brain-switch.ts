@@ -13,7 +13,7 @@ import { beginSwitch, drainTurn, endSwitch, restart, warmup } from "./acp-brain.
  * 重启整个 daemon，打断在途任务与回合。现在槽位可变（agent-slot.ts），于是「切脑」可以是一等命令。
  *
  * 流程与取舍（每一步都在防一种具体的坏结果）：
- *  1. 解析目标预设：**绕开环境变量**（用户此刻的明确意图该压过一次性 env 覆盖），不可用直接答复失败，不 spawn。
+ *  1. 解析目标 agent：**绕开环境变量**（用户此刻的明确意图该压过一次性 env 覆盖），不可用直接答复失败，不 spawn。
  *  2. `beginSwitch()` → `drainTurn()`：等在跑的回合结束（默认 30s）。超时**诚实失败**，绝不半路砍回合丢答案。
  *  3. `ensureBrainHome(新 agent)` → `restart()`（杀旧进程）→ `warmup()`（initialize + session/load|new，硬上限 120s）。
  *  4. 成功才 `setAgent()` + 写 brain.json —— **持久化放最后**，于是「退回」不需要撤销任何东西：

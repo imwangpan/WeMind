@@ -102,7 +102,7 @@ poller（长轮询，不被大脑阻塞）
 | **进程池 / worker-pool** | `worker-pool.ts`：同 agent 空闲复用 → 回收最旧腾位 → spawn；并发 `WEMIND_MAX_WORKERS`、空闲 `WEMIND_IDLE_MAX`、回收 `WEMIND_WORKER_REAP_MS` |
 | **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收 agent 名与纯数据**（无 `bin`/`args`/`shell`） |
 | **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
-| **preset / 预设** | 用户面写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）；代码里指 `ACP_AGENT_PRESETS` 里的一条：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
+| **preset / `ACP_AGENT_PRESETS`** | **代码里的叫法**；用户面统一写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）。一条 = 二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
 | **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |
 | **WORKER_HOME** | worker 的沙箱目录 |
 | **configSubdir** | agent 配置目录相对沙箱根的子路径（kiro 空；opencode `opencode`） |
@@ -129,8 +129,8 @@ poller（长轮询，不被大脑阻塞）
 | **stdio** | **标准输入输出**（首次写全称，之后可保留 `stdio`） | `st`andar**d** **i**nput / **o**utput 的缩写，指进程自带的三个流：标准输入（stdin）、标准输出（stdout）、标准错误（stderr）。<br>**为什么保留原文**：它不是普通英文单词，而是 Node API 名（`spawn(..., { stdio: "inherit" })`）和 CLI 参数的字面值，翻译后反而无法对应代码。<br>**别译**：❌「标准IO」（半中半英，不如写全称）、❌「控制台输出」（错，`stdio` 不等于终端）。 |
 | **stdin / stdout / stderr** | 标准输入 / 标准输出 / 标准错误 | 说明语境时用中文，引用代码/参数时保留原文（`stdio: ["ignore", logFd, logFd]`）。 |
 | **CLI** | 指**程序**时译「**命令行工具**」；指**形态/界面**时译「**命令行界面**」 | command-line interface 的首字母缩写。<br>**判断方法**：能「安装、运行」（如 `wemind` 是 CLI）→ 命令行工具；说「相比 GUI」（图形界面）这种对比 → 命令行界面。中文技术写作里**保留 CLI** 也完全可接受，尤其 `kiro-cli`、`claude-code` 这类名字里的 CLI 绝不能翻。<br>**别译**：❌「客户端」（CLI 与 client 是两回事：`@wemind/cli` 是命令行工具，MCP 客户端才是 client）、❌「命令行程序包」。 |
-| **daemon** | **守护进程** / 常驻进程 | 后台长期运行、无人值守的进程。本文也直接用 `daemon`（因为大量专名如 daemon 形态、`wechat-daemon` 目录依赖它）。 |
-| **watchdog** | **看护进程** | 外层监督循环：子进程退出后自动重拉。本文有 `runWatchdog()`、`wrapper.pid`。<br>**别译**：❌「监视器」（过泛）。 |
+| **daemon** | **常驻进程**（正文一律直接写 `daemon`） | 后台长期运行、无人值守的进程。本文直接用 `daemon`（大量专名如 daemon 形态、`wechat-daemon` 目录依赖它）。**命名约定（1.2.0）**：「守护进程」不再译 daemon——那个词留给真正负责守护它的 watchdog（「后台守护进程」，见下条），否则「守护进程停掉自动重启」这类句子会读反。 |
+| **watchdog** | **后台守护进程** | 外层监督循环：它盯着子进程，退出后自动重拉。本文有 `runWatchdog()`、`wrapper.pid`。同段第二次出现可简称「守护进程」；代码/协议名里的 `_watchdog`、`watchdog-runner.ts` 保持原样。<br>**别译**：❌「监视器」（过泛）、❌「看门狗」（口语；系统/硬件语境里的 watchdog 另有含义）。 |
 | **wrapper** | **包装进程** / 外层 | 包在真正业务进程外面、负责保活/传参的那一层（`wrapper.pid`）。 |
 
 #### B. 协议与协议实现（最容易混淆的一组）
@@ -142,7 +142,7 @@ poller（长轮询，不被大脑阻塞）
 | **implementation** | **实现**（具体程序） | 一个程序对某协议的具体落地。同一协议的不同实现，完备度差别很大——这正是 WeMind 要给每个 agent 配 preset 的原因。 |
 | **implement / support ACP** | **实现 ACP** / **支持 ACP** | **不要写「说 ACP」**。理由：「会说/不会说」是二元判断，会掩盖「实现完备度不同」这个事实（有的实现支持 load、有的只有 resume、有的不发流式帧）。而「实现/支持」天然可分级。<br>更精确时用可验证的事实：「它以 ACP server 身份响应 `initialize`/`session/new`/`session/prompt`」。 |
 | **minimal method set** | **最小方法集** | WeMind 实际用到的 ACP 方法子集：`initialize` → `session/new` → `session/prompt` + 流式 `session/update`。缺任一即不可用。 |
-| **capability** | **能力**（保留 `agentCapabilities` 原文） | 指「这个实现支持哪些**可选特性**」（load/resume/image/mcp），**不是权限**。别译「权限」——权限是 permission，见下条。注意：本仓库当前**不消费** `initialize` 回包，能力全部来自预设字段，见事实表。 |
+| **capability** | **能力**（保留 `agentCapabilities` 原文） | 指「这个实现支持哪些**可选特性**」（load/resume/image/mcp），**不是权限**。别译「权限」——权限是 permission，见下条。注意：本仓库当前**不消费** `initialize` 回包，能力全部来自 agent 配置字段，见事实表。 |
 | **permission** | **权限** | 与 capability 区分：`agentCapabilities` 是能力声明；`session/request_permission` 是运行时**请求授权**。 |
 | **reverse request** | **反向请求** | ACP 的反向通道：**agent → client** 的请求（`session/request_permission`、`fs/read_text_file`、`terminal/create` 等）。与正常方向（client → agent）相反，故称「反向」。<br>⚠️ 关键：**不应答会挂起**。WeMind 内置应答器：权限默认拒绝、未知方法回 `-32601`。 |
 | **streaming** | **流式** | agent 边生成边推送增量（`session/update` 的 `agent_message_chunk`），而不是一次性返回完整答案。 |
@@ -156,7 +156,7 @@ poller（长轮询，不被大脑阻塞）
 |---|---|---|
 | **brain** | **对话大脑** / `brain` | 常驻 ACP 进程，负责日常聊天问答（每用户一个 session）。因为大量代码/路径名含 brain，正文也直接写 `brain`。 |
 | **worker** | **任务工作机** / `worker` | 独立 ACP 进程，跑漫长任务，单 session，可「继续」续跑。 |
-| **preset** | **预设**（用户面写「agent 名」） | `ACP_AGENT_PRESETS` 里的一条配置：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承、能力覆盖等。 |
+| **preset** | **内置 agent 配置**（用户面写「agent 名」） | `ACP_AGENT_PRESETS` 里的一条：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承、能力覆盖等。 |
 | **sandbox** | **沙箱** | 隔离目录（`BRAIN_HOME` / `WORKER_HOME`），让 agent 读到的是干净配置而非你的真实配置。 |
 | **fallback / degrade** | **回退 / 降级（退化）** | 如「agent 缺 `session/load` 时**退化为** `session/new`（上下文丢失但能继续用）」。 |
 | **activation set** | **激活集** | 当前 brain 实际加载的 MCP 名单（`brain-mcps.json`），默认空。 |
@@ -184,15 +184,15 @@ poller（长轮询，不被大脑阻塞）
 | 事实 | 状态 | 证据/备注 |
 |---|---|---|
 | 默认大脑是 `auto`，不是固定 kiro | ✅ 代码 | `brain-agents.ts` `resolveAgent()` |
-| kiro 预设可用 | ✅ 实测 | `docs/接入-OpenCode.md` / 现有 daemon |
-| opencode 预设可用（`session/load`、无反向请求） | ✅ 实测 | `docs/接入-OpenCode.md` §3.3 |
+| kiro agent 可用 | ✅ 实测 | `docs/接入-OpenCode.md` / 现有 daemon |
+| opencode agent 可用（`session/load`、无反向请求） | ✅ 实测 | `docs/接入-OpenCode.md` §3.3 |
 | 任意兼容 ACP 的 agent 都「无需改代码」 | ⚪ **不成立** | 需要 load/resume、反向请求、首帧/心跳、image 能力适配 |
 | `session/load` 是 ACP 通用能力 | ⚪ **不成立** | DSH 只有 `session/resume`；`load` 返回 `-32601` |
-| 代码按 `initialize` 回包自动适配能力 | ⚪ **不成立** | `acp-brain.ts` / `worker-acp.ts` 发出 `initialize` 后只置 `initialized = true`，**不解析** `agentCapabilities`；image/restore/mcpViaAcp 全部来自 `brain-agents.ts` 预设字段 |
+| 代码按 `initialize` 回包自动适配能力 | ⚪ **不成立** | `acp-brain.ts` / `worker-acp.ts` 发出 `initialize` 后只置 `initialized = true`，**不解析** `agentCapabilities`；image/restore/mcpViaAcp 全部来自 `brain-agents.ts` agent 配置字段 |
 | 仓库存在 `Brain` 接口 | ⚪ **不存在** | `acp-brain.ts` 直接导出 `askBrain`/`newSession`/`restart` |
 | `wemind brain check` 默认 60s | ✅ 代码 | 冷启动慢的 agent 仍可能误报 |
-| `deepseek` 预设已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验 |
-| `qoder` 预设已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0–M3 全部已验：发图、动态 MCP、冷重启 `session/load`、worker 中断续跑、`memory/` junction 继承 |
+| `deepseek` agent 已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验 |
+| `qoder` agent 已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0–M3 全部已验：发图、动态 MCP、冷重启 `session/load`、worker 中断续跑、`memory/` junction 继承 |
 | Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |
 | Qoder 可免 `--bin` 绝对路径 | ✅ 代码 | `fallbackBinPaths` 兜底 `~/.qoder/bin/qodercli/qodercli.exe`；auto 探测仍只看 PATH |
 | Qoder 用户记忆落点 | ✅ 实测 | `~/.qoder/memory/`；已 junction 进沙箱（写入回流真实目录）。`skills/agents/commands`/`AGENTS.md` 在 1.1.78 不存在 |

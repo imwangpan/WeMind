@@ -10,16 +10,16 @@
 
 | 症状 | 先看 | 大概率原因 |
 |---|---|---|
-| `wemind start` 立刻退出 / 日志 `FATAL 大脑不可用`（exit 78） | `wemind brain` | 预设未知、二进制不在 PATH、`binWin` 写错（如只有 `dsh.cmd`） |
+| `wemind start` 立刻退出 / 日志 `FATAL 大脑不可用`（exit 78） | `wemind brain` | agent 未知、二进制不在 PATH、`binWin` 写错（如只有 `dsh.cmd`） |
 | daemon 在跑，但微信完全没反应 | `daemon.log` 有无 `turn start` / `prompt ok` | 没登录、你（登录者）不在白名单 `allowFrom` 里（异常情况）、bot token 被另一个消费者抢走 |
 | 反复「⏳ 响应中断了，正在自动重试…」 | `daemon.log` 的 `[wemind/wechat-daemon/acp]` | agent 启动失败、`initialize` 超时、参数不对、`.cmd` 没经 shell |
 | 回复突然停 / 「接近微信连续消息上限」 | 进度条数 | iLink 连发上限 ~10；回「继续」恢复 |
 | 重启后「它忘了」 | `session/load failed` / `session/resume` | agent 不支持 load，或 resume 参数/cwd 不对 |
 | 发图报错/重试 | `prompt FAIL` + `-32602` | agent `image:false`（如 DSH 官方） |
-| 桌面已登录但报 `no API key for ... deepseek-official` | 预设的 model / 路由 | DSH 默认路由要 API key；桌面登录对应 `deepseek-account`，需 `set_config_option` 切换 |
+| 桌面已登录但报 `no API key for ... deepseek-official` | agent 的 model / 路由 | DSH 默认路由要 API key；桌面登录对应 `deepseek-account`，需 `set_config_option` 切换 |
 | 多账号互相抢消息 | `list` / 进程 | 同一 bot token 起了多个 daemon，或 brain 加载了 `wechat` MCP |
 | worker 任务不动 | `wemind task-list` | worker 超时/权限/agent 不支持；看 `.../worker` 日志 |
-| 切换大脑失败 / 回滚 | 答复 + `wemind brain` | 目标预设不可用、新大脑启动超时（120s）、等在途回合结束超时（30s）、`WEMIND_BRAIN` 压着命令 |
+| 切换大脑失败 / 回滚 | 答复 + `wemind brain` | 目标 agent 不可用、新大脑启动超时（120s）、等在途回合结束超时（30s）、`WEMIND_BRAIN` 压着命令 |
 | 微信里发命令被短拒 | 答复文案 | 账号级命令（切脑/交接）由**非登录者**发出——兜底校验，平台限制下正常不会出现 |
 | CLI 命令被拒 / 显示「daemon 未运行」 | `wemind list` | 真没跑；**或**升级 CLI 后没重启 daemon（`.bridge` 凭据对不上）；**或**手跑 daemon 时路径特征不匹配 |
 | 任务数超上限被拒 | 答复 | `WEMIND_MAX_WORKERS`（默认 3）到了；先 `结束任务 <编号>` 或调大 |
@@ -118,13 +118,13 @@ wemind session list <key|label>
 
 ```powershell
 wemind brain                 # 看 requested / source / 生效 bin
-wemind brain set kiro        # 或 opencode / 其它已装预设
+wemind brain set kiro        # 或 opencode / 其它已装 agent
 wemind brain check
 ```
 
-- 预设未知 → `brain set` 会列出可选值；
+- agent 未知 → `brain set` 会列出可选值；
 - 二进制找不到 → 安装，或 `brain set <agent 名> --bin <绝对路径>`；
-- Windows 只有 `.cmd` → 预设 `binWin` 必须是实际文件名（`dsh.cmd`）；`onPath()` 不会自动补 `.cmd`；
+- Windows 只有 `.cmd` → 配置里的 `binWin` 必须是实际文件名（`dsh.cmd`）；`onPath()` 不会自动补 `.cmd`；
 - 自定义 agent → `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_HOME_ENV`。
 
 ### 3.2 daemon 在跑但不回复
@@ -148,7 +148,7 @@ wemind brain
 
 - `spawn` 后立刻 `acp exited` → 二进制/参数/`shell` 不对；
 - 卡在 `initialize` → 不是 ACP，或参数没进入 ACP server 模式；
-- Windows `.cmd`/`npx` → `shell: true`（预设或 `WEMIND_BRAIN_SHELL=1`）；
+- Windows `.cmd`/`npx` → `shell: true`（agent 或 `WEMIND_BRAIN_SHELL=1`）；
 - 路径含空格/`&` → 用绝对路径 + `shell`，并确认 `spawnAgent` 的引号逻辑；
 - 反向请求无应答 → 现在会静默丢弃；接入新 agent 时先做应答器（见 `docs/ai/recipes/add-acp-agent.md`）。
 
@@ -188,7 +188,7 @@ prompt FAIL ... -32602 Invalid params: inline image prompts were not advertised
 - `session/new` 默认模型是 `deepseek-official/*`，需要 `DEEPSEEK_API_KEY`；
 - 桌面端登录态是 `deepseek-account/*`，必须在 `session/new` 后用 `session/set_config_option` 切换：
   `{ sessionId, configId: "model", value: "[\"deepseek-account\",\"deepseek-flash\"]" }`；
-- 预设层应加 `model` 字段；`resume` 会保留上次选择，但配置变更后要重设；
+- agent 层应加 `model` 字段；`resume` 会保留上次选择，但配置变更后要重设；
 - 如果坚持 official 路由，就配 `DEEPSEEK_API_KEY`（daemon 环境）。
 
 ### 3.8 切换大脑失败 / 回滚（1.2.0）
@@ -246,11 +246,11 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 
 ### 3.12 `start` 答复「已启动」但 daemon 没起来（VS Code 终端注入，2026-10-29 修）
 
-症状：`wemind start` 打印「已启动自带看护进程…已启动 daemon」，但 `wemind list` 显示未运行；`daemon.log`、`wrapper.pid`、账号目录的 mtime 全都不更新；进程表里只有一个 `node …cli.js _watchdog`，**没有子进程**。
+症状：`wemind start` 打印「已启动自带后台守护进程…已启动 daemon」，但 `wemind list` 显示未运行；`daemon.log`、`wrapper.pid`、账号目录的 mtime 全都不更新；进程表里只有一个 `node …cli.js _watchdog`，**没有子进程**。
 
-原因：VS Code 集成终端的「智能自动附加」给终端里每个 node 进程注入 `NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` 和 `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true` 等）——被注入的进程**要等调试器接上才执行主脚本**。终端里的前台命令（`stop`/`list`/`start` 本体）会被接上，所以输出都正常；但 `start` **脱离出去的看护进程不会被接**，于是卡在「等调试器」里，既不写 `wrapper.pid` 也不拉 daemon。
+原因：VS Code 集成终端的「智能自动附加」给终端里每个 node 进程注入 `NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` 和 `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true` 等）——被注入的进程**要等调试器接上才执行主脚本**。终端里的前台命令（`stop`/`list`/`start` 本体）会被接上，所以输出都正常；但 `start` **脱离出去的后台守护进程不会被接**，于是卡在「等调试器」里，既不写 `wrapper.pid` 也不拉 daemon。
 
-处置：1.2.0 起 `watchdog-runner.ts` 的两次脱离式 spawn（看护进程、看护进程拉 daemon）都先过 `debug-env.ts` 的 `stripVscodeDebugEnv()`，已修。旧版本撞上时：换一个**非 VS Code 集成终端**（Windows Terminal / 普通 PowerShell）执行 `wemind start <key>`，或先清变量再跑：
+处置：1.2.0 起 `watchdog-runner.ts` 的两次脱离式 spawn（拉起后台守护进程、它再拉起 daemon）都先过 `debug-env.ts` 的 `stripVscodeDebugEnv()`，已修。旧版本撞上时：换一个**非 VS Code 集成终端**（Windows Terminal / 普通 PowerShell）执行 `wemind start <key>`，或先清变量再跑：
 
 ```powershell
 Remove-Item Env:VSCODE_INSPECTOR_OPTIONS -ErrorAction SilentlyContinue
@@ -258,7 +258,7 @@ $env:NODE_OPTIONS = $null
 wemind start <key>
 ```
 
-识别要点：卡死的看护进程只占一个 `cli.js _watchdog` 进程、无子进程；正常时它在 5 秒内就会写出 `wrapper.pid` 并拉出 `cli.js daemon`。
+识别要点：卡死的后台守护进程只占一个 `cli.js _watchdog` 进程、无子进程；正常时它在 5 秒内就会写出 `wrapper.pid` 并拉出 `cli.js daemon`。
 
 ---
 
@@ -277,7 +277,7 @@ wemind start <key>
 
 ## 5. 参考
 
-- [`docs/repowiki/05-守护进程-Daemon.md`](../../repowiki/05-守护进程-Daemon.md)
+- [`docs/repowiki/05-daemon.md`](../../repowiki/05-daemon.md)
 - [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)（槽位 / 热切换 / 会话管理 / 进程身份）
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md)（进程池 / 任务表）
 - [`docs/repowiki/10-部署与运维.md`](../../repowiki/10-部署与运维.md)

@@ -226,7 +226,7 @@ describe("renderHelp：按角色裁剪", () => {
     expect(owner).toContain("新会话");
     expect(owner).toContain("任务");
     const user = renderHelp("user");
-    expect(user).not.toContain("切换大脑 [预设");
+    expect(user).not.toContain("切换大脑 [agent");
     expect(user).not.toContain("生成当前会话摘要");
     expect(user).toContain("新会话");
     expect(user).toContain("仅登录者可用");

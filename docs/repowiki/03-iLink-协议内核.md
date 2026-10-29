@@ -77,7 +77,7 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 | `TypingStatus` | `TYPING=1` / `CANCEL=2` | 打字状态 |
 | `UploadMediaType` | `IMAGE=1` / `VIDEO=2` / `FILE=3` / `VOICE=4` | 上传媒体类型 |
 
-**`MessageState` 的关键约定**：发送进度/中间消息必须用 `GENERATING`，仅最终答案用 `FINISH`。因为 `FINISH` 会结束当前回合（关闭该 context 的发送窗口），如果进度也用 `FINISH` 会提前关掉会话。这是排查「重任务收不到结果」时纠正的关键认知（详见 [5. 守护进程 Daemon](05-守护进程-Daemon.md)）。
+**`MessageState` 的关键约定**：发送进度/中间消息必须用 `GENERATING`，仅最终答案用 `FINISH`。因为 `FINISH` 会结束当前回合（关闭该 context 的发送窗口），如果进度也用 `FINISH` 会提前关掉会话。这是排查「重任务收不到结果」时纠正的关键认知（详见 [5. daemon](05-daemon.md)）。
 
 ### `context_token`：最易被误解的字段
 
@@ -190,7 +190,7 @@ iLink 的图片/文件走微信 CDN，密文用 **AES-128-ECB（PKCS7）** 加�
 
 `classifyMediaByName(name)` 按扩展名判类型（image/video/file），`sendFile` 据此组装对应的 `image_item` / `video_item` / `file_item`。类型识别与 item 组装借鉴自 wxclawbot-cli 与 wechat-robot-go（均 MIT）。
 
-> 收发图在 daemon 形态下的上层编排（从大脑回复里提取图片引用、收图喂给大脑看）见 [5. 守护进程 Daemon](05-守护进程-Daemon.md#收发富媒体)。
+> 收发图在 daemon 形态下的上层编排（从大脑回复里提取图片引用、收图喂给大脑看）见 [5. daemon](05-daemon.md#收发富媒体)。
 
 ---
 

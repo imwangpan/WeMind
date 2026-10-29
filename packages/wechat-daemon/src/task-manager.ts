@@ -285,7 +285,7 @@ function ackFor(task: Task, numbered: boolean): string {
   return `✅ 已派发任务 #${task.id}（${task.agent} 执行）。看进展发「任务列表」，回话发「#${task.id} 正文」，收掉发「结束任务 ${task.id}」。`;
 }
 
-/** 解析「本任务用哪个 agent」：显式agent 名优先，否则默认任务大脑。 */
+/** 解析「本任务用哪个 agent」：显式 agent 名优先，否则默认任务大脑。 */
 function resolveTaskAgent(
   agentKey?: string,
 ): { ok: true; ag: ResolvedAgent } | { ok: false; problem: string } {

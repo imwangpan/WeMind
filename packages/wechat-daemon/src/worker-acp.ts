@@ -30,7 +30,7 @@ const PROMPT_CAP_MS = Number(process.env.WEMIND_WORKER_CAP_MS) || 1_800_000; // 
 const FIRST_FRAME_DEFAULT_MS = 30_000;
 const SESSION_MAP_FILE = path.join(DATA_DIR, "worker-sessions.json");
 
-/** 首帧超时（预设可覆盖；每轮现算，热切换/指定 agent 后随之改变）。 */
+/** 首帧超时（配置可覆盖；每轮现算，热切换/指定 agent 后随之改变）。 */
 function firstFrameMs(a: ResolvedAgent): number {
   return (
     Number(process.env.WEMIND_WORKER_FIRST_FRAME_MS) || a.firstFrameMs || FIRST_FRAME_DEFAULT_MS
@@ -434,7 +434,7 @@ export class WorkerConn {
   private async ensureSession(key: string, strictResume = false): Promise<string> {
     const existing = this.sessions.get(key);
     if (existing) return existing;
-    // mcpViaAcp 预设（DSH）：worker 继承全量 MCP（除排除集），随 session 下发；其余 agent 传空
+    // 配了 mcpViaAcp 的 agent（DSH）：worker 继承全量 MCP（除排除集），随 session 下发；其余 agent 传空
     const mcpServers = this.agent.mcpViaAcp ? workerMcpServers(this.agent) : [];
     const mapKey = sessionKey(this.agent.name, key);
     const map = loadSessionMap(this.agent);

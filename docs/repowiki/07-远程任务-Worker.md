@@ -138,7 +138,7 @@ stateDiagram-v2
 
 ### worker 沙箱
 
-`WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain 沙箱**策略相反**：worker 是无人值守的任务执行机，继承 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）—— 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。写入磁盘方式按 agent：kiro/opencode 由 `applyWorkerSandbox` 写沙箱配置文件；`mcpViaAcp` 预设（DSH）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。记忆/技能（`mirrorRealKiro`）与 settings（`syncSettings`，含模型/信任）继承与 brain 一致。
+`WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain 沙箱**策略相反**：worker 是无人值守的任务执行机，继承 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）—— 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。写入磁盘方式按 agent：kiro/opencode 由 `applyWorkerSandbox` 写沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。记忆/技能（`mirrorRealKiro`）与 settings（`syncSettings`，含模型/信任）继承与 brain 一致。
 
 > **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个配置目录（会话/缓存文件是否互踩**待实测**）。
 >
@@ -146,7 +146,7 @@ stateDiagram-v2
 
 ## 7.4 微信入口：消息路由
 
-worker 的微信侧路由在 `workerLoop` 内（详见 [5. 守护进程 Daemon](05-守护进程-Daemon.md#消息路由)）。指令集：
+worker 的微信侧路由在 `workerLoop` 内（详见 [5. daemon](05-daemon.md#消息路由)）。指令集：
 
 | 你发的消息 | 去向 |
 |-----------|------|
@@ -174,7 +174,7 @@ worker 的微信侧路由在 `workerLoop` 内（详见 [5. 守护进程 Daemon](
 
 - **不自动 spawn**（3 个 agent 一起冷启动既重、也可能复现刚崩的原因）；
 - 未完成的任务标为 **「已中断」**，在 `任务列表` 可见；
-- 用户回「继续」/`#n` 才拉进程 + 按预设 `restore` 试 `session/load` → `session/resume` 续跑。
+- 用户回「继续」/`#n` 才拉进程 + 按配置里的 `restore` 试 `session/load` → `session/resume` 续跑。
 
 两条诚实失败必须照实说：① agent 不支持 load/resume 或该会话已被 agent 自己清理 →「这次接不上，请用文字重述」（不动登记与当前会话记录）；② 半截回合的副作用可能已发生（改到一半的文件）→ 续跑前提示「可能有重复动作，注意核对」。表损坏 → 降级为空表，**不阻塞启动**。
 
@@ -296,7 +296,7 @@ worker 指向真实目录 + `--trust-all-tools` → 微信回复即可驱动它�
 
 ## 7.9 测试覆盖
 
-- `task-manager.test.ts`：任务表 —— 派发/waiting/回话续跑/stop、**编号递增不复用**、多任务并存时无编号消息回一份编号清单、`任务 <agent 名>：正文` 解析与预设路由、指定 agent 不改默认任务大脑（回归护栏）、上限拒绝、stop 单条/全部。
+- `task-manager.test.ts`：任务表 —— 派发/waiting/回话续跑/stop、**编号递增不复用**、多任务并存时无编号消息回一份编号清单、`任务 <agent 名>：正文` 解析与 agent 路由、指定 agent 不改默认任务大脑（回归护栏）、上限拒绝、stop 单条/全部。
 - `worker-pool.test.ts`：纯策略（`planAcquire`/`planReap`）—— 复用同 agent 空闲、回收最旧腾位、上限判定、空闲阈值。
 - `pool-spawn.test.ts`：**真起进程**验池的行为——同 agent 第二次任务复用同一条连接（只 spawn 一次）、结束「等你回复」的任务时留着复用、回收后进程消失。
 - `task-store.test.ts`：`tasks.json` 往返、损坏降级为空表、中断态标记、编号跨重启连续。

@@ -46,7 +46,7 @@ npx -y @wemind/cli list  # 不安装临时用：必须写全包名
 | # | 问题 | 证据 | 后果 |
 | --- | --- | --- | --- |
 | P1 | **包名冲突**：根包与待发布包都叫 `wemind` | 根 `package.json` `"name": "wemind", private: true`，workspace 里也有 `wemind` | 用户已注册 `@wemind` scope 且想按 scope 发布；同时 `wemind` 这个短名本身是「一个包名」，与根包同名会带来解析与心智混乱 |
-| P2 | **进程身份特征写死源码目录名** | `proc-identity.ts`：`CLI_PID_MARKERS = [["wechat-daemon","cli.js"], …]` | 发布后命令行是 `…/node_modules/@wemind/cli/dist/cli.js`，**匹配不上** → `wemind list` 永远「已停止」、`stop` 杀不掉、看护进程单实例守卫失效（可能双开抢 token） |
+| P2 | **进程身份特征写死源码目录名** | `proc-identity.ts`：`CLI_PID_MARKERS = [["wechat-daemon","cli.js"], …]` | 发布后命令行是 `…/node_modules/@wemind/cli/dist/cli.js`，**匹配不上** → `wemind list` 永远「已停止」、`stop` 杀不掉、后台守护进程单实例守卫失效（可能双开抢 token） |
 | P3 | **用户可见提示指向源码路径** | `manage.ts` 两处 `node packages/wechat-daemon/dist/manage.js …` | 全局安装的用户照抄命令必然失败 |
 | P4 | **无 `repository`/`homepage`/`author`** | `packages/wechat-daemon/package.json` | npm 页面无源码链接、无 provenance 校验基线；与 `wechat-mcp` 不一致 |
 | P5 | **没有发布流水线、没有产物守卫** | 只有 `wechat-mcp-publish.yml` | 忘记 build 时会发出「只有 package.json」的空壳包（`bin` 指向不存在的 `dist/cli.js`），装上即 `MODULE_NOT_FOUND` |
@@ -330,7 +330,7 @@ npx -y @wemind/cli list                   # 验证「npx 写全包名」这条�
 
 **B. 用户机器上没有 ACP agent**：`wemind daemon` 会以退出码 78 失败并停止自动重启（脚本/watchdog/pm2 三处都尊重该退出码），`wemind brain` / `brain check` 会给出可操作提示。`wemind login` 之后不会主动检查大脑——保持登录流程轻量。
 
-**C. 进程身份与老进程**：源码期（未发布）的守护进程命令行是 `…\WeMind\packages\wechat-daemon\dist\cli.js`，靠 **WeMind** 命中新特征串；从「目录名不含 wemind」的 clone 启动的老进程会认不出——重启一次即可。
+**C. 进程身份与老进程**：源码期（未发布）的 daemon 命令行是 `…\WeMind\packages\wechat-daemon\dist\cli.js`，靠 **WeMind** 命中新特征串；从「目录名不含 wemind」的 clone 启动的老进程会认不出——重启一次即可。
 
 **D. 想占住 `wemind` 短名**：可以用 `bin` 为空的 `wemind` 包做「指向 `@wemind/cli` 的提示包」（不推荐：多一个要维护的包）。当前不做。
 

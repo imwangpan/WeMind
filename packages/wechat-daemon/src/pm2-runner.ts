@@ -1,5 +1,5 @@
-// pm2 封装：`wemind start --runner pm2` / `stop` 委托 pm2 做常驻（看护进程 / 开机自启 / 多账号）。
-// 默认 runner 是自带看护进程（watchdog-runner.ts）；本模块只在用户显式选 pm2 时使用。
+// pm2 封装：`wemind start --runner pm2` / `stop` 委托 pm2 做常驻（后台守护进程 / 开机自启 / 多账号）。
+// 默认 runner 是自带后台守护进程（watchdog-runner.ts）；本模块只在用户显式选 pm2 时使用。
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -62,7 +62,7 @@ export function buildAppDeclaration(
     interpreter: "node",
     cwd: os.homedir(), // 不继承 `pm2 start` 时的 shell 目录（换了目录再 start 行为才一致）
     autorestart: true,
-    restart_delay: 5000, // 与 builtin 看护进程 / run-daemon.ps1 的 5s 重拉一致
+    restart_delay: 5000, // 与 builtin 后台守护进程 / run-daemon.ps1 的 5s 重拉一致
     max_restarts: 50, // 防崩溃风暴
     stop_exit_codes: [BRAIN_CONFIG_EXIT_CODE], // 78 = 大脑配置错误，重拉无益
     out_file: logPath,
@@ -112,7 +112,7 @@ export function pm2Start(key: string, cliPath: string): { ok: boolean; msg: stri
     ok: true,
     msg:
       `已用 pm2 启动 ${name}（日志：${log}）。\n` +
-      "  崩溃 5s 重拉、退出码 78（大脑配置错误）不再重启，与自带看护进程一致。\n" +
+      "  崩溃 5s 重拉、退出码 78（大脑配置错误）不再重启，与自带后台守护进程一致。\n" +
       "  开机自启（首次）：执行 `pm2 startup`——Linux/macOS 按提示操作；Windows 用计划任务跑 `pm2 resurrect`。",
   };
 }

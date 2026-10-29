@@ -195,7 +195,7 @@ export function parseControl(text: string): ChatCommand | null {
   return parseChatCommand(text);
 }
 
-/** 解析「明确发给 worker」指令：任务 [预设：]正文 / >xxx / #编号 正文 / 任务列表 / 结束任务 [编号]。 */
+/** 解析「明确发给 worker」指令：任务 [agent：]正文 / >xxx / #编号 正文 / 任务列表 / 结束任务 [编号]。 */
 export function parseTaskControl(text: string): TaskCommand | null {
   return parseTaskCommand(text);
 }
@@ -458,7 +458,7 @@ const MIN_SEND_GAP_MS = Number(process.env.WECHAT_MIN_SEND_GAP_MS) || 1500;
 
 // iLink 在用户回复前能连续发送的消息数上限（实测约 10，可调）。
 const CONSEC_SEND_LIMIT = Number(process.env.WECHAT_CONSEC_SEND_LIMIT) || 10;
-// 静默期心跳默认 15s（预设可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。
+// 静默期心跳默认 15s（配置可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。
 const HEARTBEAT_DEFAULT_MS = 15_000;
 // 「距该用户上一条消息以来」bot 已连续发送的条数 + 是否处于"等待继续"段。按用户(to)维护、**跨回合持续**，仅在该用户发来任何消息时重置（照抄服务端"任何用户消息都重置连续发送配额"的规则）。
 // 这样即使 A 任务期间你发了 B、A 又继续发了几条，B 任务接手时计数是延续的，不会误以为"还能再发10条"而撞上限。
@@ -1230,7 +1230,7 @@ export async function runDaemon(): Promise<void> {
   const brainProblem = agentProblem(agent);
   if (brainProblem) {
     log(`FATAL 大脑不可用：${brainProblem}`);
-    process.exit(BRAIN_CONFIG_EXIT_CODE); // 看护进程据此停止自动重启（配置错误重拉无益）
+    process.exit(BRAIN_CONFIG_EXIT_CODE); // 后台守护进程据此停止自动重启（配置错误重拉无益）
   }
   log(
     `brain=${agent.name} bin=${agent.bin} args=[${agent.args.join(" ")}] shell=${agent.shell} (source: ${agent.source})`,

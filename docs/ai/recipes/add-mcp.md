@@ -73,7 +73,7 @@ transport（怎么让 agent 看到）
 
 ### DSH
 
-> **状态：M3 已实现（2026-10-24）。** `deepseek` 预设 `mcpViaAcp: true`——不写 MCP 配置文件，激活集经 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发；worker 同理继承全量（除排除集）。`addMcp` 会预校验定义（无 command/url 拒绝加载）。HTTP MCP 未真机实测。
+> **状态：M3 已实现（2026-10-24）。** `deepseek` 配置里的 `mcpViaAcp: true`——不写 MCP 配置文件，激活集经 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发；worker 同理继承全量（除排除集）。`addMcp` 会预校验定义（无 command/url 拒绝加载）。HTTP MCP 未真机实测。
 
 DSH 的 ACP 走 `session/new` 的 `mcpServers`，没有 kiro 式文件。用中立 catalog：
 

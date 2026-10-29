@@ -12,7 +12,7 @@
 
 - [docs/repowiki/01-项目概览.md](docs/repowiki/01-项目概览.md): project overview, fork history, packages.
 - [docs/repowiki/02-系统架构.md](docs/repowiki/02-系统架构.md): three packages, two forms, process model.
-- [docs/repowiki/05-守护进程-Daemon.md](docs/repowiki/05-守护进程-Daemon.md): poller/worker, turn orchestration, send limits.
+- [docs/repowiki/05-daemon.md](docs/repowiki/05-daemon.md): poller/worker, turn orchestration, send limits.
 - [docs/repowiki/06-ACP-大脑与沙箱.md](docs/repowiki/06-ACP-大脑与沙箱.md): ACP client, agent slots, runtime hot-switch, session management, MCP sandbox, memory inheritance.
 - [docs/repowiki/07-远程任务-Worker.md](docs/repowiki/07-远程任务-Worker.md): remote task worker — multi-task, worker process pool, task numbering, restart-resume.
 - [docs/repowiki/08-数据存储与多账号.md](docs/repowiki/08-数据存储与多账号.md): data dirs, accounts.

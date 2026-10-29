@@ -43,7 +43,7 @@ node scripts/acp-probe.mjs
 | `image:false` | 在 `askBrain` 前拦截图片，或换支持图片的 agent |
 | 正文非逐 token | 调 `firstFrameMs` + 心跳策略（见 M2） |
 | `mcpServers` 被拒绝 | MCP 只能走该 agent 自己的配置文件，或先不做动态 MCP |
-| 默认模型路由需要 API key / 桌面登录要切 account | 加 `model` 预设字段，并在 session 建立后 `session/set_config_option` |
+| 默认模型路由需要 API key / 桌面登录要切 account | 加 `model` agent 配置字段，并在 session 建立后 `session/set_config_option` |
 
 ---
 
@@ -90,9 +90,9 @@ acme: {
 - `AUTO_PROBE_ORDER` 末尾追加该 agent（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；
 - `AcpAgentPreset` / `ResolvedAgent` 透传新字段；
 - `brain-agents.test.ts` 加断言；
-- `docs/接入其它-ACP-Agent.md` §5 预设表加一行。
+- `docs/接入其它-ACP-Agent.md` §5 agent 表加一行。
 
-> **1.2.0 起，加 agent 不必再"挑角色"**：同一个 agent同时可用于对话大脑与任务 worker（`resolveAgentFor(cfg, role)`），加完立刻可以
+> **1.2.0 起，加 agent 不必再"挑角色"**：同一个 agent 同时可用于对话大脑与任务 worker（`resolveAgentFor(cfg, role)`），加完立刻可以
 > `wemind brain switch acme` 热切换、也可以在微信里 `任务 acme：…` 指定它干活——两者都不需要改代码、不需要重启。
 > 启动覆盖（`--bin`/`--args`/`--shell`）按**agent 名**存在 `brain.json` 的 `presets` 段（`wemind brain set acme --bin …`），
 > 所以「切走再切回」不会丢；默认任务大脑是 `worker.agent ?? agent`。
@@ -125,7 +125,7 @@ wemind brain check
 |---|---|
 | 无 `session/load`，有 `resume` | `acp-brain.ts` + `worker-acp.ts` 的 `ensureSession`：load → resume → new 兜底 |
 | 有反向请求 | `handleFrame` 应答 `session/request_permission`；未知 method 回 `-32601` |
-| 首帧慢 / 无 activity 帧 | 预设 `firstFrameMs`；`index.ts` 心跳/`heartbeatMs` |
+| 首帧慢 / 无 activity 帧 | 配置里的 `firstFrameMs`；`index.ts` 心跳/`heartbeatMs` |
 | `image:false` | `index.ts` 收到图片时友好拒绝；不要让它 `-32602` 重试 |
 | MCP 走 ACP | `session/new` / `session/resume` 传 `mcpServers`；catalog 按 agent 自己的来源 |
 
@@ -151,7 +151,7 @@ wemind brain check
 4. 发图 → 按 image 能力正确处理；
 5. 越界写 → 有权限请求则应答，不卡死；
 6. 两个账号 → 沙箱隔离；
-7. **热切换**（1.2.0）：从别的预设 `wemind brain switch acme` → 答复两段、daemon pid 不变、下一条消息由 acme 答；再切回去，旧上下文能 load 回来；
+7. **热切换**（1.2.0）：从别的配置里的 `wemind brain switch acme` → 答复两段、daemon pid 不变、下一条消息由 acme 答；再切回去，旧上下文能 load 回来；
 8. **当 worker 用**（1.2.0）：`wemind task "…" --agent acme` → 任务跑通；跑完进程**留着复用**（`wemind list` 可见），5 分钟后回收。
 
 ---
@@ -164,9 +164,9 @@ wemind brain check
 - **`session/load` 不是通用能力**：没有就退 `resume`，再没有就 `new`，并在日志里说清楚。
 - **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。
 - **committed-only + 15s 心跳 = 烧连发额度**：先调心跳，再考虑首帧。
-- **密钥不要写进预设**：daemon 进程环境提供。
-- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自预设字段——所以探针必须看，看完必须写进 `brain-agents.ts`。
-- **冷启动耗时待实测**：各 agent `initialize`/`session/new` 的真实耗时还没量（`docs/ai/recipes/run-e2e.md` §7.2 第 3 条）；若某 agent 超过 `REQ_TIMEOUT=30s`，需要在预设里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
+- **密钥不要写进 agent**：daemon 进程环境提供。
+- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-agents.ts`。
+- **冷启动耗时待实测**：各 agent `initialize`/`session/new` 的真实耗时还没量（`docs/ai/recipes/run-e2e.md` §7.2 第 3 条）；若某 agent 超过 `REQ_TIMEOUT=30s`，需要在 agent 里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
 - **同 agent 并发 = 两个进程共用其配置目录**：多任务并行时会真实发生（不同 agent 各自 `configSubdir` 天然隔离）；新 agent 若把会话/缓存写在配置目录里，这条要实测。
 
 ---

@@ -61,7 +61,7 @@ export function parseJsonc(text: string): Record<string, unknown> | null {
   }
 }
 
-// ---- ACP 传输：把 catalog 条目转成 session/new 的 mcpServers（mcpViaAcp 预设用） ----
+// ---- ACP 传输：把 catalog 条目转成 session/new 的 mcpServers（配了 mcpViaAcp 的 agent 用） ----
 
 /** ACP `session/new` 的 stdio MCP 声明（env 是 `{name,value}[]`，与 kiro/opencode 的 map 不同）。 */
 export type AcpMcpServer = {

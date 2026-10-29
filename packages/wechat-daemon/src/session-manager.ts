@@ -33,7 +33,7 @@ export type CreateFn = (userId: string) => Promise<void>;
 
 /** 会话操作的最小上下文：谁、哪个大脑、哪个数据目录。 */
 export type SessionCtx = {
-  /** 当前对话大脑的agent 名（登记表按 agent 分开存）。 */
+  /** 当前对话大脑的 agent 名（登记表按 agent 分开存）。 */
   agent: string;
   /** 会话属于谁（微信 userId / CLI 的登录者）。 */
   userId: string;
