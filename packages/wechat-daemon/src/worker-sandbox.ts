@@ -10,7 +10,7 @@ import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./a
 /**
  * worker 沙箱：与 brain 沙箱（mcp-sandbox.ts）并列，但 MCP 策略相反。
  *
- * worker 是无人值守的任务执行机，默认**继承真实配置目录的全部 MCP**（仅排除 wechat 防回环），而非 brain 的「默认空 + 对话中按需加载」——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。
+ * worker 是无人值守的任务执行机，默认**继承真实配置目录的全部 MCP**（仅排除 wechat，防它把消息发回自己），而非 brain 的「默认空 + 对话中按需加载」——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。
  * 记忆/技能/规则（mirrorRealKiro）与 settings（syncSettings，含模型/信任）的继承与 brain 一致。
  *
  * 按 agent 适配（同 mcp-sandbox.ts）：配置目录、MCP 格式、设置继承方式均随 agent 而变。
@@ -42,7 +42,7 @@ function catalogPath(ag: ResolvedAgent): string {
   );
 }
 
-/** worker 不继承的 MCP：wechat 始终强制排除（防回环），外加 WEMIND_WORKER_MCP_EXCLUDE 指定的。 */
+/** worker 不继承的 MCP：wechat 始终强制排除（防它把消息发回自己），外加 WEMIND_WORKER_MCP_EXCLUDE 指定的。 */
 function excludeSet(): Set<string> {
   const raw = process.env.WEMIND_WORKER_MCP_EXCLUDE ?? "wechat";
   const s = new Set(
@@ -289,7 +289,7 @@ function mirrorRealKiro(ag: ResolvedAgent): void {
 
 /**
  * 启动时确保 worker 沙箱就绪：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 链入记忆/技能 → 凭据。
- * `forAgent` 可显式指定 agent（多任务/池预热时为**那个** agent 备沙箱，此刻槽位可能指着别的默认）。
+ * `forAgent` 可显式指定 agent（多任务 / 进程池提前起进程时为**那个** agent 备沙箱，此刻槽位可能指着别的默认）。
  */
 export function ensureWorkerHome(forAgent?: ResolvedAgent): void {
   const ag = forAgent ?? getAgent("worker");

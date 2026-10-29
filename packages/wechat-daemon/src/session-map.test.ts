@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { normalizeSessionMap, sessionKey } from "./session-map.js";
 
 describe("sessionKey", () => {
-  it("按 agent 前缀分命名空间", () => {
+  it("按 agent 前缀分开存", () => {
     expect(sessionKey("qoder", "o9cq@im.wechat")).toBe("qoder:o9cq@im.wechat");
     expect(sessionKey("deepseek", "task")).toBe("deepseek:task");
   });

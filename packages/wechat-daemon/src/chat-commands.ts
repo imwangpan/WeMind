@@ -40,11 +40,11 @@ export type ChatCommand =
   | { kind: "help" };
 
 export type TaskCommand =
-  /** 派发/注入任务（可选指定 agent）。 */
+  /** 派发任务 / 给任务回话（可选指定 agent）。 */
   | { kind: "toWorker"; text: string; agentToken?: string }
   /** 结束任务（无 id = 唯一那条；`all` = 全部）。 */
   | { kind: "stop"; id?: number | "all" }
-  /** 向指定编号的任务注入内容。 */
+  /** 向指定编号的任务回话。 */
   | { kind: "reply"; id: number; text: string }
   /** 任务列表。 */
   | { kind: "tasks" };
@@ -66,7 +66,7 @@ export type CommandSection = "session" | "task" | "brain" | "mcp" | "misc";
 export type CommandSpec<C> = {
   id: string;
   section: CommandSection;
-  /** 仅登录者可用（兜底门：微信平台只投递登录者的消息，正常不会触发）。 */
+  /** 仅登录者可用（兜底校验：微信平台只投递登录者的消息，正常不会触发）。 */
   ownerOnly?: boolean;
   /** 帮助里的中文写法。 */
   zh: string;
@@ -202,7 +202,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     zh: "切换大脑 [预设|auto]",
     slash: "/brain [预设|auto]、/ai brain [预设|auto]",
     cli: "wemind brain switch <预设|auto>",
-    brief: "热切换对话大脑（失败自动回滚）",
+    brief: "换对话大脑，不用重启（失败自动退回原来那个）",
     match: (t) => {
       const m = t.match(/^(?:切换大脑|ai\s*大脑|\/brain|\/ai\s+brain)(?:\s+([\s\S]+))?$/i);
       if (!m) return null;
@@ -309,7 +309,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     zh: "结束任务 [编号]、结束全部任务",
     slash: "/stop [编号|全部]",
     cli: "wemind task-stop [编号|全部]",
-    brief: "结束任务（进程回池，可复用）",
+    brief: "结束任务（进程留着复用）",
     match: (t) => {
       if (/^(?:结束全部任务|停止全部任务|\/stop\s+(?:all|全部))$/i.test(t))
         return { kind: "stop", id: "all" };

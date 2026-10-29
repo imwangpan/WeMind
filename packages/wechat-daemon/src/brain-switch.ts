@@ -16,9 +16,9 @@ import { beginSwitch, drainTurn, endSwitch, restart, warmup } from "./acp-brain.
  *  1. 解析目标预设：**绕开环境变量**（用户此刻的明确意图该压过一次性 env 覆盖），不可用直接回执失败，不 spawn。
  *  2. `beginSwitch()` → `drainTurn()`：等在跑的回合结束（默认 30s）。超时**诚实失败**，绝不半路砍回合丢答案。
  *  3. `ensureBrainHome(新agent)` → `restart()`（杀旧进程）→ `warmup()`（initialize + session/load|new，硬上限 120s）。
- *  4. 成功才 `setAgent()` + 写 brain.json —— **持久化放最后**，于是「回滚」不需要撤销任何东西：
+ *  4. 成功才 `setAgent()` + 写 brain.json —— **持久化放最后**，于是「退回」不需要撤销任何东西：
  *     失败路径只做 `restart()`（清掉半截进程与 pid 记录），槽位仍指旧大脑，下一条消息懒重建它（上下文从磁盘 load 回来）。
- *  5. 同一目标的并发请求复用同一个 promise（dedupe）；不同目标直接拒绝（不排队，避免「连点两下切到 A」这类歧义）。
+ *  5. 同一目标的并发请求复用同一次切换；不同目标直接拒绝（不排队，避免「连点两下切到 A」这类歧义）。
  *
  * 已知边界：`WEMIND_BRAIN` 环境变量优先级高于 brain.json，命令绕开了它（进程内真的切了），
  * 但**重启后会回到 env 指的大脑** —— 回执里如实警告，不装作没这回事。
@@ -93,7 +93,7 @@ export type PreflightResult =
   | { ok: false; problem: string };
 
 /**
- * 切到某个预设（`auto` 表示重新自动探测）。`userId` 是新大脑预热时按谁恢复会话（缺省不建会话）。
+ * 切到某个预设（`auto` 表示重新自动探测）。`userId` 是启动新大脑时按谁恢复会话（缺省不建会话）。
  * `persist=false`：只在本进程生效、不写 brain.json（CLI 的「仅本次」场景）。
  */
 export async function switchBrain(
@@ -149,7 +149,7 @@ async function runSwitch(
 
     const t0 = Date.now();
     try {
-      ensureBrainHome(target); // 先备沙箱（只往新 agent 的配置目录里加东西，失败回滚无需撤销）
+      ensureBrainHome(target); // 先备沙箱（只往新 agent 的配置目录里加东西，失败退回无需撤销）
       restart(); // 杀掉旧进程；旧会话在磁盘上，切回来时 session/load 恢复
       await withTimeout(warmup(target, opts.userId ?? ""), TIMEOUT_MS, warmupTimeoutMsg());
       setAgent("brain", target); // 成功之后才更新槽位
@@ -167,7 +167,7 @@ async function runSwitch(
       const why = e instanceof Error ? e.message : String(e);
       return {
         ok: false,
-        problem: `切换失败，已回滚到「${current.name}」：${why}\n下一条消息会自动重启旧大脑（上下文从磁盘恢复），不用手动处理。`,
+        problem: `切换失败，已退回原来那个「${current.name}」：${why}\n下一条消息会自动重启旧大脑（上下文从磁盘恢复），不用手动处理。`,
       };
     }
   } finally {
@@ -176,5 +176,5 @@ async function runSwitch(
 }
 
 function warmupTimeoutMsg(): string {
-  return `预热超时（${Math.round(TIMEOUT_MS / 1000)}s 内没有完成 initialize/会话）`;
+  return `新大脑启动超时（${Math.round(TIMEOUT_MS / 1000)}s 内没有完成 initialize/会话）`;
 }

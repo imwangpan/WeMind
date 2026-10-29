@@ -11,8 +11,8 @@ import type { ResolvedAgent } from "./brain-agents.js";
 
 /**
  * worker ACP 连接：**一条连接＝一个 ACP agent 进程**，约 70% 复制自 acp-brain.ts，差异：
- * - **每连接一实例**（child/pending/session/进度全在实例里，不再是模块单例）——多任务并行要有多个进程；
- *   进程池（worker-pool.ts）持有它们、按 agent 复用，任务结束把连接**还回池**而不是杀掉；
+ * - **每连接一实例**（child/pending/session/进度全在实例里，不再是模块级全局）——多任务并行要有多个进程；
+ *   进程池（worker-pool.ts）持有它们、按 agent 复用，任务结束把连接**还给进程池**而不是杀掉；
  * - **每任务一个 session key**（`task-<编号>@<userId>`），持久化到 worker-sessions.json，重建后 session/load 续上下文；
  * - **cwd = 任务工作目录**（本地派发可指定，默认用户主目录），而沙箱走 WORKER_HOME（继承全量 MCP 除 wechat + 记忆）；
  * - **更宽松超时**（漫长任务，env 可调）；去掉 brain 的「可发图」首轮提示（任务执行不是聊天发图场景）。
@@ -52,7 +52,7 @@ type Pending = {
 
 let connSeq = 0;
 
-// ---- 磁盘 session 映射（`<agent>:<sessionKey>` -> sessionId），与 brain 同样按 agent 分命名空间 ----
+// ---- 磁盘 session 映射（`<agent>:<sessionKey>` -> sessionId），与 brain 同样按 agent 分开存 ----
 function loadSessionMap(a: ResolvedAgent): Record<string, string> {
   let raw: unknown;
   try {
@@ -150,7 +150,7 @@ export class WorkerConn {
     dlog(`${this.id}(${this.agent.name}) killed`);
   }
 
-  /** 丢弃某个会话（内存 + 磁盘指针）：任务结束用，下个任务全新开始。 */
+  /** 丢弃某个会话（内存 + 磁盘上的当前会话记录）：任务结束用，下个任务全新开始。 */
   dropSession(key: string): void {
     this.sessions.delete(key);
     const map = loadSessionMap(this.agent);
@@ -158,13 +158,13 @@ export class WorkerConn {
     saveSessionMap(map);
   }
 
-  /** 预热：只做「起进程 + initialize」，不建会话（任务拿到连接时用；失败由调用方处理）。 */
+  /** 提前起进程：只做「起进程 + initialize」，不建会话（任务拿到连接时用；失败由调用方处理）。 */
   async warm(): Promise<void> {
     await this.ensureProcess();
   }
 
   /**
-   * 发一轮 prompt（任务派发或注入续跑），等这一轮 ACP 响应结束，返回拼接文本。
+   * 发一轮 prompt（任务派发或回话续跑），等这一轮 ACP 响应结束，返回拼接文本。
    * 失败即杀本连接的进程（下一轮 ask 重建并 session/load 恢复上下文）→ 配合「继续」实现中断恢复。
    * `strictResume`：磁盘上有旧会话、但 load/resume 都失败时**不静默新建**，直接抛错（续跑场景要的是「上下文接上」，
    * 悄悄换一个空会话会让用户以为续上了、其实什么都不知道）。

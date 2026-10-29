@@ -44,7 +44,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 | `wemind start / stop <key\|label>` | 启停某账号的常驻 |
 | `wemind brain [show\|set\|unset\|check]` | 查看/切换/清除/自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`） |
 | `wemind task "<描述>" [--cwd 目录]` | 本地派发远程任务给 worker |
-| `wemind task-status / task-reply / task-stop` | 任务状态、注入续跑（`task-reply 继续`）、结束 |
+| `wemind task-status / task-reply / task-stop` | 任务状态、回话续跑（`task-reply 继续`）、结束 |
 | `wemind allow / revoke / allowlist` | 授权管理（谁能驱动这个 bot） |
 | `wemind logout / delete / label / set-default` | 账号运维 |
 | `wemind version` / `wemind help` | 版本、完整帮助 |
@@ -59,7 +59,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 
 ## 数据与安全
 
-- 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标、`allowFrom.json` 授权清单、`brain-home/` 大脑沙箱、`daemon.log` 日志。
+- 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标（读到哪条消息了）、`allowFrom.json` 授权清单、`brain-home/` 大脑沙箱、`daemon.log` 日志。
 - ⚠️ **daemon 会让大脑免确认执行工具**（kiro 预设 `--trust-all-tools`；qoder 预设 `--yolo`）：能给这个 bot 发消息的人，即可让大脑在本机执行任意工具（shell / 写文件）。唯一安全闸是**发件人授权（allowFrom）**：扫码登录者自动授权，**勿清空**。
 - `account.json` 里 bot token 是明文（POSIX 上 chmod 600；Windows 请用目录权限或磁盘加密）。
 - 同一个 bot token **只能有一个消费者**：`wemind` daemon 与 `@wemind/wechat-mcp` 二选一，否则互相抢消息。

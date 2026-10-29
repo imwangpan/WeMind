@@ -11,17 +11,17 @@ export function sessionKey(agent: string, key: string): string {
   return `${agent}:${key}`;
 }
 
-/** 对话大脑的会话指针表路径（`<agent>:<userId>` → sessionId）。 */
+/** 对话大脑的当前会话表路径（`<agent>:<userId>` → sessionId）。 */
 export function brainSessionMapPath(dir: string = DATA_DIR): string {
   return path.join(dir, "brain-sessions.json");
 }
 
-/** 任务 worker 的会话指针表路径（`<agent>:<taskKey>` → sessionId）。 */
+/** 任务 worker 的当前会话表路径（`<agent>:<taskKey>` → sessionId）。 */
 export function workerSessionMapPath(dir: string = DATA_DIR): string {
   return path.join(dir, "worker-sessions.json");
 }
 
-/** 读会话指针表；缺失/损坏/非对象 → 空表（幂等、不抛）。只保留字符串值，**不做格式迁移**（迁移归 normalizeSessionMap）。 */
+/** 读当前会话表；缺失/损坏/非对象 → 空表（幂等、不抛）。只保留字符串值，**不做格式迁移**（迁移归 normalizeSessionMap）。 */
 export function readSessionMap(file: string): Record<string, string> {
   let raw: unknown;
   try {
@@ -37,7 +37,7 @@ export function readSessionMap(file: string): Record<string, string> {
   return map;
 }
 
-/** 原子写会话指针表（tmp + rename）：这个文件在关键路径上（ensureSession → session/load），半截 JSON 等于「所有会话丢失」。 */
+/** 原子写当前会话表（tmp + rename）：这个文件在关键路径上（ensureSession → session/load），半截 JSON 等于「所有会话丢失」。 */
 export function writeSessionMap(file: string, map: Record<string, string>): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
@@ -45,7 +45,7 @@ export function writeSessionMap(file: string, map: Record<string, string>): void
   fs.renameSync(tmp, file);
 }
 
-/** 清掉某个键的会话指针（如「删除会话」删的正是当前那条）；返回是否确有改动。 */
+/** 清掉某个键的当前会话记录（如「删除会话」删的正是当前那条）；返回是否确有改动。 */
 export function clearSessionPointer(file: string, key: string): boolean {
   const map = readSessionMap(file);
   if (!(key in map)) return false;

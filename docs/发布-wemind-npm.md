@@ -146,7 +146,7 @@ export const CLI_PID_MARKERS: string[][] = [["wemind", "cli.js"], ["run-daemon.p
 | 源码仓库 | `…\WeMind\packages\wechat-daemon\dist\cli.js daemon` | 路径里的 **WeMind** |
 | 全局安装（scope 包） | `…\npm\node_modules\@wemind\cli\dist\cli.js daemon` | `@wemind` 里的 **wemind** |
 | 项目本地安装 | `…\node_modules\@wemind\cli\dist\cli.js daemon` | 同上（Windows npm shim 走 `…/@wemind/cli/dist/cli.js`） |
-| 源码开发期 PowerShell wrapper | `pwsh -File …\run-daemon.ps1` | 第二组 marker |
+| 源码开发期 PowerShell wrapper | `pwsh -File …\run-daemon.ps1` | 第二组进程特征串 |
 
 > 注意：**不要**改成 `@wemind/cli` + `cli.js`。Windows 上 npm 的 shim 走短路径 `…/@wemind/cli/dist/cli.js`（不保证出现 scope 前缀形态），用 `wemind` 这个子串同时覆盖 scope 全路径与短路径，更稳。
 
@@ -330,7 +330,7 @@ npx -y @wemind/cli list                   # 验证「npx 写全包名」这条�
 
 **B. 用户机器上没有 ACP agent**：`wemind daemon` 会以退出码 78 失败并停止自动重启（脚本/watchdog/pm2 三处都尊重该退出码），`wemind brain` / `brain check` 会给出可操作提示。`wemind login` 之后不会主动检查大脑——保持登录流程轻量。
 
-**C. 进程身份与老进程**：源码期（未发布）的守护进程命令行是 `…\WeMind\packages\wechat-daemon\dist\cli.js`，靠 **WeMind** 命中新 marker；从「目录名不含 wemind」的 clone 启动的老进程会认不出——重启一次即可。
+**C. 进程身份与老进程**：源码期（未发布）的守护进程命令行是 `…\WeMind\packages\wechat-daemon\dist\cli.js`，靠 **WeMind** 命中新特征串；从「目录名不含 wemind」的 clone 启动的老进程会认不出——重启一次即可。
 
 **D. 想占住 `wemind` 短名**：可以用 `bin` 为空的 `wemind` 包做「指向 `@wemind/cli` 的提示包」（不推荐：多一个要维护的包）。当前不做。
 

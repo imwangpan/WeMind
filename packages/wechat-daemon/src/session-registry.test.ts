@@ -218,7 +218,7 @@ describe("落盘与读写入口", () => {
     expect(() => markUsed("kiro", "u1", "s1", { dir: blocked })).not.toThrow();
   });
 
-  it("listSessions：只列本人的 + 其它大脑的条数 + 当前指针", () => {
+  it("listSessions：只列本人的 + 其它大脑的条数 + 当前会话记录", () => {
     ensureEntry("kiro", "u1", "s1", { dir });
     ensureEntry("opencode", "u1", "s2", { dir });
     ensureEntry("kiro", "u2", "s3", { dir });
@@ -242,7 +242,7 @@ describe("重命名 / 删除", () => {
     expect(names).toContain("改名了");
   });
 
-  it("删除：删登记项；删的若是当前会话则同时清指针（下条消息自然开新的）", () => {
+  it("删除：删登记项；删的若是当前会话则同时清当前会话记录（下条消息自然开新的）", () => {
     ensureEntry("kiro", "u1", "s1", { dir, now: 1 });
     ensureEntry("kiro", "u1", "s2", { dir, now: 2 });
     writeSessionMap(brainSessionMapPath(dir), { "kiro:u1": "s2" });
@@ -265,7 +265,7 @@ describe("重命名 / 删除", () => {
 });
 
 describe("回填与渲染", () => {
-  it("syncFromPointerMap：补指针表里有、登记表里没有的（幂等）", () => {
+  it("syncFromPointerMap：补当前会话表里有、登记表里没有的（幂等）", () => {
     writeSessionMap(brainSessionMapPath(dir), { "kiro:u1": "s1", "opencode:u1": "s2", 坏键: "s3" });
     expect(syncFromPointerMap(dir, 100)).toBe(2);
     expect(syncFromPointerMap(dir, 200)).toBe(0);

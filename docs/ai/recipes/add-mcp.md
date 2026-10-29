@@ -1,4 +1,4 @@
-# 配方：新增 / 调试 MCP 注入
+# 配方：新增 / 调试 MCP 挂载
 
 > **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
 >
@@ -125,7 +125,7 @@ MCP                 # 列出可选与已激活
 |---|---|
 | `MCP` 列表为空 | `catalog` 路径是否存在；`WEMIND_MCP_CATALOG` 是否指对；格式是否是该 agent 的格式 |
 | 加载后工具不出现 | 是否 `restart()`；会话是否 `load/resume` 成功；agent 是否需要「新会话」 |
-| 加载 `wechat` 被拒 | 预期行为（防回环）；不要绕过 |
+| 加载 `wechat` 被拒 | 预期行为（防它把消息发回自己）；不要绕过 |
 | worker 没有工具 | worker 是「全量继承除排除集」，看 `WEMIND_WORKER_MCP_EXCLUDE`；`disabled:true` 会被跳过 |
 | DSH 报 `-32602`/会话创建失败 | MCP 定义不合法或起不来；官方 `session/new` 会回滚整会话，先删坏条目 |
 | Windows 起不来 | `.cmd`/`npx` 要 `shell:true`；命令/参数要按 `spawnAgent` 规则引号 |

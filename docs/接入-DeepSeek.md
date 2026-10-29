@@ -60,7 +60,7 @@
 - 预设表：`packages/wechat-daemon/src/brain-agents.ts` 的 `ACP_AGENT_PRESETS`。
 - 选择优先级：`WEMIND_BRAIN`（env）> `<数据目录>/brain.json` > `auto`（`kiro → opencode → gemini → deepseek → qoder`）。
 - 沙箱：`BRAIN_HOME`（默认 `<数据目录>/brain-home`），通过预设的 `homeEnvVar` 指向 agent 的配置目录；`configSubdir` 决定配置目录在沙箱内的相对位置。
-- MCP：brain 默认空；微信指令「加载/卸载」改激活集，重启 ACP 生效；`wechat` 永久禁止（防回环）。**传输方式按 agent 分派**：kiro/opencode 写各自的配置文件；DSH 走 ACP `session/new` 的 `mcpServers`；catalog 也按 agent 各自的约定读取（详见 §5.3 M3）。
+- MCP：brain 默认空；微信指令「加载/卸载」改激活集，重启 ACP 生效；`wechat` 永久禁止（防它把消息发回自己）。**传输方式按 agent 分派**：kiro/opencode 写各自的配置文件；DSH 走 ACP `session/new` 的 `mcpServers`；catalog 也按 agent 各自的约定读取（详见 §5.3 M3）。
 - 记忆继承：`mirrorRealKiro()` 把 `realHome` 下的 `inheritDirs` 目录 junction 进沙箱，`inheritFiles` 单文件拷入。
 
 ### 2.3 现有客户端对「新 agent」的隐含假设
@@ -390,7 +390,7 @@ deepseek: {
    - committed 模式下只发一条「该大脑完成后一次性返回」的说明，后续不再按 15s 刷；
    - 不要用假 `activity` 掩盖真实卡死；`WECHAT_BRAIN_CAP_MS` 仍兜底。
 
-#### M3 · MCP 注入 ✅ 已实现并真机验证（2026-10-24）
+#### M3 · MCP 挂载 ✅ 已实现并真机验证（2026-10-24）
 
 DSH 不读 kiro/opencode 的 MCP 配置文件；它自己的 MCP 通过 ACP `session/new` 的 `mcpServers` 挂载（stdio 实测接受，`http:true` 已广告）。**已落地**：
 
@@ -403,7 +403,7 @@ DSH 不读 kiro/opencode 的 MCP 配置文件；它自己的 MCP 通过 ACP `ses
 3. **catalog 按 agent 各自的约定读取，不跨 agent 借文件**：DSH 用 `WEMIND_MCP_CATALOG` 指向中立 kiro 格式文件（默认 `~/.dsh/settings/mcp.json` 不存在 → 未设 catalog 时为空）。
 4. **坏条目防护**：官方 `session/new` 遇到起不来的 MCP 会回滚整个会话（实测 `mcp-client: initial connection or tool synchronization failed`）——`addMcp` 预校验拒绝无法转换的定义。
 
-**真机验证（假 stdio MCP，echo 工具写 marker）**：`session/new` 挂载 → 模型调用工具（marker `called`）回答 `ok`；`session/resume` 带同一声明 → 再次调用（marker 第 2 次）回答 `okPINEAPPLE`。HTTP MCP 未真机实测（能力已广告）。
+**真机验证（假 stdio MCP，echo 工具写标记文件）**：`session/new` 挂载 → 模型调用工具（标记文件记到 `called`）回答 `ok`；`session/resume` 带同一声明 → 再次调用（标记文件第 2 次）回答 `okPINEAPPLE`。HTTP MCP 未真机实测（能力已广告）。
 
 #### M4 · 记忆 / 技能继承 ✅ 已验收（2026-10-24，现场已还原）
 
@@ -592,7 +592,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | 代码级 `askBrain` 集成 | `A1=STORED` → `restart()` → `A2=PINEAPPLE`；`model set` / `resume` 均成功 | — | **M1/M2 代码路径验证通过** |
 | **微信端到端** | 收到「你好」→ `spawn deepseek` → 旧 opencode session `resume` 失败 → `session/new` → `model set` → `prompt ok` 693ms → 回复「你好！很高兴见到你 😊」 | — | **E2E 通过** |
 | **worker E2E** | `task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok` 2305ms（tool_call）→ `hello.txt`；`task-reply` 第二轮 1575ms → `hello`；`task-stop` idle | — | **worker E2E 通过** |
-| **M3：MCP via ACP** | 假 stdio MCP 经 `toAcpMcpServers()` 转换：`session/new` 挂载 → 模型调用（marker `called`）答 `ok`；`session/resume` 再挂 → 再调用答 `okPINEAPPLE`；坏 MCP → `session/new` 回滚（`initial connection or tool synchronization failed`） | — | **M3 通过**（HTTP 未实测） |
+| **M3：MCP via ACP** | 假 stdio MCP 经 `toAcpMcpServers()` 转换：`session/new` 挂载 → 模型调用（标记文件记到 `called`）答 `ok`；`session/resume` 再挂 → 再调用答 `okPINEAPPLE`；坏 MCP → `session/new` 回滚（`initial connection or tool synchronization failed`） | — | **M3 通过**（HTTP 未实测） |
 | **M3：微信侧全链路** | 用户实测：`MCP` 列出 test-echo → `加载` → 下一条消息 `session/resume ok ... mcp=[test-echo]`，模型调用工具答 `MCP-OK`（调用记录落盘）→ `卸载` 激活集回空 | — | **微信侧通过**（含微信侧 `resume` 首次实证） |
 | **M4：记忆/技能** | 真实 `~/.dsh` 放测试 skill（KIWANO）+ `AGENTS.md` 规则（MANGO-42）→ brain/worker 沙箱均可读，回答均 `CODEWORD=MANGO-42 SECRET=KIWANO`；现场已还原 | — | **M4 通过** |
 | **M5：多账号机制** | 双数据目录各跑一轮：brain-home/worker-home 凭据各自独立，session id 不同，均答 `OK` | — | **机制通过**（双真机微信待需要时验） |

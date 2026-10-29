@@ -10,7 +10,7 @@ import type { ResolvedAgent } from "./brain-agents.js";
  *
  * 为什么需要池：多任务并行要求「a 大脑做任务1、b 大脑做任务2」，而一个 agent 进程同一时刻只跑一条会话；
  * 同时每个 agent 进程都是一个完整的 agent（内存/冷启动都不便宜），任务一结束就杀掉会让「紧接着派下一个任务」反复付冷启动。
- * 于是任务结束只是把连接**还回池**：同 agent 的下一个任务直接复用，空闲久了才回收。
+ * 于是任务结束只是把连接**还给进程池**：同 agent 的下一个任务直接复用，空闲久了才回收。
  *
  * 策略（`planAcquire`/`planReap` 是纯函数，可单独测——IO 与判定分离）：
  *  - 同 agent 的空闲连接优先复用（**最旧的先用**：它本来就最接近被回收，先让它干活正好续命）；
@@ -227,7 +227,7 @@ export async function acquire(
   }
 }
 
-/** 任务结束：把连接还回池（置空闲）并按策略回收多余/过期的空闲连接；连接已经死了就地清掉。 */
+/** 任务结束：把连接还给进程池（置空闲）并按策略回收多余/过期的空闲连接；连接已经死了就地清掉。 */
 export function release(conn: WorkerConn, limits: PoolLimits = poolLimits()): void {
   const e = entries.get(conn.id);
   if (!e) return;
@@ -260,7 +260,7 @@ export function sweep(limits: PoolLimits = poolLimits()): void {
 
 /**
  * 杀掉池里**全部**连接——只给「daemon 退出」用（`task-manager.ts` 的 `shutdownTasks()`，由 `wemind stop` / 进程退出触发）。
- * 结束单条任务**不经过这里**：那条路走 `task-manager.ts` 的「等回复的 `release()` 回池 / 正在跑的 `drop()` 杀一条」。
+ * 结束单条任务**不经过这里**：那条路走 `task-manager.ts` 的「等回复的 `release()` 留着复用 / 正在跑的 `drop()` 杀一条」。
  */
 export function killAll(): void {
   for (const e of entries.values()) e.conn.kill();

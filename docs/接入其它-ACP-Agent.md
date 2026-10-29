@@ -57,7 +57,7 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 |---|------|------|------------|
 | 1 | **二进制名/路径** | 可执行文件名（在 PATH 上）或绝对路径 | `kiro-cli`（Win：`kiro-cli.exe`） |
 | 2 | **ACP 启动参数** | 让该 CLI 进入「ACP server over stdio」模式的命令行参数 | `acp --trust-all-tools` |
-| 3 | **配置目录环境变量名** | 该 agent 读取其配置/数据目录的环境变量名；WeMind 会把它指向 brain 沙箱目录，用于隔离与可选的 MCP 注入。没有就留空 | `KIRO_HOME` |
+| 3 | **配置目录环境变量名** | 该 agent 读取其配置/数据目录的环境变量名；WeMind 会把它指向 brain 沙箱目录，用于隔离与可选的 MCP 挂载。没有就留空 | `KIRO_HOME` |
 | 4 | **ACP 兼容性** | 该 CLI 是否实现了 ACP 的最小方法集；**还要看** `initialize.agentCapabilities` 的 `load/resume/image/mcp` 与是否会发反向请求 | 是 |
 
 > 第 1、2 项几乎所有 agent 都有；第 3 项各家差异较大（见 §6 MCP 沙箱）；第 4 项是前提——不支持 ACP 的 agent 走不了这条路，得用「第二档：裸 LLM API 适配器」（尚未实现，见 §9）。
@@ -198,7 +198,7 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 ACP agent 分两类，接入方式不同：
 
 - **原生 ACP**：CLI 自带 ACP 模式，加个参数直接起（如 kiro、Gemini）。
-- **需适配器**：CLI 本身不说 ACP，要起一个**第三方适配器进程**来桥接（如 Claude Code、Codex）。适配器一般有自己的认证（API key / 登录），且不读 WeMind 的 `KIRO_HOME` 沙箱（故无 `homeEnvVar`、动态 MCP 注入不适用，见 §6）。
+- **需适配器**：CLI 本身不说 ACP，要起一个**第三方适配器进程**来桥接（如 Claude Code、Codex）。适配器一般有自己的认证（API key / 登录），且不读 WeMind 的 `KIRO_HOME` 沙箱（故无 `homeEnvVar`、动态挂 MCP不适用，见 §6）。
 
 | 预设键 | agent | 类型 | 状态 | 启动（示意） |
 |--------|-------|------|------|------|
@@ -224,7 +224,7 @@ ACP agent 分两类，接入方式不同：
 WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAIN_HOME` 决定），目的是：
 
 1. **隔离**——大脑用的配置/会话与你本机日常用的该 agent 分开；
-2. **可选 MCP 注入**——通过微信指令 `加载/卸载 <MCP>` 动态改沙箱里的 MCP 配置，重启 agent 生效；
+2. **可选 MCP 挂载**——通过微信指令 `加载/卸载 <MCP>` 动态改沙箱里的 MCP 配置，重启 agent 生效；
 3. **杜绝回环**——默认不加载 `wechat` 自身 MCP。
 
 实现方式是：把 `homeEnvVar`（kiro 是 `KIRO_HOME`）指向沙箱目录，并在该目录放一个 **kiro 格式的 `mcp.json`**。
@@ -237,16 +237,16 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 因此：**kiro、opencode、qoder 现已开箱支持「微信里动态加载/卸载 MCP」**（qoder 用 `QODER_CONFIG_DIR` + `settings.json` 的 `mcpServers`，沙箱实测生效）；**DSH 走 `mcpViaAcp: true`**——不写配置文件，激活集由 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发（已真机验证）。其它 agent 若格式不同，则是上述预设字段填对即可；实在不同再按其约定适配。
 
-- 若该 agent 也用「某个 HOME 环境变量 + 兼容结构」，设对 `homeEnvVar` 即可，MCP 注入大概率可用；
+- 若该 agent 也用「某个 HOME 环境变量 + 兼容结构」，设对 `homeEnvVar` 即可，MCP 挂载大概率可用；
 - 该 agent 完全不需要配置目录时，把 `homeEnvVar` 留空，仅做隔离 cwd。
 
-> 简言之：**对话/工具是通用的；「动态 MCP 注入」依赖该 agent 的配置约定，跨 agent 不保证开箱即用。**
+> 简言之：**对话/工具是通用的；「动态挂 MCP」依赖该 agent 的配置约定，跨 agent 不保证开箱即用。**
 
 ---
 
 ## 6.5 继承记忆 / 规则 / 技能（按 agent 配置）
 
-为了让微信里的大脑和你日常使用同一 agent 时读到**同样的记忆、规则、技能**，沙箱会把该 agent 真实配置目录里的「知识/记忆」类子目录用 junction 链进 brain 沙箱（`settings`、`sessions` 除外——前者 MCP 必须隔离防回环，后者是 brain 自有会话）。
+为了让微信里的大脑和你日常使用同一 agent 时读到**同样的记忆、规则、技能**，沙箱会把该 agent 真实配置目录里的「知识/记忆」类子目录用 junction 链进 brain 沙箱（`settings`、`sessions` 除外——前者 MCP 必须隔离防它把消息发回自己，后者是 brain 自有会话）。
 
 这一项**按 agent 配置驱动**（不同 agent 目录布局/记忆机制不同）：
 
@@ -309,7 +309,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 - 本指南覆盖「**能说 ACP 的 agent CLI**」。这是接入成本最低的一档，但**不等于零适配**：先跑能力探针，再决定是否需要改 `acp-brain.ts` / `worker-acp.ts`。
 - **能力差异清单**（接入前逐条确认）：
-  - **会话恢复**：有 `session/load`？只有 `session/resume`？都没有？当前客户端会按预设 `restore` 选 `load`/`resume`；DSH 走 `resume`，其余 agent 先 `load`，失败再试 `resume`/`new`。会话映射按 agent 分命名空间（`brain-sessions.json` 键 `<agent>:<userId>`，`worker-sessions.json` 键 `<agent>:task`），切换大脑互不覆盖，切回原大脑仍能恢复；
+  - **会话恢复**：有 `session/load`？只有 `session/resume`？都没有？当前客户端会按预设 `restore` 选 `load`/`resume`；DSH 走 `resume`，其余 agent 先 `load`，失败再试 `resume`/`new`。会话映射按 agent 分开存（`brain-sessions.json` 键 `<agent>:<userId>`，`worker-sessions.json` 键 `<agent>:task`），切换大脑互不覆盖，切回原大脑仍能恢复；
   - **图片**：`initialize.promptCapabilities.image` 是否为 true？false 时带图 `session/prompt` 会报 `-32602`；
   - **MCP**：走 agent 配置文件，还是 ACP `session/new` 的 `mcpServers`？支持 stdio/HTTP 哪些传输？
   - **反向请求**：是否会发 `session/request_permission` / `fs/*` / `terminal/*`？当前 `handleFrame` 不应答，遇到会挂起；

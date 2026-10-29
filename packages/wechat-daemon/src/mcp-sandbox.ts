@@ -48,7 +48,7 @@ function catalogPath(ag: ResolvedAgent): string {
   );
 }
 
-/** 永不允许 brain 加载（防回环）。 */
+/** 永不允许 brain 加载（防它把消息发回自己）。 */
 const FORBIDDEN = new Set(["wechat"]);
 
 /**
@@ -56,7 +56,7 @@ const FORBIDDEN = new Set(["wechat"]);
  * - 目录式（inheritDirs，如 kiro 的 steering/memories/skills、opencode 的 skills/agents/commands）用目录 junction（Windows）/ symlink 指向真实目录；
  * - 单文件式（inheritFiles，如 opencode 的 AGENTS.md）直接拷入配置目录。
  * 使微信里的大脑和你日常使用读到同样的记忆、规则、技能。
- * **MCP（settings/opencode.json 的 mcp 段）与 brain 自有会话（sessions）不镜像**：MCP 必须走沙箱（排除 wechat 防回环），会话不能混。
+ * **MCP（settings/opencode.json 的 mcp 段）与 brain 自有会话（sessions）不照搬**：MCP 必须走沙箱（排除 wechat，防它把消息发回自己），会话不能混。
  */
 function mirrorRealKiro(ag: ResolvedAgent): void {
   if (!ag.inherit || !ag.realHome) return;
@@ -312,19 +312,19 @@ function syncSettings(ag: ResolvedAgent): void {
 
 /**
  * 启动时确保沙箱存在并与激活集一致。
- * `forAgent` 可显式指定 agent（切换流程预热用：预热新大脑时要先备好**它**的沙箱，此刻槽位还指着旧大脑）。
+ * `forAgent` 可显式指定 agent（切换流程启动新大脑用：启动新大脑时要先备好**它**的沙箱，此刻槽位还指着旧大脑）。
  */
 export function ensureBrainHome(forAgent?: ResolvedAgent): void {
   const ag = forAgent ?? getAgent("brain");
   syncSettings(ag); // 先同步「非 MCP」设置(模型/免确认等)，让大脑与日常使用同款配置
-  applySandbox(ag); // 再写 curated mcp（权威，保持 MCP 隔离防回环）
+  applySandbox(ag); // 再写 curated mcp（权威，保持 MCP 隔离——防它把消息发回自己）
   mirrorRealKiro(ag); // 继承真实配置目录的记忆/steering/skills（sessions 仍隔离）
   syncCredentials(ag); // 登录态/凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
 }
 
 export function addMcp(name: string): string {
   const ag = getAgent("brain");
-  if (FORBIDDEN.has(name)) return `不允许加载「${name}」（防回环）。`;
+  if (FORBIDDEN.has(name)) return `不允许加载「${name}」（防它把消息发回自己）。`;
   const cat = loadCatalog(ag);
   if (!cat[name]) return `未找到 MCP「${name}」。可选：${catalogNames().join(", ") || "（无）"}`;
   // 预校验：坏条目不进激活集（官方 DSH 的 session/new 会因起不来的 MCP 回滚整会话）

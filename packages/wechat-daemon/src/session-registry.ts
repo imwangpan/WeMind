@@ -11,15 +11,15 @@ import {
 
 /**
  * 会话登记表（`<数据目录>/session-registry.json`）：跨大脑记住「这个人有哪些会话」，
- * 让「会话列表 / 恢复会话 / 重命名 / 删除」有东西可列——`brain-sessions.json` 只存**当前那一个**指针，
+ * 让「会话列表 / 恢复会话 / 重命名 / 删除」有东西可列——`brain-sessions.json` 只存**当前那一个**会话的 id，
  * 一开新会话，旧的就失去引用、无处可恢复。
  *
  * 为什么与 `brain-sessions.json` 分开：
- *  - 指针表在关键路径上（ensureSession → session/load）且已背了一层旧格式迁移（见 session-map.ts）；
+ *  - 当前会话表在关键路径上（ensureSession → session/load）且已背了一层旧格式迁移（见 session-map.ts）；
  *    把它的值从 string 改成 object 要再迁一次，还会波及 worker 的孪生代码。
  *  - 登记表是**派生元数据**：损坏/丢失只应导致「列表空」，绝不能影响恢复。
- * 因此一致性的规则是：**指针表唯一权威地表示「当前是哪个」**；登记表只供列表，且自己**不存 current**
- * （渲染时才与指针比对）；`删除会话` 若是当前那条，则同时清指针（下一次消息自然开新的）。
+ * 因此一致性的规则是：**当前会话表唯一权威地表示「当前是哪个」**；登记表只供列表，且自己**不存 current**
+ * （渲染时才与当前会话记录比对）；`删除会话` 若是当前那条，则同时清当前会话记录（下一次消息自然开新的）。
  *
  * 写入方只有 daemon（或 CLI 经控制桥，见 control-bridge.ts），避免多写者互相覆盖。
  * 所有写入走 tmp + rename；所有读取失败都降级为空表，只记日志、不抛——它不该有能力拖垮 daemon。
@@ -40,7 +40,7 @@ export type SessionEntry = {
   turns: number;
   createdAt: number;
   lastUsedAt: number;
-  /** 来自指针表回填（功能上线前就存在的会话，没有真实时间/轮次）。 */
+  /** 来自当前会话表回填（功能上线前就存在的会话，没有真实时间/轮次）。 */
   backfilled?: boolean;
 };
 
@@ -308,7 +308,7 @@ export function renderSessionList(
 
 // ---- 读写入口（daemon / CLI 经桥调用） ----
 
-/** 当前大脑下、本人的会话 + 其它大脑的条数 + 当前指针。 */
+/** 当前大脑下、本人的会话 + 其它大脑的条数 + 当前会话记录。 */
 export function listSessions(
   agent: string,
   userId: string,
@@ -321,7 +321,7 @@ export function listSessions(
   return { entries, others, currentSessionId: currentSessionIdOf(a, userId, dir) };
 }
 
-/** 指针表里该人当前的会话 id（登记表不存 current，渲染时才比对）。 */
+/** 当前会话表里该人当前的会话 id（登记表不存 current，渲染时才比对）。 */
 export function currentSessionIdOf(
   agent: string,
   userId: string,
@@ -471,7 +471,7 @@ export function renameSession(
 }
 
 /**
- * 删除登记项。删的若是当前会话，**同时清指针**（下一条消息自然开新的）——指针不清会让「删掉的会话」继续被使用。
+ * 删除登记项。删的若是当前会话，**同时清当前会话记录**（下一条消息自然开新的）——当前会话记录不清会让「删掉的会话」继续被使用。
  * agent 侧的历史归档不动（ACP 无可验证的 session/delete，如实告知用户）。
  */
 export function deleteSession(
@@ -501,7 +501,7 @@ export function deleteSession(
 }
 
 /**
- * 一次性回填：把指针表里存在、登记表里还没有的会话补进去（功能上线前的老会话）。
+ * 一次性回填：把当前会话表里存在、登记表里还没有的会话补进去（功能上线前的老会话）。
  * 只由 daemon 启动时调用（幂等）；之后会话的登记走 ensureEntry/touchEntry。
  */
 export function syncFromPointerMap(dir: string = DATA_DIR, now: number = Date.now()): number {

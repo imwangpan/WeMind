@@ -13,8 +13,8 @@ import {
 } from "./task-inbox.js";
 
 /**
- * 任务收件箱的两条腿：命令（CLI 写、daemon 读）与回执（daemon 写、CLI 读）。
- * 回执腿的存在理由见 task-inbox.ts 头部注释——「没等到回执」必须能与「回执说失败」区分开。
+ * 任务收件箱的两个方向：命令（CLI 写、daemon 读）与回执（daemon 写、CLI 读）。
+ * 回结果通道的存在理由见 task-inbox.ts 头部注释——「没等到回执」必须能与「回执说失败」区分开。
  */
 
 let dir = "";
@@ -25,7 +25,7 @@ beforeEach(() => {
 
 const files = (p: string) => (fs.existsSync(p) ? fs.readdirSync(p).sort() : []);
 
-describe("命令腿：写命令文件", () => {
+describe("收命令通道：写命令文件", () => {
   it("命令文件带 ack id 与时间戳，文件名用同一个 id（按名排序即按时间排序）", () => {
     const id = writeTaskCmd(dir, { kind: "dispatch", text: "做X", cwd: "D:\\p" });
     const names = files(taskInboxDir(dir));
@@ -51,7 +51,7 @@ describe("命令腿：写命令文件", () => {
   });
 });
 
-describe("回执腿：写回执与短轮询", () => {
+describe("回结果通道：写回执与短轮询", () => {
   it("往返：daemon 写、CLI 读到原文并删掉（目录不留垃圾）", async () => {
     const id = writeTaskCmd(dir, { kind: "dispatch", text: "做X" });
     writeTaskAck(dir, id, "✅ 已派发任务 #3（kiro 执行）。");
@@ -68,7 +68,7 @@ describe("回执腿：写回执与短轮询", () => {
     expect((await awaitTaskAck(dir, "x2", 1000, 20))?.ok).toBe(true);
   });
 
-  it("等不到就超时返回 null（老 daemon 不认这条腿 → CLI 退回「已投递」措辞）", async () => {
+  it("等不到就超时返回 null（老 daemon 不认这条通道 → CLI 退回「已投递」措辞）", async () => {
     const t0 = Date.now();
     expect(await awaitTaskAck(dir, "从未写过", 300, 50)).toBeNull();
     expect(Date.now() - t0).toBeGreaterThanOrEqual(250);
@@ -88,7 +88,7 @@ describe("回执腿：写回执与短轮询", () => {
 });
 
 describe("清理", () => {
-  it("clearTaskDirs 清掉两条腿的残留并重建收件箱（防重放）", () => {
+  it("clearTaskDirs 清掉两个通道的残留并重建收件箱（防重放）", () => {
     writeTaskCmd(dir, { kind: "dispatch", text: "旧命令" });
     writeTaskAck(dir, "old", "旧回执");
     clearTaskDirs(dir);

@@ -56,7 +56,7 @@ node scripts/acp-probe.mjs
 | 3 | 配置目录环境变量 | 该 agent 读取配置/数据目录的 env 名；WeMind 指向沙箱 | `DSH_HOME` |
 | 4 | 配置目录布局 / MCP 格式 | `configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile` | 空 / ACP `mcpServers` |
 
-> 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态 MCP 注入需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
+> 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
 
 ---
 
@@ -106,7 +106,7 @@ acme: {
 - 记忆继承：`realHome` + `inheritDirs` / `inheritFiles`；单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
 - 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时沙箱。
 - 设置继承：`settingsBase` 会在 brain/worker 两个沙箱生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）。
-- 默认空 MCP；`wechat` 永久禁止（防回环）。
+- 默认空 MCP；`wechat` 永久禁止（防它把消息发回自己）。
 - **每个 agent 只读自己的 catalog**；不要把 kiro 的文件指给 DSH。
 
 验证：
@@ -152,7 +152,7 @@ wemind brain check
 5. 越界写 → 有权限请求则应答，不卡死；
 6. 两个账号 → 沙箱隔离；
 7. **热切换**（1.2.0）：从别的预设 `wemind brain switch acme` → 回执两段、daemon pid 不变、下一条消息由 acme 答；再切回去，旧上下文能 load 回来；
-8. **当 worker 用**（1.2.0）：`wemind task "…" --agent acme` → 任务跑通；跑完进程**回池**（`wemind list` 可见），5 分钟后回收。
+8. **当 worker 用**（1.2.0）：`wemind task "…" --agent acme` → 任务跑通；跑完进程**留着复用**（`wemind list` 可见），5 分钟后回收。
 
 ---
 

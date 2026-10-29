@@ -554,13 +554,13 @@ async function cmdBrainSet(
   const dir = accountDir(key);
   const customized = opts.bin !== undefined || opts.args !== undefined || opts.shell !== undefined;
   // 只选预设（没带自定义启动参数）+ 没要求重启时，落盘和「热切换」其实是同一件事：daemon 在跑且认桥就交给它一次做完——
-  // 它先预热新大脑、成功才写 brain.json（失败回滚，盘上不留半截结果），这比「写盘 + 等下次重启」对用户更实在（决策⑪）。
-  // 带 --bin/--args/--shell 则**不能**热应用：控制桥只接受预设名（见 control-bridge.ts 的安全边界）。
+  // 它先启动新大脑、成功才写 brain.json（失败退回，盘上不留半截结果），这比「写盘 + 等下次重启」对用户更实在（决策⑪）。
+  // 带 --bin/--args/--shell 则**不能**当场应用：控制桥只接受预设名（见 control-bridge.ts 的安全边界）。
   if (!opts.restart && !customized && bridgeReady(key)) {
     const r = await cmdBrainSwitch(agent, key, false);
     // 热切换失败时**没有落盘**（持久化放最后，见 brain-switch.ts）：把这点说清楚，否则用户会以为 brain.json 已经改了。
     return r.startsWith("❌")
-      ? `${r}\n（brain.json **没有被改写**：热切换失败就不落盘，这是「失败回滚」的代价。想强制写入再重启：wemind brain set ${agent} --restart）`
+      ? `${r}\n（brain.json **没有被改写**：换大脑失败就不写盘——这是「失败就退回原来那个」的代价。想强制写入再重启：wemind brain set ${agent} --restart）`
       : r;
   }
   const patch: BrainConfig = { agent };
@@ -583,7 +583,7 @@ async function cmdBrainSet(
     }
   } else if (customized && bridgeReady(key)) {
     lines.push(
-      `（带 --bin/--args/--shell 的改动不能热应用：控制桥只认预设名。重启后生效——wemind stop ${key} && wemind start ${key}）`,
+      `（带 --bin/--args/--shell 的改动不能当场应用：控制桥只认预设名。重启后生效——wemind stop ${key} && wemind start ${key}）`,
     );
   } else if (daemonAlive(key)) {
     lines.push(
@@ -662,7 +662,7 @@ async function cmdBrain(rest: string[]): Promise<string> {
       // 桥只接受**预设名**（安全边界：见 control-bridge.ts）。带 --bin/--args/--shell 就走 set（只写盘 + 需重启）。
       if (bin !== undefined || argsOverride !== undefined || shell !== undefined)
         throw new Error(
-          "`brain switch` 只接受预设名（热切换是「换一个已装好的 agent」，不能带 --bin/--args）。\n" +
+          "`brain switch` 只接受预设名（换大脑是「换一个已装好的 agent」，不能带 --bin/--args）。\n" +
             "需要自定义二进制用 `brain set <预设> --bin …`（那是配置变更，需要重启 daemon 生效）。",
         );
       if (!pos[1]) throw new Error("用法: brain switch <预设|auto> [--worker] [<key|label>]");
@@ -748,8 +748,8 @@ function writeTaskCmd(key: string, obj: Record<string, unknown>): string {
  * 三种情形分得很清楚：
  *  - 有回执、有文案 → 打印 daemon 的那句话（失败原因、「没有 #9 号任务」这类只有它知道的事）；
  *  - 有回执、文案为空 → 命令成功但没有额外要说的，用调用方自己那句话（**立刻**，不干等）；
- *  - 没有回执 → 老版 daemon 不认这条腿（或它正在退出）：回退到「已投递」措辞并说明一句，
- *    不把「没等到」当成「成功了」——池满被拒与「派发成功」在旧措辞里长得一模一样。
+ *  - 没有回执 → 老版 daemon 不认这条通道（或它正在退出）：回退到「已投递」措辞并说明一句，
+ *    不把「没等到」当成「成功了」——达上限被拒与「派发成功」在旧措辞里长得一模一样。
  */
 async function taskOutcome(
   key: string,
@@ -808,7 +808,7 @@ async function viaBridge(key: string, req: Omit<ControlRequest, "id" | "at">): P
   const dpid = readPid(dir, "daemon.pid");
   if (bridgePidOf(dir) !== dpid)
     throw new Error(
-      `账号 ${key} 的 daemon 还在跑**旧版本**（不认识控制桥），热切换/会话命令投递过去只会白等超时。\n` +
+      `账号 ${key} 的 daemon 还在跑**旧版本**（不认识控制桥），换大脑/会话命令投递过去只会白等超时。\n` +
         `重启一次即可：wemind stop ${key} && wemind start ${key}\n` +
         `（只想改配置不动进程：wemind brain set <预设>，但它要等下次启动才生效。）`,
     );
@@ -841,7 +841,7 @@ async function cmdBrainSwitch(agentName: string, key: string, worker: boolean): 
   }
   if (daemonAlive(key)) return await viaBridge(key, { kind: "brain.switch", target: agent });
   updateBrainConfig({ agent }, dir);
-  return `daemon 未在运行：已把 ${key} 的大脑写进 brain.json（agent=${agent}，下次启动生效）。\n运行中热切换：先 wemind start ${key}`;
+  return `daemon 未在运行：已把 ${key} 的大脑写进 brain.json（agent=${agent}，下次启动生效）。\n运行中换大脑：先 wemind start ${key}`;
 }
 
 /** 会话命令归属的人：登录者（与 daemon 里 owner 的定义一致）。 */
@@ -849,7 +849,7 @@ function ownerOf(key: string): string {
   return process.env.WECHAT_OWNER_ID?.trim() || readAccount(accountDir(key))?.userId || "";
 }
 
-/** daemon 没在跑时用来定会话命名空间的大脑名（与 daemon 启动期同一个解析来源：配置 + 环境变量 + 自动探测）。 */
+/** daemon 没在跑时用来定会话归属（按 agent 分开存）的大脑名（与 daemon 启动期同一个解析来源：配置 + 环境变量 + 自动探测）。 */
 function agentNameOf(key: string): string {
   return resolveAgent(loadBrainConfig(accountDir(key))).name;
 }
@@ -867,7 +867,7 @@ function splitKeyArg(args: string[]): { args: string[]; sel?: string } {
 
 /**
  * `wemind session <new|list|resume|rename|delete>`。
- * 读写规则：**读**永远可用（直接读登记表）；**写**优先走 daemon（单一写者，且会话指针/agent 侧状态都是它的活状态）。
+ * 读写规则：**读**永远可用（直接读登记表）；**写**优先走 daemon（单一写者，且会话当前会话记录/agent 侧状态都是它的活状态）。
  * 例外：`rename`/`delete` 只动登记表这一个文件，daemon 没跑时直接改也是安全的；`resume` 必须真让 agent load，没 daemon 做不了。
  */
 async function cmdSession(rest: string[]): Promise<string> {
@@ -887,7 +887,7 @@ async function cmdSession(rest: string[]): Promise<string> {
 
   if (sub === "list") {
     const key = pickKey(sel);
-    // 读优先走桥（daemon 里在用的那个大脑才是真的命名空间）；桥不可用就退回直接读文件——读永远不该失败。
+    // 读优先走桥（daemon 里在用的那个大脑才是真的会话归属）；桥不可用就退回直接读文件——读永远不该失败。
     if (bridgeReady(key)) return await viaBridge(key, { kind: "session.list", page });
     const dir = accountDir(key);
     const agent = agentNameOf(key);
@@ -909,7 +909,7 @@ async function cmdSession(rest: string[]): Promise<string> {
     const name = args.join(" ").trim() || undefined;
     if (daemonAlive(key))
       return await viaBridge(key, { kind: "session.new", ...(name ? { name } : {}) });
-    // 没 daemon：能做的只有「丢掉当前会话指针」——下条消息会开新的。名字要等会话真的建好再 rename。
+    // 没 daemon：能做的只有「丢掉当前会话记录」——下条消息会开新的。名字要等会话真的建好再 rename。
     const dir = accountDir(key);
     const userId = ownerOf(key);
     if (!userId) throw new Error(`账号 ${key} 没有 userId（account.json 不全），先重新登录。`);
@@ -918,7 +918,7 @@ async function cmdSession(rest: string[]): Promise<string> {
       sessionKey(agentNameOf(key), userId),
     );
     return [
-      cleared ? "已清空当前会话指针" : "当前本来就没有会话指针",
+      cleared ? "已清空当前会话记录" : "当前本来就没有会话当前会话记录",
       "（daemon 未运行：下次启动后你发的第一条消息会开一个新会话）",
       name ? `名字等新会话建好后再登记：wemind session rename 1 ${name}` : "",
     ]
@@ -944,7 +944,7 @@ async function cmdSession(rest: string[]): Promise<string> {
           ? { kind: "session.rename", ref, name: nameRest.join(" ") }
           : { kind: "session.delete", ref },
       );
-    // 只动登记表（+ 删除时可能清指针），daemon 不在也不影响它下次读到的结果
+    // 只动登记表（+ 删除时可能清当前会话记录），daemon 不在也不影响它下次读到的结果
     const dir = accountDir(key);
     const userId = ownerOf(key);
     if (!userId) throw new Error(`账号 ${key} 没有 userId（account.json 不全），先重新登录。`);
@@ -976,14 +976,14 @@ async function cmdBrainHandoff(key: string): Promise<string> {
   return await viaBridge(key, { kind: "brain.handoff" });
 }
 
-/** 当前会话指针（供 CLI 展示；不常用但排查时值钱）。 */
+/** 当前会话记录（供 CLI 展示；不常用但排查时值钱）。 */
 function cmdSessionCurrent(key: string): string {
   const agent = agentNameOf(key);
   const userId = ownerOf(key);
   const sid = userId ? currentSessionIdOf(agent, userId, accountDir(key)) : undefined;
   return sid
     ? `${key} 当前会话：${sid}（agent=${agent}）`
-    : `${key} 当前没有会话指针（下一条消息会开新会话）。agent=${agent}`;
+    : `${key} 当前没有会话当前会话记录（下一条消息会开新会话）。agent=${agent}`;
 }
 
 async function cmdTask(
@@ -996,8 +996,8 @@ async function cmdTask(
   const key = pickKey(sel);
   requireDaemonAlive(key);
   const useCwd = cwd || process.cwd();
-  // 回执等 daemon：**起进程有结果之后**它才发（池满/agent 起不来是那时才知道的），
-  // 所以这里不能自己编「已派发」——旧写法轮询 task-state.json 的 active，会把「池满被拒」和
+  // 回执等 daemon：**起进程有结果之后**它才发（达上限/agent 起不来是那时才知道的），
+  // 所以这里不能自己编「已派发」——旧写法轮询 task-state.json 的 active，会把「达上限被拒」和
   // 甚至上一条任务的编号报成成功。
   const ackId = writeTaskCmd(key, {
     kind: "dispatch",

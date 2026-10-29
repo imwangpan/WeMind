@@ -9,7 +9,7 @@ import { brainSessionMapPath, readSessionMap, writeSessionMap } from "./session-
  * 会话管理操作层（session-manager）：把「新会话 / 列表 / 恢复 / 重命名 / 删除」拼成回执。
  *
  * 这里**不**起 ACP 进程：`create`/`resume` 是注入的（真实现在 acp-brain，由 acp-switch.test.ts 用假 agent 覆盖）。
- * 要钉死的是顺序与失败语义——尤其是「恢复失败**不**动指针」「删除**只**删登记」这两条对用户的承诺。
+ * 要钉死的是顺序与失败语义——尤其是「恢复失败**不**动当前会话记录」「删除**只**删登记」这两条对用户的承诺。
  * 所有用例显式传 dir（临时目录），不碰 DATA_DIR。
  */
 const { newSessionCmd, sessionsCmd, resumeSessionCmd, renameSessionCmd, deleteSessionCmd } =
@@ -27,7 +27,7 @@ afterEach(() => {
 
 const AG = "kiro";
 const mapFile = (): string => brainSessionMapPath(dir);
-/** 模拟 ACP 层写指针（真实现在 acp-brain.ensureSession / resumeSession）。 */
+/** 模拟 ACP 层写当前会话记录（真实现在 acp-brain.ensureSession / resumeSession）。 */
 const setPointer = (userId: string, sid: string): void =>
   writeSessionMap(mapFile(), { ...readSessionMap(mapFile()), [`${AG}:${userId}`]: sid });
 const cur = (userId: string): string | undefined => currentSessionIdOf(AG, userId, dir);
@@ -44,7 +44,7 @@ const entryOf = (sid: string, user = "u1") =>
   loadRegistry(dir).entries.find((e) => e.agent === AG && e.userId === user && e.sessionId === sid);
 
 describe("新会话", () => {
-  it("命名新建：先建后登记命名（按刚写下的指针读 id）", async () => {
+  it("命名新建：先建后登记命名（按刚写下的当前会话记录读 id）", async () => {
     const create = vi.fn(async (userId: string) => {
       setPointer(userId, "sess-a");
     });
@@ -111,12 +111,12 @@ describe("会话列表", () => {
 });
 
 describe("恢复会话", () => {
-  it("成功：strict load 由注入实现做，成功后才登记「最近使用」", async () => {
+  it("成功：严格恢复的 load 由注入实现做，成功后才登记「最近使用」", async () => {
     seed("s-old", { title: "旧会话", turns: 5, at: 1_000_000 });
     seed("s-new", { title: "新会话", turns: 1, at: 1_000_000 + 5000 });
     setPointer("u1", "s-new");
     const resume = vi.fn(async (userId: string, sid: string) => {
-      setPointer(userId, sid); // 真实现在 acp-brain：load 成功才写指针
+      setPointer(userId, sid); // 真实现在 acp-brain：load 成功才写当前会话记录
       return { ok: true as const };
     });
     const r = await resumeSessionCmd({ agent: AG, userId: "u1", dir, resume, now: 2_000_000 }, "2");
@@ -130,7 +130,7 @@ describe("恢复会话", () => {
     expect(entryOf("s-old")?.title).toBe("旧会话"); // 标题不被抹掉
   });
 
-  it("失败：如实报错、markUsed 不执行、**指针不变**", async () => {
+  it("失败：如实报错、markUsed 不执行、**当前会话记录不变**", async () => {
     seed("s-old", { name: "旧会话", turns: 5, at: 1_000_000 });
     setPointer("u1", "s-cur");
     const resume = vi.fn(async () => ({
@@ -187,7 +187,7 @@ describe("重命名 / 删除", () => {
     expect(entryOf("s1")?.name).toBeUndefined();
   });
 
-  it("删除当前会话：清指针（下条消息开新的），并如实说 agent 侧归档还在", () => {
+  it("删除当前会话：清当前会话记录（下条消息开新的），并如实说 agent 侧归档还在", () => {
     seed("s-cur", { name: "当前", at: 1_000_000 });
     seed("s2", { title: "另一条", at: 1_000_001 });
     setPointer("u1", "s-cur");
@@ -195,11 +195,11 @@ describe("重命名 / 删除", () => {
     expect(r).toContain("✅");
     expect(r).toContain("下一条消息会开一个新的");
     expect(r).toContain("agent 自己那份历史归档不在 WeMind 手里");
-    expect(cur("u1")).toBeUndefined(); // 指针清了
+    expect(cur("u1")).toBeUndefined(); // 当前会话记录清了
     expect(loadRegistry(dir).entries.map((e) => e.sessionId)).toEqual(["s2"]); // 只删了这一条
   });
 
-  it("删除非当前会话：指针不动", () => {
+  it("删除非当前会话：当前会话记录不动", () => {
     seed("s-cur", { title: "当前", at: 1_000_000 });
     seed("s2", { title: "另一条", at: 1_000_001 });
     setPointer("u1", "s-cur");
@@ -217,7 +217,7 @@ describe("重命名 / 删除", () => {
 });
 
 describe("回填（功能上线前的老账号）", () => {
-  it("syncFromPointerMap 把指针表里的会话补进登记表，标题/轮次留待真实回合", () => {
+  it("syncFromPointerMap 把当前会话表里的会话补进登记表，标题/轮次留待真实回合", () => {
     setPointer("u1", "sess-legacy");
     expect(syncFromPointerMap(dir, 5_000_000)).toBe(1);
     const e = entryOf("sess-legacy");

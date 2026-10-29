@@ -20,7 +20,7 @@ import {
 /**
  * 任务表：**一条任务一条 worker 连接**，多条任务并行；编号按用户单调递增、永不复用（避免「任务2」在对话里指代漂移）。
  *
- * 与改造前的差别（单任务单例 → 任务表）：
+ * 与改造前的差别（单任务单进程 → 任务表）：
  *  - 派发时决定 agent（默认任务大脑，或 `任务 <预设>：正文` 指定）；每条任务一个 session key `task-<编号>@<userId>`；
  *  - 任务结束（`结束任务`）把连接**还回进程池**（同 agent 的下个任务直接复用），而不是杀掉；
  *  - 任务表落盘（tasks.json）：daemon 重启后未完成的标「已中断」并在「任务列表」可见，回「继续」/`#n 继续` 才拉进程续跑；
@@ -75,8 +75,8 @@ export function setTaskTyping(fn: (to: string) => void): void {
  * 依赖注入：回执出口（CLI 写 `task-out/<id>.json`）。
  *
  * 只在「本地命令问结果」时用到：`wemind task` 这类命令丢完命令就只能猜，
- * 猜出来的「已派发」在池满被拒时会变成假消息。派发的回执**必须等起进程有结果**再回——
- * 池满/agent 起不来都是 acquire 阶段才知道的（dispatchTask 当场返回时还不知道）。
+ * 猜出来的「已派发」在达上限被拒时会变成假消息。派发的回执**必须等起进程有结果**再回——
+ * 达上限/agent 起不来都是 acquire 阶段才知道的（dispatchTask 当场返回时还不知道）。
  */
 let ack: (id: string, text: string) => void = () => {};
 export function setTaskAckSink(fn: (id: string, text: string) => void): void {
@@ -86,7 +86,7 @@ export function setTaskAckSink(fn: (id: string, text: string) => void): void {
  * 发一条回执（没有 id / 没有出口就当没这回事）。
  *
  * **空文案也照发**：它是「命令已送达、没有额外要说的」这个信号——CLI 收到它就能立刻用自己那句话，
- * 而不是干等到超时才敢打印（超时是留给「老版 daemon 不认这条腿」的）。
+ * 而不是干等到超时才敢打印（超时是留给「老版 daemon 不认这条通道」的）。
  */
 function ackIf(id: string | undefined, text: string): void {
   if (!id) return;
@@ -97,7 +97,7 @@ function ackIf(id: string | undefined, text: string): void {
   }
 }
 
-/** 任务状态快照（落盘 task-state.json 供本地 `task-status` 读；顶层字段镜像「最近一条」，旧版 CLI 仍能显示）。 */
+/** 任务状态快照（落盘 task-state.json 供本地 `task-status` 读；顶层字段复制「最近一条」，旧版 CLI 仍能显示）。 */
 export type TaskStateSnapshot = {
   active: boolean;
   status: TaskStatus | "idle";
@@ -297,7 +297,7 @@ function resolveTaskAgent(
 /**
  * 派发新任务（后台异步执行，立即返回回执文案，不阻塞调用方）。
  * `agentKey`：`任务 <预设>：正文` 指定的 agent；`cwd`：本地派发指定的任务工作目录。
- * `ackId` 给了就等起进程有结果再回执（成功＝真回执文案，池满/起不来＝那句警告）。
+ * `ackId` 给了就等起进程有结果再回执（成功＝真回执文案，达上限/起不来＝那句警告）。
  */
 export function dispatchTask(
   to: string,
@@ -354,7 +354,7 @@ function waitForInject(task: Task): Promise<string | null> {
   });
 }
 
-/** 任务循环：每轮 ask → 推送本轮输出 → 等注入 → 续跑。绝不在 workerLoop 里 await 它。 */
+/** 任务循环：每轮 ask → 推送本轮输出 → 等用户回话 → 续跑。绝不在 workerLoop 里 await 它。 */
 async function runTask(task: Task, firstInstruction: string): Promise<void> {
   const ag = task.ag;
   if (!ag) {
@@ -408,7 +408,7 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
       const why = String(e instanceof Error ? e.message : e);
       if (wasResume && why.includes("接不上")) {
         // 续跑失败（原会话接不上）：回到「已中断」并把话说清楚，而不是静默换一个空会话假装续上了。
-        // 会话指针**保留**（收尾处按「任务是否还在表里」决定要不要清），用户重述进展后还能再试。
+        // 当前会话记录**保留**（收尾处按「任务是否还在表里」决定要不要清），用户重述进展后还能再试。
         task.status = "interrupted";
         persist();
         emitState();
@@ -435,8 +435,8 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
       emitState();
     }
   }
-  // 收尾：连接还回池（活着才有复用价值；被 stop 时可能已经死了，release 会就地清掉空壳）。
-  // 会话指针只在「任务真的结束」（已被 stop、不在表里）时清掉：回到「已中断」的任务要留着它，用户重述进展后还能再试。
+  // 收尾：连接还给进程池（活着才有复用价值；被 stop 时可能已经死了，release 会就地清掉空壳）。
+  // 会话当前会话记录只在「任务真的结束」（已被 stop、不在表里）时清掉：回到「已中断」的任务要留着它，用户重述进展后还能再试。
   if (task.conn === conn) {
     if (tasks.get(task.id) !== task) conn.dropSession(task.key);
     release(conn);
@@ -470,7 +470,7 @@ function resumeTask(task: Task, instruction: string): string {
 }
 
 /**
- * 注入用户消息。`id` 给定时只作用于那条任务；不给时：唯一一条 → 它；多条 → 回消歧提示（不猜）。
+ * 把用户消息送给任务。`id` 给定时只作用于那条任务；不给时：唯一一条 → 它；多条 → 回编号提示（不猜）。
  * 返回要额外回复的文案（空字符串＝只推给了任务，不需要额外回执）。
  * `ackId`（本地命令）：非空返回文案也回一份给 CLI——「没有 #9 号任务」这种话不能只进 daemon 日志。
  */
@@ -571,7 +571,7 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
     if (conn) {
       conn.dropSession(t.key);
       if (wasWaiting)
-        release(conn); // 等回复的任务进程是干净的 → 回池复用
+        release(conn); // 等回复的任务进程是干净的 → 留着复用
       else drop(conn); // 正在跑的那条：回合没法「优雅取消」，只能杀掉（正在做的动作就此作罢）
       t.conn = undefined;
     }

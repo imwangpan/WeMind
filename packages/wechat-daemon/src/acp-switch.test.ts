@@ -5,7 +5,7 @@ import path from "node:path";
 
 /**
  * ACP 层面的端到端测试：用**假 ACP agent**（本文件写出的 node 脚本）替代真 agent，覆盖两类最容易静默回归的行为——
- * 切脑（成功 / 失败回滚 / 只起一个进程 / 异目标拒绝 / drain 门 / WEMIND_BRAIN 警告）与会话恢复（strict：接不上就如实失败且不动指针）。
+ * 切脑（成功 / 失败退回 / 只起一个进程 / 异目标拒绝 / drain 门 / WEMIND_BRAIN 警告）与会话恢复（严格恢复：接不上就如实失败、不动当前会话记录）。
  *
  * 为什么必须是真子进程：切脑的价值全在「换掉那个进程」——用 mock 掉 spawn 只能测出「代码按顺序调了函数」，
  * 测不出「旧进程真的死了、没残留、新进程真的能用 ACP 说话」；恢复同理（load 失败/成功的分支在 ACP 往返上）。
@@ -184,7 +184,7 @@ describe("switchBrain", () => {
     expect(recs.length).toBe(1);
     expect(recs[0].agent).toBe("kiro");
     const map = JSON.parse(fs.readFileSync(sessionsFile, "utf-8"));
-    expect(map["kiro:u1"]).toBe("sess-new"); // 会话映射按新 agent 分命名空间
+    expect(map["kiro:u1"]).toBe("sess-new"); // 会话映射按新 agent 分开存
     expect(methods()).toContainEqual(expect.stringContaining("initialize"));
   });
 
@@ -205,7 +205,7 @@ describe("switchBrain", () => {
     setup("ok", "fail-init");
     const out = await switchBrain("kiro", { userId: "u1", dir: dataDir });
     expect(out.ok).toBe(false);
-    expect(out.ok === false && out.problem).toContain("已回滚到「opencode」");
+    expect(out.ok === false && out.problem).toContain("已退回原来那个「opencode」");
     expect(out.ok === false && out.problem).toContain("下一条消息会自动重启");
     expect(getAgent("brain").name).toBe("opencode"); // 槽位留旧
     expect(loadBrainConfig(dataDir)?.agent).toBe("opencode"); // 磁盘未动
@@ -224,7 +224,7 @@ describe("switchBrain", () => {
     expect(spawnCount()).toBe(before); // 没有为新进程付代价
   });
 
-  it("同一目标的并发请求复用同一次切换（预热只做一遍）", async () => {
+  it("同一目标的并发请求复用同一次切换（启动新大脑只做一遍）", async () => {
     setup("ok", "slow-init");
     const [a, b] = await Promise.all([
       switchBrain("kiro", { userId: "u1", dir: dataDir }),
@@ -267,7 +267,7 @@ describe("switchBrain", () => {
     const turn = askBrain("u1", "在吗"); // 此刻槽位还是 opencode，但切换已把它挡住
     expect((await switching).ok).toBe(true);
     expect(await turn).toContain("答:");
-    expect(spawnCount()).toBe(1); // 双起进程的回归护栏：预热与回合不能各起一个
+    expect(spawnCount()).toBe(1); // 双起进程的回归护栏：启动新大脑与回合不能各起一个
     expect(getAgent("brain").name).toBe("kiro");
   });
 
@@ -304,7 +304,7 @@ describe("槽位与假 agent 的一致性", () => {
   });
 });
 
-describe("会话（ACP 侧写入 + strict 恢复）", () => {
+describe("会话（ACP 侧写入 + 严格恢复）", () => {
   const entries = () => loadRegistry(dataDir).entries;
   const pointerOf = (userId: string): string | undefined => {
     try {
@@ -326,7 +326,7 @@ describe("会话（ACP 侧写入 + strict 恢复）", () => {
     expect(entries().filter((x) => x.userId === "u1")).toHaveLength(1); // 同一条会话，不是又开了一条
   });
 
-  it("恢复会话成功：指针改到目标，下一回合直接发进那条会话（不再 load 一次）", async () => {
+  it("恢复会话成功：当前会话记录改到目标，下一回合直接发进那条会话（不再 load 一次）", async () => {
     fs.writeFileSync(sessionsFile, JSON.stringify({ "opencode:u1": "sess-cur" }));
     setup();
     expect(await resumeSession("u1", "sess-old")).toEqual({ ok: true });
@@ -337,14 +337,14 @@ describe("会话（ACP 侧写入 + strict 恢复）", () => {
     expect(entries().find((x) => x.sessionId === "sess-old")).toMatchObject({ turns: 1 });
   });
 
-  it("恢复会话失败：如实报错、**指针不变**（不静默新建一条顶替）", async () => {
+  it("恢复会话失败：如实报错、**当前会话记录不变**（不静默新建一条顶替）", async () => {
     fs.writeFileSync(sessionsFile, JSON.stringify({ "opencode:u1": "sess-cur" }));
     setup("fail-load");
     const r = await resumeSession("u1", "sess-ghost");
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.problem).toContain("接不上会话 sess-gho");
     expect(r.ok === false && r.problem).toContain("当前会话没变");
-    expect(pointerOf("u1")).toBe("sess-cur"); // 原来的指针原样
+    expect(pointerOf("u1")).toBe("sess-cur"); // 原来的当前会话记录原样
     expect(methods().some((m) => m.startsWith("session/new"))).toBe(false); // 没有偷偷开新会话
     expect(entries().some((x) => x.sessionId === "sess-ghost")).toBe(false); // 也没登记一条假会话
   });

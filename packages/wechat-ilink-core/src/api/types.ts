@@ -1,5 +1,5 @@
 /**
- * iLink Bot API 协议类型（镜像服务端 proto：GetUpdatesReq/Resp、WeixinMessage、SendMessageReq 等）。
+ * iLink Bot API 协议类型（照抄服务端 proto：GetUpdatesReq/Resp、WeixinMessage、SendMessageReq 等）。
  *
  * 来源与依据：
  *  - 字段与 proto 含义对照官方 Tencent/openclaw-weixin `src/api/types.ts` 整理（社区/官方最权威的公开实现）。

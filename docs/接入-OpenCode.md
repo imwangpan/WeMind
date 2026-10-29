@@ -103,10 +103,10 @@ WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文�
 - 未登录任何 provider 时 OpenCode 仍可用其**自带免费模型**（`session/new` 默认 `opencode/nemotron-3.5-super-vl-free`）完成对话。
 - **模型由 OpenCode 自己决定**：WeMind 不设置模型；若要固定模型，需写进沙箱 `opencode.json` 的 `model`。
 
-**隔离与 MCP 注入（M2 实现前另做的决定性验证）**：
+**隔离与 MCP 挂载（M2 实现前另做的决定性验证）**：
 - `OPENCODE_CONFIG_DIR` 只"追加"、**不能**替换默认 global，无法隔离 → 改用 **`XDG_CONFIG_HOME`**。
 - 实测 `XDG_CONFIG_HOME=<dir>` 后：`opencode debug paths config` → `<dir>/opencode`；ACP 的 `session/new` 采用该目录 `opencode.json` 的 `model`；放入 `mcp.servers` 的假 MCP **被实际拉起**（标记文件被创建）→ **`opencode acp` 完整读取 `<XDG>/opencode/opencode.json`**。
-- 结论：`XDG_CONFIG_HOME` 指向沙箱 = 配置隔离 + MCP 注入**端到端成立**。（注：`opencode mcp list` 连的是共享后台服务，不代表 ACP 进程行为。）
+- 结论：`XDG_CONFIG_HOME` 指向沙箱 = 配置隔离 + MCP 挂载**端到端成立**。（注：`opencode mcp list` 连的是共享后台服务，不代表 ACP 进程行为。）
 
 ### 3.4 实施方案
 

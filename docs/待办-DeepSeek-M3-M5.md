@@ -6,7 +6,7 @@
 
 ---
 
-## M3 · 动态 MCP 注入（via ACP）✅ 已实现并验证（2026-10-24）
+## M3 · 动态挂 MCP（via ACP）✅ 已实现并验证（2026-10-24）
 
 **目标**：让微信里的「加载/卸载 MCP」对 DeepSeek 生效，且不要求 DSH 读 kiro 的文件。
 
@@ -14,8 +14,8 @@
 
 **验证（真机，dsh 0.2.1-rc.2）**：
 
-- 假 stdio MCP（echo 工具，被调用时写 marker）：`session/new` 挂载成功，模型调用工具 → marker 第 1 次 `called`，回答 `ok`；
-- `session/resume` 带同一 `mcpServers` → 模型再次调用 → marker 第 2 次 `called`，回答 `okPINEAPPLE`（上下文保留）；
+- 假 stdio MCP（echo 工具，被调用时写标记文件）：`session/new` 挂载成功，模型调用工具 → 标记文件第 1 次 `called`，回答 `ok`；
+- `session/resume` 带同一 `mcpServers` → 模型再次调用 → 标记文件第 2 次 `called`，回答 `okPINEAPPLE`（上下文保留）；
 - **坏条目回滚验证**：起不来的 MCP 让 `session/new` 直接失败（`mcp-client: initial connection or tool synchronization failed`）——因此 `addMcp` 预校验拒绝无法转换的定义，`toAcpMcpServers` 跳过坏条目并记日志；
 - **微信侧全链路 ✅（2026-10-24，用户实测）**：`MCP` 列出 test-echo → `加载 test-echo` → 下一条消息 `session/resume ok ... mcp=[test-echo]`（**微信侧 resume 也由此验证**），模型调用工具回答 `MCP-OK`（调用记录落盘）→ `卸载 test-echo` 激活集回空；
 - 单测：`agent-mcp.test.ts`（转换/跳过/排除/预校验）、`brain-agents.test.ts`（mcpViaAcp 解析），全量 136 tests 通过。

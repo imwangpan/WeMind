@@ -9,7 +9,7 @@
 | 模块 | 提供 |
 |---|---|
 | `api/client` | iLink CGI：`getUpdates`（长轮询收）/ `sendMessage`（发）/ `getConfig` / `sendTyping` / `notifyStart` / `notifyStop` / `fetchQRCode` / `pollQRStatus` |
-| `api/types` | 协议类型（镜像 proto），每个字段附官方含义 + 实测注释 |
+| `api/types` | 协议类型（照抄 proto），每个字段附官方含义 + 实测注释 |
 | `api/error-codes` | `ILinkError` / `classifyILinkCode` / `describeILinkCode`（`ret=-2` 参数错误、`errcode=-14` 会话过期） |
 | `api/session-guard` | `-14` 会话过期后的进程内冷却（fail-closed，避免对死会话狂打） |
 | `api/transport-errors` | 网络层错误分类（timeout/dns/tls/connection/network，判定是否可重试） |

@@ -240,8 +240,8 @@ function agentOverview(): string {
 }
 
 /**
- * 切对话大脑：先回 ack，预热在后台跑、结果补发（决策⑦：切换可能要几十秒，不能让用户干等等不到一句回话）。
- * 这里**不** await 整段切换——预热期间的入站消息会自己在 acp-brain 门口等新大脑就绪（有界），不会双起进程。
+ * 切对话大脑：先回 ack，启动新大脑在后台跑、结果补发（决策⑦：切换可能要几十秒，不能让用户干等等不到一句回话）。
+ * 这里**不** await 整段切换——启动新大脑期间的入站消息会自己在 acp-brain 门口等新大脑就绪（有界），不会双起进程。
  */
 async function switchBrainAck(target: string, userId: string, ctx: ControlCtx): Promise<string> {
   const running = switchInFlightTarget();
@@ -260,7 +260,7 @@ async function switchBrainAck(target: string, userId: string, ctx: ControlCtx): 
       log("brain switch:", r.replace(/\n/g, " | "));
       await ctx.notify(r).catch((e) => log("switch notice failed:", String(e)));
     });
-  return `⏳ 正在切到「${pre.agent.name}」…（预热中，成功或失败稍后补发消息；这期间发来的消息会等新大脑就绪）`;
+  return `⏳ 正在切到「${pre.agent.name}」…（正在启动新大脑，成功或失败稍后补发消息；这期间发来的消息会等新大脑就绪）`;
 }
 
 /** `切换任务大脑`：只改本进程的默认任务大脑（本次运行内一直生效，不写 brain.json）。 */
@@ -322,7 +322,7 @@ async function runHandoff(userId: string, ctx: ControlCtx): Promise<string> {
   );
   const head =
     `✅ 交接摘要已保存（${text.length} 字，来自「${from}」）。\n` +
-    `切到别的大脑后，你发的第一条消息会自动带上它（答完即用掉，只带一次；切回「${from}」不注入）。`;
+    `切到别的大脑后，你发的第一条消息会自动带上它（答完即用掉，只带一次；切回「${from}」不带上）。`;
   if (text.length > LONG_REPLY_THRESHOLD && ctx.notifyFile) {
     await ctx.notifyFile(text).catch((e) => log("handoff md send failed:", String(e)));
     return `${head}\n（摘要较长，已另发 .md 文件。）`;
@@ -332,7 +332,7 @@ async function runHandoff(userId: string, ctx: ControlCtx): Promise<string> {
 
 async function handleControl(c: ChatCommand, userId: string, ctx: ControlCtx): Promise<string> {
   if (c.kind === "list") return listMcp();
-  // 会话类指令的共用上下文：谁、当前对话大脑、数据目录（登记表按 agent 分命名空间，切换后自然按新大脑列）
+  // 会话类指令的共用上下文：谁、当前对话大脑、数据目录（登记表按 agent 分开存，切换后自然按新大脑列）
   const sc = (): SessionCtx => ({ agent: getAgent("brain").name, userId, dir: DATA_DIR });
   if (c.kind === "new") return await newSessionCmd({ ...sc(), name: c.name, create: newSession });
   if (c.kind === "sessions") return sessionsCmd({ ...sc(), page: c.page });
@@ -460,7 +460,7 @@ const MIN_SEND_GAP_MS = Number(process.env.WECHAT_MIN_SEND_GAP_MS) || 1500;
 const CONSEC_SEND_LIMIT = Number(process.env.WECHAT_CONSEC_SEND_LIMIT) || 10;
 // 静默期心跳默认 15s（预设可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。
 const HEARTBEAT_DEFAULT_MS = 15_000;
-// 「距该用户上一条消息以来」bot 已连续发送的条数 + 是否处于"等待继续"段。按用户(to)维护、**跨回合持续**，仅在该用户发来任何消息时重置（镜像服务端"任何用户消息都重置连续发送配额"的规则）。
+// 「距该用户上一条消息以来」bot 已连续发送的条数 + 是否处于"等待继续"段。按用户(to)维护、**跨回合持续**，仅在该用户发来任何消息时重置（照抄服务端"任何用户消息都重置连续发送配额"的规则）。
 // 这样即使 A 任务期间你发了 B、A 又继续发了几条，B 任务接手时计数是延续的，不会误以为"还能再发10条"而撞上限。
 type SendBudget = { count: number; awaiting: boolean };
 const sendBudget = new Map<string, SendBudget>();
@@ -958,7 +958,7 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
       if (r) await sendNotice(account, from, token, r, latestToken());
       continue;
     }
-    // 4) 派发：带预设名 = 指定 agent 起一条**新任务**（多任务并行）；不带 = 沿用「有任务就注入，没有就派发」
+    // 4) 派发：带预设名 = 指定 agent 起一条**新任务**（多任务并行）；不带 = 沿用「有任务就发给它，没有就派发」
     if (tcmd?.kind === "toWorker" && tcmd.agentToken) {
       // 指定的 agent **只对这条任务生效**，不改默认任务大脑：那是账号级状态（`切换任务大脑` 是 owner-only），顺手改会让「派一条任务」变成一次隐形的全局设置变更，也破坏微信与 CLI（`--agent` 只影响那一条任务）两边的对称。
       const r = dispatchTask(from, tcmd.text, { agentKey: tcmd.agentToken });
@@ -967,7 +967,7 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
       continue;
     }
     if (tcmd?.kind === "toWorker") {
-      // 明确发给 worker：有活跃任务 → 注入/追加（唯一一条喂下一轮、running 暂存、多条则回消歧提示）；
+      // 明确发给 worker：有活跃任务 → 发给它/追加（唯一一条喂下一轮、running 暂存、多条则回编号提示）；
       // 没有活跃任务 → 派发新任务（不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活）。
       if (hasActiveTask(from)) {
         const r = injectTask(from, tcmd.text);
@@ -982,7 +982,7 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
     }
     // 2) 明确「问大脑」逃逸前缀 → 去前缀后强制走 brain（即使 worker 在等你）
     const brainEscape = item.text ? parseBrainEscape(item.text) : null;
-    // 3) 无前缀 + worker 正等你回 + 非图片 → 默认注入 worker（唯一一条 waiting 直接喂；多条 waiting 回消歧提示）；
+    // 3) 无前缀 + worker 正等你回 + 非图片 → 默认发给 worker（唯一一条 waiting 直接喂；多条 waiting 回编号提示）；
     //    其余（running / 无任务 / 逃逸 / 图片）→ brain
     if (!brainEscape && item.imageItems.length === 0 && awaitingTasks(from).length > 0) {
       const r = injectTask(from, item.text);
@@ -1007,7 +1007,7 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
 
     const brainText = brainEscape ?? item.text;
     // 交接注入：切换大脑后，发给**新**大脑的第一条消息带上前一个大脑留下的摘要（切回来源大脑、别人、
-    // 过期都不注入，规则见 handoff.ts）。作为前缀注入 = 不额外占一个回合、不多一次模型调用。
+    // 过期都不带上，规则见 handoff.ts）。作为前缀带上 = 不额外占一个回合、不多一次模型调用。
     // 切换进行中时按**目标**大脑判断（这条消息会在门口等新大脑就绪，实际答话的是它）。
     const pending = loadHandoff(DATA_DIR);
     const goal = switchInFlightTarget() ?? getAgent("brain").name;
@@ -1085,7 +1085,7 @@ function scanTaskInbox(owner: string): void {
     } // 先删，避免重复处理
     try {
       if (cmd.kind === "dispatch") {
-        // 回执由 task-manager 在**起进程有结果之后**发（池满/起不来都是那时才知道），这里只把 ack id 递进去
+        // 回执由 task-manager 在**起进程有结果之后**发（达上限/起不来都是那时才知道），这里只把 ack id 递进去
         log(
           "local task dispatch:",
           dispatchTask(owner, String(cmd.text ?? ""), {
@@ -1177,7 +1177,7 @@ async function handleControlRequest(req: ControlRequest, owner: string): Promise
         req.text,
         typeof req.taskId === "number" ? req.taskId : undefined,
       );
-      return r || "已注入任务（它继续跑，结果会发到微信）。";
+      return r || "已把这句话发给任务（它继续跑，结果会发到微信）。";
     }
     case "task.stop":
       return stopTask(owner, req.taskId);
@@ -1187,7 +1187,7 @@ async function handleControlRequest(req: ControlRequest, owner: string): Promise
 // ===== 控制桥（CLI ↔ daemon）：CLI 写 control-inbox，这里执行 + 写 control-out =====
 let controlBusy = false; // 同时只处理一条：切换/会话恢复本来就要串行（它们争的是同一个 ACP 连接）
 
-/** 扫描控制桥收件箱。异步：brain.switch 要等预热（最长 ~2 分钟），期间不能再处理下一条。 */
+/** 扫描控制桥收件箱。异步：brain.switch 要等启动新大脑（最长 ~2 分钟），期间不能再处理下一条。 */
 async function scanControlInbox(owner: string): Promise<void> {
   if (controlBusy) return;
   const items = readControlInbox(DATA_DIR);
@@ -1317,7 +1317,7 @@ export async function runDaemon(): Promise<void> {
       /* best-effort */
     }
   });
-  setTaskAckSink((id, text) => writeTaskAck(DATA_DIR, id, text)); // 本地命令的回执腿（`wemind task` 等着的「到底派上了没有」）
+  setTaskAckSink((id, text) => writeTaskAck(DATA_DIR, id, text)); // 本地命令的回结果通道（`wemind task` 等着的「到底派上了没有」）
   // 本地命令入口：启动清空收件箱与回执目录（作废重启前残留命令、防重放），再起独立定时器扫描分发（不挂 poller，避免被 25s 长轮询阻塞）
   clearTaskDirs(DATA_DIR);
   setInterval(() => scanTaskInbox(owner), TASK_SCAN_MS);
@@ -1329,9 +1329,9 @@ export async function runDaemon(): Promise<void> {
   const restored = initTasks(DATA_DIR);
   if (restored.interrupted.length)
     log(`restored tasks: interrupted=[${restored.interrupted.join(",")}]（回「继续」可续跑）`);
-  // 会话登记表：把指针表里有、登记表里还没有的旧会话补进去（功能上线前的老账号，一次性、幂等）
+  // 会话登记表：把当前会话表里有、登记表里还没有的旧会话补进去（功能上线前的老账号，一次性、幂等）
   const backfilled = syncFromPointerMap(DATA_DIR);
-  if (backfilled) log(`session registry backfilled: ${backfilled} 条（来自会话指针表）`);
+  if (backfilled) log(`session registry backfilled: ${backfilled} 条（来自当前会话表）`);
   // 进程池清扫：空闲超时的 worker 回收（默认 5 分钟）
   const poolSweep = setInterval(() => sweepWorkerPool(), 30_000);
   poolSweep.unref?.();

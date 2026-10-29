@@ -123,7 +123,7 @@ afterEach(() => {
 });
 
 describe("task-manager 状态机（单任务：行为与改造前一致）", () => {
-  it("派发 → 一轮推送【任务】→ waiting → 注入续跑 → stop", async () => {
+  it("派发 → 一轮推送【任务】→ waiting → 回话续跑 → stop", async () => {
     const r1 = deferred();
     const r2 = deferred();
     acquire.mockImplementationOnce(async () => {
@@ -146,7 +146,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     expect(has(pushed, "🤖【任务】")).toBe(true); // 来源标记
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1)); // 推送后进入 waiting
 
-    injectTask("u1", "选 A"); // waiting 态注入 → 第二轮
+    injectTask("u1", "选 A"); // waiting 态回话 → 第二轮
     await vi.waitFor(() => expect(conn.ask).toHaveBeenCalledTimes(2));
     expect(conn.ask.mock.calls[1][0]).toBe("选 A");
 
@@ -156,7 +156,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     expect(stopTask("u1")).toContain("已结束");
     expect(hasActiveTask("u1")).toBe(false);
     expect(awaitingTasks("u1").length).toBe(0);
-    await vi.waitFor(() => expect(release).toHaveBeenCalled()); // 连接回池（不是杀掉）
+    await vi.waitFor(() => expect(release).toHaveBeenCalled()); // 连接留着复用（不是杀掉）
     expect(drop).not.toHaveBeenCalled();
   });
 
@@ -176,7 +176,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     expect(has(pushed, "超时/卡住")).toBe(true);
   });
 
-  it("running 期间多次注入全部保留（按序累积，下一轮一并消费）", async () => {
+  it("running 期间多次回话全部保留（按序累积，下一轮一并消费）", async () => {
     const r1 = deferred();
     const r2 = deferred();
     acquire.mockImplementationOnce(async () => {
@@ -199,7 +199,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     await vi.waitFor(() => expect(has(pushed, "done")).toBe(true));
   });
 
-  it("cwd 透传给连接；状态 sink 走 running→waiting→idle，且快照带 tasks 数组", async () => {
+  it("cwd 透传给连接；状态写盘回调 走 running→waiting→idle，且快照带 tasks 数组", async () => {
     const r1 = deferred();
     acquire.mockImplementationOnce(async () => {
       const c = fakeConn();
@@ -222,7 +222,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
 });
 
 describe("多任务与编号", () => {
-  it("可并行派发多条：编号递增、回执带编号、按编号注入互不串台", async () => {
+  it("可并行派发多条：编号递增、回执带编号、按编号发话互不串台", async () => {
     const a1 = deferred();
     const a2 = deferred();
     acquire
@@ -254,7 +254,7 @@ describe("多任务与编号", () => {
     expect(has(pushed, "🤖【任务2】")).toBe(true);
 
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(2));
-    // 两条都在等 → 无编号注入必须回消歧提示（不猜）
+    // 两条都在等 → 无编号时必须回编号提示（不猜）
     const dis = injectTask("u1", "随便说点什么");
     expect(dis).toContain("2 条任务");
     expect(dis).toContain("#1");
@@ -313,7 +313,7 @@ describe("多任务与编号", () => {
 
     a1.resolve("甲第一轮");
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
-    const r = stopTask("u1", 1); // 甲在 waiting → 连接回池；乙仍在跑
+    const r = stopTask("u1", 1); // 甲在 waiting → 连接留着复用；乙仍在跑
     expect(r).toContain("#1");
     await vi.waitFor(() => expect(release).toHaveBeenCalled());
     expect(drop).not.toHaveBeenCalled();
@@ -321,7 +321,7 @@ describe("多任务与编号", () => {
     expect(hasActiveTask("u1")).toBe(true);
   });
 
-  it("结束正在跑的那条 → 杀掉它的连接（不是回池）；结束全部 → 两条都收", async () => {
+  it("结束正在跑的那条 → 杀掉它的连接（不是留着复用）；结束全部 → 两条都收", async () => {
     acquire
       .mockImplementationOnce(async () => {
         const c = fakeConn("kiro");
@@ -542,7 +542,7 @@ describe("任务表落盘与重启续跑", () => {
     await vi.waitFor(() => expect(has(pushed, "这次接不上")).toBe(true));
     expect(listTasks("u1")[0].status).toBe("interrupted"); // 回到可重试状态
     expect(hasActiveTask("u1")).toBe(false);
-    // 会话指针保留（收尾不清）：用户重述进展后还能再试
+    // 会话当前会话记录保留（收尾不清）：用户重述进展后还能再试
     expect(conns[0].sessions).toEqual([]);
   });
 
@@ -576,7 +576,7 @@ describe("任务表落盘与重启续跑", () => {
 
 /**
  * CLI 侧的回执：`wemind task` 这类命令丢完命令就再也看不见结果，于是只能自己编「已派发」——
- * 池满被拒、agent 起不来都会被报成成功（甚至报成上一条任务的编号，因为 `active` 本来就是 true）。
+ * 达上限被拒、agent 起不来都会被报成成功（甚至报成上一条任务的编号，因为 `active` 本来就是 true）。
  * 这里钉死「回执等起进程有结果」「失败回执就是失败」。
  */
 describe("本地命令的回执（daemon 说了才算）", () => {
@@ -590,7 +590,7 @@ describe("本地命令的回执（daemon 说了才算）", () => {
     expect(acks[0].text).toContain("kiro");
   });
 
-  it("池满被拒：回执是那句警告（不是「已派发」），任务也不留在表里", async () => {
+  it("达上限被拒：回执是那句警告（不是「已派发」），任务也不留在表里", async () => {
     acquire.mockImplementationOnce(async () => ({
       ok: false,
       problem:

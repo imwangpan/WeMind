@@ -65,7 +65,7 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 ## 3.3 协议类型（api/types.ts）
 
-这个文件镜像服务端 proto，是理解 iLink 数据模型的核心参考。字段绝大多数可选（服务端按场景下发）。proto 里的 `bytes` 在 JSON 中是 base64 字符串。
+这个文件照抄服务端 proto，是理解 iLink 数据模型的核心参考。字段绝大多数可选（服务端按场景下发）。proto 里的 `bytes` 在 JSON 中是 base64 字符串。
 
 ### 关键枚举
 

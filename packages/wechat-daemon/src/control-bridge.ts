@@ -8,7 +8,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
  * `control-out/<id>.json` 应答；CLI 短轮询应答并打印。
  *
  * 为什么要有它：切换大脑/开新会话/恢复会话都必须**在 daemon 进程里**发生（进程内的 ACP 连接、
- * 会话指针、任务表都是 daemon 的活状态）。CLI 另起一个进程去改文件只能改「下次启动才读」的配置，
+ * 会话当前会话记录、任务表都是 daemon 的活状态）。CLI 另起一个进程去改文件只能改「下次启动才读」的配置，
  * 那就回到「切脑要重启 daemon、打断在途任务」的老问题。桥让 CLI 与微信指令走同一段代码。
  *
  * 与既有 task-inbox 的分工：task-inbox 是**单向**（CLI 派活，结果从微信回）；控制桥要**回话**（CLI 要打印成功/失败），
@@ -20,7 +20,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
  */
 
 export type ControlKind =
-  /** 热切换对话大脑（落盘 + 预热 + 失败回滚）。 */
+  /** 热切换对话大脑（写盘 + 启动新大脑 + 失败退回）。 */
   | "brain.switch"
   /** 设默认任务大脑（本次运行内一直生效，不落盘）。 */
   | "brain.worker"
@@ -238,7 +238,7 @@ export function bridgePidOf(dir: string = DATA_DIR): number | null {
 }
 
 /**
- * 按 kind 给等待上限：`brain.switch` 要跑「drain + 预热」（预热本身就有 120s 硬上限），
+ * 按 kind 给等待上限：`brain.switch` 要跑「等在途回合结束 + 启动新大脑」（启动本身就有 120s 硬上限），
  * 用普通上限会让 CLI 在正确的长切换上误报超时。
  */
 export function controlTimeoutMs(kind: ControlKind, env: NodeJS.ProcessEnv = process.env): number {

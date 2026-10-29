@@ -73,11 +73,11 @@ M1 期间补测（2026-10-26）：
 | # | 场景 | 结果 |
 |---|---|---|
 | M3-1 | 发图片（真实照片） | ✅ 回复准确描述画面（「大红苹果…巨型苹果雕塑」），`prompt ok 5650ms chunks=73`；`image:true` 落实到端到端 |
-| M3-2 | 动态 MCP：`列出 MCP` → `加载 wemind-test` → 让 agent 调工具 → `卸载` | ✅ 目录列出临时 MCP；加载后沙箱 `settings.json.mcpServers` 写入、`brain-mcps.json` 记录、ACP 自动重启；agent 真实调用并回 `pong from wemind-mcp-test`（临时 server 日志可见握手）；`加载 wechat` 被拒（防回环）；卸载后清理；真实 `~/.qoder/settings.json` 已按备份还原 |
+| M3-2 | 动态 MCP：`列出 MCP` → `加载 wemind-test` → 让 agent 调工具 → `卸载` | ✅ 目录列出临时 MCP；加载后沙箱 `settings.json.mcpServers` 写入、`brain-mcps.json` 记录、ACP 自动重启；agent 真实调用并回 `pong from wemind-mcp-test`（临时 server 日志可见握手）；`加载 wechat` 被拒（防它把消息发回自己）；卸载后清理；真实 `~/.qoder/settings.json` 已按备份还原 |
 | M3-3 | worker：派发约 25 s 任务 → `taskkill /T /F` 强杀 worker → 微信「继续」 | ✅ 强杀后 `prompt FAIL → rebuild`，任务进入 waiting；「继续」触发重拉 + `session/load ok`，工具调用续跑，两步产物 `STEP-A-DONE` / `STEP-B-DONE` 齐全；`worker-sessions.json` 新增 `qoder:task` |
 | M3-4 | 冷重启后追问 | ✅ daemon 重启后首轮 `session/load ok`，上下文保留（配合 M3-3 的硬杀恢复，覆盖两种重启路径） |
 | M3-5 | 记忆/技能继承 | ✅ `memory/` junction 生效：大脑能读到日常 Qoder 写入的用户偏好（实测答出真实记忆里的内容）；`skills`/`agents`/`commands`/`AGENTS.md` 在 1.1.78 不存在，保持空操作 |
-| — | 切换隔离（会话映射分命名空间） | ✅ qoder 与 deepseek 各自 `session/load` 自己的 sessionId；来回切换不再出现 `-32602 INVALID_SESSION_IDENTIFIER`，切回时原上下文仍在 |
+| — | 切换隔离（会话映射按 agent 分开存） | ✅ qoder 与 deepseek 各自 `session/load` 自己的 sessionId；来回切换不再出现 `-32602 INVALID_SESSION_IDENTIFIER`，切回时原上下文仍在 |
 | — | 日常 Qoder 登录态 | ✅ E2E 全程未被登出（token 轮换暂未观察到，见 §6） |
 
 ---
@@ -154,7 +154,7 @@ syncSettings():
 
 协议方法层**不改**：现有 load → resume → new 兜底、权限默认拒绝、未知方法回 `-32601`、图片透传都直接适用。
 
-唯一落地改动是 **session 映射按 agent 分命名空间**（`brain-sessions.json` 的键 `userId` → `<agent>:<userId>`，`worker-sessions.json` 的键 `task` → `<agent>:task`）：
+唯一落地改动是 **session 映射按 agent 分开存**（`brain-sessions.json` 的键 `userId` → `<agent>:<userId>`，`worker-sessions.json` 的键 `task` → `<agent>:task`）：
 
 - 起因：E2E 时账号 `brain.json` 仍是 deepseek，靠 `WEMIND_BRAIN=qoder` 临时切换；旧映射里的 DSH sessionId 被拿去 `session/load`，Qoder 回 `-32602 INVALID_SESSION_IDENTIFIER`，连试 load/resume 失败后才 `session/new`。功能能自愈，但白丢一轮上下文且日志噪音。
 - 现在：换大脑后各 agent 各自保留一条会话记录，切回去仍能 `load` 回原上下文；微信「新会话」只清当前 agent 的那条。

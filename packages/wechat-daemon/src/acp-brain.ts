@@ -72,14 +72,14 @@ let answerStarted = false; // 当前回合是否已通知"开始写回复"
 let thoughtStarted = false; // 当前回合是否已通知"正在思考"
 const seenUpdateTypes = new Set<string>(); // 诊断：本回合出现过的 sessionUpdate 类型
 const seenTools = new Set<string>(); // 当前回合已上报的工具标题，去重
-const hintedSessions = new Set<string>(); // 已注入「可发图」约定提示的 session（每会话首轮注入一次）
+const hintedSessions = new Set<string>(); // 已带上「可发图」约定提示的 session（每会话首轮带上一次）
 
 // ---- 并发门（切脑用）----
 // 一回合是一段长异步（可能几分钟）：热切换必须先**等在跑的回合结束**，绝不在整回合上持锁。
-// 反过来，切换期间新回合要在门口等（有界），否则会与预热**双起进程**（看门狗/重试也走这条路）。
+// 反过来，切换期间新回合要在门口等（有界），否则会与启动新大脑时**双起进程**（看门狗/重试也走这条路）。
 let turnInFlight = false; // 有回合正在跑（askBrain / newSession 全程）
 let switching = false; // 正在切换大脑
-const SWITCH_WAIT_MS = Number(process.env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000; // 回合等切换的上限，与切换自身的预热上限一致
+const SWITCH_WAIT_MS = Number(process.env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000; // 回合等切换的上限，与切换自身的启动新大脑的上限一致
 
 export function isTurnInFlight(): boolean {
   return turnInFlight;
@@ -104,7 +104,7 @@ export async function drainTurn(timeoutMs: number): Promise<boolean> {
   return true;
 }
 
-/** 回合入口用：切换进行中就先等它完成（有界），再继续——避免与预热抢同一个 ACP 进程。 */
+/** 回合入口用：切换进行中就先等它完成（有界），再继续——避免与启动新大脑抢同一个 ACP 进程。 */
 async function waitWhileSwitching(): Promise<void> {
   if (!switching) return;
   dlog("turn waits for in-flight brain switch…");
@@ -434,7 +434,7 @@ export async function askBrain(
   onProgress?: (ev: ProgressEvent) => void,
   images?: Array<{ data: string; mimeType: string }>,
 ): Promise<string> {
-  await waitWhileSwitching(); // 切换进行中就先在门口等（有界）：绝不与预热双起进程
+  await waitWhileSwitching(); // 切换进行中就先在门口等（有界）：绝不在启动新大脑时双起进程
   const ag = getAgent("brain"); // 等完之后才取槽位——拿到的是切换后的新大脑；此后全程用它，过程内不再读槽位
   turnInFlight = true; // 从这一刻起，切脑会等本回合结束（drainTurn）
   try {
@@ -521,10 +521,10 @@ export async function newSession(userId: string): Promise<void> {
 }
 
 /**
- * 「恢复会话」：把某条**已有的**会话切回当前，**strict**——只认真接上的 load/resume，
+ * 「恢复会话」：把某条**已有的**会话切回当前，**严格恢复**——只认真接上的 load/resume，
  * 接不上就如实报错，**绝不**回退成 session/new（那会让用户以为上下文回来了，其实是一张白纸），
- * 也**不改**会话指针（当前会话原样保留，用户还能继续用）。
- * 成功才动磁盘：userSessions + 指针表（`<agent>:<userId>` → 这条）。
+ * 也**不改**会话当前会话记录（当前会话原样保留，用户还能继续用）。
+ * 成功才动磁盘：userSessions + 当前会话表（`<agent>:<userId>` → 这条）。
  */
 export async function resumeSession(
   userId: string,
@@ -565,7 +565,7 @@ export async function resumeSession(
 }
 
 /**
- * 切换流程用：为新 agent 备好进程与（触发者）会话——预热成功才算「新大脑真的能用 ACP 说话」。
+ * 切换流程用：为新 agent 备好进程与（触发者）会话——启动成功才算「新大脑真的能用 ACP 说话」。
  * 会话走既有 ensureSession：该 agent 里有本人的旧会话就 load/resume 恢复上下文，没有就新建。
  * `userId` 为空（CLI 触发、还不知道是谁在聊）时只验进程能握手。
  */

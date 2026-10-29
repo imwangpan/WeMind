@@ -161,7 +161,7 @@ describe("controlTimeoutMs", () => {
     expect(controlTimeoutMs("task.reply", { WEMIND_CONTROL_TIMEOUT_MS: "5000" })).toBe(5000);
   });
 
-  it("brain.switch 给足「drain + 预热」的时间：不能比 daemon 自己的上限还短", () => {
+  it("brain.switch 给足「等在途回合结束 + 启动新大脑」的时间：不能比 daemon 自己的上限还短", () => {
     // 默认：30s base 明显不够 → 取 warm(120s) + drain(30s) + 余量
     expect(controlTimeoutMs("brain.switch", {})).toBeGreaterThan(150_000);
     expect(
