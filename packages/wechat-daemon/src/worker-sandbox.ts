@@ -6,7 +6,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import type { ResolvedAgent } from "./brain-agents.js";
 import { getAgent } from "./agent-slot.js";
 import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
-import { stripWechatMcpEntries } from "./profile-model.js";
+import { copyProfilePatch } from "./profile-model.js";
 
 /**
  * worker 沙箱：与 brain 沙箱（mcp-sandbox.ts）并列，但 MCP 策略相反。
@@ -221,20 +221,14 @@ function syncProfilePatch(ag: ResolvedAgent): void {
   if (!ag.realProfile || !ag.realHome || !ag.inherit) return;
   if (path.resolve(WORKER_HOME) === path.resolve(ag.realHome)) return;
   const src = path.join(ag.realHome, "profiles", ag.realProfile, "cordis.patch.yml");
-  const dst = path.join(WORKER_HOME, "profiles", ag.realProfile, "cordis.patch.yml");
   try {
     if (!fs.existsSync(src)) return;
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    const raw = fs.readFileSync(src);
-    const { text, removed } = stripWechatMcpEntries(raw.toString("utf-8"));
+    const removed = copyProfilePatch(ag.realHome, ag.realProfile, WORKER_HOME);
     if (removed.length) {
       console.error(
         `[wemind/wechat-daemon/mcp] 真实 profile 里的微信 MCP 已从 worker 沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
       );
     }
-    const out = removed.length ? Buffer.from(text, "utf-8") : raw;
-    const same = fs.existsSync(dst) && fs.readFileSync(dst).equals(out);
-    if (!same) fs.writeFileSync(dst, out);
   } catch {
     /* best-effort */
   }

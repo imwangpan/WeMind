@@ -6,7 +6,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import type { ResolvedAgent } from "./brain-agents.js";
 import { getAgent } from "./agent-slot.js";
 import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
-import { stripWechatMcpEntries } from "./profile-model.js";
+import { copyProfilePatch } from "./profile-model.js";
 
 /**
  * brain 的 MCP 沙箱：brain 跑在独立配置目录下，默认不加载任何 MCP。
@@ -307,20 +307,14 @@ function syncProfilePatch(ag: ResolvedAgent): void {
   if (!ag.realProfile || !ag.realHome || !ag.inherit) return;
   if (path.resolve(BRAIN_HOME) === path.resolve(ag.realHome)) return; // 沙箱就是真实目录时不自我覆盖
   const src = path.join(ag.realHome, "profiles", ag.realProfile, "cordis.patch.yml");
-  const dst = path.join(BRAIN_HOME, "profiles", ag.realProfile, "cordis.patch.yml");
   try {
     if (!fs.existsSync(src)) return;
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    const raw = fs.readFileSync(src);
-    const { text, removed } = stripWechatMcpEntries(raw.toString("utf-8"));
+    const removed = copyProfilePatch(ag.realHome, ag.realProfile, BRAIN_HOME);
     if (removed.length) {
       console.error(
         `[wemind/wechat-daemon/mcp] 真实 profile 里的微信 MCP 已从大脑沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
       );
     }
-    const out = removed.length ? Buffer.from(text, "utf-8") : raw;
-    const same = fs.existsSync(dst) && fs.readFileSync(dst).equals(out);
-    if (!same) fs.writeFileSync(dst, out);
   } catch {
     /* best-effort */
   }

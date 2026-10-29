@@ -128,6 +128,21 @@ describe("用户层自己有 - id: acp 时（Agent 自己的配置优先）", ()
     expect(readProfileDefaultModel(home, "acp")).toBe('["magpie","auto/from-default"]');
   });
 
+  it("flow 式 config（`config: {provider: …, model: …}`）也读得到——DSH 一样会采用它", () => {
+    const body = [
+      "- id: agent-default-model",
+      "  config:",
+      "    provider: magpie",
+      "    model: auto/from-default",
+      "- id: acp",
+      "  config: {provider: magpie, model: auto/from-acp}",
+      "",
+    ].join("\n");
+    const home = writeProfile("acp-flow", body);
+    expect(readProfileDefaultModel(home, "acp")).toBe('["magpie","auto/from-acp"]');
+    expect(acpOverrideHint(home, "acp")).toBeNull();
+  });
+
   it("acpOverrideHint：已配置 → null；缺 → 给出可直接粘贴的片段（值取自 agent-default-model）；名字里带 acp 不算已配置", () => {
     expect(
       acpOverrideHint(writeProfile("hint-yes", withAcp("auto/x", "auto/y")), "acp"),
@@ -165,8 +180,22 @@ describe("用户层自己有 - id: acp 时（Agent 自己的配置优先）", ()
     expect(hint).toContain(
       '- id: acp\n  config:\n    provider: "magpie"\n    model: "auto/from-default"',
     );
+    expect(hint).toContain("加到那份文件末尾"); // 块式 profile：末尾追加即可
     // 文件不存在（dsh 还没生成过这份 profile）→ 不提示：说不清该改哪份文件
     expect(acpOverrideHint(path.join(root, "no-home"), "acp")).toBeNull();
+  });
+
+  it("profile 还是空壳 [] 时，提示「替换 [] 那一行」（追加在 [] 后面是非法 YAML），且值是占位符", () => {
+    const home = writeProfile(
+      "hint-shell",
+      ["# Your patch layer for this dsh profile", "[]", ""].join("\n"),
+    );
+    const hint = acpOverrideHint(home, "acp")!;
+    expect(hint).toContain("[] 那一行替换");
+    expect(hint).not.toContain("加到那份文件末尾");
+    expect(hint).toContain('provider: "<provider>"');
+    expect(hint).toContain('model: "<model>"');
+    expect(hint).toContain("占位符");
   });
 });
 

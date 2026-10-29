@@ -329,7 +329,7 @@ deepseek: {
 
    `session/resume` 的入参已实测：`{ sessionId, cwd, mcpServers: [] }`；DSH 走 `restore: "resume"`，其余 agent 仍先 `load`。
 
-1b. **模型路由选择**（DSH 必须；否则落到 `deepseek-official` 报 no API key）：
+1b. **模型路由选择**（默认已由真实 profile 里的 `- id: acp` 决定开局模型，沙箱原样复制、`session/new` 就对；这里再按同一值发一次作兜底/显式覆盖——真实 profile 读不到、或 `--model auto` 没读到默认时，它才是唯一手段，否则落到 `deepseek-official` 报 no API key）：
 
    ```ts
    // ensureSession() 返回后调用；resume 会保留上次选择，但配置变更时需重设
@@ -535,7 +535,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | R7 | 版本是 RC，ACP 行为可能变化 | 升级即坏 | 锁 `0.2.1-rc.2`；升级先跑 M0 脚本；文档记录版本 |
 | R8 | Node ≥22（社区包明确；官方以安装包为准），而仓库声明 ≥20 | 旧环境起不来 | 文档标注；`agentProblem` 加 `minNode` 检查；M0 记录 |
 | R9 | DSH 的 Windows ACL 沙箱只限制普通 NTFS 写，不限制读/网络/进程可见性 | 微信侧提示注入可外带本机文件 | `allowFrom` 登录者白名单；专用 OS 账号；`workspace-write`；不要把敏感目录设为 worker cwd |
-| R10 | 模型/路由选择 | 不选就落到 official 路由，需 API key | 配置里的 `model` + `session/set_config_option`；桌面登录用 `deepseek-account` |
+| R10 | 模型/路由选择 | 不干预就落到 official 路由，需 API key（默认已由真实 profile 里的 `- id: acp` 跟随用户日常默认，见 R18） | 配置里的 `model` + 真实 profile 的 `- id: acp`（沙箱原样复制）+ `session/set_config_option`（显式覆盖/兜底）；桌面登录用 `deepseek-account` |
 | R11 | 桌面端 CLI 只有 `dsh.cmd`，无无扩展名 `dsh` | `onPath("dsh")` 找不到，`auto`/agent 判不可用 | 配置里的 `binWin: "dsh.cmd"`；或让 `onPath` 对 `.cmd` 补试；`WEMIND_BRAIN_BIN` 绝对路径兜底 |
 | R12 | 多账号 / pm2 环境变量传递 | key 不生效 | 文档给 pm2 / `Start-Process -Environment` 示例 |
 | R13 | 成本与长上下文 | 账单/延迟 | 限制 `allowFrom`；观察 usage；`WECHAT_BRAIN_CAP_MS` 兜底 |

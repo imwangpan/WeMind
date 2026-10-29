@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { ResolvedAgent } from "./brain-agents.js";
+import { copyProfilePatch } from "./profile-model.js";
 import { spawnAgent } from "./spawn-agent.js";
 
 /**
@@ -31,6 +32,18 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
       fs.copyFileSync(src, path.join(cfgDir, f));
     } catch {
       /* best-effort */
+    }
+  }
+
+  // 与 daemon 的大脑沙箱对齐：配了 realProfile 的 agent（DSH）启动时就解析 profiles/<名>/cordis.patch.yml，
+  // 语法错误会直接 exit 1（initialize 都不会发生）。不复制的话，坏 profile 上自检仍报 ✅，而 daemon 每条消息都起不来。
+  if (ag.inherit && ag.realProfile && ag.realHome) {
+    try {
+      const rel = path.join("profiles", ag.realProfile, "cordis.patch.yml");
+      if (fs.existsSync(path.join(ag.realHome, rel)))
+        copyProfilePatch(ag.realHome, ag.realProfile, home);
+    } catch {
+      /* best-effort（与 daemon 的 syncProfilePatch 一致） */
     }
   }
 
@@ -101,10 +114,22 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
       ms: Date.now() - started,
     };
   } catch (e) {
-    const tail = stderrTail.join("").trim().slice(-400);
+    // 只留末尾会把「Error: dsh: failed to parse overlay … YAMLException」这种头行切掉（栈尾看不出原因），
+    // 所以同时保留第一行错误信息与末尾上下文。
+    const all = stderrTail.join("").trim();
+    const lines = all
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const head =
+      lines.find((l) => /^(Error|YAMLException)\b/.test(l)) ??
+      lines.find((l) => /failed to parse|YAMLException/i.test(l)) ??
+      lines[0];
+    const tail = all.slice(-400);
+    const detail = `${e instanceof Error ? e.message : String(e)}${head ? `\n  stderr: ${head}` : ""}${tail && !head?.includes(tail.trim()) ? `\n  …${tail}` : ""}`;
     return {
       ok: false,
-      detail: `${e instanceof Error ? e.message : String(e)}${tail ? `\n  stderr: ${tail}` : ""}`,
+      detail,
       ms: Date.now() - started,
     };
   } finally {
