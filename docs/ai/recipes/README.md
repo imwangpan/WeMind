@@ -7,7 +7,7 @@
 | 任务 | 配方 |
 |---|---|
 | 接入一个新的 ACP agent（大脑/worker） | [add-acp-agent.md](add-acp-agent.md) |
-| 新增 / 调试 MCP 注入 | [add-mcp.md](add-mcp.md) |
+| 新增 / 调试 MCP 挂载 | [add-mcp.md](add-mcp.md) |
 | 排查 daemon 不回复 / 大脑异常 | [debug-daemon.md](debug-daemon.md) |
 | 端到端验收（微信链路） | [run-e2e.md](run-e2e.md) |
 

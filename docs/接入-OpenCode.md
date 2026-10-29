@@ -1,6 +1,6 @@
 # 接入 OpenCode（设计文档）
 
-> **状态**：M1 冒烟验证 **已完成 ✅** · M2（预设 + 沙箱）**已实现 ✅**；M3+ 见 §3.6。
+> **状态**：M1 冒烟验证 **已完成 ✅** · M2（agent + 沙箱）**已实现 ✅**；M3+ 见 §3.6。
 > **实测环境**：Windows 11 / Node ≥20 / OpenCode **v2.0.29** / WeMind 1.0.1。
 > **最后核对**：2026-10-24 ｜ 本文结论**仅适用于 OpenCode v2.0.29**；其它 agent 的能力（load/image/MCP）可能不同。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](repowiki/06-ACP-大脑与沙箱.md)。
@@ -12,8 +12,8 @@
 - WeMind 有**两种接入形态**：① `@wemind/wechat-mcp`（OpenCode 当 MCP 客户端消费微信工具）；② daemon（OpenCode 当**常驻 ACP 大脑**）。
 - 本文重点做 **形态②**：用 `wemind brain set opencode`（或一次性 `WEMIND_BRAIN=opencode`）把 daemon 的大脑换成 `opencode acp`。
 - **M1 已实测**：`initialize` / `session/new` / `session/prompt` / `session/load`（自愈）/ 工具调用全部可用，且 **OpenCode 全程不向客户端发反向请求**（无 `fs/*`、无 `session/request_permission`）——现有 `acp-brain.ts` 协议层**不需要改动**。
-- 剩余工作量集中在 **预设 + 沙箱**：OpenCode 的配置目录环境变量、配置文件名与 **MCP 配置格式**都与 kiro 不同，需要按 agent 适配。
-- 预计 M2（预设 + brain 沙箱）为主工作量；M3（记忆继承 + worker）顺势复用。
+- 剩余工作量集中在 **agent + 沙箱**：OpenCode 的配置目录环境变量、配置文件名与 **MCP 配置格式**都与 kiro 不同，需要按 agent 适配。
+- 预计 M2（agent + brain 沙箱）为主工作量；M3（记忆继承 + worker）顺势复用。
 
 ---
 
@@ -25,7 +25,7 @@
 | 谁生成回复 | 客户端 agent | daemon 调常驻 ACP 大脑 |
 | OpenCode 角色 | **MCP 客户端**（把微信当工具集） | **ACP agent**（当大脑） |
 | 协议 | MCP（stdio） | ACP（JSON-RPC over stdio） |
-| 改动量 | 配置级 | 预设 + 沙箱适配 |
+| 改动量 | 配置级 | agent + 沙箱适配 |
 
 两者可独立使用；**同一 bot token 不要同时跑形态①与形态②**（会抢消息，回环）。
 
@@ -70,7 +70,7 @@ opencode mcp list
 
 WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文档已把 OpenCode 列入「原生支持 ACP」清单。M1 实测确认协议完全兼容（见 §3.3）。
 
-### 3.2 与 kiro 预设的关键差异
+### 3.2 与 kiro agent 的关键差异
 
 | 维度 | kiro（现状） | OpenCode（需适配） |
 |---|---|---|
@@ -101,18 +101,18 @@ WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文�
 - `initialize` 还带 `sessionCapabilities.{additionalDirectories,close,delete,fork,list,resume}` 与 `_meta["opencode/child-session-updates"]`——WeMind 不理会，无副作用。
 - `session/update` 会出现 `available_commands_update`、`usage_update`、`user_message_chunk`；WeMind 现有逻辑把它们当"活动"或忽略，**不报错**。
 - 未登录任何 provider 时 OpenCode 仍可用其**自带免费模型**（`session/new` 默认 `opencode/nemotron-3.5-super-vl-free`）完成对话。
-- **模型由 OpenCode 自己决定**：WeMind 不设置模型；若要固定模型，需写进沙箱 `opencode.json` 的 `model`。
+- **模型默认由 OpenCode 自己决定**：预设不带 `model`，WeMind 默认不下发；会话用它自己配置里的 `model`（沙箱 `opencode.json` 由你真实的 `~/.config/opencode/opencode.json` 作基底生成，手改沙箱那份会在下次启动被覆盖——要改就改真实那份）。也可以 `wemind brain set opencode --model '…'`（写入 `brain.json`，会话建立/恢复后经 `session/set_config_option` 下发，daemon 在跑时接着 `wemind brain switch opencode` 当场应用）——但 **OpenCode 是否接受这个 `configId` 尚未实测**（DSH/Qoder 已实测可用），下发失败会让该回合报错；稳妥做法仍是改真实 `opencode.json` 的 `model`。
 
-**隔离与 MCP 注入（M2 实现前另做的决定性验证）**：
+**隔离与 MCP 挂载（M2 实现前另做的决定性验证）**：
 - `OPENCODE_CONFIG_DIR` 只"追加"、**不能**替换默认 global，无法隔离 → 改用 **`XDG_CONFIG_HOME`**。
 - 实测 `XDG_CONFIG_HOME=<dir>` 后：`opencode debug paths config` → `<dir>/opencode`；ACP 的 `session/new` 采用该目录 `opencode.json` 的 `model`；放入 `mcp.servers` 的假 MCP **被实际拉起**（标记文件被创建）→ **`opencode acp` 完整读取 `<XDG>/opencode/opencode.json`**。
-- 结论：`XDG_CONFIG_HOME` 指向沙箱 = 配置隔离 + MCP 注入**端到端成立**。（注：`opencode mcp list` 连的是共享后台服务，不代表 ACP 进程行为。）
+- 结论：`XDG_CONFIG_HOME` 指向沙箱 = 配置隔离 + MCP 挂载**端到端成立**。（注：`opencode mcp list` 连的是共享后台服务，不代表 ACP 进程行为。）
 
 ### 3.4 实施方案
 
 > 以下为**已实现**的实现说明（M2 已落地）；代码路径对应现仓库结构。
 
-#### Step 1 · 新增 `opencode` 预设（`packages/wechat-daemon/src/brain-agents.ts`）
+#### Step 1 · 新增 `opencode` agent（`packages/wechat-daemon/src/brain-agents.ts`）
 
 ```ts
 opencode: {
@@ -148,7 +148,7 @@ for (const [k, v] of Object.entries(AGENT.env ?? {}))
   env[k] = v.replaceAll("%HOME%", BRAIN_HOME);
 ```
 
-opencode 预设可附带（可选，防御性）：
+opencode agent 可附带（可选，防御性）：
 
 ```ts
 env: { OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, // 不从 cwd 祖先目录发现用户 opencode.json
@@ -195,7 +195,7 @@ worker 策略相反（**继承全量 MCP，仅排除 wechat**），但同样要�
 #### Step 8 · 验证
 
 ```powershell
-wemind brain set opencode --restart   # 落盘持久（推荐）；一次性覆盖：$env:WEMIND_BRAIN = "opencode"
+wemind brain set opencode --restart   # 写入磁盘持久（推荐）；一次性覆盖：$env:WEMIND_BRAIN = "opencode"
 wemind brain check                    # 真起一个进程跑 ACP 握手（initialize + session/new）
 ```
 启动 daemon 后微信发消息，`~/.wemind/<acct>/daemon.log` 应出现：
@@ -216,9 +216,9 @@ npm run build; npm run daemon
 | # | 风险/待确认 | 影响 | 处置 |
 |---|---|---|---|
 | 1 | ACP 反向请求 | 可能卡死 | ✅ 已排除（M1 实测无） |
-| 2 | 配置隔离彻底性 | global/system MCP 串入大脑 | ✅ 已用 `XDG_CONFIG_HOME` 实测隔离并成功读取沙箱 `mcp.servers`；预设已注入 `OPENCODE_DISABLE_PROJECT_CONFIG=1` |
+| 2 | 配置隔离彻底性 | global/system MCP 串入大脑 | ✅ 已用 `XDG_CONFIG_HOME` 实测隔离并成功读取沙箱 `mcp.servers`；agent 已注入 `OPENCODE_DISABLE_PROJECT_CONFIG=1` |
 | 3 | 模型不继承 | 大脑用 OpenCode 默认（或免费模型） | ✅ 已实现：`syncOpencodeBase` 把用户 `opencode.json`（去 `mcp`）作基底写入沙箱 `model` |
-| 4 | 权限语义 | OpenCode 自动批准 ≈ `--trust-all-tools` | 保留 daemon 的 `allowFrom` 发件人鉴权（唯一安全闸，勿关） |
+| 4 | 权限语义 | OpenCode 自动批准 ≈ `--trust-all-tools` | 保留 daemon 的 `allowFrom` 登录者白名单（兜底校验，默认只放行登录者，勿关） |
 | 5 | 共享后台服务 | 多实例/生命周期 | 观察 `opencode acp` 是否复用全局 background server；必要时评估 `--standalone` |
 | 6 | 冷启动时延 | 首帧超时 | OpenCode 冷启动可能偏慢，按需放宽 `WECHAT_BRAIN_FIRST_FRAME_MS` |
 | 7 | Code Mode 工具命名 | 微信"步骤 N"文案 | 实测 `tool_call.title` 文案，必要时在 `zhTool()` 增加 OpenCode 风格映射 |
@@ -228,7 +228,7 @@ npm run build; npm run daemon
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | M1 | 冒烟：`opencode acp` 可被现有 ACP 客户端驱动，确认无反向请求 | ✅ 完成 |
-| M2 | Step 1–3：预设 + 多 env 注入 + 沙箱 strategy（brain 默认空、动态 MCP） | ✅ 完成 |
+| M2 | Step 1–3：agent + 多 env 注入 + 沙箱 strategy（brain 默认空、动态 MCP） | ✅ 完成 |
 | M3 | Step 4–6：记忆/技能继承 + worker 改造 + 模型注入 | ✅ 完成 |
 | M4 | Step 7–8 + 文档：Windows 兼容、验证脚本、更新 [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) 与 README 的 OpenCode 片段 | ✅ 文档/脚本就绪；⏳ 微信端到端待跑（需登录 bot） |
 
@@ -236,11 +236,11 @@ npm run build; npm run daemon
 
 | 文件 | 改动 |
 |---|---|
-| `packages/wechat-daemon/src/brain-agents.ts` | 新增 `opencode` 预设；`AcpAgentPreset`/`ResolvedAgent` 增加 `configSubdir`/`mcpFormat`/`mcpConfigFile`/`catalogFile`/`env`/`inheritFiles` |
+| `packages/wechat-daemon/src/brain-agents.ts` | 新增 `opencode` agent；`AcpAgentPreset`/`ResolvedAgent` 增加 `configSubdir`/`mcpFormat`/`mcpConfigFile`/`catalogFile`/`env`/`inheritFiles` |
 | `packages/wechat-daemon/src/agent-mcp.ts`（新） | MCP 格式纯函数：`readMcpServers`/`withMcpServers`/`parseJsonc` |
 | `packages/wechat-daemon/src/mcp-sandbox.ts` | 按 agent 分派配置目录与 MCP 格式；opencode 继承 `model` 基底；`inheritFiles` 支持 |
 | `packages/wechat-daemon/src/worker-sandbox.ts` | 同上（worker 策略：继承全量 MCP 除 wechat） |
-| `packages/wechat-daemon/src/acp-brain.ts` / `worker-acp.ts` | 注入预设 `env`（`%HOME%` → 沙箱） |
+| `packages/wechat-daemon/src/acp-brain.ts` / `worker-acp.ts` | 注入配置里的 `env`（`%HOME%` → 沙箱） |
 | `packages/wechat-daemon/src/agent-mcp.test.ts` / `brain-agents.test.ts`（新） | 单测 |
 | `scripts/acp-probe.mjs` | M1 回归 harness（当时的 `acp-smoke.mjs`/`acp-smoke2.mjs` 只硬编码 `opencode acp`，已并入通用探针后删除） |
 | `README.md` / `docs/接入其它-ACP-Agent.md` | 文档更新 |

@@ -30,7 +30,7 @@ export function generateTitle(text: string): string {
 }
 
 /**
- * 构造长回复的 md 文件（不落盘，直接内存 buffer）。
+ * 构造长回复的 md 文件（不写入磁盘，直接内存 buffer）。
  * 若正文未以 Markdown 标题开头，则前置一个由内容生成的 H1，便于打开后阅读。
  */
 export function buildMdReply(text: string): { fileName: string; data: Buffer } {

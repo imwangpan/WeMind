@@ -1,14 +1,14 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26 ｜ **状态**：kiro/opencode/deepseek/qoder 已实测；其它预设为示例，接入前按 §8 验证。
+> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26 ｜ **状态**：kiro/opencode/deepseek/qoder 已实测；其它 agent 为示例，接入前按 §8 验证。
 >
-> 本文说明如何把 WeMind 守护进程（daemon）的「大脑」从默认的 `auto`（优先 kiro）换成另一个 ACP agent。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
+> 本文说明如何把 WeMind daemon 的「大脑」从默认的 `auto`（优先 kiro）换成另一个 ACP agent。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 
 ---
 
 ## 0. 一句话版本（先看这段，30 秒判断能不能接）
 
-> WeMind 的大脑必须是一个**可启动的命令行程序**（executable CLI：daemon 以子进程方式运行它，spawn as a child process），并且**实现 ACP 协议**（implements the ACP protocol：原生实现 built-in，或经由 **ACP 适配器** adapter 桥接 bridged），通过**标准输入输出**（stdin/stdout，即 stdio）交换 **JSON-RPC** 帧；其 ACP 实现至少要支持 `initialize`、`session/new`，以及能**流式**（streaming）回包的 `session/prompt`。`session/load`、`session/resume`、**图片输入**（image input）、**MCP 传输**（MCP transport）、**反向请求**（reverse request）这些是**可降级项**（optional / degradable capabilities），按**预设字段**（preset fields）逐项适配。
+> WeMind 的大脑必须是一个**可启动的命令行程序**（executable CLI：daemon 以子进程方式运行它，spawn as a child process），并且**实现 ACP 协议**（implements the ACP protocol：原生实现 built-in，或经由 **ACP 适配器** adapter 桥接 bridged），通过**标准输入输出**（stdin/stdout，即 stdio）交换 **JSON-RPC** 帧；其 ACP 实现至少要支持 `initialize`、`session/new`，以及能**流式**（streaming）回包的 `session/prompt`。`session/load`、`session/resume`、**图片输入**（image input）、**MCP 传输**（MCP transport）、**反向请求**（reverse request）这些是**可降级项**（optional / degradable capabilities），按**agent 配置字段**（preset fields）逐项适配。
 >
 > 反过来说：**没有 CLI 入口的裸 HTTP API**（bare HTTP API，如 OpenAI / Anthropic / Ollama）目前接不了——那需要抽象 `Brain` 接口（`Brain` interface abstraction）并另写一个 HTTP 实现（见 §9）。
 
@@ -45,7 +45,7 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 
 相关代码：
 
-- `packages/wechat-daemon/src/brain-agents.ts` —— 预设表与解析逻辑（本文主角）；
+- `packages/wechat-daemon/src/brain-agents.ts` —— agent 表与解析逻辑（本文主角）；
 - `packages/wechat-daemon/src/acp-brain.ts` —— ACP 客户端（协议层；缺 load/反向请求时需要改）；
 - `packages/wechat-daemon/src/worker-acp.ts` —— worker 的 ACP 客户端（与 brain 是两份实现，改动要同步）。
 
@@ -57,7 +57,7 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 |---|------|------|------------|
 | 1 | **二进制名/路径** | 可执行文件名（在 PATH 上）或绝对路径 | `kiro-cli`（Win：`kiro-cli.exe`） |
 | 2 | **ACP 启动参数** | 让该 CLI 进入「ACP server over stdio」模式的命令行参数 | `acp --trust-all-tools` |
-| 3 | **配置目录环境变量名** | 该 agent 读取其配置/数据目录的环境变量名；WeMind 会把它指向 brain 沙箱目录，用于隔离与可选的 MCP 注入。没有就留空 | `KIRO_HOME` |
+| 3 | **配置目录环境变量名** | 该 agent 读取其配置/数据目录的环境变量名；WeMind 会把它指向 brain 沙箱目录，用于隔离与可选的 MCP 挂载。没有就留空 | `KIRO_HOME` |
 | 4 | **ACP 兼容性** | 该 CLI 是否实现了 ACP 的最小方法集；**还要看** `initialize.agentCapabilities` 的 `load/resume/image/mcp` 与是否会发反向请求 | 是 |
 
 > 第 1、2 项几乎所有 agent 都有；第 3 项各家差异较大（见 §6 MCP 沙箱）；第 4 项是前提——不支持 ACP 的 agent 走不了这条路，得用「第二档：裸 LLM API 适配器」（尚未实现，见 §9）。
@@ -66,14 +66,14 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 
 ---
 
-## 3. 配置方式 A：选大脑（推荐落盘持久；环境变量为一次性覆盖）
+## 3. 配置方式 A：选大脑（推荐写入磁盘持久；环境变量为一次性覆盖）
 
 **选择存在「账号级配置文件」里**（`<数据目录>/brain.json`），任何入口重启都能复现；`wemind brain` 是切换它的正门：
 
 | 命令 | 作用 |
 |------|------|
 | `wemind brain [<key\|label>]` | 查看：配置、生效值、来源、二进制是否可用 |
-| `wemind brain set <预设\|auto> [--bin X] [--args "…"] [--shell\|--no-shell] [--restart] [<key\|label>]` | 写入 brain.json（`--restart` 顺带重启 daemon 立即生效） |
+| `wemind brain set <agent 名\|auto> [--bin X] [--args "…"] [--shell\|--no-shell] [--model X\|auto] [--restart] [<key\|label>]` | 写入 brain.json；daemon 在跑且认控制桥时，**只给 agent 名**会当场热切换（成功才写入磁盘，失败不改 brain.json）；带 `--bin`/`--args`/`--shell`/`--model` 不能由它当场应用（控制桥只认 agent 名）——重启后生效，或（除 `--shell` 外）随后 `wemind brain switch <同名 agent>` 当场应用；`--restart` 顺带重启 daemon 立即生效 |
 | `wemind brain unset [<key\|label>]` | 删除 brain.json，回退到自动探测/默认 |
 | `wemind brain check [<key\|label>]` | 真起一个进程跑 ACP 握手（`initialize` + `session/new`），验证「不仅找得到、而且能说 ACP」 |
 
@@ -83,47 +83,47 @@ wemind brain                            # 查看当前大脑
 wemind brain check                      # 真机自检（真实 ACP 握手）
 ```
 
-`brain.json` 形如（`bin` / `args` / `shell` / `homeEnvVar` 可选，用于**覆盖该预设**的启动细节）：
+`brain.json` 形如（`bin` / `args` / `shell` / `homeEnvVar` 可选，用于**覆盖该 agent**的启动细节）：
 
 ```json
 { "agent": "opencode" }
 ```
 
-> `--bin` / `--args` 只覆盖**已知预设**的启动细节（例如把 `opencode` 预设指向绝对路径的 `opencode.exe`）。
-> 全新 agent 请先按 §4 加一条预设——预设携带沙箱/MCP 约定，光有二进制不足以接进来。
+> `--bin` / `--args` 只覆盖**已知 agent**的启动细节（例如把 `opencode` agent 指向绝对路径的 `opencode.exe`）。
+> 全新 agent 请先按 §4 加一条 agent——agent 携带沙箱/MCP 约定，光有二进制不足以接进来。
 
 ### 3.1 选择优先级（`resolveAgent()`）
 
 ```
-预设：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
+agent：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
 ```
 
-- **`auto`（未配置时的默认）**：按 `kiro → opencode → gemini → deepseek → qoder` 取第一个**二进制在 PATH 上可解析**的预设；适配器类（`claude-code`/`codex`）不参与（`npx` 几乎总存在，会误选）。
+- **`auto`（未配置时的默认）**：按 `kiro → opencode → gemini → deepseek → qoder` 取第一个**二进制在 PATH 上可解析**的 agent；适配器类（`claude-code`/`codex`）不参与（`npx` 几乎总存在，会误选）。
 - 一个都没装 → daemon **启动即失败并说人话**（不再「跑起来、第一条消息才炸」），提示安装或 `wemind brain set`。
 
 ### 3.2 环境变量（一次性覆盖，优先级最高）
 
-临时试别的 agent 用它；**别写进 profile**——那等于把隐式默认换成另一个值固定死，换个入口重启仍会漂移。给 daemon 进程设这些变量，优先级高于 brain.json 与预设默认值：
+临时试别的 agent 用它；**别写进 profile**——那等于把隐式默认换成另一个值固定死，换个入口重启仍会变。给 daemon 进程设这些变量，优先级高于 brain.json 与内置默认值：
 
 | 环境变量 | 作用 | 默认 |
 |------|------|------|
-| `WEMIND_BRAIN` | 选用哪个预设（见 §5），如 `kiro` / `opencode` / `auto` | `auto`（自动探测） |
-| `WEMIND_BRAIN_BIN` | 覆盖二进制（绝对路径或 PATH 上的名字） | 预设自动在 PATH 解析 |
-| `WEMIND_BRAIN_ARGS` | 覆盖 ACP 启动参数（**空格分隔**） | 预设值 |
-| `WEMIND_BRAIN_HOME_ENV` | 覆盖「配置目录环境变量名」（指向 brain 沙箱） | 预设值 |
-| `WEMIND_BRAIN_SHELL` | 是否经 shell 启动（`1`/`true` 开）；npx/`.cmd`/`.bat` 类适配器在 Windows 需要 | 预设值（默认 false） |
+| `WEMIND_BRAIN` | 选用哪个 agent（见 §5），如 `kiro` / `opencode` / `auto` | `auto`（自动探测） |
+| `WEMIND_BRAIN_BIN` | 覆盖二进制（绝对路径或 PATH 上的名字） | 默认自动在 PATH 解析 |
+| `WEMIND_BRAIN_ARGS` | 覆盖 ACP 启动参数（**空格分隔**） | 内置默认值 |
+| `WEMIND_BRAIN_HOME_ENV` | 覆盖「配置目录环境变量名」（指向 brain 沙箱） | 内置默认值 |
+| `WEMIND_BRAIN_SHELL` | 是否经 shell 启动（`1`/`true` 开）；npx/`.cmd`/`.bat` 类适配器在 Windows 需要 | 内置默认值（默认 false） |
 | `WEMIND_BRAIN_INHERIT` | 是否继承真实配置目录的记忆/规则/技能（见 §6.5） | `1`（开） |
-| `WEMIND_BRAIN_REAL_HOME` | 覆盖被继承的真实配置目录 | 预设 `realHome` |
-| `WEMIND_BRAIN_INHERIT_DIRS` | 覆盖继承的子目录清单（逗号/空格分隔） | 预设 `inheritDirs` |
+| `WEMIND_BRAIN_REAL_HOME` | 覆盖被继承的真实配置目录 | 配置里的 `realHome` |
+| `WEMIND_BRAIN_INHERIT_DIRS` | 覆盖继承的子目录清单（逗号/空格分隔） | 配置里的 `inheritDirs` |
 | `WEMIND_MCP_CATALOG` | 覆盖可选 MCP 的来源 mcp.json 路径 | `<realHome>/settings/mcp.json` |
-| `KIRO_CLI_BIN` | 旧的 kiro 专用二进制覆盖（仅 `kiro` 预设、且未设 `WEMIND_BRAIN_BIN` 时生效） | — |
+| `KIRO_CLI_BIN` | 旧的 kiro 专用二进制覆盖（仅 `kiro` agent、且未设 `WEMIND_BRAIN_BIN` 时生效） | — |
 
 解析优先级（`resolveAgent()`）：
 
 ```
-二进制：WEMIND_BRAIN_BIN  >  (kiro 预设时) KIRO_CLI_BIN  >  brain.json 的 bin  >  PATH 查找  >  预设裸名
-参数：  WEMIND_BRAIN_ARGS（空格切分）  >  brain.json 的 args  >  预设 args
-目录变量：WEMIND_BRAIN_HOME_ENV  >  brain.json 的 homeEnvVar  >  预设 homeEnvVar
+二进制：WEMIND_BRAIN_BIN  >  (kiro agent 时) KIRO_CLI_BIN  >  brain.json 的 bin  >  PATH 查找  >  agent 裸名
+参数：  WEMIND_BRAIN_ARGS（空格切分）  >  brain.json 的 args  >  agent args
+目录变量：WEMIND_BRAIN_HOME_ENV  >  brain.json 的 homeEnvVar  >  agent homeEnvVar
 ```
 
 ### 例子
@@ -141,7 +141,7 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 
 ---
 
-## 4. 配置方式 B：新增一条预设（推荐长期使用）
+## 4. 配置方式 B：新增一条 agent 配置（推荐长期使用）
 
 在 `packages/wechat-daemon/src/brain-agents.ts` 的 `ACP_AGENT_PRESETS` 里加一条：
 
@@ -160,7 +160,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
 };
 ```
 
-然后构建并选用（推荐落盘持久）：
+然后构建并选用（推荐写入磁盘持久）：
 
 ```powershell
 npm run build
@@ -172,7 +172,7 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `name` | 是 | 预设名（也用于日志） |
+| `name` | 是 | agent 名（也用于日志） |
 | `bin` | 是 | 非 Windows 可执行名 |
 | `binWin` | 否 | Windows 可执行名，缺省为 `bin + ".exe"`（经 shell 启动时可用裸名让 shell 解析） |
 | `args` | 是 | 进入 ACP 模式的启动参数数组 |
@@ -190,17 +190,19 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `settingsBase` | 否 | 以 `realHome` 下该文件为基底生成沙箱设置：剥离 `mcpServers` / `enabledPlugins` / `providers` / `model`，强制 `general.enableAutoUpdate=false`（qoder 用 `settings.json`） |
 | `credentialFiles` | 否 | 需从 `realHome` 同步进沙箱配置目录的凭据文件（新者胜；DSH `.credentials.yaml`、qoder `.auth/user`） |
 | `identityFiles` | 否 | 必须与 `realHome` 完全一致的标识文件（内容不同即覆盖；qoder `.auth/machine_id`——被 agent 重新生成会导致永久认证失败） |
+| `model` | 否 | 默认模型（如 DSH 的 `'["deepseek-account","deepseek-flash"]'`，格式是 `[provider 路由, 模型名]`）：会话建立后经 `session/set_config_option { configId:"model", value }` 下发一次（显式覆盖以它为准）；**用户可用 `wemind brain set <agent 名> --model …` 覆盖**（写进 `brain.json` 的 `presets.<名>.model`）。解析优先级「本段 > `presets[agent 名]` > 真实 profile 的默认 > 预设兜底」，`--model auto`/`default` = 跟随真实 profile 的默认（见下行 `realProfile`），**读不到就不下发**（由 agent 用自己的默认，**不会**改用本行的预设值）；只有完全没写 model 时，读不到才用本行预设值兜底 |
+| `realProfile` | 否 | 该 agent **用户层 profile 的名字**（DSH：`"acp"`，对应真实 `<realHome>/profiles/acp/`）。沙箱在 `syncSettings` 里**原样复制**这份 `cordis.patch.yml`（agent 自己首次启动生成的往往是空壳 `[]`，不同步就连它的 provider 路由都不存在；WeMind 不追加任何条目——缺的配置由用户自己补，`wemind brain` 只提示），并由 `profile-model.ts` 从它读默认模型（优先用户写的 `- id: acp`，否则 `agent-default-model`）——用户日常怎么用，WeMind 就跟着怎么用 |
 
 ---
 
-## 5. 内置预设
+## 5. 内置 agent
 
 ACP agent 分两类，接入方式不同：
 
 - **原生 ACP**：CLI 自带 ACP 模式，加个参数直接起（如 kiro、Gemini）。
-- **需适配器**：CLI 本身不说 ACP，要起一个**第三方适配器进程**来桥接（如 Claude Code、Codex）。适配器一般有自己的认证（API key / 登录），且不读 WeMind 的 `KIRO_HOME` 沙箱（故无 `homeEnvVar`、动态 MCP 注入不适用，见 §6）。
+- **需适配器**：CLI 本身不说 ACP，要起一个**第三方适配器进程**来桥接（如 Claude Code、Codex）。适配器一般有自己的认证（API key / 登录），且不读 WeMind 的 `KIRO_HOME` 沙箱（故无 `homeEnvVar`、动态挂 MCP不适用，见 §6）。
 
-| 预设键 | agent | 类型 | 状态 | 启动（示意） |
+| agent 名 | 程序 | 类型 | 状态 | 启动（示意） |
 |--------|-------|------|------|------|
 | `kiro` | kiro-cli | 原生 | ✅ **已实测** | `kiro-cli acp --trust-all-tools`，`KIRO_HOME` |
 | `opencode` | OpenCode | 原生 | ✅ **已实测** | `opencode acp`，`XDG_CONFIG_HOME`（详见 [接入-OpenCode.md](接入-OpenCode.md)） |
@@ -214,7 +216,7 @@ ACP agent 分两类，接入方式不同：
 
 **适配器类的准备工作（示例）**：
 
-- **Claude Code**：预设用 `npx -y @zed-industries/claude-code-acp`（`shell:true`，因 Windows 上是 `npx.cmd`）。需先装好 Claude Code 并完成认证（登录或设 `ANTHROPIC_API_KEY`）。该适配器把 Claude Code 暴露成 ACP server over stdio。
+- **Claude Code**：agent 用 `npx -y @zed-industries/claude-code-acp`（`shell:true`，因 Windows 上是 `npx.cmd`）。需先装好 Claude Code 并完成认证（登录或设 `ANTHROPIC_API_KEY`）。该适配器把 Claude Code 暴露成 ACP server over stdio。
 - **Codex**：需先安装社区适配器 `codex-acp`（见其仓库说明，多为 Rust 构建出的二进制），把它放到 PATH（或用 `WEMIND_BRAIN_BIN` 指向）。Codex 官方原生 ACP 仍在推进中（openai/codex#2785）。
 
 ---
@@ -224,48 +226,48 @@ ACP agent 分两类，接入方式不同：
 WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAIN_HOME` 决定），目的是：
 
 1. **隔离**——大脑用的配置/会话与你本机日常用的该 agent 分开；
-2. **可选 MCP 注入**——通过微信指令 `加载/卸载 <MCP>` 动态改沙箱里的 MCP 配置，重启 agent 生效；
+2. **可选 MCP 挂载**——通过微信指令 `加载/卸载 <MCP>` 动态改沙箱里的 MCP 配置，重启 agent 生效；
 3. **杜绝回环**——默认不加载 `wechat` 自身 MCP。
 
 实现方式是：把 `homeEnvVar`（kiro 是 `KIRO_HOME`）指向沙箱目录，并在该目录放一个 **kiro 格式的 `mcp.json`**。
 
-**注意**：这套「沙箱 + MCP 配置」现在**按 agent 分派**（预设字段驱动，见 `brain-agents.ts`）：
+**注意**：这套「沙箱 + MCP 配置」现在**按 agent 分派**（agent 配置字段驱动，见 `brain-agents.ts`）：
 
 - `homeEnvVar` 决定把哪个环境变量指向沙箱（kiro 用 `KIRO_HOME`；opencode 用 `XDG_CONFIG_HOME`——后者能**替换**默认 global 目录，实现真正隔离）；
 - `configSubdir` 决定 agent 配置目录相对沙箱根的位置（kiro 空=沙箱根；opencode `opencode`）；
 - `mcpFormat` / `mcpConfigFile` / `catalogFile` 决定 MCP 文件的结构与路径（kiro：`settings/mcp.json` 的 `mcpServers`；opencode：`opencode.json` 的 `mcp.servers`）。
 
-因此：**kiro、opencode、qoder 现已开箱支持「微信里动态加载/卸载 MCP」**（qoder 用 `QODER_CONFIG_DIR` + `settings.json` 的 `mcpServers`，沙箱实测生效）；**DSH 走 `mcpViaAcp: true`**——不写配置文件，激活集由 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发（已真机验证）。其它 agent 若格式不同，则是上述预设字段填对即可；实在不同再按其约定适配。
+因此：**kiro、opencode、qoder 现已开箱支持「微信里动态加载/卸载 MCP」**（qoder 用 `QODER_CONFIG_DIR` + `settings.json` 的 `mcpServers`，沙箱实测生效）；**DSH 走 `mcpViaAcp: true`**——不写配置文件，激活集由 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发（已真机验证）。其它 agent 若格式不同，则是上述 agent 配置字段填对即可；实在不同再按其约定适配。
 
-- 若该 agent 也用「某个 HOME 环境变量 + 兼容结构」，设对 `homeEnvVar` 即可，MCP 注入大概率可用；
+- 若该 agent 也用「某个 HOME 环境变量 + 兼容结构」，设对 `homeEnvVar` 即可，MCP 挂载大概率可用；
 - 该 agent 完全不需要配置目录时，把 `homeEnvVar` 留空，仅做隔离 cwd。
 
-> 简言之：**对话/工具是通用的；「动态 MCP 注入」依赖该 agent 的配置约定，跨 agent 不保证开箱即用。**
+> 简言之：**对话/工具是通用的；「动态挂 MCP」依赖该 agent 的配置约定，跨 agent 不保证开箱即用。**
 
 ---
 
 ## 6.5 继承记忆 / 规则 / 技能（按 agent 配置）
 
-为了让微信里的大脑和你日常使用同一 agent 时读到**同样的记忆、规则、技能**，沙箱会把该 agent 真实配置目录里的「知识/记忆」类子目录用 junction 链进 brain 沙箱（`settings`、`sessions` 除外——前者 MCP 必须隔离防回环，后者是 brain 自有会话）。
+为了让微信里的大脑和你日常使用同一 agent 时读到**同样的记忆、规则、技能**，沙箱会把该 agent 真实配置目录里的「知识/记忆」类子目录用 junction 链进 brain 沙箱（`settings`、`sessions` 除外——前者 MCP 必须隔离防它把消息发回自己，后者是 brain 自有会话）。
 
 这一项**按 agent 配置驱动**（不同 agent 目录布局/记忆机制不同）：
 
-| 预设字段 / 环境变量 | 含义 |
+| agent 配置字段 / 环境变量 | 含义 |
 |---|---|
-| 预设 `realHome` / `WEMIND_BRAIN_REAL_HOME` | 被继承的真实配置目录 |
-| 预设 `inheritDirs` / `WEMIND_BRAIN_INHERIT_DIRS`（逗号/空格分隔） | 从 `realHome` 继承的子目录清单 |
+| 配置里的 `realHome` / `WEMIND_BRAIN_REAL_HOME` | 被继承的真实配置目录 |
+| 配置里的 `inheritDirs` / `WEMIND_BRAIN_INHERIT_DIRS`（逗号/空格分隔） | 从 `realHome` 继承的子目录清单 |
 | `WEMIND_BRAIN_INHERIT=0` | 关闭继承 |
 
 - **kiro 已预置**：`realHome=~/.kiro`，`inheritDirs=steering,memories,skills,agents,powers,tasks,extensions`。
 - **qoder 已预置**：`realHome=~/.qoder`，`inheritDirs=memory,skills,agents,commands`，`inheritFiles=AGENTS.md`。M3 实测：`memory/`（用户画像/偏好）存在并以 junction 与日常使用共享，大脑可读到真实记忆；`skills/agents/commands` 与 `AGENTS.md` 在 Qoder 1.1.78 不存在，当前是空操作，保留以便上游新增后自动生效。
-- **其它 agent 默认不继承**：因为记忆机制差异大——例如 Gemini CLI / Claude Code 的「记忆」是**单个文件**（`GEMINI.md` / `CLAUDE.md`）而非目录，本机制（按目录 junction）不适用；需要时给预设填 `realHome`/`inheritDirs`，或用上面的环境变量。**单文件式记忆需另行处理**（本机制只链目录）。
+- **其它 agent 默认不继承**：因为记忆机制差异大——例如 Gemini CLI / Claude Code 的「记忆」是**单个文件**（`GEMINI.md` / `CLAUDE.md`）而非目录，本机制（按目录 junction）不适用；需要时给 agent 填 `realHome`/`inheritDirs`，或用上面的环境变量。**单文件式记忆需另行处理**（本机制只链目录）。
 - 仅当目标 agent 用「配置目录 + 目录式记忆」模型时此继承才直接可用。
 
 ## 7. 平台注意（Windows）
 
 - 默认 `shell: false` 直接 spawn 二进制。对 `.exe`（如 `kiro-cli.exe`）没问题。
 - 若某 agent 在 Windows 上是 `.cmd` / `.bat` / 经 `npx` 启动（如 `npx.cmd`、`gemini.cmd`、Claude Code 适配器），`shell: false` 直接 spawn 会失败。本项目已支持经 shell 启动：
-  - 预设里设 `shell: true`（`claude-code`、`gemini` 预设已设）；或运行时设 `WEMIND_BRAIN_SHELL=1`。
+  - agent 里设 `shell: true`（`claude-code`、`gemini` agent 已设）；或运行时设 `WEMIND_BRAIN_SHELL=1`。
   - 经 shell 启动时，二进制用「裸名」让 shell 从 PATH 解析（避免带空格的全路径在 shell 下出问题）。
   - 参数由我们自己逐条加引号拼成**一条命令串**再交给 shell（`spawn-agent.ts` 的 `spawnAgent`），**不传 `args` 数组**——Node 20+ 对「`shell:true` + args 数组」会报 DEP0190（args 只按空格拼接、不做转义），参数含空格会被拆开、含 `&`/`|` 等 cmd 元字符则会被 shell 自行解释。三处启动点（对话大脑 / 任务 worker / `brain check`）都走这个入口。
 - 仍可用 `WEMIND_BRAIN_BIN` 指向真正的 `.exe` / node 入口绕开 shim（则无需 shell）。
@@ -293,7 +295,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 3. 也可不经微信、直接验证选择与连通性：
 
    ```powershell
-   wemind brain          # 查看：解析到哪个预设/二进制、来源、是否可用
+   wemind brain          # 查看：解析到哪个 agent/二进制、来源、是否可用
    wemind brain check    # 真起一个 agent 进程跑 ACP 握手（initialize + session/new）
    ```
 
@@ -309,7 +311,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 - 本指南覆盖「**能说 ACP 的 agent CLI**」。这是接入成本最低的一档，但**不等于零适配**：先跑能力探针，再决定是否需要改 `acp-brain.ts` / `worker-acp.ts`。
 - **能力差异清单**（接入前逐条确认）：
-  - **会话恢复**：有 `session/load`？只有 `session/resume`？都没有？当前客户端会按预设 `restore` 选 `load`/`resume`；DSH 走 `resume`，其余 agent 先 `load`，失败再试 `resume`/`new`。会话映射按 agent 分命名空间（`brain-sessions.json` 键 `<agent>:<userId>`，`worker-sessions.json` 键 `<agent>:task`），切换大脑互不覆盖，切回原大脑仍能恢复；
+  - **会话恢复**：有 `session/load`？只有 `session/resume`？都没有？当前客户端会按配置里的 `restore` 选 `load`/`resume`；DSH 走 `resume`，其余 agent 先 `load`，失败再试 `resume`/`new`。会话映射按 agent 分开存（`brain-sessions.json` 键 `<agent>:<userId>`，`worker-sessions.json` 键 `<agent>:task`），切换大脑互不覆盖，切回原大脑仍能恢复；
   - **图片**：`initialize.promptCapabilities.image` 是否为 true？false 时带图 `session/prompt` 会报 `-32602`；
   - **MCP**：走 agent 配置文件，还是 ACP `session/new` 的 `mcpServers`？支持 stdio/HTTP 哪些传输？
   - **反向请求**：是否会发 `session/request_permission` / `fs/*` / `terminal/*`？当前 `handleFrame` 不应答，遇到会挂起；
@@ -323,8 +325,8 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 ## 10. 速查
 
 ```text
-选择大脑（推荐，落盘持久）：
-  wemind brain set <预设|auto> [--bin X] [--args "…"] [--restart]   # 写入 <数据目录>/brain.json
+选择大脑（推荐，写入磁盘持久）：
+  wemind brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--model X|auto] [--restart]   # 写入 <数据目录>/brain.json
   wemind brain / wemind brain check                                 # 查看 / 真机自检
   （未配置时默认 auto：按 kiro → opencode → gemini → deepseek → qoder 探测已安装者）
 
@@ -333,7 +335,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
   WEMIND_BRAIN_ARGS=<进入 ACP 的参数，空格分隔>
   WEMIND_BRAIN_HOME_ENV=<配置目录环境变量名，没有则不设>
 
-长期接入（加预设）：
+长期接入（加 agent）：
   在 brain-agents.ts 的 ACP_AGENT_PRESETS 加一条 → npm run build → wemind brain set <键>
 
 验证：
@@ -350,7 +352,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 > 来源：ACP 官方站 `agentclientprotocol.com/get-started/agents`（截至 2026 年；生态在扩大，以官方为准）。
 > ACP 通用介绍见知识库笔记《ACP（Agent Client Protocol）详解》。
 
-**原生支持 ACP（可直接配预设/环境变量接入，理论可当 WeMind 大脑/工作机）**：
+**原生支持 ACP（可直接配 agent/环境变量接入，理论可当 WeMind 大脑/工作机）**：
 - Kiro CLI（✅ 已实测，默认）、Gemini CLI、Goose、OpenCode、OpenHands、Cline、Cursor、GitHub Copilot（公开预览）、Junie（JetBrains）、Kimi CLI、Hermes Agent、Docker cagent、fast-agent、Augment Code、Factory Droid、AgentPool、AutoDev、Blackbox AI、Code Assistant、crow-cli、Minion Code、Mistral Vibe、fount、OpenClaw…
 
 **需经适配器（CLI 本身不原生说 ACP，需先起桥接进程）**：

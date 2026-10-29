@@ -1,17 +1,17 @@
 # 方案 C MVP：远程 human-in-the-loop（受控 ACP 工作机）
 
-> 状态：**MVP 已实现** ✅（2026-06-17，真机端到端跑通：派发 → 列方案 → 无前缀注入续跑 → `任务：` explicit 注入 → `问大脑` 逃逸 → `结束任务` 清理 → typing 全程）。
+> 状态：**MVP 已实现** ✅（2026-06-17，真机端到端跑通：派发 → 列方案 → 无前缀回话续跑 → `任务：` 显式发给它 → `问大脑` 逃逸 → `结束任务` 清理 → typing 全程）。
 >
 > **历史/设计说明（2026-10-24 补）**：文中「`session/load` 恢复」只适用于**支持 load** 的 agent；当前 worker 对不支持者会退化为 `session/resume`，再失败则新建会话。接入新 agent 时以实际能力为准。
 > 关联：[方案C-受控ACP工作机设计.md](方案C-受控ACP工作机设计.md)（总设计）、`packages/wechat-daemon/src/{index,acp-brain,brain-agents}.ts`。
 > 目标用户故事：**在电脑上派发一个漫长任务后离开；任务在「列方案让我选」或「中断需要继续」时把情况推到微信，我在微信回一句即可让它续跑。**
-> 术语：**MVP**（Minimum Viable Product，最小可行产品）——先用最小功能集做出能跑通、验证核心价值的第一版，增强功能往后放。本文的「方案 C MVP」即只做核心闭环（派发 → worker 执行 → 卡点推微信 → 回复注入续跑 → 结束任务），暂不做本地命令派发 / 本地看敲视图 / 多任务并发 / worker 发图等增强。
+> 术语：**MVP**（Minimum Viable Product，最小可行产品）——先用最小功能集做出能跑通、验证核心价值的第一版，增强功能往后放。本文的「方案 C MVP」即只做核心闭环（派发 → worker 执行 → 卡点推微信 → 回复回话续跑 → 结束任务），暂不做本地命令派发 / 本地查看/回复视图 / 多任务并发 / worker 发图等增强。
 
 ---
 
 ## 1. 聚焦的需求
 
-不是「把电脑上 kiro 的全部输出实时镜像到微信」，而是更聚焦的 **human-in-the-loop（人在回路）的远程化**：
+不是「把电脑上 kiro 的全部输出实时同步到微信」，而是更聚焦的 **human-in-the-loop（人在回路）的远程化**：
 
 - 漫长任务自己跑，平时不打扰人；
 - 只在两个时刻找人：① 任务**主动征询**（列出多种方案让你选 / 问要不要继续）；② 任务**异常中断**（崩溃 / 卡死，需要你发「继续」）；
@@ -28,11 +28,11 @@
 ```
 派发任务  = 给 worker 发第 1 个 prompt（任务描述）
 一轮结束  = worker 这一轮 ACP 响应完成 → 把本轮输出推微信
-微信回复  = 给 worker 发下一个 prompt（注入）→ 又一轮 → 再推送 …
+微信回复  = 给 worker 发下一个 prompt（回话）→ 又一轮 → 再推送 …
 任务中断  = worker 进程退出/超时 → 推微信告警 → 用户回「继续」→ session/load 恢复后续跑
 ```
 
-关键洞察：现有 `acp-brain.askBrain(userId, msg, onProgress)` 的语义恰好就是「发一个 prompt、等这一轮结束、返回拼接文本」——**这正是「一轮」的天然单元**。worker 的派发与注入，本质都是对 worker 版 `askBrain` 的调用；每次调用的返回值，就是要推给微信的「决策请求 / 阶段结果」。
+关键洞察：现有 `acp-brain.askBrain(userId, msg, onProgress)` 的语义恰好就是「发一个 prompt、等这一轮结束、返回拼接文本」——**这正是「一轮」的天然单元**。worker 的派发与回话，本质都是对 worker 版 `askBrain` 的调用；每次调用的返回值，就是要推给微信的「决策请求 / 阶段结果」。
 
 为什么 ACP 模式天然适配：agent 每响应完一轮就**明确进入「等待下一条指令」**状态，daemon 一清二楚，无需靠抓屏去猜「它是不是在等我」。
 
@@ -45,7 +45,7 @@
 微信(用户) ⇄ iLink ⇄ │  pollerLoop ──(入队)──► msgQueue ──► workerLoop（瞬时路由）   │
                 │                                          │                      │
                 │   普通对话 ─────────────────────────────►  handleMessage → brain │
-                │   任务：xxx / 注入 / 结束任务 ───────────►  TaskManager           │
+                │   任务：xxx / 回话 / 结束任务 ───────────►  TaskManager           │
                 │                                          │   ▲ 不 await 长执行    │
                 │                                          ▼   │                    │
                 │                              runTask（后台异步）──► worker-acp     │
@@ -56,7 +56,7 @@
 
 - **brain**（`acp-brain.ts`）：日常对话，`handleMessage` 同步处理。**保持不变**。
 - **worker**（新 `worker-acp.ts`）：跑漫长任务，独立 ACP 进程 / 独立会话 / 独立沙箱。
-- **TaskManager**（新，在 daemon 内）：维护单个活跃任务的状态机，`runTask` 在后台异步推进，`workerLoop` 只做**瞬时路由**（派发 / 注入 / 停止），绝不 await 长执行。
+- **TaskManager**（新，在 daemon 内）：维护单个活跃任务的状态机，`runTask` 在后台异步推进，`workerLoop` 只做**瞬时路由**（派发 / 回话 / 停止），绝不 await 长执行。
 
 ---
 
@@ -68,21 +68,21 @@
  → workerLoop 识别任务派发前缀
  → 若已有活跃任务：提示「已有任务在跑，先回复『结束任务』」
  → 否则：void runTask(taskId, 指令, to)（后台异步，立即返回）
- → 立即回执:「✅ 已派给工作机执行（任务运行中）。它需要你决策或中断时会主动找你。」
+ → 立即答复:「✅ 已派给工作机执行（任务运行中）。它需要你决策或中断时会主动找你。」
 ```
 
 ### 4.2 一轮结束 → 推送
 ```
 runTask: const out = await askWorker(taskId, 指令, onProgress)   // 阻塞几分钟，但在后台
  → 推送 out 给微信（worker 在问你 / 给阶段结果）
- → status = "waiting"，等待用户注入
+ → status = "waiting"，等待用户回话
 ```
 
-### 4.3 注入续跑
+### 4.3 回话续跑
 ```
 微信:「用方案 B，数据源优先国内可达的」
- → workerLoop 发现有 waiting 中的任务 → 喂给该任务（resolve 注入 promise，不 await）
- → runTask: status = "running"，instruction = 注入内容 → askWorker(注入) → 下一轮 → 4.2
+ → workerLoop 发现有 waiting 中的任务 → 喂给该任务（resolve 回话 promise，不 await）
+ → runTask: status = "running"，instruction = 用户回的话 → askWorker(回话) → 下一轮 → 4.2
 ```
 
 ### 4.4 中断与恢复
@@ -95,7 +95,7 @@ askWorker 抛错（进程退出 / idle / cap 超时）
 
 ### 4.5 结束
 ```
-微信:「结束任务」→ TaskManager.stop()：杀 worker 进程、清状态、回执「🛑 任务已结束」
+微信:「结束任务」→ TaskManager.stop()：杀 worker 进程、清状态、答复「🛑 任务已结束」
 ```
 
 ---
@@ -110,9 +110,9 @@ askWorker 抛错（进程退出 / idle / cap 超时）
 |---|---|---|
 | 1 | `parseControl` 命中（mcp / 新会话 / 加载…） | 走 `handleControl`（brain 控制，保持） |
 | 2 | `结束任务` / `停止任务` / `/stop` | **停止**当前任务 |
-| 3 | **明确发 worker**：`任务` / `task` + **冒号**（`任务：`、`task:`，半角/全角均可）前缀，或行首 `>`（`任务 ` + 空格**不是**有效前缀——`parseTaskControl` 要求冒号，避免把「任务很重要」这类正常对话误判为派发） | 无活跃任务 → **派发**新任务；有 → **注入/追加**（waiting 喂下一轮、running 暂存） |
+| 3 | **明确发 worker**：`任务` / `task` + **冒号**（`任务：`、`task:`，半角/全角均可）前缀，或行首 `>`（`任务 ` + 空格**不是**有效前缀——`parseTaskControl` 要求冒号，避免把「任务很重要」这类正常对话误判为派发） | 无活跃任务 → **派发**新任务；有 → **发给它/追加**（waiting 喂下一轮、running 暂存） |
 | 4 | **明确问大脑**：`问大脑` / `问大脑：` 前缀 | 去前缀 → 强制走 `handleMessage`（brain），即使 worker 在等你 |
-| 5 | 无前缀 ＋ worker 处于 **waiting**（刚问你、在等你回）＋ 非图片 | 作为**注入**喂 worker |
+| 5 | 无前缀 ＋ worker 处于 **waiting**（刚问你、在等你回）＋ 非图片 | 作为**回话**喂 worker |
 | 6 | 其余（running / 无任务 / 图片消息） | 走 `handleMessage`（brain 对话） |
 
 **核心**：
@@ -128,12 +128,12 @@ askWorker 抛错（进程退出 / idle / cap 超时）
  idle ────────► running ──────────────────► waiting
    ▲              ▲  │ askWorker 抛错            │
    │              │  └──────────► waiting ◄──────┘
-   │  stop        │      注入(或暂存的 pendingInject)
+   │  stop        │      回话(或暂存的 pendingInject)
    └──────────────┴───────────────────────────────
 ```
 
-- `running`：worker 正在跑一轮。此时若用户来消息 → **暂存为 `pendingInject`**（只留最近一条，新的覆盖旧的）并回执「任务执行中，已记下，等它停下来会处理」；下次进入 waiting 时若有 pendingInject 直接消费。
-- `waiting`：等用户注入。收到注入即 `running`。
+- `running`：worker 正在跑一轮。此时若用户来消息 → **暂存为 `pendingInject`**（只留最近一条，新的覆盖旧的）并答复「任务执行中，已记下，等它停下来会处理」；下次进入 waiting 时若有 pendingInject 直接消费。
+- `waiting`：等用户回话。收到即 `running`。
 - `stop`/完成：回 `idle`，清状态。
 
 状态对象（约）：
@@ -142,8 +142,8 @@ type ActiveTask = {
   taskId: string;
   to: string;                 // 用户 userId
   status: "running" | "waiting";
-  injectResolver?: (text: string) => void;  // waiting 时等待注入
-  pendingInject?: string;     // running 期间暂存的注入
+  injectResolver?: (text: string) => void;  // waiting 时等待回话
+  pendingInject?: string;     // running 期间暂存的回话
 };
 let activeTask: ActiveTask | null = null;   // MVP 单任务
 ```
@@ -156,11 +156,11 @@ let activeTask: ActiveTask | null = null;   // MVP 单任务
 
 | 项 | brain | worker |
 |---|---|---|
-| 进程 | 全局单例 1 个 | 独立单例 1 个（与 brain 并存，互不影响） |
+| 进程 | 全局 1 个 | 独立 1 个（与 brain 并存，互不影响） |
 | 会话 | 每用户一 session（`userSessions` Map） | **单任务一 session**（MVP 单任务，一个 sessionId） |
 | 会话持久化 | `brain-sessions.json` | `worker-sessions.json` |
 | cwd | `BRAIN_HOME` 沙箱 | **任务工作目录**（按 kiro 约定，见 §8.3；`WEMIND_WORKER_CWD` 可覆盖） |
-| 沙箱 home | `BRAIN_HOME`（默认空 MCP，按需加载） | 独立 `WORKER_HOME`：**继承真实 ~/.kiro 全部 MCP（仅排除 `wechat` 防回环）** + 记忆/技能/规则 + settings(模型/信任) |
+| 沙箱 home | `BRAIN_HOME`（默认空 MCP，按需加载） | 独立 `WORKER_HOME`：**继承真实 ~/.kiro 全部 MCP（仅排除 `wechat` 防它把消息发回自己）** + 记忆/技能/规则 + settings(模型/信任) |
 | 超时 | idle 120s / cap 15min / 首帧 25s | 可更宽松（漫长任务），env 可调 |
 | agent | `resolveAgent()`（kiro acp --trust-all-tools） | **复用同一 `resolveAgent()`** |
 
@@ -171,7 +171,7 @@ stopWorker() → void                                            // 杀进程、
 isWorkerAlive() → boolean
 ```
 
-> 复用而非参数化 acp-brain 的理由：两者超时策略、cwd、沙箱、会话粒度都不同；强行参数化会让本就微妙的单例状态更难维护。复制后各自演进更安全（与里程碑 24 文档 §6 估算一致）。
+> 复用而非参数化 acp-brain 的理由：两者超时策略、cwd、沙箱、会话粒度都不同；强行参数化会让本就微妙的全局状态更难维护。复制后各自演进更安全（与里程碑 24 文档 §6 估算一致）。
 
 ---
 
@@ -191,7 +191,7 @@ isWorkerAlive() → boolean
 4. worker 推送复用发送层：`pushToUser(to, text)` = 取 `latestToken(to)` → `sendOrdered(...)`。
 5. 新增 env（§10）。
 
-> ⚠️ 绝不在 `workerLoop` 里 `await runTask`/`await askWorker`——否则长任务会阻塞 poller 入队消息的处理（含用户的注入回复），整个机制失效。`runTask` 必须 `void` 掉、后台跑；`workerLoop` 只 resolve 注入 promise。
+> ⚠️ 绝不在 `workerLoop` 里 `await runTask`/`await askWorker`——否则长任务会阻塞 poller 入队消息的处理（含用户回话），整个机制失效。`runTask` 必须 `void` 掉、后台跑；`workerLoop` 只 resolve 回话 promise。
 
 ---
 
@@ -200,9 +200,9 @@ isWorkerAlive() → boolean
 1. **派发入口** ✅ 已确认（2026-06-17）：MVP 用**微信「任务：xxx」**（零额外 IPC，最快闭环）。本地命令派发（`manage.js task "..."`，贴合「电脑上开启任务」原场景）为**紧接着的下一步**——本地 CLI 写任务文件、poller 顺带扫描启动（轻量文件桥）。
 2. **单任务 vs 多任务**：MVP **单任务**（一个 activeTask）。多任务（多 worker 进程 + 任务标识）后续。
 3. **worker cwd（按 kiro 约定）** ✅：MVP 微信派发无「用户所在目录」概念 → 默认用户主目录（`WEMIND_WORKER_CWD` 可覆盖）；任务用绝对路径仍可访问任意项目。下一步本地命令派发时取「执行派发命令时所在目录」为 cwd——与本地开 kiro 完全一致（真正的 kiro 约定）。
-4. **worker 继承（按用户确认：尽可能继承 kiro 的一切）** ✅：独立 `WORKER_HOME`，**继承真实 ~/.kiro 的全部 MCP，仅排除 `wechat`（防回环，技术必然，同坑①）**；同时继承记忆/技能/规则（steering/memories/skills/agents/powers/tasks/extensions）与 settings（含模型 `claude-opus-4.8`、信任配置）；会话独立（`worker-sessions.json`）。**与 brain 的差异**：brain 是对话助手，默认空 MCP、对话中按需「加载 X」；worker 无人值守跑任务，故**默认全继承**（开箱即用的完整工具能力）。实现复用 `mcp-sandbox` 的 `mirrorRealKiro`/`syncSettings`，MCP 由「复制 catalog 全量 − 排除集」生成（而非 brain 的「空 + 激活集」）。
-5. **进度反馈**：文字 **默认安静**——只在「轮次结束 / 中断 / 派发回执」推送文字（正合「只在卡点找我」，也避开连续发送上限）；但 worker 跑每一轮期间**持续发 typing「正在输入中」**（每 8s，不占连续发送上限），让用户知道在干活、不焦虑（真机实测：长任务文字静默会让人以为卡了）。全程文字进度可选 `WEMIND_WORKER_PROGRESS=1` 开启。
-6. **「继续」语义消歧** ⚠️：现有 poller 里「继续」用于**连续发送上限的等待段恢复**（`budgetOf.awaiting`）。任务的「继续」是**注入 worker**。二者需分流：当存在 waiting 中的 activeTask 且不处于发送上限等待段时，「继续」路由给任务；否则维持原有上限恢复语义。实现时明确判定顺序，避免互相吞掉。
+4. **worker 继承（按用户确认：尽可能继承 kiro 的一切）** ✅：独立 `WORKER_HOME`，**继承真实 ~/.kiro 的全部 MCP，仅排除 `wechat`（防它把消息发回自己，技术必然，同坑①）**；同时继承记忆/技能/规则（steering/memories/skills/agents/powers/tasks/extensions）与 settings（含模型 `claude-opus-4.8`、信任配置）；会话独立（`worker-sessions.json`）。**与 brain 的差异**：brain 是对话助手，默认空 MCP、对话中按需「加载 X」；worker 无人值守跑任务，故**默认全继承**（开箱即用的完整工具能力）。实现复用 `mcp-sandbox` 的 `mirrorRealKiro`/`syncSettings`，MCP 由「复制 catalog 全量 − 排除集」生成（而非 brain 的「空 + 激活集」）。
+5. **进度反馈**：文字 **默认安静**——只在「轮次结束 / 中断 / 派发答复」推送文字（正合「只在卡点找我」，也避开连续发送上限）；但 worker 跑每一轮期间**持续发 typing「正在输入中」**（每 8s，不占连续发送上限），让用户知道在干活、不焦虑（真机实测：长任务文字静默会让人以为卡了）。全程文字进度可选 `WEMIND_WORKER_PROGRESS=1` 开启。
+6. **「继续」的三种含义** ⚠️：现有 poller 里「继续」用于**连续发送上限的等待段恢复**（`budgetOf.awaiting`）。任务的「继续」是**发给 worker**。二者需分流：当存在 waiting 中的 activeTask 且不处于发送上限等待段时，「继续」路由给任务；否则维持原有上限恢复语义。实现时明确判定顺序，避免互相吞掉。
 
 ---
 
@@ -233,7 +233,7 @@ async function runTask(taskId, firstInstruction, to) {
     }
     if (!activeTask) break;                  // 期间被 stop
     activeTask.status = "waiting";
-    instruction = await waitForInject();     // 等注入；stop 时 resolve(null) 退出
+    instruction = await waitForInject();     // 等用户回话；stop 时 resolve(null) 退出
     if (activeTask) activeTask.status = "running";
   }
 }
@@ -253,7 +253,7 @@ async function runTask(taskId, firstInstruction, to) {
 | `WEMIND_WORKER_FIRST_FRAME_MS` | 30000 | worker 首帧超时 |
 | `WEMIND_WORKER_PROGRESS` | `0` | 是否推送全程进度（默认安静） |
 | `WEMIND_WORKER_HOME` | `~/.wemind/<account>/worker-home` | worker 沙箱配置目录（继承记忆/技能/settings + 全量 MCP 除排除项） |
-| `WEMIND_WORKER_MCP_EXCLUDE` | `wechat` | worker **不**继承的 MCP（逗号分隔；`wechat` 始终强制排除，防回环） |
+| `WEMIND_WORKER_MCP_EXCLUDE` | `wechat` | worker **不**继承的 MCP（逗号分隔；`wechat` 始终强制排除，防它把消息发回自己） |
 
 worker 复用现有 `WEMIND_BRAIN*` 的 agent 解析（同一 `resolveAgent()`）。
 
@@ -261,26 +261,26 @@ worker 复用现有 `WEMIND_BRAIN*` 的 agent 解析（同一 `resolveAgent()`�
 
 ## 11. 安全
 
-- worker 指向真实目录 + `--trust-all-tools` → 微信回复即可驱动它在你电脑上全权操作。**已与用户确认接受**，靠 `allowFrom` 发件人白名单兜底（poller 已对所有消息 `isAuthorized`）。
-- `wechat` MCP 在 worker 沙箱永禁，防回环抢连接（同 brain 坑①）。
+- worker 指向真实目录 + `--trust-all-tools` → 微信回复即可驱动它在你电脑上全权操作。**已与用户确认接受**，靠 `allowFrom` 登录者白名单兜底（poller 已对所有消息 `isAuthorized`；平台限制下发件人只有登录者）。
+- `wechat` MCP 在 worker 沙箱永禁，防它抢自己的连接（同 brain 坑①）。
 
 ---
 
 ## 12. MVP 范围与非目标
 
-**做**：微信「任务：xxx」派发 → worker 后台执行 → 轮次结束/中断推微信 → 微信回复注入续跑 → `session/load` 崩溃恢复 → 「结束任务」。
+**做**：微信「任务：xxx」派发 → worker 后台执行 → 轮次结束/中断推微信 → 微信回复回话续跑 → `session/load` 崩溃恢复 → 「结束任务」。
 
-**先不做**（后续迭代）：本地命令派发、本地看/敲视图、多任务并发、全程进度镜像、任务历史/列表、worker 部署到独立机器。
+**先不做**（后续迭代）：本地命令派发、本地查看/回复视图、多任务并发、全程进度同步、任务历史/列表、worker 部署到独立机器。
 
 ---
 
 ## 13. 落地步骤
 
-1. `worker-acp.ts`：复制 acp-brain，改独立单例 / 单任务 session / 可配 cwd / 独立沙箱 / 宽松超时。
+1. `worker-acp.ts`：复制 acp-brain，改独立一个进程 / 单任务 session / 可配 cwd / 独立沙箱 / 宽松超时。
 2. worker 沙箱：泛化 `mcp-sandbox` 产出 `WORKER_HOME`（空 MCP、继承 steering/skills）。
 3. `task-manager.ts`：`ActiveTask` 状态机 + `runTask` 后台循环 + dispatch/inject/stop + `pushToUser`。
-4. `index.ts` `workerLoop`：插入路由分支（§5.1、§9）；「继续」消歧（§8.6）。
-5. 构建 + typecheck + 单元测试（状态机路由、消歧、注入/暂存）+ 真机跑一个漫长任务验证端到端闭环。
+4. `index.ts` `workerLoop`：插入路由分支（§5.1、§9）；「继续」编号判别（§8.6）。
+5. 构建 + typecheck + 单元测试（状态机路由、编号指定、发话/暂存）+ 真机跑一个漫长任务验证端到端闭环。
 
 ---
 

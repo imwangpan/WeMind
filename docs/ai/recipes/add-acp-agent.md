@@ -1,6 +1,6 @@
 # 配方：接入一个新的 ACP Agent
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28
 >
 > 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)。
 
@@ -37,13 +37,14 @@ node scripts/acp-probe.mjs
 
 | 探针结果 | 结论 |
 |---|---|
-| 全部符合 WeMind 现有假设 | 加预设即可（kiro/opencode 路线） |
+| 全部符合 WeMind 现有假设 | 加 agent 即可（kiro/opencode 路线） |
 | 无 `session/load`，有 `resume` | 加 `restore: "resume"` + 客户端兜底 |
 | 有反向请求 | 先做 M2 应答器，否则会挂到超时 |
 | `image:false` | 在 `askBrain` 前拦截图片，或换支持图片的 agent |
 | 正文非逐 token | 调 `firstFrameMs` + 心跳策略（见 M2） |
 | `mcpServers` 被拒绝 | MCP 只能走该 agent 自己的配置文件，或先不做动态 MCP |
-| 默认模型路由需要 API key / 桌面登录要切 account | 加 `model` 预设字段，并在 session 建立后 `session/set_config_option` |
+| 默认模型路由需要 API key / 桌面登录要切 account | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖 |
+| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：沙箱**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在），并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
 
 ---
 
@@ -56,11 +57,11 @@ node scripts/acp-probe.mjs
 | 3 | 配置目录环境变量 | 该 agent 读取配置/数据目录的 env 名；WeMind 指向沙箱 | `DSH_HOME` |
 | 4 | 配置目录布局 / MCP 格式 | `configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile` | 空 / ACP `mcpServers` |
 
-> 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态 MCP 注入需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
+> 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
 
 ---
 
-## 2. 加预设（`brain-agents.ts`）
+## 2. 加 agent（`brain-agents.ts`）
 
 ```ts
 acme: {
@@ -82,15 +83,21 @@ acme: {
   // settingsBase: "settings.json",       // 以真实配置为基底（剥离 MCP/插件/providers/model、关自动更新）
   // credentialFiles: [".auth/user"],     // 登录态（新者胜）
   // identityFiles: [".auth/machine_id"], // 必须与真实目录一致（内容不同即覆盖）
+  // realProfile: "acp",                  // 该 agent 的用户层 profile 名——原样复制真实 profiles/<名>/cordis.patch.yml 并从它读默认模型（DSH）
 },
 ```
 
 同时：
 
-- `AUTO_PROBE_ORDER` 末尾追加该预设（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；
+- `AUTO_PROBE_ORDER` 末尾追加该 agent（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；
 - `AcpAgentPreset` / `ResolvedAgent` 透传新字段；
 - `brain-agents.test.ts` 加断言；
-- `docs/接入其它-ACP-Agent.md` §5 预设表加一行。
+- `docs/接入其它-ACP-Agent.md` §5 agent 表加一行。
+
+> **1.2.0 起，加 agent 不必再"挑角色"**：同一个 agent 同时可用于对话大脑与任务 worker（`resolveAgentFor(cfg, role)`），加完立刻可以
+> `wemind brain switch acme` 热切换、也可以在微信里 `任务 acme：…` 指定它干活——两者都不需要改代码、不需要重启。
+> 启动覆盖（`--bin`/`--args`/`--shell`/`--model`）按**agent 名**存在 `brain.json` 的 `presets` 段（`wemind brain set acme --bin …`），
+> 所以「切走再切回」不会丢；`--model auto` = 跟随真实 profile 的默认（agent 配了 `realProfile` 时；读不到就不下发）；默认任务大脑是 `worker.agent ?? agent`。
 
 ---
 
@@ -101,7 +108,8 @@ acme: {
 - 记忆继承：`realHome` + `inheritDirs` / `inheritFiles`；单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
 - 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时沙箱。
 - 设置继承：`settingsBase` 会在 brain/worker 两个沙箱生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）。
-- 默认空 MCP；`wechat` 永久禁止（防回环）。
+- **profile 继承**（`realProfile`，可选）：把真实 `<realHome>/profiles/<名>/cordis.patch.yml` **原样复制**进两个沙箱——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在；默认模型也从这份读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
+- 默认空 MCP；`wechat` 永久禁止（防它把消息发回自己）。
 - **每个 agent 只读自己的 catalog**；不要把 kiro 的文件指给 DSH。
 
 验证：
@@ -120,7 +128,7 @@ wemind brain check
 |---|---|
 | 无 `session/load`，有 `resume` | `acp-brain.ts` + `worker-acp.ts` 的 `ensureSession`：load → resume → new 兜底 |
 | 有反向请求 | `handleFrame` 应答 `session/request_permission`；未知 method 回 `-32601` |
-| 首帧慢 / 无 activity 帧 | 预设 `firstFrameMs`；`index.ts` 心跳/`heartbeatMs` |
+| 首帧慢 / 无 activity 帧 | 配置里的 `firstFrameMs`；`index.ts` 心跳/`heartbeatMs` |
 | `image:false` | `index.ts` 收到图片时友好拒绝；不要让它 `-32602` 重试 |
 | MCP 走 ACP | `session/new` / `session/resume` 传 `mcpServers`；catalog 按 agent 自己的来源 |
 
@@ -145,7 +153,9 @@ wemind brain check
 3. 长任务 >30s → 不因首帧误杀；进度不刷屏；
 4. 发图 → 按 image 能力正确处理；
 5. 越界写 → 有权限请求则应答，不卡死；
-6. 两个账号 → 沙箱隔离。
+6. 两个账号 → 沙箱隔离；
+7. **热切换**（1.2.0）：从别的配置里的 `wemind brain switch acme` → 答复两段、daemon pid 不变、下一条消息由 acme 答；再切回去，旧上下文能 load 回来；
+8. **当 worker 用**（1.2.0）：`wemind task "…" --agent acme` → 任务跑通；跑完进程**留着复用**（`wemind list` 可见），5 分钟后回收。
 
 ---
 
@@ -157,7 +167,10 @@ wemind brain check
 - **`session/load` 不是通用能力**：没有就退 `resume`，再没有就 `new`，并在日志里说清楚。
 - **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。
 - **committed-only + 15s 心跳 = 烧连发额度**：先调心跳，再考虑首帧。
-- **密钥不要写进预设**：daemon 进程环境提供。
+- **密钥不要写进 agent**：daemon 进程环境提供。
+- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-agents.ts`。
+- **冷启动耗时待实测**：各 agent `initialize`/`session/new` 的真实耗时还没量（`docs/ai/recipes/run-e2e.md` §7.2 第 3 条）；若某 agent 超过 `REQ_TIMEOUT=30s`，需要在 agent 里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
+- **同 agent 并发 = 两个进程共用其配置目录**：多任务并行时会真实发生（不同 agent 各自 `configSubdir` 天然隔离）；新 agent 若把会话/缓存写在配置目录里，这条要实测。
 
 ---
 
@@ -166,4 +179,6 @@ wemind brain check
 - [`docs/接入-OpenCode.md`](../../接入-OpenCode.md) — 原生 ACP 的实测样板
 - [`docs/接入-DeepSeek.md`](../../接入-DeepSeek.md) — 缺 load、`image:false`、committed-only 的反例
 - [`docs/接入其它-ACP-Agent.md`](../../接入其它-ACP-Agent.md) — 通用 ACP 指南
+- [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md) — worker 侧（进程池、任务表）对新 agent 的要求
+- [`docs/ai/recipes/run-e2e.md`](run-e2e.md) — 验收分层与待实测清单
 - [`scripts/acp-probe.mjs`](../../../scripts/acp-probe.mjs) — 能力探针

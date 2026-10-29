@@ -1,4 +1,4 @@
-# 配方：新增 / 调试 MCP 注入
+# 配方：新增 / 调试 MCP 挂载
 
 > **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
 >
@@ -73,7 +73,7 @@ transport（怎么让 agent 看到）
 
 ### DSH
 
-> **状态：M3 已实现（2026-10-24）。** `deepseek` 预设 `mcpViaAcp: true`——不写 MCP 配置文件，激活集经 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发；worker 同理继承全量（除排除集）。`addMcp` 会预校验定义（无 command/url 拒绝加载）。HTTP MCP 未真机实测。
+> **状态：M3 已实现（2026-10-24）。** `deepseek` 配置里的 `mcpViaAcp: true`——不写 MCP 配置文件，激活集经 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发；worker 同理继承全量（除排除集）。`addMcp` 会预校验定义（无 command/url 拒绝加载）。HTTP MCP 未真机实测。
 
 DSH 的 ACP 走 `session/new` 的 `mcpServers`，没有 kiro 式文件。用中立 catalog：
 
@@ -99,7 +99,7 @@ $env:WEMIND_MCP_CATALOG = "D:\wemind-data\mcp-catalog.json"
 
 ```powershell
 npm run build
-wemind brain set <预设> --restart
+wemind brain set <agent 名> --restart
 wemind brain check
 ```
 
@@ -125,7 +125,7 @@ MCP                 # 列出可选与已激活
 |---|---|
 | `MCP` 列表为空 | `catalog` 路径是否存在；`WEMIND_MCP_CATALOG` 是否指对；格式是否是该 agent 的格式 |
 | 加载后工具不出现 | 是否 `restart()`；会话是否 `load/resume` 成功；agent 是否需要「新会话」 |
-| 加载 `wechat` 被拒 | 预期行为（防回环）；不要绕过 |
+| 加载 `wechat` 被拒 | 预期行为（防它把消息发回自己）；不要绕过 |
 | worker 没有工具 | worker 是「全量继承除排除集」，看 `WEMIND_WORKER_MCP_EXCLUDE`；`disabled:true` 会被跳过 |
 | DSH 报 `-32602`/会话创建失败 | MCP 定义不合法或起不来；官方 `session/new` 会回滚整会话，先删坏条目 |
 | Windows 起不来 | `.cmd`/`npx` 要 `shell:true`；命令/参数要按 `spawnAgent` 规则引号 |
@@ -134,8 +134,8 @@ MCP                 # 列出可选与已激活
 
 ## 4. 安全
 
-- brain 默认是 `--trust-all-tools`（kiro）/ 自动批准（opencode）；**加载一个 MCP = 对白名单发件人开放该工具的全部能力**。
-- `allowFrom` 是唯一发件人闸门，不要为了省事关掉。
+- brain 默认是 `--trust-all-tools`（kiro）/ 自动批准（opencode）；**加载一个 MCP = 对登录者（唯一能发消息的人）开放该工具的全部能力**。
+- `allowFrom` 是唯一的发件人闸门（默认只放行登录者），不要为了省事关掉。
 - worker 继承全量 MCP，风险更高；不要把 worker 的 cwd 指到敏感目录。
 - `wechat` 永久禁止：同一 token 长轮询会与 daemon 抢消息/回环。
 - MCP 定义里不要写明文密钥到仓库；用环境变量或本机配置。

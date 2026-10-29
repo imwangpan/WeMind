@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-26（`@wemind/cli@1.1.0` 与 `@wemind/wechat-mcp@1.0.4` 均已发布到 npm）
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28（`@wemind/cli@1.1.1` 已发布，1.2.0 待发布；`@wemind/wechat-mcp@1.0.5` 已发布）
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -56,24 +56,29 @@ wechat-ilink-core  ◄──  wechat-mcp      （tsdown 内联 core，发布单�
 ```text
 poller（长轮询，不被大脑阻塞）
   → 收到消息 / 逐条入队（**不合并**：一条消息 = 一次 prompt）
-  → 指令拦截（新会话 / MCP / 任务 / 问大脑 …）
-  → 选择 brain 或 worker
+  → 指令拦截（帮助 / 切脑 / 交接 / 会话四件套 / 任务 / MCP / 问大脑 …；
+     账号级指令（切脑/交接）由非登录者发 → 短提示拒绝，不进大脑；兜底校验，平台限制下正常不触发）
+  → 选择 brain 或 worker（多任务时按编号寻址；无编号按 waiting > running > 唯一已中断。**模型/账号侧报错的任务直接转「已中断」，不进 waiting、不接管无编号消息**）
   → askBrain(userId, text, onProgress, images)
-       ├─ ensureProcess()：懒启动 ACP agent，initialize
-       ├─ ensureSession()：内存 session → 磁盘 map → load/resume → 否则 new
+       ├─ 等切换门（切换大脑进行中时有界等待）
+       ├─ ensureProcess(ag)：懒启动 ACP agent，initialize
+       ├─ ensureSession(ag, userId)：内存 session → 磁盘 map → load/resume → 否则 new
+       ├─ 有交接摘要且目标大脑不是来源 → 作为本条消息的**前缀**带上
        ├─ session/prompt：文本（+ 图片）
        └─ session/update：拼 agent_message_chunk；tool/thought → 进度
+  → 成功：写会话登记表（轮次+1/标题首写）、答成才消费交接摘要
   → md-reply / image-reply 处理长文与图片
   → send_text_message（受连续发送额度约束）
 ```
 
 关键点：
 
-- **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`（键 `<agent>:<userId>`，换大脑不丢各自上下文）；
-- **worker 是第二个独立 ACP 进程**，单任务 session，映射在 `worker-sessions.json`；
+- **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`（键 `<agent>:<userId>`，换大脑不丢各自上下文）——**这张当前会话表是「当前是哪个会话」的唯一权威**；`session-registry.json` 只是展示用的登记表（名字/标题/轮次），坏了不影响恢复；
+- **worker 是 N 个独立 ACP 进程**（进程池，一条任务一条连接），任务会话在 `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`）；任务表另存 `tasks.json` 供**重启后续跑**（未完成的标「已中断」，回「继续」才续跑）；
+- **切换大脑是进程内的**（`brain-switch.ts`）：预检 → 等回合结束 → 启动新大脑 → **成功才写 `brain.json`**；失败退回、槽位留旧大脑；
 - **自愈**：prompt 超时/失败 → `reset()` 杀进程树 → 下条消息重建并尝试恢复会话；
 - **进度**：`tool_call` → 「步骤 N」；`agent_message_chunk` → 「正在整理回复」；任意 `session/update` → 刷新心跳基线；
-- **连发上限**：iLink 约 10 条；`index.ts` 预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」。
+- **连发上限**：iLink 约 10 条；`index.ts` 预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」；**多任务与对话大脑共享同一份额度**（按用户计）。
 
 ---
 
@@ -83,8 +88,21 @@ poller（长轮询，不被大脑阻塞）
 |---|---|
 | **ACP** | Agent Client Protocol，JSON-RPC 2.0 over stdio，每行一个 JSON；Zed 提出 |
 | **brain** | 对话大脑，`acp-brain.ts`，每用户一个 session |
-| **worker** | 远程任务执行器，`worker-acp.ts`，单 session，独立进程 |
-| **preset / 预设** | `ACP_AGENT_PRESETS` 里的一条：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
+| **worker** | 远程任务执行器，`worker-acp.ts` 的 `class WorkerConn`，**一条任务一条连接**（进程池复用） |
+| **agent 槽位（agent-slot）** | `agent-slot.ts`：`getAgent("brain"\|"worker")` 懒解析 + 记忆化；`setAgent` 供热切换改写（取代了模块常量） |
+| **热切换 / brain-switch** | `brain-switch.ts`：预检 → 等回合结束 → 启动新大脑 → **成功才写入磁盘**；失败退回 |
+| **drain / 等在途回合结束** | 切换/停止前「等在跑的回合自然结束」的门（默认 30s，超时=诚实失败，不砍回合） |
+| **启动新大脑 / warmup** | 切脑时先把新 agent 起起来跑 `initialize` + 建会话，成功才对外宣布切换完成 |
+| **当前会话表** | `brain-sessions.json`（键 `<agent>:<userId>`）——**「当前是哪个会话」的唯一权威** |
+| **会话登记表** | `session-registry.json`：名字/标题/轮次/最近使用（派生元数据，坏了只导致列表空） |
+| **严格恢复** | `恢复会话` 的语义：`load`/`resume` 都失败就如实报错，**不回退 `new`、不改当前会话记录** |
+| **交接 / handoff** | `handoff.ts`：摘要写入磁盘（TTL 24h），切走后**下一条消息作为前缀带上**、**答成才消费**、切回来源不带上 |
+| **任务编号** | 按用户单调递增、**不复用**、跨重启不归零；多任务并存时无编号消息必须报出编号清单 |
+| **默认任务大脑** | `worker.agent ?? agent`；`切换任务大脑`/`--worker` 可在**进程内**覆盖它（**不写入磁盘**，重启回到配置值）；`任务 <agent 名>：`/`--agent` **只对那一条任务生效**，不改它 |
+| **进程池 / worker-pool** | `worker-pool.ts`：同 agent 空闲复用 → 回收最旧腾位 → spawn；并发 `WEMIND_MAX_WORKERS`、空闲 `WEMIND_IDLE_MAX`、回收 `WEMIND_WORKER_REAP_MS` |
+| **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收 agent 名与纯数据**（无 `bin`/`args`/`shell`） |
+| **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
+| **preset / `ACP_AGENT_PRESETS`** | **代码里的叫法**；用户面统一写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）。一条 = 二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
 | **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |
 | **WORKER_HOME** | worker 的沙箱目录 |
 | **configSubdir** | agent 配置目录相对沙箱根的子路径（kiro 空；opencode `opencode`） |
@@ -111,8 +129,8 @@ poller（长轮询，不被大脑阻塞）
 | **stdio** | **标准输入输出**（首次写全称，之后可保留 `stdio`） | `st`andar**d** **i**nput / **o**utput 的缩写，指进程自带的三个流：标准输入（stdin）、标准输出（stdout）、标准错误（stderr）。<br>**为什么保留原文**：它不是普通英文单词，而是 Node API 名（`spawn(..., { stdio: "inherit" })`）和 CLI 参数的字面值，翻译后反而无法对应代码。<br>**别译**：❌「标准IO」（半中半英，不如写全称）、❌「控制台输出」（错，`stdio` 不等于终端）。 |
 | **stdin / stdout / stderr** | 标准输入 / 标准输出 / 标准错误 | 说明语境时用中文，引用代码/参数时保留原文（`stdio: ["ignore", logFd, logFd]`）。 |
 | **CLI** | 指**程序**时译「**命令行工具**」；指**形态/界面**时译「**命令行界面**」 | command-line interface 的首字母缩写。<br>**判断方法**：能「安装、运行」（如 `wemind` 是 CLI）→ 命令行工具；说「相比 GUI」（图形界面）这种对比 → 命令行界面。中文技术写作里**保留 CLI** 也完全可接受，尤其 `kiro-cli`、`claude-code` 这类名字里的 CLI 绝不能翻。<br>**别译**：❌「客户端」（CLI 与 client 是两回事：`@wemind/cli` 是命令行工具，MCP 客户端才是 client）、❌「命令行程序包」。 |
-| **daemon** | **守护进程** / 常驻进程 | 后台长期运行、无人值守的进程。本文也直接用 `daemon`（因为大量专名如 daemon 形态、`wechat-daemon` 目录依赖它）。 |
-| **watchdog** | **看门狗** | 外层监督循环：子进程退出后自动重拉。本文有 `runWatchdog()`、`wrapper.pid`。<br>**别译**：❌「监视器」（过泛）。 |
+| **daemon** | **常驻进程**（正文一律直接写 `daemon`） | 后台长期运行、无人值守的进程。本文直接用 `daemon`（大量专名如 daemon 形态、`wechat-daemon` 目录依赖它）。**命名约定（1.2.0）**：「守护进程」不再译 daemon——那个词留给真正负责守护它的 watchdog（「后台守护进程」，见下条），否则「守护进程停掉自动重启」这类句子会读反。 |
+| **watchdog** | **后台守护进程** | 外层监督循环：它盯着子进程，退出后自动重拉。本文有 `runWatchdog()`、`wrapper.pid`。同段第二次出现可简称「守护进程」；代码/协议名里的 `_watchdog`、`watchdog-runner.ts` 保持原样。<br>**别译**：❌「监视器」（过泛）、❌「看门狗」（口语；系统/硬件语境里的 watchdog 另有含义）。 |
 | **wrapper** | **包装进程** / 外层 | 包在真正业务进程外面、负责保活/传参的那一层（`wrapper.pid`）。 |
 
 #### B. 协议与协议实现（最容易混淆的一组）
@@ -124,7 +142,7 @@ poller（长轮询，不被大脑阻塞）
 | **implementation** | **实现**（具体程序） | 一个程序对某协议的具体落地。同一协议的不同实现，完备度差别很大——这正是 WeMind 要给每个 agent 配 preset 的原因。 |
 | **implement / support ACP** | **实现 ACP** / **支持 ACP** | **不要写「说 ACP」**。理由：「会说/不会说」是二元判断，会掩盖「实现完备度不同」这个事实（有的实现支持 load、有的只有 resume、有的不发流式帧）。而「实现/支持」天然可分级。<br>更精确时用可验证的事实：「它以 ACP server 身份响应 `initialize`/`session/new`/`session/prompt`」。 |
 | **minimal method set** | **最小方法集** | WeMind 实际用到的 ACP 方法子集：`initialize` → `session/new` → `session/prompt` + 流式 `session/update`。缺任一即不可用。 |
-| **capability** | **能力**（保留 `agentCapabilities` 原文） | 指「这个实现支持哪些**可选特性**」（load/resume/image/mcp），**不是权限**。别译「权限」——权限是 permission，见下条。注意：本仓库当前**不消费** `initialize` 回包，能力全部来自预设字段，见事实表。 |
+| **capability** | **能力**（保留 `agentCapabilities` 原文） | 指「这个实现支持哪些**可选特性**」（load/resume/image/mcp），**不是权限**。别译「权限」——权限是 permission，见下条。注意：本仓库当前**不消费** `initialize` 回包，能力全部来自 agent 配置字段，见事实表。 |
 | **permission** | **权限** | 与 capability 区分：`agentCapabilities` 是能力声明；`session/request_permission` 是运行时**请求授权**。 |
 | **reverse request** | **反向请求** | ACP 的反向通道：**agent → client** 的请求（`session/request_permission`、`fs/read_text_file`、`terminal/create` 等）。与正常方向（client → agent）相反，故称「反向」。<br>⚠️ 关键：**不应答会挂起**。WeMind 内置应答器：权限默认拒绝、未知方法回 `-32601`。 |
 | **streaming** | **流式** | agent 边生成边推送增量（`session/update` 的 `agent_message_chunk`），而不是一次性返回完整答案。 |
@@ -138,11 +156,11 @@ poller（长轮询，不被大脑阻塞）
 |---|---|---|
 | **brain** | **对话大脑** / `brain` | 常驻 ACP 进程，负责日常聊天问答（每用户一个 session）。因为大量代码/路径名含 brain，正文也直接写 `brain`。 |
 | **worker** | **任务工作机** / `worker` | 独立 ACP 进程，跑漫长任务，单 session，可「继续」续跑。 |
-| **preset** | **预设** | `ACP_AGENT_PRESETS` 里的一条配置：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承、能力覆盖等。 |
+| **preset** | **内置 agent 配置**（用户面写「agent 名」） | `ACP_AGENT_PRESETS` 里的一条：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承、能力覆盖等。 |
 | **sandbox** | **沙箱** | 隔离目录（`BRAIN_HOME` / `WORKER_HOME`），让 agent 读到的是干净配置而非你的真实配置。 |
 | **fallback / degrade** | **回退 / 降级（退化）** | 如「agent 缺 `session/load` 时**退化为** `session/new`（上下文丢失但能继续用）」。 |
 | **activation set** | **激活集** | 当前 brain 实际加载的 MCP 名单（`brain-mcps.json`），默认空。 |
-| **curated MCP** | **WeMind 写入的 MCP 配置** | 沙箱里由 WeMind 生成的 MCP 定义；`wechat` 永久禁止（防回环）。 |
+| **curated MCP** | **WeMind 写入的 MCP 配置** | 沙箱里由 WeMind 生成的 MCP 定义；`wechat` 永久禁止（防它把消息发回自己）。 |
 | **committed-only** | **仅提交后发正文** | 指 agent 不逐 token 推流、只在生成完成后一次性发正文（如 DSH 官方 ACP），需靠心跳兜底。 |
 | **idempotent** | **幂等** | 同一操作重复执行结果一致。 |
 | **atomic write** | **原子写** | 先写临时文件再 `rename` 覆盖，避免写一半被读到半截 JSON。 |
@@ -166,15 +184,15 @@ poller（长轮询，不被大脑阻塞）
 | 事实 | 状态 | 证据/备注 |
 |---|---|---|
 | 默认大脑是 `auto`，不是固定 kiro | ✅ 代码 | `brain-agents.ts` `resolveAgent()` |
-| kiro 预设可用 | ✅ 实测 | `docs/接入-OpenCode.md` / 现有 daemon |
-| opencode 预设可用（`session/load`、无反向请求） | ✅ 实测 | `docs/接入-OpenCode.md` §3.3 |
+| kiro agent 可用 | ✅ 实测 | `docs/接入-OpenCode.md` / 现有 daemon |
+| opencode agent 可用（`session/load`、无反向请求） | ✅ 实测 | `docs/接入-OpenCode.md` §3.3 |
 | 任意兼容 ACP 的 agent 都「无需改代码」 | ⚪ **不成立** | 需要 load/resume、反向请求、首帧/心跳、image 能力适配 |
 | `session/load` 是 ACP 通用能力 | ⚪ **不成立** | DSH 只有 `session/resume`；`load` 返回 `-32601` |
-| 代码按 `initialize` 回包自动适配能力 | ⚪ **不成立** | `acp-brain.ts` / `worker-acp.ts` 发出 `initialize` 后只置 `initialized = true`，**不解析** `agentCapabilities`；image/restore/mcpViaAcp 全部来自 `brain-agents.ts` 预设字段 |
+| 代码按 `initialize` 回包自动适配能力 | ⚪ **不成立** | `acp-brain.ts` / `worker-acp.ts` 发出 `initialize` 后只置 `initialized = true`，**不解析** `agentCapabilities`；image/restore/mcpViaAcp 全部来自 `brain-agents.ts` agent 配置字段 |
 | 仓库存在 `Brain` 接口 | ⚪ **不存在** | `acp-brain.ts` 直接导出 `askBrain`/`newSession`/`restart` |
 | `wemind brain check` 默认 60s | ✅ 代码 | 冷启动慢的 agent 仍可能误报 |
-| `deepseek` 预设已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验 |
-| `qoder` 预设已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0–M3 全部已验：发图、动态 MCP、冷重启 `session/load`、worker 中断续跑、`memory/` junction 继承 |
+| `deepseek` agent 已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验 |
+| `qoder` agent 已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0–M3 全部已验：发图、动态 MCP、冷重启 `session/load`、worker 中断续跑、`memory/` junction 继承 |
 | Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |
 | Qoder 可免 `--bin` 绝对路径 | ✅ 代码 | `fallbackBinPaths` 兜底 `~/.qoder/bin/qodercli/qodercli.exe`；auto 探测仍只看 PATH |
 | Qoder 用户记忆落点 | ✅ 实测 | `~/.qoder/memory/`；已 junction 进沙箱（写入回流真实目录）。`skills/agents/commands`/`AGENTS.md` 在 1.1.78 不存在 |
@@ -183,13 +201,29 @@ poller（长轮询，不被大脑阻塞）
 | DSH `0.2.1-rc.2` 有 resume/list/close | ✅ 实测 | `docs/接入-DeepSeek.md` 附录 |
 | DSH `0.2.1-rc.2` 有 `session/load` | ❌ 实测 | `-32601 Method not found` |
 | DSH `0.2.1-rc.2` 接受图片 | ❌ 实测 | `image:false`；带图 `-32602` |
-| DSH `0.2.1-rc.2` 接受 stdio/HTTP MCP | ✅ 实测 | stdio：假 MCP 在 `session/new`/`resume` 均被模型真实调用（marker×2）；HTTP 能力已广告、未实测 |
+| DSH `0.2.1-rc.2` 接受 stdio/HTTP MCP | ✅ 实测 | stdio：假 MCP 在 `session/new`/`resume` 均被模型真实调用（两个方法各调用 2 次）；HTTP 能力已广告、未实测 |
 | DSH 能保留多轮上下文（resume 后） | ✅ 实测 | PINEAPPLE：close + 强杀 + resume 后答出 |
-| DSH 默认模型路由可直接用 | ⚪ **不成立** | 默认 `deepseek-official` 需 `DEEPSEEK_API_KEY`；桌面登录是 `deepseek-account`，必须 `set_config_option` |
+| DSH 默认模型路由可直接用 | ⚪ **不成立** | 默认 `deepseek-official/deepseek-v4-flash` 需 `DEEPSEEK_API_KEY`（2026-10-29 用 `acp-probe` 在 `0.2.1-rc.3` 复测，空 home 与桌面登录态下默认值都是它）——根因是桥插件的 bundle patch 写死了 `- id: acp` 的 `provider/model`，用户 profile 只覆盖 `agent-default-model`（另一个服务的键），`- id: acp` 要用户自己写（插件 README 写明的覆盖点）。WeMind 侧**原样复制** `profiles/acp/cordis.patch.yml`、不追加条目（复制前剔除用户自己挂的微信 MCP 条目——跑 `wemind-mcp` 的或 `serverName: wechat` 的 mcp-client，防沙箱里的 agent 抢同一个 bot token）；读默认模型时优先 `- id: acp`、否则 `agent-default-model`（典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端在运行），会话建立后按它发 `set_config_option`（agent 自己的接口）；缺 `- id: acp` 时 `wemind brain` 给可粘贴的片段、由用户补到真实 profile；读不到才回退 `deepseek-account/deepseek-flash`；显式覆盖 `wemind brain set deepseek --model …`，`--model auto` = 跟随真实 profile 的默认 |
 | DSH 首帧很慢 | ⚪ **不成立**（短任务） | 实测 1.0–2.3s；长任务仍可能静默 |
 | DSH 会发 thought/tool/usage 帧 | ✅ 实测 | `agent_thought_chunk` / `tool_call` / `usage_update` |
 | 微信连发上限约 10 条 | ✅ 实测/代码 | `CONSEC_SEND_LIMIT=10`，预留最后一条 |
 | 15s 心跳会占连发额度 | ✅ 代码 | `index.ts` `heartbeat` + `sendProgress`；DSH 有帧时通常不触发 |
+| **切大脑要重启 daemon** | ⚪ **已不成立（1.2.0）** | `brain-switch.ts` 进程内切换：等在途回合结束 → 启动新大脑 → 成功才写入磁盘；失败退回 |
+| **agent 在进程启动时冻结** | ⚪ **已不成立（1.2.0）** | `agent-slot.ts` 槽位 + 过程内显式传 `ag`；心跳/首帧每回合现算 |
+| **任务只能有一条（单任务单进程）** | ⚪ **已不成立（1.2.0）** | 任务表 + `class WorkerConn` + `worker-pool.ts`；编号按用户递增不复用 |
+| **任务结束即杀进程** | ⚪ **已不成立（1.2.0）** | 结束「等你回复」的任务时进程**留着复用**（「正在跑」的那条只能力杀——回合没法优雅取消）；空闲超 `WEMIND_WORKER_REAP_MS`(5min) 回收；`wemind stop` 才杀光 |
+| **daemon 重启后任务全丢** | ⚪ **已不成立（1.2.0）** | `tasks.json` 读回 → 未完成标「已中断」→ 回「继续」才 `load`/`resume` 续跑（**不自动**） |
+| 会话只能保留「当前一条」 | ⚪ **已不成立（1.2.0）** | 登记表 + 五条会话指令（列表/新/恢复/改名/删除）；当前会话表仍是唯一权威 |
+| ACP 有 `session/delete` | ✅ **已实测（2026-10-29）**：opencode/qoder 有，DSH 没有（`-32601`） | 当前实现仍只删 WeMind 登记、回复写明 agent 侧归档仍在（三家里有一家没有，就不能依赖它） |
+| 各 agent `session/load` 会回放历史帧 | ✅ **已实测（2026-10-29）**：opencode 2 帧/857ms、qoder 3 帧/804ms；DSH 无 load，`resume` 0 帧/195ms | 回放帧在无 prompt 时本就被丢弃（`acp-brain.ts`）；时间远小于超时 |
+| 被强杀后各 agent 能 `load`/`resume` 回该任务会话 | ✅ **已实测（2026-10-29）**：DSH（resume）与 opencode（load）能接回同一 sessionId；qoder 任务续跑未单独测 | 「重启后续跑」对这些 agent 成立；接不上时的诚实文案仍保留 |
+| 同 agent 两个 worker 共用配置目录不互踩 | ⚪ **一轮样本未见互踩（2026-10-29）** | 不同 agent 各有 `configSubdir`；同 agent 并发等于「两个终端在同一配置目录」，长期风险仍在 |
+| 多任务并发时 `sendNotice` 会撞 `ret=-2` | ⚪ **未观察到限流型（2026-10-29）** | 真机里的 `-2` 全是重启后旧 token（见下一行）；额度仍按用户共享，压力大就调小并发 |
+| Windows `taskkill /T /F` 杀池中特定进程 | ⚪ **待实测** | daemon 强杀 + `wemind stop` 已验证无孤儿；「杀池中某个特定 pid」与「`session/load` 途中强杀」未单独测 |
+| **daemon 重启后、用户下一条消息前的外发** | ✅ **已确认会静默丢失（2026-10-29，已修）** | `state.contextTokens` 是上次运行留下的 token，任务结果/指令答复必然 `-2 (prepare failed)`；现在只在该用户本进程还没发过消息时挂进 `pending-push.ts`，等新 token 到达按序补发（每人 20 条、每轮 5 条且给答复留额度、同一条最多 3 次） |
+| 「多个微信账号之间有一个主号」 | ⚪ **不存在** | 一个微信账号 = 一个真人（扫码登录者）；N 个账号 = N 个 daemon，各有自己的 `brain.json`/会话表/沙箱/登录者，互不越界（README「多账号管理」、`repowiki/06` §6.2） |
+| 「切 daemon 大脑是跨账号权限」 | ⚪ **不是** | 微信侧只有**该账号的登录者**能切**它自己**那个 daemon（`OWNER_ONLY_KINDS`）；本机 CLI 才可指定任意账号（`wemind brain switch X <key\|label>`），因为「能在本机敲命令 = 机主」 |
+| 除登录者外还有谁能把消息发进 bot | ✅ **已确认：没有** | 微信平台限制——**必须扫码登录该 bot 才能给它发消息**，所以每个 bot 只有其登录者能发（用户 2026-10-29 确认）。`allowFrom` 因此是**兜底校验**（默认拒绝、默认只放行登录者）：防的是发送范围将来变化 / daemon 被接到别的入口；旧文档里「换个微信号验证」的写法已删 |
 
 > **规矩**：新增 agent 接入文档时，必须写清「已实测 / 仅代码 / 未验证」，并给版本与日期。
 
@@ -201,7 +235,7 @@ poller（长轮询，不被大脑阻塞）
 |---|---|---|
 | 接新 ACP agent | `brain-agents.ts` | `acp-brain.ts`、`mcp-sandbox.ts`、`docs/ai/recipes/add-acp-agent.md` |
 | 改 ACP 自愈/超时 | `acp-brain.ts` | `worker-acp.ts`（同步）、`brain-check.ts` |
-| 改 MCP 注入 | `mcp-sandbox.ts` | `agent-mcp.ts`、`worker-sandbox.ts`、`docs/ai/recipes/add-mcp.md` |
+| 改 MCP 挂载 | `mcp-sandbox.ts` | `agent-mcp.ts`、`worker-sandbox.ts`、`docs/ai/recipes/add-mcp.md` |
 | 改微信消息/回复 | `index.ts` | `md-reply.ts`、`image-reply.ts` |
 | 改 CLI | `cli.ts` | `manage.ts` |
 | 改数据/账号 | `wechat-ilink-core/src/store/*` | `brain-config.ts`、`docs/repowiki/08` |
@@ -223,7 +257,7 @@ poller（长轮询，不被大脑阻塞）
 ## 8. 任务配方
 
 - [接入一个新的 ACP Agent](recipes/add-acp-agent.md)
-- [新增/调试 MCP 注入](recipes/add-mcp.md)
+- [新增/调试 MCP 挂载](recipes/add-mcp.md)
 - [排查 daemon 不回复](recipes/debug-daemon.md)
 - [端到端验收](recipes/run-e2e.md)
 

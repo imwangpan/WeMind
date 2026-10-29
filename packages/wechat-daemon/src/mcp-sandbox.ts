@@ -3,44 +3,53 @@ import path from "node:path";
 import os from "node:os";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import { resolveAgent } from "./brain-agents.js";
-import { loadBrainConfig } from "./brain-config.js";
+import type { ResolvedAgent } from "./brain-agents.js";
+import { getAgent } from "./agent-slot.js";
 import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
+import { copyProfilePatch } from "./profile-model.js";
 
 /**
  * brain 的 MCP 沙箱：brain 跑在独立配置目录下，默认不加载任何 MCP。
  * 通过对话指令（加载/卸载/列出）动态调整「激活集」，从全局 MCP 目录取定义写入沙箱。
  * DATA_DIR 从 core 导入（支持 WECHAT_DATA_DIR 覆盖，便于多账号隔离）。
  *
- * 按 agent 适配（见 brain-agents.ts 预设与 docs/接入-OpenCode.md）：
+ * 按 agent 适配（见 brain-agents.ts 里的 agent 配置与 docs/接入-OpenCode.md）：
  * - 配置目录：kiro = 沙箱根（KIRO_HOME）；opencode = <沙箱>/opencode（XDG_CONFIG_HOME）。
  * - MCP 文件：kiro = settings/mcp.json（{mcpServers}）；opencode = opencode.json（mcp.servers）。
  * kiro 行为与改造前完全一致（默认值即 kiro 约定）。
+ *
+ * agent 不再存成模块常量（改造前是 import 时解析的 `AG`）：每个函数显式收 `ag`，
+ * 或在入口用 `getAgent("brain")` 取一次当前大脑——热切换后沙箱会写到新 agent 的配置目录。
  */
 
-const AG = resolveAgent(loadBrainConfig());
-
-/** brain 专用沙箱根目录（由 agent 的 homeEnvVar 指向它）。 */
+/** brain 专用沙箱根目录（由 agent 的 homeEnvVar 指向它）。与 agent 无关。 */
 export const BRAIN_HOME =
   process.env.WECHAT_BRAIN_HOME?.trim() || path.join(DATA_DIR, "brain-home");
 
 /** 该 agent 在沙箱里的「配置目录」（kiro=沙箱根；opencode=<沙箱>/opencode）。 */
-export const BRAIN_CONFIG_DIR = path.join(BRAIN_HOME, AG.configSubdir);
+function brainConfigDir(ag: ResolvedAgent): string {
+  return path.join(BRAIN_HOME, ag.configSubdir);
+}
 
 /** MCP 配置文件（相对配置目录，按 agent 的 mcpConfigFile）。 */
-const BRAIN_MCP_JSON = path.join(BRAIN_CONFIG_DIR, AG.mcpConfigFile);
+function brainMcpJson(ag: ResolvedAgent): string {
+  return path.join(brainConfigDir(ag), ag.mcpConfigFile);
+}
 
-/** 激活集持久化文件。 */
+/** 激活集持久化文件（与 agent 无关：切脑后再切回，激活的 MCP 仍是那套）。 */
 const ACTIVE_FILE = path.join(DATA_DIR, "brain-mcps.json");
 
 /** 「目录」：可选 MCP 的定义来源。默认取所用 agent 真实配置目录（realHome）下的
  *  catalogFile（kiro: settings/mcp.json / opencode: opencode.json）；可用 `WEMIND_MCP_CATALOG` / `WECHAT_MCP_CATALOG` 覆盖为任意路径。 */
-const CATALOG =
-  process.env.WEMIND_MCP_CATALOG?.trim() ||
-  process.env.WECHAT_MCP_CATALOG?.trim() ||
-  path.join(AG.realHome || path.join(os.homedir(), ".kiro"), AG.catalogFile);
+function catalogPath(ag: ResolvedAgent): string {
+  return (
+    process.env.WEMIND_MCP_CATALOG?.trim() ||
+    process.env.WECHAT_MCP_CATALOG?.trim() ||
+    path.join(ag.realHome || path.join(os.homedir(), ".kiro"), ag.catalogFile)
+  );
+}
 
-/** 永不允许 brain 加载（防回环）。 */
+/** 永不允许 brain 加载（防它把消息发回自己）。 */
 const FORBIDDEN = new Set(["wechat"]);
 
 /**
@@ -48,19 +57,20 @@ const FORBIDDEN = new Set(["wechat"]);
  * - 目录式（inheritDirs，如 kiro 的 steering/memories/skills、opencode 的 skills/agents/commands）用目录 junction（Windows）/ symlink 指向真实目录；
  * - 单文件式（inheritFiles，如 opencode 的 AGENTS.md）直接拷入配置目录。
  * 使微信里的大脑和你日常使用读到同样的记忆、规则、技能。
- * **MCP（settings/opencode.json 的 mcp 段）与 brain 自有会话（sessions）不镜像**：MCP 必须走沙箱（排除 wechat 防回环），会话不能混。
+ * **MCP（settings/opencode.json 的 mcp 段）与 brain 自有会话（sessions）不照搬**：MCP 必须走沙箱（排除 wechat，防它把消息发回自己），会话不能混。
  */
-function mirrorRealKiro(): void {
-  if (!AG.inherit || !AG.realHome) return;
-  if (path.resolve(BRAIN_HOME) === path.resolve(AG.realHome)) return; // 安全：别把自己链给自己
+function mirrorRealKiro(ag: ResolvedAgent): void {
+  if (!ag.inherit || !ag.realHome) return;
+  const dir = brainConfigDir(ag);
+  if (path.resolve(BRAIN_HOME) === path.resolve(ag.realHome)) return; // 安全：别把自己链给自己
   try {
-    fs.mkdirSync(BRAIN_CONFIG_DIR, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true });
   } catch {
     /* ignore */
   }
-  for (const d of AG.inheritDirs) {
-    const target = path.join(AG.realHome, d);
-    const link = path.join(BRAIN_CONFIG_DIR, d);
+  for (const d of ag.inheritDirs) {
+    const target = path.join(ag.realHome, d);
+    const link = path.join(dir, d);
     if (!fs.existsSync(target)) continue;
     let present = false;
     try {
@@ -102,9 +112,9 @@ function mirrorRealKiro(): void {
     }
   }
   // 单文件式记忆（如 opencode 的 AGENTS.md）：真实目录有、沙箱没有才拷（不覆盖沙箱已有）
-  for (const f of AG.inheritFiles) {
-    const src = path.join(AG.realHome, f);
-    const dst = path.join(BRAIN_CONFIG_DIR, f);
+  for (const f of ag.inheritFiles) {
+    const src = path.join(ag.realHome, f);
+    const dst = path.join(dir, f);
     try {
       if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
     } catch {
@@ -127,10 +137,10 @@ function readJson(file: string): Record<string, unknown> | null {
  * - `always`：内容不同即覆盖（标识类文件，如 Qoder 的 `.auth/machine_id`——agent 在缺凭据时会自造一个，它比真实文件新，「新者胜」会把错的留下，导致永远认证失败）。
  * 这是敏感文件，仅放在账号沙箱内；Windows 无 POSIX 600，建议专用账号 + 目录 ACL。
  */
-function syncCredentialFile(file: string, mode: "newer" | "always"): void {
-  if (!AG.realHome) return;
-  const src = path.join(AG.realHome, file);
-  const dst = path.join(BRAIN_CONFIG_DIR, file);
+function syncCredentialFile(ag: ResolvedAgent, file: string, mode: "newer" | "always"): void {
+  if (!ag.realHome) return;
+  const src = path.join(ag.realHome, file);
+  const dst = path.join(brainConfigDir(ag), file);
   try {
     if (!fs.existsSync(src)) return;
     fs.mkdirSync(path.dirname(dst), { recursive: true });
@@ -147,18 +157,19 @@ function syncCredentialFile(file: string, mode: "newer" | "always"): void {
   }
 }
 
-function syncCredentials(): void {
-  for (const f of AG.credentialFiles) syncCredentialFile(f, "newer");
-  for (const f of AG.identityFiles) syncCredentialFile(f, "always");
+function syncCredentials(ag: ResolvedAgent): void {
+  for (const f of ag.credentialFiles) syncCredentialFile(ag, f, "newer");
+  for (const f of ag.identityFiles) syncCredentialFile(ag, f, "always");
 }
 
-function loadCatalog(): Record<string, unknown> {
-  return readMcpServers(readJson(CATALOG), AG.mcpFormat);
+function loadCatalog(ag: ResolvedAgent): Record<string, unknown> {
+  return readMcpServers(readJson(catalogPath(ag)), ag.mcpFormat);
 }
 
 /** 目录中可选的 server 名（排除禁用项）。 */
 export function catalogNames(): string[] {
-  return Object.keys(loadCatalog()).filter((n) => !FORBIDDEN.has(n));
+  const ag = getAgent("brain");
+  return Object.keys(loadCatalog(ag)).filter((n) => !FORBIDDEN.has(n));
 }
 
 export function loadActive(): string[] {
@@ -173,23 +184,25 @@ function saveActive(list: string[]): void {
 }
 
 /** 按激活集从目录取定义，写入沙箱 MCP 配置（默认空）。保留配置里其它键（如 opencode 的 model）。
- *  `mcpViaAcp` 预设（DSH）不写文件——激活集经 activeMcpServers() 转成 ACP mcpServers 随 session 下发。 */
-export function applySandbox(): void {
-  if (AG.mcpViaAcp) return;
-  const cat = loadCatalog();
+ *  配了 `mcpViaAcp` 的 agent（DSH）不写文件——激活集经 activeMcpServers() 转成 ACP mcpServers 随 session 下发。 */
+function applySandbox(ag: ResolvedAgent): void {
+  if (ag.mcpViaAcp) return;
+  const cat = loadCatalog(ag);
   const active = loadActive().filter((n) => cat[n] && !FORBIDDEN.has(n));
   const servers: Record<string, unknown> = {};
   for (const n of active) servers[n] = cat[n];
-  const existing = readJson(BRAIN_MCP_JSON) ?? {};
-  const next = withMcpServers(existing, servers, AG.mcpFormat);
-  fs.mkdirSync(path.dirname(BRAIN_MCP_JSON), { recursive: true });
-  fs.writeFileSync(BRAIN_MCP_JSON, JSON.stringify(next, null, 2), "utf-8");
+  const file = brainMcpJson(ag);
+  const existing = readJson(file) ?? {};
+  const next = withMcpServers(existing, servers, ag.mcpFormat);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(next, null, 2), "utf-8");
 }
 
-/** brain 当前应挂载的 ACP mcpServers（mcpViaAcp 预设用）：激活集 → catalog 定义 → ACP 声明。
+/** brain 当前应挂载的 ACP mcpServers（配了 mcpViaAcp 的 agent 用）：激活集 → catalog 定义 → ACP 声明。
  *  跳过不可转换的坏条目并记日志——官方 DSH 的 session/new 遇到起不来的 MCP 会回滚整个会话。 */
 export function activeMcpServers() {
-  const cat = loadCatalog();
+  const ag = getAgent("brain");
+  const cat = loadCatalog(ag);
   const active = loadActive().filter((n) => cat[n] && !FORBIDDEN.has(n));
   const picked: Record<string, unknown> = {};
   for (const n of active) picked[n] = cat[n];
@@ -200,9 +213,9 @@ export function activeMcpServers() {
 }
 
 /** kiro：继承真实 settings/ 下除 mcp.json 外的文件（cli.json 含模型/免确认等），让大脑与日常使用同款配置。 */
-function syncKiroSettings(): void {
-  const realSettings = path.join(AG.realHome!, "settings");
-  const brainSettings = path.join(BRAIN_CONFIG_DIR, "settings");
+function syncKiroSettings(ag: ResolvedAgent): void {
+  const realSettings = path.join(ag.realHome!, "settings");
+  const brainSettings = path.join(brainConfigDir(ag), "settings");
   if (!fs.existsSync(realSettings)) return;
   try {
     fs.mkdirSync(brainSettings, { recursive: true });
@@ -227,9 +240,9 @@ function syncKiroSettings(): void {
 }
 
 /** opencode：把用户全局 opencode.json(c)（去掉 mcp 段）作为基底写进沙箱，继承 model 等设置；mcp 仍由 applySandbox 权威覆盖。 */
-function syncOpencodeBase(): void {
+function syncOpencodeBase(ag: ResolvedAgent): void {
   const src = ["opencode.json", "opencode.jsonc"]
-    .map((f) => path.join(AG.realHome!, f))
+    .map((f) => path.join(ag.realHome!, f))
     .find((f) => fs.existsSync(f));
   if (!src) return;
   let parsed: Record<string, unknown> | null = null;
@@ -243,8 +256,9 @@ function syncOpencodeBase(): void {
   }
   if (!parsed || typeof parsed !== "object") return;
   delete (parsed as Record<string, unknown>).mcp; // MCP 必须走沙箱 curated（防 wechat 回环）
-  fs.mkdirSync(BRAIN_CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(BRAIN_MCP_JSON, JSON.stringify(parsed, null, 2), "utf-8");
+  const file = brainMcpJson(ag);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(parsed, null, 2), "utf-8");
 }
 
 /** Qoder 这类「设置与 MCP 同文件」的 agent：以真实 settings.json 为基底生成沙箱设置。
@@ -253,10 +267,10 @@ function syncOpencodeBase(): void {
  *  - `enabledPlugins`：插件可自带 MCP，且沙箱不继承 `plugins/`；
  *  - `providers` / `model`：自定义供应商（BYOK）含明文密钥，`model` 又可能指向已剥离的供应商。
  *  并强制 `general.enableAutoUpdate=false`：否则每个沙箱都会各下一份约 210 MB 的 CLI。 */
-function settingsBase(): Record<string, unknown> {
+function settingsBase(ag: ResolvedAgent): Record<string, unknown> {
   let parsed: unknown = null;
   try {
-    parsed = JSON.parse(fs.readFileSync(path.join(AG.realHome!, AG.settingsBase!), "utf-8"));
+    parsed = JSON.parse(fs.readFileSync(path.join(ag.realHome!, ag.settingsBase!), "utf-8"));
   } catch {
     /* 缺失/损坏 → 空基底 */
   }
@@ -278,45 +292,74 @@ function settingsBase(): Record<string, unknown> {
   return base;
 }
 
-function syncSettingsBase(): void {
-  fs.mkdirSync(BRAIN_CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(BRAIN_MCP_JSON, JSON.stringify(settingsBase(), null, 2), "utf-8");
+function syncSettingsBase(ag: ResolvedAgent): void {
+  const dir = brainConfigDir(ag);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(brainMcpJson(ag), JSON.stringify(settingsBase(ag), null, 2), "utf-8");
+}
+
+/** 继承真实 profile 的用户层（DSH：`profiles/<名>/cordis.patch.yml`，桌面端写 provider 目录与默认模型）。
+ *  **原样复制**——这份文件是用户自己的配置，WeMind 只镜像、不合成（`- id: acp` 这类覆盖由用户自己维护，
+ *  缺失时 `wemind brain` 会提示怎么补；见 `profile-model.ts` 的 `acpOverrideHint`），这样「终端 dsh」与「微信大脑」行为一致。
+ *  按内容同步（桌面端更新后覆盖）；**唯独剔除用户自己挂的微信 MCP 条目**（`stripWechatMcpEntries`）：
+ *  沙箱里的 MCP 只能是 WeMind 的激活集（`wechat` 永远不在里面），否则 agent 会拿同一个 bot token 起第二个消费者。 */
+function syncProfilePatch(ag: ResolvedAgent): void {
+  if (!ag.realProfile || !ag.realHome || !ag.inherit) return;
+  if (path.resolve(BRAIN_HOME) === path.resolve(ag.realHome)) return; // 沙箱就是真实目录时不自我覆盖
+  const src = path.join(ag.realHome, "profiles", ag.realProfile, "cordis.patch.yml");
+  try {
+    if (!fs.existsSync(src)) return;
+    const removed = copyProfilePatch(ag.realHome, ag.realProfile, BRAIN_HOME);
+    if (removed.length) {
+      console.error(
+        `[wemind/wechat-daemon/mcp] 真实 profile 里的微信 MCP 已从大脑沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
+      );
+    }
+  } catch {
+    /* best-effort */
+  }
 }
 
 /** 继承真实配置目录的「非 MCP」设置（模型/免确认等），让大脑与日常使用同款配置；mcp 段保持沙箱权威。
- *  `mcpViaAcp` 预设没有文件式 MCP/settings 可继承，跳过（模型走 preset.model + set_config_option）。 */
-function syncSettings(): void {
-  if (AG.mcpViaAcp) return;
-  if (AG.settingsBase && AG.realHome) {
-    syncSettingsBase(); // 不依赖 inherit：沙箱硬化（关自动更新）与隔离始终生效
+ *  配了 `mcpViaAcp` 的 agent 也仍有「profile 用户层」可继承（DSH 的 provider 目录/默认模型），只是 MCP 不写文件。 */
+function syncSettings(ag: ResolvedAgent): void {
+  syncProfilePatch(ag);
+  if (ag.mcpViaAcp) return;
+  if (ag.settingsBase && ag.realHome) {
+    syncSettingsBase(ag); // 不依赖 inherit：沙箱硬化（关自动更新）与隔离始终生效
     return;
   }
-  if (!AG.inherit || !AG.realHome) return;
-  if (AG.mcpFormat === "opencode") syncOpencodeBase();
-  else syncKiroSettings();
+  if (!ag.inherit || !ag.realHome) return;
+  if (ag.mcpFormat === "opencode") syncOpencodeBase(ag);
+  else syncKiroSettings(ag);
 }
 
-/** 启动时确保沙箱存在并与激活集一致。 */
-export function ensureBrainHome(): void {
-  syncSettings(); // 先同步「非 MCP」设置(模型/免确认等)，让大脑与日常使用同款配置
-  applySandbox(); // 再写 curated mcp（权威，保持 MCP 隔离防回环）
-  mirrorRealKiro(); // 继承真实配置目录的记忆/steering/skills（sessions 仍隔离）
-  syncCredentials(); // 登录态/凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
+/**
+ * 启动时确保沙箱存在并与激活集一致。
+ * `forAgent` 可显式指定 agent（切换流程启动新大脑用：启动新大脑时要先备好**它**的沙箱，此刻槽位还指着旧大脑）。
+ */
+export function ensureBrainHome(forAgent?: ResolvedAgent): void {
+  const ag = forAgent ?? getAgent("brain");
+  syncSettings(ag); // 先同步「非 MCP」设置(模型/免确认等)，让大脑与日常使用同款配置
+  applySandbox(ag); // 再写 curated mcp（权威，保持 MCP 隔离——防它把消息发回自己）
+  mirrorRealKiro(ag); // 继承真实配置目录的记忆/steering/skills（sessions 仍隔离）
+  syncCredentials(ag); // 登录态/凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
 }
 
 export function addMcp(name: string): string {
-  if (FORBIDDEN.has(name)) return `不允许加载「${name}」（防回环）。`;
-  const cat = loadCatalog();
+  const ag = getAgent("brain");
+  if (FORBIDDEN.has(name)) return `不允许加载「${name}」（防它把消息发回自己）。`;
+  const cat = loadCatalog(ag);
   if (!cat[name]) return `未找到 MCP「${name}」。可选：${catalogNames().join(", ") || "（无）"}`;
   // 预校验：坏条目不进激活集（官方 DSH 的 session/new 会因起不来的 MCP 回滚整会话）
-  if (AG.mcpViaAcp && !toAcpMcpServers({ [name]: cat[name] }).servers.length)
+  if (ag.mcpViaAcp && !toAcpMcpServers({ [name]: cat[name] }).servers.length)
     return `MCP「${name}」的定义无法转换（需要 command 或 url），已拒绝加载。`;
   const a = loadActive();
   if (!a.includes(name)) {
     a.push(name);
     saveActive(a);
   }
-  applySandbox();
+  applySandbox(ag);
   return `已加载 MCP「${name}」。当前激活：${a.join(", ")}（下一条消息生效）`;
 }
 
@@ -325,7 +368,7 @@ export function removeMcp(name: string): string {
   if (!a.includes(name)) return `「${name}」当前未激活。`;
   const next = a.filter((x) => x !== name);
   saveActive(next);
-  applySandbox();
+  applySandbox(getAgent("brain"));
   return `已卸载 MCP「${name}」。当前激活：${next.join(", ") || "（空）"}`;
 }
 

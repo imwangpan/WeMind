@@ -2,8 +2,10 @@
 
 > 状态：**MVP 已实现** ✅（2026-06-17，真机跑通，见 [方案C-MVP-远程human-in-the-loop.md](方案C-MVP-远程human-in-the-loop.md)）。本文为总设计与方案对比（A/B/C）；MVP 落地细节（worker-acp / task-manager / 消息路由 / typing）见 MVP 文档。
 >
-> **历史/设计说明（2026-10-24 补）**：文中以 `session/load` 为恢复路径；该能力并非所有 ACP agent 都有（如 DSH 只有 `session/resume`）。当前实现需按 agent 能力兜底。
-> 关联：MVP 设计文档、README「远程任务（worker）」、`packages/wechat-daemon/src/{worker-acp,task-manager,worker-sandbox}.ts`、`acp-brain.ts`、`brain-agents.ts`。
+> **阶段 2 已落地（2026-10-28）**：受控工作机**多任务化**——单 worker → **多 worker 进程池 + 任务编号 + 派发时选 agent + 重启后续跑**（详见 §10）。实现文件：`worker-pool.ts`（进程池：复用/回收/并发上限）、`worker-acp.ts`（`class WorkerConn`，一条任务一条 ACP 连接）、`task-manager.ts`（任务表与派发路由）、`task-store.ts`（任务表写入磁盘、重启后按能力续跑）、`control-bridge.ts`（CLI 与微信走同一段实现的双入口）。
+>
+> **历史/设计说明（2026-10-24 补）**：文中以 `session/load` 为恢复路径；该能力并非所有 ACP agent 都有（如 DSH 只有 `session/resume`）。当前实现按 agent 能力兜底：`session/load` → `session/resume`，都接不上就**如实报错**（不假装成功、也不静默换新会话）。
+> 关联：MVP 设计文档、[使用指南-远程任务（worker）.md](使用指南-远程任务（worker）.md)、README「远程任务（worker）」、`packages/wechat-daemon/src/{worker-pool,worker-acp,task-manager,task-store,control-bridge,worker-sandbox}.ts`、`acp-brain.ts`、`brain-agents.ts`。
 
 ---
 
@@ -14,12 +16,12 @@
 2. 在**微信里对该任务下达进一步指令**（调整、补充、暂停、追问）。
 
 **关键约束（来自现状分析）**：
-- 用户**手动开的交互式 kiro 窗口无法被外部控制**：其 stdin 被终端占用，kiro-cli 未暴露让外部注入 prompt 的接口。
+- 用户**手动开的交互式 kiro 窗口无法被外部控制**：其 stdin 被终端占用，kiro-cli 未暴露让外部送入 prompt 的接口。
 - 因此「接管一个已经开着的窗口」做不到——**要可控，任务就得跑在一个"受控进程"里**。
 
 **目标**：提供一个**受程序控制的 agent 工作机**，让微信大脑（及经由它的用户）能向其**下发指令**并**实时接收进展**。
 
-**非目标**：接管用户手动开启的交互窗口；多任务真并发（单 worker 仍串行，见 §9）。
+**非目标**：接管用户手动开启的交互窗口；跨机器 worker（见 §10 阶段 3）。**同一条 ACP 连接内仍串行**——多任务靠多条连接（每任务一条，见 §9）。
 
 ---
 
@@ -30,7 +32,7 @@ ACP（Agent Client Protocol，JSON-RPC over stdio）天生为"外部程序控制
 | 方法 | 作用（对本方案） |
 |------|------------------|
 | `initialize` | 握手 |
-| `session/new` / `session/load` | 新建 / 恢复工作机会话（持久化 sessionId，可重连续传） |
+| `session/new` / `session/load` / `session/resume` | 新建 / 恢复工作机会话（持久化 sessionId，可重连续传；不是所有 agent 都有 `load`） |
 | `session/prompt` | **向工作机下发任务/指令** |
 | `session/update`（通知） | **实时回传**工具调用、思考、正文输出等帧 |
 
@@ -59,27 +61,32 @@ ACP（Agent Client Protocol，JSON-RPC over stdio）天生为"外部程序控制
 
 要点：
 - **对话大脑** 与 **工作机** 是两个独立的 ACP 进程；对话大脑负责聊天/路由，工作机负责跑重活。
-- 二者都由 daemon 通过 ACP 客户端管理（`acp-brain` 已实现；`worker-acp` 复制其大部分逻辑）。
+- 二者都由 daemon 通过 ACP 客户端管理（`acp-brain` 已实现；`worker-acp` 起初复制其大部分逻辑，阶段 2 已重写为「一任务一连接」的 `WorkerConn`）。
+- **工作机是个进程池**（阶段 2，2026-10-28）：`worker-pool.ts` 管多个 worker 进程（每任务一条独立连接），跑完**留着复用**、空闲回收，并发上限默认 3（例外：正在跑的任务被结束时**杀掉**、进程不保留；停在「等回复」的任务占着那条连接，不计入空闲进程）。
 
 ---
 
 ## 4. 核心组件
 
 1. **工作机 agent 进程（worker）**
-   - 一个以 ACP 模式运行的 agent（默认 `kiro-cli acp`，复用 `brain-agents.ts` 的通用化预设，可换其它 ACP agent）。
-   - 持久会话：`worker-sessions.json` 存 `任务标识 → sessionId`，支持 daemon 重启/断连后 `session/load` 续传。
+   - 一个以 ACP 模式运行的 agent（默认 `kiro-cli acp`，复用 `brain-agents.ts` 的通用化 agent，可换其它 ACP agent；阶段 2 起**派发时可逐任务指定**）。
+   - 持久会话：`worker-sessions.json` 存 `<agent>:task-<编号>@<userId> → sessionId`（带编号与用户，防多任务/多用户撞键），支持 daemon 重启后按 agent 能力 `session/load` → `session/resume` 续传。
+   - 任务表写入磁盘 `tasks.json`（`task-store.ts`）：编号 / agent / 状态 / 轮次 / 最近输出；daemon 重启后**不自动拉起**未完成任务，它们标为「已中断」，用户回「继续」才续跑。
    - 跑在自己的工作目录/沙箱（可与 brain 沙箱区分，或指向真实项目目录以便操作真实文件——按需配置）。
 
-2. **`worker-acp.ts`（新）**
-   - 复制 `acp-brain.ts` 的 JSON-RPC over stdio 客户端：`initialize`/`session/new`/`session/load`/`session/prompt`、`session/update` 解析、空闲/首帧/cap 超时、自愈重建。
-   - 暴露：`dispatch(taskId, instruction, onProgress) → Promise<result>`、`status(taskId)`、`listTasks()`。
+2. **`worker-acp.ts` / `worker-pool.ts`**
+   - `WorkerConn`（`worker-acp.ts`）：**一条任务一条** ACP over stdio 连接——`initialize`/`session/new`/`session/load`/`session/resume`/`session/prompt`、`session/update` 解析、空闲/首帧/cap 超时、自愈重建（原为模块级全局状态，阶段 2 重写为类，否则做不到「a 大脑跑任务 1、b 大脑跑任务 2」）。
+   - `worker-pool.ts`：连接**池**——同 agent 空闲命中优先、否则回收最旧空闲腾位、再否则 spawn；并发生效上限 `WEMIND_MAX_WORKERS`（默认 3，超了**拒绝派发**不排队）、空闲上限 `WEMIND_IDLE_MAX`、空闲超 `WEMIND_WORKER_REAP_MS` 回收；任务跑完**留着复用不杀进程**，`wemind stop` / daemon 退出才一次杀光。被中途结束的 running 任务是例外——**直接杀掉**（回合没法优雅取消）；「等回复」的任务占着连接，同样进程不保留。
+   - 暴露：按任务 `dispatch`、按任务查连接、池摘要（供 `wemind list` / 任务列表展示）。
 
 3. **任务路由（在 daemon poller/worker）**
    - 约定指令前缀把微信消息路由到工作机而非对话大脑：
-     - `任务：<描述>` / `task: <…>` → 新建/派发一个工作机任务；
-     - `任务进展` / `status` → 查询当前/指定任务进展；
-     - `任务指令：<…>` / 直接回复 → 作为追加 `session/prompt` 发给该任务会话；
+     - `任务：<描述>` / `task: <…>` / 行首 `>正文` → 派发新任务（用**默认任务大脑**）；
+     - `任务 <agent 名>：<描述>` → 派发并**指定 agent**（冒号前必须是不带空格的已知 agent 名，否则不指定 agent、整串仍是正文派给任务侧）——**总是新开一条**（指定只影响这一条任务，不改默认任务大脑）；
+     - `#<编号> 正文` / `/reply <编号> 正文` → 作为追加 `session/prompt` 发给该任务会话（**≥2 条活跃且没有唯一在等回复的那条时必须带编号**：唯一一条 waiting 优先，其次唯一一条活跃，0 条活跃且只有一条「已中断」则续跑；都不满足时 daemon 回一份清单让用户带编号重发）；
+     - `任务列表` / `/tasks` → 列任务（编号 / agent / 状态 / 轮次 / 已运行 / 最近输出）；`结束任务 [编号]` / `结束全部任务` → 结束；
      - 其余普通消息 → 仍走对话大脑。
+   - CLI（`wemind task` / `task-reply` / `task-stop` / `task-list`）是同一路由的另一个入口：派发/回复/结束经 `task-inbox` 抵达 daemon，列表直接读 `tasks.json`（daemon 没跑也能看）。
 
 4. **进展回传（复用现有发送层）**
    - 工作机的 `session/update` 进度 → 复用现有 **进度播报 + 连续发送上限管理 + 「继续」机制**（见 README）转发给微信，避免触发 ~10 条上限。
@@ -90,11 +97,11 @@ ACP（Agent Client Protocol，JSON-RPC over stdio）天生为"外部程序控制
 
 ### 5.1 派发任务
 ```
-微信:「任务：抓取并核实文章X，结果写进笔记」
-  → 路由识别为任务派发
-  → worker-acp.dispatch(taskId, 指令, onProgress)
-     → session/new(或 load) → session/prompt(指令)
-  → 立即回微信:「已派给工作机执行（任务 #t1），可随时发「任务进展」查询或「继续」续传」
+微信:「任务：抓取并核实文章X，结果写进笔记」（或「任务 qoder：…」指定 agent）
+  → 路由识别为任务派发（编号按人递增、不复用，跨重启不归零）
+  → 池里取一条连接：同 agent 空闲命中 → 回收最旧空闲腾位 → spawn
+     → session/new(或按需 load/resume) → session/prompt(指令)
+  → 立即回微信:「已派发任务 #3（kiro），可随时发「任务列表」查询或回「#3 继续」续传」
 ```
 
 ### 5.2 实时进展
@@ -106,17 +113,19 @@ ACP（Agent Client Protocol，JSON-RPC over stdio）天生为"外部程序控制
 
 ### 5.3 追加指令 / 查询
 ```
-微信:「任务指令：核实时优先用国内可达源」
-  → 路由到该任务会话 → session/prompt(追加指令)（同一 session，多轮上下文）
+微信:「#3 核实时优先用国内可达源」
+  → 路由到该任务连接 → session/prompt(追加指令)（同一 session，多轮上下文）
 
-微信:「任务进展」
-  → status(taskId)：读该会话累计输出/最近状态 → 总结回微信
+微信:「任务列表」
+  → 读任务表 → 回微信：编号 / agent / 状态 / 轮次 / 已运行 / 最近输出
 ```
 
 ### 5.4 完成与重连
 ```
-工作机产出最终结果 → 转发微信 → 标记任务完成
-daemon 重启/断连 → worker-acp 用 session/load 恢复该任务会话续传
+工作机产出最终结果 → 转发微信 → 标记任务完成（进程留着复用，留作复用；被中途结束的 running 任务例外，直接杀掉）
+daemon 重启 → 未完成的任务按 tasks.json 标为「已中断」，**不自动重新拉起**
+用户回「继续」/「#3 继续」 → 拉进程 + 按 agent 能力 session/load → session/resume 续跑
+  → 接不上则如实报「这次接不上」（重试无效，要重来就结束这条任务后重新派；不假装成功、不静默换新会话）
 ```
 
 ---
@@ -125,12 +134,12 @@ daemon 重启/断连 → worker-acp 用 session/load 恢复该任务会话续传
 
 | 已有 | 复用到工作机 |
 |------|--------------|
-| `acp-brain.ts` JSON-RPC 客户端 + 自愈 + 超时 | 直接复制为 `worker-acp.ts` |
-| `brain-agents.ts`（agent 预设/通用化） | 工作机也可配任意 ACP agent |
+| `acp-brain.ts` JSON-RPC 客户端 + 自愈 + 超时 | 起初直接复制为 `worker-acp.ts`（阶段 2 重写为 `WorkerConn` 类，一号任务一条连接） |
+| `brain-agents.ts`（agent 表/通用化） | 工作机也可配任意 ACP agent（且可逐任务指定） |
 | 进度播报 + 连续发送上限 + 「继续」 + 错误码处理 | 工作机进展回传共用 |
-| 会话持久化（`brain-sessions.json` 思路） | `worker-sessions.json` |
+| 会话持久化（`brain-sessions.json` 思路） | `worker-sessions.json`（键为 `<agent>:task-<编号>@<userId>`，与大脑同样按 agent 分开存） |
 
-> 估算：worker-acp 客户端约 70% 是 acp-brain 的复制；主要新增是**任务路由**与**多会话(任务)管理**。
+> 估算：`worker-acp.ts` 约 70% 是 acp-brain 的复制；主要新增是**任务路由**与**多会话(任务)管理**（阶段 2 又叠了**进程池**与**任务表写入磁盘**，见 `worker-pool.ts` / `task-store.ts`）。
 
 ---
 
@@ -139,8 +148,8 @@ daemon 重启/断连 → worker-acp 用 session/load 恢复该任务会话续传
 1. **对话大脑与工作机：合一还是分离？**
    - **分离（推荐）**：对话不被重活阻塞、可多 worker、worker 可部署到更强机器。代价：多一层编排。
    - 合一：即现在的方案 A（brain 自己跑重活）——简单但重活期间对话被占。
-2. **工作机的 cwd / 权限**：跑在隔离沙箱（安全）还是真实项目目录（能操作真实文件，更实用但风险高，仍受发件人白名单约束）。
-3. **任务标识与多任务**：是否支持多个并行任务（→ 多 worker 进程，每任务一进程，因单 session 串行）。MVP 可先单任务。
+2. **工作机的 cwd / 权限**：跑在隔离沙箱（安全）还是真实项目目录（能操作真实文件，更实用但风险高，仍受登录者白名单约束）。
+3. **任务标识与多任务**：是否支持多个并行任务（→ 多 worker 进程，每任务一进程，因单 session 串行）。**已落地（2026-10-28，阶段 2）**：多任务并行、每任务一条独立 ACP 连接（`worker-pool.ts` 复用）、编号按人递增且**不复用**（跨重启不归零）。
 4. **路由约定**：用显式前缀（`任务：`）还是让对话大脑判断意图后调用"派发工具"。前缀简单可靠；意图判断更自然但需大脑配合。
 5. **进展推送策略**：worker 进展同样受 ~10 连续发送上限约束 → 复用「继续」；或对 worker 任务**默认更克制的进度**（只在关键节点报）。
 
@@ -157,26 +166,28 @@ daemon 重启/断连 → worker-acp 用 session/load 恢复该任务会话续传
 ## 9. 局限与权衡
 
 - **不接管手动窗口**：任务必须跑在受控的 worker 里（与 A 同前提）。
-- **单 session 串行**（ACP 限制）：一个 worker 同时只跑一个任务；多任务需多 worker 进程。
+- **单 session 串行**（ACP 限制）：**一条 ACP 连接**同时只跑一个任务；多任务靠**多条连接**——**已落地（阶段 2，`worker-pool.ts`）**：并发上限默认 `WEMIND_MAX_WORKERS=3`（超了拒绝派发），空闲连接 `WEMIND_IDLE_MAX`、空闲超 `WEMIND_WORKER_REAP_MS` 回收。
 - **连续发送上限**：worker 进展回传同样占微信 ~10 条上限，依赖「继续」机制。
-- **资源**：每个 worker 是一个常驻 agent 进程（内存/算力开销）。
-- **安全**：worker 若指向真实目录 + `--trust-all-tools`，等于又一个全权 agent，仍靠发件人白名单兜底。
+- **资源**：每个 worker 是一个常驻 agent 进程（内存/算力开销）；改成进程池后任务跑完**留着复用**而不是跑完即杀——用常驻换启动开销，并发上限就是这个平衡的闸。例外：正在跑的任务被中途结束是**杀掉**（回合没法优雅取消），「等回复」的任务占着连接、不计入空闲进程。
+- **安全**：worker 若指向真实目录 + `--trust-all-tools`，等于又一个全权 agent，仍靠登录者白名单兜底。
 
 ---
 
 ## 10. 落地步骤（建议分阶段）
 
-1. **阶段 0（观察，最小）**：先做方案②的"只读进展查询"——大脑读 `~/.kiro/sessions` 的 jsonl 总结某任务进展。验证"微信看进展"链路与价值，零新进程。
-2. **阶段 1（MVP 单 worker）**：`worker-acp.ts`（复制 acp-brain）+ 单任务派发/进展/追加指令 + 前缀路由 `任务：`。
-3. **阶段 2（多任务/多 worker）**：任务标识、多 worker 进程、`列出任务`/`停止任务`。
-4. **阶段 3（增强）**：worker 部署到独立/更强机器（ACP over 网络转发）、与对话大脑的意图路由、任务持久化与历史。
+1. **阶段 0（观察，最小）**：先做方案②的"只读进展查询"——大脑读 `~/.kiro/sessions` 的 jsonl 总结某任务进展。验证"微信看进展"链路与价值，零新进程。— **已完成（历史）**。
+2. **阶段 1（MVP 单 worker）**：`worker-acp.ts`（复制 acp-brain）+ 单任务派发/进展/追加指令 + 前缀路由 `任务：`。— **已完成（2026-06-17，真机跑通）**。
+3. **阶段 2（多任务/多 worker）**：任务标识、多 worker 进程、`列出任务`/`停止任务`。— **已落地（2026-10-28）**：任务**编号**按人递增、不复用、跨重启不归零；`worker-pool.ts` **进程池**（并发上限 3 / 空闲超 5min 回收 / 结束任务留着复用）；派发时**选 agent**（微信 `任务 <agent 名>：正文`、CLI `--agent`）与**默认任务大脑**（本次运行内一直生效、不写配置文件）；任务表写入磁盘 `task-store.ts`，重启后未完成任务标「已中断」、回「继续」按 agent 能力 `session/load` → `session/resume` 续跑；`任务列表` / `结束任务 [编号]` / `结束全部任务` 与 CLI 双入口（`control-bridge.ts` / `task-inbox`）。**相关功能也随本阶段补齐**：运行时换对话大脑（`brain-switch.ts`）与完整会话管理（`session-registry.ts`），换大脑不再需要重启 daemon。
+4. **阶段 3（增强）**：worker 部署到独立/更强机器（ACP over 网络转发）、与对话大脑的意图路由、任务持久化与历史。— **未做**：跨机器 worker（ACP over 网络转发）与**任务历史归档**均未落地；意图路由仍按显式前缀（`任务` / `#编号`）。（注：任务的**当前表**持久化与重启续跑已在阶段 2 落地，这里剩的是**历史归档**。）
 
 ---
 
 ## 11. 待定问题 / 风险
 
 - kiro-cli 的 ACP 是否稳定支持长时间多轮 worker 会话（已知 brain 侧可用，但 worker 跑数十分钟级任务需实测）。
-- 多 worker 同时跑对本机资源/网络（联网工具）的压力。
+- 多 worker 同时跑对本机资源/网络（联网工具）的压力（已用并发上限 + 空闲回收缓解，真实压力仍**待实测**）。
+- 同一 agent 的多条连接**共用它的配置目录/登录态**（各 agent 行为不同）——多任务并存下的相互影响**待实测**。
+- 任务被**强杀**（`wemind stop` / 崩溃）后，各 agent 能否恢复该任务会话——**待实测**。
 - 任务"暂停/取消"在 ACP 下如何优雅实现（可能需杀会话重建，丢当前轮）。
 - 路由误判：普通聊天被误当任务指令（前缀方案可规避）。
 
@@ -184,4 +195,4 @@ daemon 重启/断连 → worker-acp 用 session/load 恢复该任务会话续传
 
 ## 12. 一句话结论
 
-方案 C = **把"工作机"做成一个受 ACP 控制的独立 agent 进程**，复用现有 `acp-brain` 客户端 + 进度/上限/继续机制，实现"微信端双向监控与控制耗时任务"。**最优先建议**：先做阶段 0（只读观察）验证价值，再按需推进到 MVP 单 worker。
+方案 C = **把"工作机"做成一个受 ACP 控制的独立 agent 进程**，复用现有 `acp-brain` 客户端 + 进度/上限/继续机制，实现"微信端双向监控与控制耗时任务"。阶段 0/1/2 **均已落地**（阶段 2 = 多任务进程池 / 任务编号 / 派发选 agent / 重启后续跑，2026-10-28）。**下一步只剩阶段 3 的未做项**：跨机器 worker（ACP over 网络转发）与任务历史归档。

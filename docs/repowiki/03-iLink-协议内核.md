@@ -65,7 +65,7 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 ## 3.3 协议类型（api/types.ts）
 
-这个文件镜像服务端 proto，是理解 iLink 数据模型的核心参考。字段绝大多数可选（服务端按场景下发）。proto 里的 `bytes` 在 JSON 中是 base64 字符串。
+这个文件照抄服务端 proto，是理解 iLink 数据模型的核心参考。字段绝大多数可选（服务端按场景下发）。proto 里的 `bytes` 在 JSON 中是 base64 字符串。
 
 ### 关键枚举
 
@@ -77,7 +77,7 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 | `TypingStatus` | `TYPING=1` / `CANCEL=2` | 打字状态 |
 | `UploadMediaType` | `IMAGE=1` / `VIDEO=2` / `FILE=3` / `VOICE=4` | 上传媒体类型 |
 
-**`MessageState` 的关键约定**：发送进度/中间消息必须用 `GENERATING`，仅最终答案用 `FINISH`。因为 `FINISH` 会结束当前回合（关闭该 context 的发送窗口），如果进度也用 `FINISH` 会提前关掉会话。这是排查「重任务收不到结果」时纠正的关键认知（详见 [5. 守护进程 Daemon](05-守护进程-Daemon.md)）。
+**`MessageState` 的关键约定**：发送进度/中间消息必须用 `GENERATING`，仅最终答案用 `FINISH`。因为 `FINISH` 会结束当前回合（关闭该 context 的发送窗口），如果进度也用 `FINISH` 会提前关掉会话。这是排查「重任务收不到结果」时纠正的关键认知（详见 [5. daemon](05-daemon.md)）。
 
 ### `context_token`：最易被误解的字段
 
@@ -95,7 +95,7 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 ### 本地（非协议）类型
 
-除协议类型外，还定义了落盘用的本地类型：`AccountData`（账号凭证）、`ServerState`（运行状态：游标 + contextTokens + lastMessageId）、`QrLoginState`（扫码暂存态）。
+除协议类型外，还定义了写入磁盘用的本地类型：`AccountData`（账号凭证）、`ServerState`（运行状态：游标 + contextTokens + lastMessageId）、`QrLoginState`（扫码暂存态）。
 
 ## 3.4 错误码体系（api/error-codes.ts）
 
@@ -112,7 +112,7 @@ iLink 有两个语义不同的错误字段：
 | `-2` | ret | 参数错误（Parameter error） | 检查请求参数 |
 | `-14` | errcode | 会话过期（Session expired） | 重新登录（本项目对该账号冷却 1 小时） |
 
-**关于 `-2` 的重要澄清**：官方定义是「参数错误」，**不是**「context_token 按时间过期」。常见诱因是 context_token 失效/不匹配，或被复用为**发送限流**（短时连续发送过多）。真正「按会话过期」的是 `-14`。
+**关于 `-2` 的重要澄清**：官方定义是「参数错误」，**不是**「context_token 按时间过期」。常见诱因是 context_token 失效/不匹配，或被复用为**发送限流**（短时连续发送过多）。真正「按会话过期」的是 `-14`。**daemon 重启后** `state.contextTokens` 里是上次运行留下的 token，用户下一条消息之前它必然失效——这类「必须送达」的推送由 daemon 挂起、等新 token 到达再补发（见 [05-daemon](05-daemon.md#串行发送链)）。
 
 模块提供：`classifyILinkCode`（归类为 `ok`/`param_error`/`session_expired`/`unknown`）、`describeILinkCode`（返回可读标签 + 处理建议）、`ILinkError` 类（携带 `code` + `kind`，消息可读如「参数错误(-2) — 检查请求参数」）。
 
@@ -148,7 +148,7 @@ API：`pauseSession` / `isSessionPaused` / `getRemainingPauseMs` / `clearSession
 
 多账号即「不同 `WECHAT_ACCOUNT` → 不同目录 → 互相隔离」。
 
-**原子写**：所有落盘都用「先写临时文件再 rename」（同盘 rename 原子），避免写途崩溃/并发产生半截损坏文件；写/rename 失败时会清掉临时文件，不在数据目录里留 `*.tmp-*` 垃圾。**坏文件处理**：读取时若解析失败，不静默清空，而是备份坏文件（`.corrupt-<时间戳>`）+ 记日志，便于人工恢复。**错误不吞**：只有 `ENOENT`（文件不存在）才当作「首次运行」返回空；权限等 fs 错误会向上抛——否则调用方下一步 save 会覆盖掉真实凭证。删除类函数（`clearAccount` / `clearQrState`）返回布尔值表示是否真的删掉了，非 ENOENT 的删除失败会记日志。
+**原子写**：所有写入磁盘都用「先写临时文件再 rename」（同盘 rename 原子），避免写途崩溃/并发产生半截损坏文件；写/rename 失败时会清掉临时文件，不在数据目录里留 `*.tmp-*` 垃圾。**坏文件处理**：读取时若解析失败，不静默清空，而是备份坏文件（`.corrupt-<时间戳>`）+ 记日志，便于人工恢复。**错误不吞**：只有 `ENOENT`（文件不存在）才当作「首次运行」返回空；权限等 fs 错误会向上抛——否则调用方下一步 save 会覆盖掉真实凭证。删除类函数（`clearAccount` / `clearQrState`）返回布尔值表示是否真的删掉了，非 ENOENT 的删除失败会记日志。
 
 **Windows 权限提示**：`account.json` 含 bot token。POSIX 下设权限 `600`；Windows 下 `chmod` 是 no-op，文件以明文存放，启动保存时会有一次性告警，提示用文件夹权限或磁盘加密保护。
 
@@ -166,7 +166,7 @@ API：`pauseSession` / `isSessionPaused` / `getRemainingPauseMs` / `clearSession
 
 ### 授权清单（store/allow-from.ts）
 
-每账号一份持久化的「被授权用户 userId 清单」`allowFrom.json`，取代单一环境变量白名单。这是核心安全闸（因为 daemon 大脑是 `--trust-all-tools`）。
+每账号一份持久化的「登录者白名单」`allowFrom.json`（允许发消息的 userId 清单），取代单一环境变量白名单。它是**兜底校验**：微信平台只把消息发送给登录者本人，这道闸防的是「发送范围将来变化 / daemon 被接到别的入口」（daemon 大脑是 `--trust-all-tools`，任何被接受的发件人都能驱动它）。
 
 - 格式 `{ version, allowFrom: string[] }`（对齐官方 openclaw-weixin）。
 - API：`readAllowFrom` / `addAllowFrom` / `removeAllowFrom` / `isAllowed`。
@@ -190,7 +190,7 @@ iLink 的图片/文件走微信 CDN，密文用 **AES-128-ECB（PKCS7）** 加�
 
 `classifyMediaByName(name)` 按扩展名判类型（image/video/file），`sendFile` 据此组装对应的 `image_item` / `video_item` / `file_item`。类型识别与 item 组装借鉴自 wxclawbot-cli 与 wechat-robot-go（均 MIT）。
 
-> 收发图在 daemon 形态下的上层编排（从大脑回复里提取图片引用、收图喂给大脑看）见 [5. 守护进程 Daemon](05-守护进程-Daemon.md#收发富媒体)。
+> 收发图在 daemon 形态下的上层编排（从大脑回复里提取图片引用、收图喂给大脑看）见 [5. daemon](05-daemon.md#收发富媒体)。
 
 ---
 

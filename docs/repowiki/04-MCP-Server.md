@@ -1,6 +1,6 @@
 # 4. MCP Server（@wemind/wechat-mcp）
 
-> 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. 守护进程 Daemon](05-守护进程-Daemon.md)
+> 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. daemon](05-daemon.md)
 
 MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `wemind`，见 [`docs/发布-wemind-npm.md`](../发布-wemind-npm.md)）。
 
@@ -161,8 +161,8 @@ MCP server 用 [tsdown](https://tsdown.dev/)（rolldown + oxc，tsup 的继任�
 
 MCP 形态是**无状态的请求驱动**：WeMind 不主动做任何事，靠 MCP 客户端按工具描述自己编排长轮询和打字状态。多轮记忆、回复生成都由 MCP 客户端背后的模型负责。
 
-如果你想要的是「一个自己跑起来、自带 AI 大脑、7×24 自动收发」的机器人，那是 daemon 形态 —— 见 [5. 守护进程 Daemon](05-守护进程-Daemon.md)。
+如果你想要的是「一个自己跑起来、自带 AI 大脑、7×24 自动收发」的机器人，那是 daemon 形态 —— 见 [5. daemon](05-daemon.md)。
 
 ---
 
-接下来：[5. 守护进程 Daemon](05-守护进程-Daemon.md) 进入项目最复杂的部分。
+接下来：[5. daemon](05-daemon.md) 进入项目最复杂的部分。

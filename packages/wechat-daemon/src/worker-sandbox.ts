@@ -3,40 +3,47 @@ import path from "node:path";
 import os from "node:os";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import { resolveAgent } from "./brain-agents.js";
-import { loadBrainConfig } from "./brain-config.js";
+import type { ResolvedAgent } from "./brain-agents.js";
+import { getAgent } from "./agent-slot.js";
 import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
+import { copyProfilePatch } from "./profile-model.js";
 
 /**
  * worker 沙箱：与 brain 沙箱（mcp-sandbox.ts）并列，但 MCP 策略相反。
  *
- * worker 是无人值守的任务执行机，默认**继承真实配置目录的全部 MCP**（仅排除 wechat 防回环），而非 brain 的「默认空 + 对话中按需加载」——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。
+ * worker 是无人值守的任务执行机，默认**继承真实配置目录的全部 MCP**（仅排除 wechat，防它把消息发回自己），而非 brain 的「默认空 + 对话中按需加载」——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。
  * 记忆/技能/规则（mirrorRealKiro）与 settings（syncSettings，含模型/信任）的继承与 brain 一致。
  *
  * 按 agent 适配（同 mcp-sandbox.ts）：配置目录、MCP 格式、设置继承方式均随 agent 而变。
+ * agent 不再存成模块常量：函数显式收 `ag`，入口用 `getAgent("worker")`（默认任务大脑）。
  *
  * 设计依据：docs/方案C-MVP-远程human-in-the-loop.md §8.4。
  * 与 mcp-sandbox.ts 有少量重复（mirrorRealKiro/syncSettings），刻意复制以隔离演进、不动已稳定的 brain 沙箱。
  */
 
-const AG = resolveAgent(loadBrainConfig());
-
-/** worker 专用沙箱根（由 agent 的 homeEnvVar 指向它）。 */
+/** worker 专用沙箱根（由 agent 的 homeEnvVar 指向它）。与 agent 无关。 */
 export const WORKER_HOME =
   process.env.WEMIND_WORKER_HOME?.trim() || path.join(DATA_DIR, "worker-home");
 
 /** 该 agent 在 worker 沙箱里的「配置目录」（kiro=沙箱根；opencode=<沙箱>/opencode）。 */
-export const WORKER_CONFIG_DIR = path.join(WORKER_HOME, AG.configSubdir);
+function workerConfigDir(ag: ResolvedAgent): string {
+  return path.join(WORKER_HOME, ag.configSubdir);
+}
 
-const WORKER_MCP_JSON = path.join(WORKER_CONFIG_DIR, AG.mcpConfigFile);
+function workerMcpJson(ag: ResolvedAgent): string {
+  return path.join(workerConfigDir(ag), ag.mcpConfigFile);
+}
 
 /** MCP「目录」：可继承的 MCP 定义来源（同 brain，默认取 agent 真实配置目录的 catalogFile）。 */
-const CATALOG =
-  process.env.WEMIND_MCP_CATALOG?.trim() ||
-  process.env.WECHAT_MCP_CATALOG?.trim() ||
-  path.join(AG.realHome || path.join(os.homedir(), ".kiro"), AG.catalogFile);
+function catalogPath(ag: ResolvedAgent): string {
+  return (
+    process.env.WEMIND_MCP_CATALOG?.trim() ||
+    process.env.WECHAT_MCP_CATALOG?.trim() ||
+    path.join(ag.realHome || path.join(os.homedir(), ".kiro"), ag.catalogFile)
+  );
+}
 
-/** worker 不继承的 MCP：wechat 始终强制排除（防回环），外加 WEMIND_WORKER_MCP_EXCLUDE 指定的。 */
+/** worker 不继承的 MCP：wechat 始终强制排除（防它把消息发回自己），外加 WEMIND_WORKER_MCP_EXCLUDE 指定的。 */
 function excludeSet(): Set<string> {
   const raw = process.env.WEMIND_WORKER_MCP_EXCLUDE ?? "wechat";
   const s = new Set(
@@ -59,10 +66,10 @@ function readJson(file: string): Record<string, unknown> | null {
 
 /** 同 brain：把凭据文件（如 DSH 的 `.credentials.yaml`、Qoder 的 `.auth/user`）同步进 worker 沙箱。
  *  `newer`=新者胜；`always`=内容不同即覆盖（标识类文件必须与真实目录一致，见 mcp-sandbox.ts）。 */
-function syncCredentialFile(file: string, mode: "newer" | "always"): void {
-  if (!AG.realHome) return;
-  const src = path.join(AG.realHome, file);
-  const dst = path.join(WORKER_CONFIG_DIR, file);
+function syncCredentialFile(ag: ResolvedAgent, file: string, mode: "newer" | "always"): void {
+  if (!ag.realHome) return;
+  const src = path.join(ag.realHome, file);
+  const dst = path.join(workerConfigDir(ag), file);
   try {
     if (!fs.existsSync(src)) return;
     fs.mkdirSync(path.dirname(dst), { recursive: true });
@@ -79,20 +86,20 @@ function syncCredentialFile(file: string, mode: "newer" | "always"): void {
   }
 }
 
-function syncCredentials(): void {
-  for (const f of AG.credentialFiles) syncCredentialFile(f, "newer");
-  for (const f of AG.identityFiles) syncCredentialFile(f, "always");
+function syncCredentials(ag: ResolvedAgent): void {
+  for (const f of ag.credentialFiles) syncCredentialFile(ag, f, "newer");
+  for (const f of ag.identityFiles) syncCredentialFile(ag, f, "always");
 }
 
-function loadCatalog(): Record<string, unknown> {
-  return readMcpServers(readJson(CATALOG), AG.mcpFormat);
+function loadCatalog(ag: ResolvedAgent): Record<string, unknown> {
+  return readMcpServers(readJson(catalogPath(ag)), ag.mcpFormat);
 }
 
 /** worker 继承全量 MCP：复制 catalog 全部 server，去掉排除集与 disabled:true 的。
- *  `mcpViaAcp` 预设（DSH）不写文件——全量集合经 workerMcpServers() 转成 ACP mcpServers 随 session 下发。 */
-export function applyWorkerSandbox(): void {
-  if (AG.mcpViaAcp) return;
-  const cat = loadCatalog();
+ *  配了 `mcpViaAcp` 的 agent（DSH）不写文件——全量集合经 workerMcpServers() 转成 ACP mcpServers 随 session 下发。 */
+function applyWorkerSandbox(ag: ResolvedAgent): void {
+  if (ag.mcpViaAcp) return;
+  const cat = loadCatalog(ag);
   const ex = excludeSet();
   const servers: Record<string, unknown> = {};
   for (const [name, def] of Object.entries(cat)) {
@@ -101,15 +108,17 @@ export function applyWorkerSandbox(): void {
       continue; // 跳过用户已禁用的
     servers[name] = def;
   }
-  const existing = readJson(WORKER_MCP_JSON) ?? {};
-  const next = withMcpServers(existing, servers, AG.mcpFormat);
-  fs.mkdirSync(path.dirname(WORKER_MCP_JSON), { recursive: true });
-  fs.writeFileSync(WORKER_MCP_JSON, JSON.stringify(next, null, 2), "utf-8");
+  const file = workerMcpJson(ag);
+  const existing = readJson(file) ?? {};
+  const next = withMcpServers(existing, servers, ag.mcpFormat);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(next, null, 2), "utf-8");
 }
 
-/** worker 当前应挂载的 ACP mcpServers（mcpViaAcp 预设用）：全量 catalog（除排除集/disabled/坏条目）→ ACP 声明。 */
-export function workerMcpServers() {
-  const cat = loadCatalog();
+/** worker 当前应挂载的 ACP mcpServers（配了 mcpViaAcp 的 agent 用）：全量 catalog（除排除集/disabled/坏条目）→ ACP 声明。 */
+export function workerMcpServers(forAgent?: ResolvedAgent) {
+  const ag = forAgent ?? getAgent("worker");
+  const cat = loadCatalog(ag);
   const ex = excludeSet();
   const picked: Record<string, unknown> = {};
   for (const [name, def] of Object.entries(cat)) {
@@ -125,9 +134,9 @@ export function workerMcpServers() {
 }
 
 /** kiro：继承真实 settings/ 下除 mcp.json 外的文件（cli.json 含模型/免确认等）。逻辑同 brain 的 syncKiroSettings。 */
-function syncKiroSettings(): void {
-  const realSettings = path.join(AG.realHome!, "settings");
-  const workerSettings = path.join(WORKER_CONFIG_DIR, "settings");
+function syncKiroSettings(ag: ResolvedAgent): void {
+  const realSettings = path.join(ag.realHome!, "settings");
+  const workerSettings = path.join(workerConfigDir(ag), "settings");
   if (!fs.existsSync(realSettings)) return;
   try {
     fs.mkdirSync(workerSettings, { recursive: true });
@@ -152,9 +161,9 @@ function syncKiroSettings(): void {
 }
 
 /** opencode：把用户全局 opencode.json(c)（去 mcp 段）作基底写入 worker 沙箱，继承 model 等；mcp 由 applyWorkerSandbox 覆盖。 */
-function syncOpencodeBase(): void {
+function syncOpencodeBase(ag: ResolvedAgent): void {
   const src = ["opencode.json", "opencode.jsonc"]
-    .map((f) => path.join(AG.realHome!, f))
+    .map((f) => path.join(ag.realHome!, f))
     .find((f) => fs.existsSync(f));
   if (!src) return;
   let parsed: Record<string, unknown> | null = null;
@@ -168,15 +177,16 @@ function syncOpencodeBase(): void {
   }
   if (!parsed || typeof parsed !== "object") return;
   delete (parsed as Record<string, unknown>).mcp;
-  fs.mkdirSync(WORKER_CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(WORKER_MCP_JSON, JSON.stringify(parsed, null, 2), "utf-8");
+  const file = workerMcpJson(ag);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(parsed, null, 2), "utf-8");
 }
 
 /** Qoder 这类「设置与 MCP 同文件」的 agent：与 brain 相同的基底疗法（剥离 MCP/插件/自定义供应商 + 关自动更新）。 */
-function settingsBase(): Record<string, unknown> {
+function settingsBase(ag: ResolvedAgent): Record<string, unknown> {
   let parsed: unknown = null;
   try {
-    parsed = JSON.parse(fs.readFileSync(path.join(AG.realHome!, AG.settingsBase!), "utf-8"));
+    parsed = JSON.parse(fs.readFileSync(path.join(ag.realHome!, ag.settingsBase!), "utf-8"));
   } catch {
     /* 缺失/损坏 → 空基底 */
   }
@@ -198,34 +208,57 @@ function settingsBase(): Record<string, unknown> {
   return base;
 }
 
-function syncSettingsBase(): void {
-  fs.mkdirSync(WORKER_CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(WORKER_MCP_JSON, JSON.stringify(settingsBase(), null, 2), "utf-8");
+function syncSettingsBase(ag: ResolvedAgent): void {
+  const dir = workerConfigDir(ag);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(workerMcpJson(ag), JSON.stringify(settingsBase(ag), null, 2), "utf-8");
 }
 
-function syncSettings(): void {
-  if (AG.mcpViaAcp) return; // 无文件式 settings/MCP 可继承；模型走 preset.model
-  if (AG.settingsBase && AG.realHome) {
-    syncSettingsBase(); // 不依赖 inherit：沙箱硬化（关自动更新）与隔离始终生效
+/** 继承真实 profile 的用户层（DSH：`profiles/<名>/cordis.patch.yml`，桌面端写 provider 目录与默认模型），**原样复制**。
+ *  逻辑同 brain 的 syncProfilePatch：WeMind 只镜像用户配置、不合成（`- id: acp` 由用户自己维护，缺失时 CLI 提示怎么补）；
+ *  **唯独剔除用户自己挂的微信 MCP 条目**（worker 的 MCP 也永远排除 `wechat`，防抢同一个 bot token）。 */
+function syncProfilePatch(ag: ResolvedAgent): void {
+  if (!ag.realProfile || !ag.realHome || !ag.inherit) return;
+  if (path.resolve(WORKER_HOME) === path.resolve(ag.realHome)) return;
+  const src = path.join(ag.realHome, "profiles", ag.realProfile, "cordis.patch.yml");
+  try {
+    if (!fs.existsSync(src)) return;
+    const removed = copyProfilePatch(ag.realHome, ag.realProfile, WORKER_HOME);
+    if (removed.length) {
+      console.error(
+        `[wemind/wechat-daemon/mcp] 真实 profile 里的微信 MCP 已从 worker 沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
+      );
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+function syncSettings(ag: ResolvedAgent): void {
+  syncProfilePatch(ag); // DSH 等：继承真实 profile 用户层（provider 目录 / 默认模型）；MCP 仍走 ACP 注入
+  if (ag.mcpViaAcp) return; // 无「配置文件式」的 MCP/settings 可继承（模型走 set_config_option）
+  if (ag.settingsBase && ag.realHome) {
+    syncSettingsBase(ag); // 不依赖 inherit：沙箱硬化（关自动更新）与隔离始终生效
     return;
   }
-  if (!AG.inherit || !AG.realHome) return;
-  if (AG.mcpFormat === "opencode") syncOpencodeBase();
-  else syncKiroSettings();
+  if (!ag.inherit || !ag.realHome) return;
+  if (ag.mcpFormat === "opencode") syncOpencodeBase(ag);
+  else syncKiroSettings(ag);
 }
 
 /** 用 junction/symlink 把真实配置目录的记忆/技能/规则类子目录链入 worker 配置目录；单文件记忆直接拷。逻辑同 brain 的 mirrorRealKiro。 */
-function mirrorRealKiro(): void {
-  if (!AG.inherit || !AG.realHome) return;
-  if (path.resolve(WORKER_HOME) === path.resolve(AG.realHome)) return; // 安全：别把自己链给自己
+function mirrorRealKiro(ag: ResolvedAgent): void {
+  if (!ag.inherit || !ag.realHome) return;
+  const dir = workerConfigDir(ag);
+  if (path.resolve(WORKER_HOME) === path.resolve(ag.realHome)) return; // 安全：别把自己链给自己
   try {
-    fs.mkdirSync(WORKER_CONFIG_DIR, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true });
   } catch {
     /* ignore */
   }
-  for (const d of AG.inheritDirs) {
-    const target = path.join(AG.realHome, d);
-    const link = path.join(WORKER_CONFIG_DIR, d);
+  for (const d of ag.inheritDirs) {
+    const target = path.join(ag.realHome, d);
+    const link = path.join(dir, d);
     if (!fs.existsSync(target)) continue;
     let present = false;
     try {
@@ -265,9 +298,9 @@ function mirrorRealKiro(): void {
       /* 权限不足等：best-effort 忽略 */
     }
   }
-  for (const f of AG.inheritFiles) {
-    const src = path.join(AG.realHome, f);
-    const dst = path.join(WORKER_CONFIG_DIR, f);
+  for (const f of ag.inheritFiles) {
+    const src = path.join(ag.realHome, f);
+    const dst = path.join(dir, f);
     try {
       if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
     } catch {
@@ -276,10 +309,14 @@ function mirrorRealKiro(): void {
   }
 }
 
-/** 启动时确保 worker 沙箱就绪：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 链入记忆/技能。 */
-export function ensureWorkerHome(): void {
-  syncSettings(); // 先同步「非 MCP」设置（模型/免确认等）
-  applyWorkerSandbox(); // 再写全量 MCP（除 wechat 等排除集）
-  mirrorRealKiro(); // 链入记忆/steering/skills（sessions 仍隔离）
-  syncCredentials(); // 凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
+/**
+ * 启动时确保 worker 沙箱就绪：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 链入记忆/技能 → 凭据。
+ * `forAgent` 可显式指定 agent（多任务 / 进程池提前起进程时为**那个** agent 备沙箱，此刻槽位可能指着别的默认）。
+ */
+export function ensureWorkerHome(forAgent?: ResolvedAgent): void {
+  const ag = forAgent ?? getAgent("worker");
+  syncSettings(ag); // 先同步「非 MCP」设置（模型/免确认等）
+  applyWorkerSandbox(ag); // 再写全量 MCP（除 wechat 等排除集）
+  mirrorRealKiro(ag); // 链入记忆/steering/skills（sessions 仍隔离）
+  syncCredentials(ag); // 凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
 }

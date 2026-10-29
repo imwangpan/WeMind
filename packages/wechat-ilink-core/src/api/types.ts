@@ -1,5 +1,5 @@
 /**
- * iLink Bot API 协议类型（镜像服务端 proto：GetUpdatesReq/Resp、WeixinMessage、SendMessageReq 等）。
+ * iLink Bot API 协议类型（照抄服务端 proto：GetUpdatesReq/Resp、WeixinMessage、SendMessageReq 等）。
  *
  * 来源与依据：
  *  - 字段与 proto 含义对照官方 Tencent/openclaw-weixin `src/api/types.ts` 整理（社区/官方最权威的公开实现）。
@@ -295,7 +295,7 @@ export interface QRStatusResponse {
   bot_token?: string;
   ilink_bot_id?: string;
   baseurl?: string;
-  /** 扫码者的 user id（confirmed 时返回；用于加入 allowFrom 授权清单）。 */
+  /** 扫码者的 user id（confirmed 时返回；用于加入 allowFrom 登录者白名单）。 */
   ilink_user_id?: string;
   /** status=scaned_but_redirect 时，需把后续轮询切换到的新 host（IDC 重定向）。 */
   redirect_host?: string;
@@ -322,7 +322,7 @@ export interface GetConfigResp {
   typing_ticket?: string;
 }
 
-// ===== 以下为 WeMind 本地（非协议）类型：落盘的账号/状态/二维码态 =====
+// ===== 以下为 WeMind 本地（非协议）类型：写入磁盘的账号/状态/二维码态 =====
 
 /** 本地持久化的账号凭证（account.json）。 */
 export interface AccountData {

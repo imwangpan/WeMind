@@ -1,6 +1,6 @@
 /**
  * MCP 配置的「格式」适配：不同 ACP agent 把 MCP server 定义放在不同文件、不同结构里。
- * 本模块只做纯数据的组织/解析（无文件 IO），便于单测；沙箱模块负责落盘。
+ * 本模块只做纯数据的组织/解析（无文件 IO），便于单测；沙箱模块负责写入磁盘。
  *
  * - `kiro`：独立文件 `settings/mcp.json`，结构 `{ "mcpServers": { 名: {command,args,env} } }`
  * - `opencode`：主配置 `opencode.json`，结构 `{ "mcp": { "servers": { 名: {type,command,environment} } } }`（与 model 等共处一文件）
@@ -61,7 +61,7 @@ export function parseJsonc(text: string): Record<string, unknown> | null {
   }
 }
 
-// ---- ACP 传输：把 catalog 条目转成 session/new 的 mcpServers（mcpViaAcp 预设用） ----
+// ---- ACP 传输：把 catalog 条目转成 session/new 的 mcpServers（配了 mcpViaAcp 的 agent 用） ----
 
 /** ACP `session/new` 的 stdio MCP 声明（env 是 `{name,value}[]`，与 kiro/opencode 的 map 不同）。 */
 export type AcpMcpServer = {

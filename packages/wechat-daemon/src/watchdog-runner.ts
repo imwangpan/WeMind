@@ -1,12 +1,13 @@
-// 自带看门狗（方案 b）：`wemind start --runner builtin` 用它常驻，不依赖 pm2。
-// - runWatchdog：看门狗循环本体（由 `cli.js _watchdog` 调用），单实例守卫 + 循环 spawn daemon、崩溃 5s 重拉。
-// - watchdogStart：从 manage 脱离式启动看门狗进程。
+// 自带后台守护进程（方案 b）：`wemind start --runner builtin` 用它常驻，不依赖 pm2。
+// - runWatchdog：后台守护进程循环本体（由 `cli.js _watchdog` 调用），单实例守卫 + 循环 spawn daemon、崩溃 5s 重拉。
+// - watchdogStart：从 manage 脱离式启动后台守护进程。
 // 单实例用 wrapper.pid + isOurProcess() 身份校验（不只看 pid 存活，防重启后 pid 复用误判）；竞态由「start 前先 stop」进一步压低。
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, accountDir } from "@wemind/wechat-ilink-core";
 import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
+import { stripVscodeDebugEnv } from "./debug-env.js";
 import { CLI_PID_MARKERS, isOurProcess } from "./proc-identity.js";
 
 const RESTART_DELAY_MS = 5000;
@@ -21,16 +22,16 @@ function readPidFile(file: string): number | null {
   }
 }
 
-/** 单实例守卫：已有存活**且确认是我们**的看门狗返回 false；否则写自己 pid、返回 true。 */
+/** 单实例守卫：已有存活**且确认是我们**的后台守护进程返回 false；否则写自己 pid、返回 true。 */
 function acquireSingleton(wrapperPidFile: string): boolean {
   const old = readPidFile(wrapperPidFile);
-  // 身份校验：陈旧 pid + 重启后 pid 复用时会误判「已有实例」→ 看门狗直接退出、daemon 静默不起。
+  // 身份校验：陈旧 pid + 重启后 pid 复用时会误判「已有实例」→ 后台守护进程直接退出、daemon 静默不起。
   if (old && isOurProcess(old, CLI_PID_MARKERS)) return false;
   fs.writeFileSync(wrapperPidFile, String(process.pid), "ascii");
   return true;
 }
 
-/** 看门狗循环本体（由 `cli.js _watchdog` 调用，常驻）：单实例守卫 → 循环拉起 daemon、退出 5s 重拉。 */
+/** 后台守护进程循环本体（由 `cli.js _watchdog` 调用，常驻）：单实例守卫 → 循环拉起 daemon、退出 5s 重拉。 */
 export async function runWatchdog(): Promise<void> {
   const dataDir = DATA_DIR; // 本进程已设 WECHAT_ACCOUNT，core 据此解析到账号目录
   fs.mkdirSync(dataDir, { recursive: true });
@@ -69,7 +70,8 @@ export async function runWatchdog(): Promise<void> {
     );
     const logFd = fs.openSync(log, "a");
     const child: ChildProcess = spawn(process.execPath, [cliPath, "daemon"], {
-      env: process.env, // WECHAT_ACCOUNT 已在本进程环境中
+      // WECHAT_ACCOUNT 已在本进程环境中；同时摘掉 VS Code 终端注入的调试引导（后台守护进程若本身被注入过，daemon 不能再被带坏，见 debug-env.ts）
+      env: stripVscodeDebugEnv(process.env),
       stdio: ["ignore", logFd, logFd], // stdout/stderr 都并入 daemon.log（与 run-daemon.ps1 一致）
       windowsHide: true, // 不弹出控制台窗口（Windows）：日志已重定向到 daemon.log，无需可见窗口
     });
@@ -83,7 +85,7 @@ export async function runWatchdog(): Promise<void> {
       /* ignore */
     }
     if (code === BRAIN_CONFIG_EXIT_CODE) {
-      // 大脑配置错误：重拉无益（需人工修），停在看门狗循环外，避免每 5s 刷一条。
+      // 大脑配置错误：重拉无益（需人工修），停在后台守护进程循环外，避免每 5s 刷一条。
       fs.appendFileSync(
         log,
         `[wemind/wechat-daemon/wrapper] 大脑配置错误（exit ${code}），已停止自动重启。修好后执行：wemind start <账号>\n`,
@@ -98,17 +100,18 @@ export async function runWatchdog(): Promise<void> {
   }
 }
 
-/** 从 manage 脱离式启动某账号的看门狗（方案 b：builtin runner）。 */
+/** 从 manage 脱离式启动某账号的后台守护进程（方案 b：builtin runner）。 */
 export function watchdogStart(key: string, cliPath: string): { ok: boolean; msg: string } {
   const child = spawn(process.execPath, [cliPath, "_watchdog"], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
-    env: { ...process.env, WECHAT_ACCOUNT: key },
+    // 脱离出的后台守护进程拿不到 VS Code 的调试器，带着 bootloader 注入会被「等调试器」卡死 → 摘掉（见 debug-env.ts）
+    env: stripVscodeDebugEnv({ ...process.env, WECHAT_ACCOUNT: key }),
   });
   child.unref();
   return {
     ok: true,
-    msg: `已启动自带看门狗（账号 ${key}，看门狗 pid ${child.pid}）。日志：${path.join(accountDir(key), "daemon.log")}`,
+    msg: `已启动自带后台守护进程（账号 ${key}，pid ${child.pid}）。日志：${path.join(accountDir(key), "daemon.log")}`,
   };
 }

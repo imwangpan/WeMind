@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 
-import { parseControl, parseTaskControl, parseBrainEscape } from "./index.js";
+import {
+  brainErrorMessage,
+  brainFailurePlan,
+  parseBrainEscape,
+  parseControl,
+  parseTaskControl,
+} from "./index.js";
 
 describe("parseControl（daemon 直接处理的控制指令）", () => {
   it("列出 mcp", () => {
@@ -62,5 +68,40 @@ describe("parseBrainEscape（强制走大脑的逃逸前缀）", () => {
   it("无前缀 → null", () => {
     expect(parseBrainEscape("普通消息")).toBeNull();
     expect(parseBrainEscape("我想问大脑一个问题")).toBeNull();
+  });
+});
+
+describe("brainFailurePlan / brainErrorMessage（大脑失败的处置）", () => {
+  it("provider 侧永久错误只试 1 次（余额/密钥/模型），并把原因说给用户", () => {
+    const bal = new Error("Internal error: turn failed: Insufficient Balance (request_id: x)");
+    expect(brainFailurePlan(bal)).toEqual({ attemptLimit: 1, category: "provider：额度/余额不足" });
+    expect(brainErrorMessage(bal)).toMatch(/额度\/余额不足/);
+    expect(brainErrorMessage(bal)).toMatch(/重试不会好/); // 别再让用户「稍后重发」白等
+
+    const key = new Error('-32603 ... no API key for provider route "deepseek-official"');
+    expect(brainFailurePlan(key)).toEqual({
+      attemptLimit: 1,
+      category: "provider：密钥/鉴权有问题",
+    });
+    expect(brainErrorMessage(key)).toMatch(/密钥\/鉴权有问题/);
+    expect(brainErrorMessage(key)).toMatch(/重启一次 daemon/); // 本地改登录态/模型后必须重启才生效
+    expect(brainErrorMessage(bal)).not.toMatch(/重启/); // 余额在 provider 侧处理，重发即可
+
+    const model = new Error("model_not_found: deepseek-xyz");
+    expect(brainFailurePlan(model)).toEqual({ attemptLimit: 1, category: "provider：模型不可用" });
+  });
+
+  it("限流仍是 backend（重试 3 次）——不能把「等一会儿就好」误判成账号问题", () => {
+    const rl = new Error("-32603 internal error: rate limit exceeded, please try again");
+    expect(brainFailurePlan(rl)).toEqual({ attemptLimit: 3, category: "backend" });
+    expect(brainErrorMessage(rl)).toMatch(/模型后端临时出错/);
+  });
+
+  it("超时/其它 → 2 次，提示维持原样", () => {
+    expect(
+      brainFailurePlan(new Error("session/prompt idle timeout (idle=999ms)")).attemptLimit,
+    ).toBe(2);
+    expect(brainFailurePlan(new Error("fetch failed")).attemptLimit).toBe(2);
+    expect(brainErrorMessage(new Error("fetch failed"))).toMatch(/处理出错了/);
   });
 });

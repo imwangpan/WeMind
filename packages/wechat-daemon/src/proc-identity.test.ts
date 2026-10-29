@@ -48,10 +48,23 @@ describe("matchesMarkers（纯逻辑，无系统调用）", () => {
     expect(
       matchesMarkers(String.raw`pwsh -File D:\repo\scripts\run-daemon.ps1`, CLI_PID_MARKERS),
     ).toBe(true);
+    // 仓库根目录用**相对路径**手跑（`node packages/wechat-daemon/dist/cli.js daemon`）：命令行里没有仓库名/包名，
+    // 只有源码目录名 → 必须靠追加的那组 marker 命中，否则 daemon 活着、CLI 却认定「没在运行」。
+    expect(matchesMarkers("node packages/wechat-daemon/dist/cli.js daemon", CLI_PID_MARKERS)).toBe(
+      true,
+    );
+    expect(matchesMarkers("node ./packages/wechat-daemon/dist/cli.js brain", CLI_PID_MARKERS)).toBe(
+      true,
+    );
   });
 
   it("组合内 token 必须全部出现（AND），不同组合任一命中即可（OR）", () => {
     expect(matchesMarkers("node /other/proj/cli.js daemon", CLI_PID_MARKERS)).toBe(false); // 缺 wemind
+    // 追加的 `wechat-daemon` 组还要求 `dist`：别的项目里恰好有个同名目录时不会误命中（这串最终用于杀进程）
+    expect(matchesMarkers("node /other/proj/wechat-daemon-tools/cli.js", CLI_PID_MARKERS)).toBe(
+      false,
+    );
+    expect(matchesMarkers("node /other/proj/wechat-daemon/cli.js", CLI_PID_MARKERS)).toBe(false);
     expect(matchesMarkers("opencode", [["opencode", "acp"]])).toBe(false); // 缺 acp
     expect(matchesMarkers("opencode acp", [["nope"], ["opencode", "acp"]])).toBe(true); // 第二组命中
   });
