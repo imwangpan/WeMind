@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { authHint, type ResolvedAgent } from "./brain-agents.js";
+import { agentEnv, authHint, type ResolvedAgent } from "./brain-agents.js";
 import { copyProfilePatch } from "./profile-model.js";
 import { spawnAgent } from "./spawn-agent.js";
 
@@ -18,9 +18,7 @@ export type CheckResult = { ok: boolean; detail: string; ms: number };
 export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise<CheckResult> {
   const started = Date.now();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-check-"));
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把「配置目录」指向临时沙箱
-  for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
+  const env = agentEnv(ag, home); // 父进程 env → 临时沙箱目录 → 预设 env → 预设 envDefaults（与 daemon 的 spawn 口径一致）
 
   // 需要登录的 agent（DSH / Qoder）缺凭据会在 session/new 报认证失败——把凭据带进临时沙箱，否则自检会把「没登录」误报成「二进制不可用」。标识类文件（如 Qoder 的 machine_id）必须一致。
   const cfgDir = path.join(home, ag.configSubdir);
@@ -108,9 +106,19 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
   try {
     await req("initialize", { protocolVersion: 1, clientCapabilities: {} });
     const s = (await req("session/new", { cwd: home, mcpServers: [] })) as { sessionId?: string };
+    // 预设声明了 sessionMode（免审批）就一并验证：不发这一步的话，模式不可用（如 claude-code 以 root 跑且没设 IS_SANDBOX=1）在这里永远显示 ✅
+    let modeNote = "";
+    if (ag.sessionMode && s?.sessionId) {
+      try {
+        await req("session/set_mode", { sessionId: s.sessionId, modeId: ag.sessionMode });
+        modeNote = `，mode=${ag.sessionMode}`;
+      } catch (e) {
+        modeNote = `，但 session/set_mode ${ag.sessionMode} 失败（${e instanceof Error ? e.message : String(e)}）——免审批模式可能不可用，回合仍可跑但会按 agent 自己的审批流程走`;
+      }
+    }
     return {
       ok: true,
-      detail: `ACP 握手成功（initialize + session/new，sessionId=${s?.sessionId ?? "?"}）`,
+      detail: `ACP 握手成功（initialize + session/new，sessionId=${s?.sessionId ?? "?"}${modeNote}）`,
       ms: Date.now() - started,
     };
   } catch (e) {

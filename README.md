@@ -36,7 +36,7 @@ wemind list                          # 查看运行状态
 wemind brain                 # 看当前用的是哪个大脑
 wemind brain check           # 真起一次 ACP 握手，验证能不能用
 wemind brain set qoder       # 换大脑（按账号写入磁盘，重启仍生效）
-wemind brain set gemini --extra-args "--yolo"   # 只追加启动参数（保留预设的 ACP 模式参数；--args 是整段替换，漏掉会握手超时）
+wemind brain set opencode --extra-args "--log-level debug"   # 只追加启动参数（保留预设的 ACP 模式参数；--args 是整段替换，漏掉会握手超时）
 wemind brain switch opencode # 换大脑：daemon 在跑就不重启、不打断在途回合；失败自动退回原来那个
 wemind session list          # 会话列表（新会话 / 恢复会话 / 重命名 / 删除同名子命令）
 ```
@@ -436,12 +436,13 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | `WEMIND_BRAIN_BIN`      | 覆盖二进制（绝对路径或 PATH 上的名字）              | 自动解析     |
 | `WEMIND_BRAIN_ARGS`     | 覆盖进入 ACP 模式的启动参数（空格分隔，整段替换）   | 内置默认值   |
 | `WEMIND_BRAIN_EXTRA_ARGS` | 追加启动参数（空格分隔，拼在预设/覆盖参数之后）   | 无           |
+| `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off` 关闭，其它值 = 该 modeId | 用预设值 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（指向 brain 沙箱） | 内置默认值   |
 | `KIRO_CLI_BIN`          | 旧的 kiro 专用二进制覆盖（仍兼容）                  | —            |
 
 `kiro`（内置）= `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 里加一条、或直接用上面四个变量。持久化选择用 `wemind brain set <agent 名> [--bin ...] [--args "…"] [--extra-args "…"] [--model ...]`（写入 `<数据目录>/brain.json`，任何入口重启都复现；`--args` 是**整段替换**、`--extra-args` 追加在末尾——只加开关（如免确认）用后者，漏掉 `acp` 这类模式参数会握手超时，`wemind brain` 会给出警告；只给 agent 名且 daemon 在跑并认控制桥时会**立刻当场应用（不用重启）**，带 `--bin/--args/--extra-args/--shell/--model` 则只写盘——其中 `--bin`/`--args`/`--extra-args`/`--model` 的改动可由随后的 `wemind brain switch <同名 agent>` 当场应用（「是不是同一个」按 name/bin/args/model 判），`--shell` 要重启）。**模型**同样可配：`--model '["provider 路由","模型名"]'` 指定；**`--model auto` = 跟随你日常那个 agent 的默认**——DSH 读真实 `~/.dsh/profiles/acp/cordis.patch.yml`（优先你自己写的 `- id: acp`，否则 `agent-default-model`；典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端 DeepSeek Harness 在运行；读不到就不下发）。**运行时切换**用 `wemind brain switch <agent 名>` 或微信里发 `切换大脑 <agent 名>`——进程内换、失败自动退回原来那个，见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](docs/repowiki/06-ACP-大脑与沙箱.md)。
 
-**内置预设默认免审批**（每个 agent 用自己官方的机制，不是统一开关）：kiro `--trust-all-tools`、gemini `--acp --approval-mode yolo --skip-trust`、qoder `--acp --yolo`、opencode 写进沙箱 `opencode.json` 的 `"permission": "allow"`（它没有 ACP 可用的 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`、cline `--acp --auto-approve true`、claude-code 会话建立后 `session/set_mode bypassPermissions`、codex `agent-full-access`。自己改过 `--args` 就按你的来；边缘情况下 agent 仍可能发权限请求（如 claude-code 的 ask 规则），WeMind 默认拒绝，要全部放行设 `WEMIND_ACP_AUTO_ALLOW=1`。各 agent 的准确参数与出处见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §5。
+**内置预设默认免审批**（每个 agent 用自己官方的机制，不是统一开关）：kiro `--trust-all-tools`、gemini `--acp --approval-mode yolo --skip-trust`、qoder `--acp --yolo`、cline `--acp --auto-approve true`、opencode 写进沙箱 `opencode.json` 的 `"permission": "allow"`（它没有 ACP 可用的 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code 会话建立后 `session/set_mode bypassPermissions`、codex `agent-full-access`。想收紧时**不用改预设**：`--args` 整段替换启动参数，`DSH_PERMISSION_MODE` / `INITIAL_AGENT_MODE` 这类审批开关属于「默认值」（`envDefaults`：daemon 进程环境里同名变量优先），`WEMIND_ACP_SESSION_MODE=0` 可关掉 claude-code / codex 的会话模式切换（其它非空值 = 换成该 modeId）。边缘情况下 agent 仍可能发权限请求（如 claude-code 的 ask 规则），WeMind 默认拒绝，要全部放行设 `WEMIND_ACP_AUTO_ALLOW=1`。各 agent 的准确参数与出处见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §5。
 
 > 详细步骤、各 agent 需确认的 4 件事、MCP 沙箱差异、验证方法见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)。
 >

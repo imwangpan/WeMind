@@ -22,6 +22,7 @@ import { readProfileDefaultModel } from "./profile-model.js";
  *  - `WEMIND_BRAIN_INHERIT`    是否继承真实配置目录的记忆/规则（默认 1；0 关闭）
  *  - `WEMIND_BRAIN_REAL_HOME`  覆盖被继承的真实配置目录（默认取该 agent 的 `realHome`）
  *  - `WEMIND_BRAIN_INHERIT_DIRS` 覆盖继承的子目录清单（逗号/空格分隔）
+ *  - `WEMIND_ACP_SESSION_MODE` 覆盖预设的会话模式（`session/set_mode`）：`0`/`false`/`off` 关掉该调用，其它非空值 = 用该 modeId
  *  - `KIRO_CLI_BIN`            旧的 kiro 专用覆盖（仅 kiro agent、且未设 WEMIND_BRAIN_BIN 时仍生效）
  *  ② 账号级持久配置（`<数据目录>/brain.json`，见 brain-config.ts）：顶层 = 对话大脑，`worker` 段 = 任务 worker（缺省跟随顶层）；每段可带 `agent` / `bin` / `args` / `shell` / `homeEnvVar`，另有按 agent 名存启动覆盖的 `presets` 段。写入磁盘后任何入口重启都能复现，切换用 `wemind brain set <agent 名>`。
  *  ③ `auto`（未配置时的兜底）：按 AUTO_PROBE_ORDER 取第一个二进制可解析的 agent；一个都没有则标记 unavailable，由启动校验明确报错（不再「静默跑起来、第一条消息才炸」）。
@@ -49,7 +50,8 @@ export type AcpAgentPreset = {
   mcpFormat?: "kiro" | "opencode"; // MCP 配置文件的组织格式（默认 kiro）
   mcpConfigFile?: string; // MCP 配置文件相对「配置目录」的路径（默认 settings/mcp.json）
   catalogFile?: string; // 可选 MCP 目录来源文件相对 realHome 的路径（默认 settings/mcp.json）
-  env?: Record<string, string>; // 额外注入的环境变量；值里 %HOME% → 沙箱根目录
+  env?: Record<string, string>; // 额外注入的环境变量（强制；值里 %HOME% → 沙箱根目录）
+  envDefaults?: Record<string, string>; // 默认值：父进程已设同名变量时不覆盖。审批类开关（DSH_PERMISSION_MODE / INITIAL_AGENT_MODE）用它，部署方可用环境变量收紧权限
   // —— 协议/能力差异（按 agent 覆盖；默认保持 kiro/opencode 旧行为）——
   restore?: "load" | "resume"; // 恢复会话的方式：load（默认）或 resume（如 DSH）
   firstFrameMs?: number; // 首帧超时覆盖（默认 25s；慢启动/committed-only agent 可放宽）
@@ -150,7 +152,8 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     // 免审批：DSH 没有启动 flag，也没有会话级权限配置项；`DSH_PERMISSION_MODE` 是官方 bundle 读的默认值来源
     // （文档正文未收录，升级后若失效见 docs/接入-DeepSeek.md），取值 danger-full-access = 绕过文件沙箱、不产生提权请求。
     // 注意 `approval.policy: never` 是「不问并拒绝」，不能单独拿来放行——这里只用 danger-full-access。
-    env: { DSH_PERMISSION_MODE: "danger-full-access" },
+    // 放在 envDefaults：daemon 进程里显式设了同名变量（如 workspace-write）时以用户为准（可收紧）。
+    envDefaults: { DSH_PERMISSION_MODE: "danger-full-access" },
   },
 
   // Qoder CLI（官方原生 ACP，qodercli 1.1.78 实测）。
@@ -218,6 +221,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // Claude Code：官方维护的 ACP 适配器 @agentclientprotocol/claude-agent-acp（npx 运行；需 Claude Code 登录/ANTHROPIC_API_KEY；**Node ≥22**）。
   // 旧包 @zed-industries/claude-code-acp 已弃用并改名（0.16.2 停更）。适配器**不解析** --dangerously-skip-permissions 之类的 CLI flag，
   // 免审批走 ACP：会话建立后 `session/set_mode {modeId:"bypassPermissions"}`（新旧包都支持；见 sessionMode）。
+  // 以 root 运行且未设 `IS_SANDBOX=1` 时该模式不可用——会话回包的 availableModes 里没有它，applySessionMode 会跳过并记日志。
   "claude-code": {
     name: "claude-code",
     bin: "npx",
@@ -226,15 +230,17 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     shell: true,
     sessionMode: "bypassPermissions",
   },
-  // Codex：社区适配器 codex-acp（agentclientprotocol/codex-acp，需自行安装；Codex 本身暂不原生支持 ACP）。
+  // Codex：社区适配器 codex-acp（agentclientprotocol/codex-acp，npm 包 `@agentclientprotocol/codex-acp`，需自行安装）。
   // codex-acp **不解析** CLI 参数（codex 的 --yolo/--full-auto 都不适用）；免审批走 ACP `session/set_mode {modeId:"agent-full-access"}`
   // （= approval never + sandbox danger-full-access），并同时用 README 记录的环境变量 INITIAL_AGENT_MODE 兜底（旧版本无 set_mode 时仍生效）。
+  // npm 全局安装在 Windows 产出 codex-acp.cmd（无 .exe），故 binWin 写 .cmd + shell（与 npx 适配器同理）；standalone 二进制用 --bin 指定。
   codex: {
     name: "codex",
     bin: "codex-acp",
-    binWin: "codex-acp.exe",
+    binWin: "codex-acp.cmd",
     args: [],
-    env: { INITIAL_AGENT_MODE: "agent-full-access" },
+    shell: true,
+    envDefaults: { INITIAL_AGENT_MODE: "agent-full-access" },
     sessionMode: "agent-full-access",
   },
 };
@@ -282,7 +288,8 @@ export function acpArgsWarning(
   if (binOverridden) return null;
   const markers = acpModeTokens(name);
   if (!markers.length) return null;
-  if (args.some((a) => markers.includes(a))) return null;
+  // 宽匹配：任何含 `acp` 的 token 都算（`--experimental-acp` 是 gemini 旧版仍在用的等价开关，不能被判成漏参数）
+  if (args.some((a) => /acp/i.test(a))) return null;
   return `args 里没有 ${name} 的 ACP 模式参数（预设是 ${markers.map((m) => `\`${m}\``).join(" / ")}）——进程可能起得来但不会说 ACP，首条消息会握手超时。请把它一起写回去，或改用 --extra-args 只追加。`;
 }
 
@@ -290,7 +297,7 @@ export function acpArgsWarning(
 export function acpArgsHint(ag: ResolvedAgent): string {
   if (ag.binOverridden) return ""; // 自定义入口/包装脚本可能自带 ACP 模式，静态判断不可靠
   const markers = acpModeTokens(ag.name);
-  if (!markers.length || ag.args.some((a) => markers.includes(a))) return "";
+  if (!markers.length || ag.args.some((a) => /acp/i.test(a))) return "";
   return `（当前 args=[${ag.args.join(" ")}] 里没有 ${markers.map((m) => `\`${m}\``).join(" / ")}——若覆盖过 --args，确认没漏 ACP 模式参数；也可改用 --extra-args 只追加）`;
 }
 
@@ -346,6 +353,8 @@ export type ResolvedAgent = {
   mcpConfigFile: string;
   catalogFile: string;
   env: Record<string, string>;
+  /** 预设给的「默认环境变量」：父进程已设同名变量时不覆盖（用于审批类开关，部署方可以收紧）。 */
+  envDefaults: Record<string, string>;
   restore?: "load" | "resume";
   firstFrameMs?: number;
   heartbeatMs?: number;
@@ -371,6 +380,25 @@ export type ResolvedAgent = {
   /** bin 是否来自覆盖（env / brain.json），而不是预设——静态 ACP 标记检查据此跳过（自定义入口可能自带 ACP 模式）。 */
   binOverridden: boolean;
 };
+
+/** 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向沙箱 → 预设强制 `env` → 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。 */
+export function agentEnv(
+  ag: ResolvedAgent,
+  home: string,
+  skipped: string[] = [],
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把沙箱目录传给 agent
+  for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
+  for (const [k, v] of Object.entries(ag.envDefaults ?? {})) {
+    if (process.env[k] !== undefined) {
+      skipped.push(k);
+      continue;
+    }
+    env[k] = v.replaceAll("%HOME%", home);
+  }
+  return env;
+}
 
 /** 该角色「选 agent」的环境变量：worker 先看 `WEMIND_WORKER_BRAIN`，未设则回落 `WEMIND_BRAIN`。 */
 function envKeyFor(role: AgentRole): string | undefined {
@@ -493,6 +521,12 @@ function resolveAgentCore(
     ? dirsEnv.split(/[,\s]+/).filter(Boolean)
     : (preset.inheritDirs ?? []);
 
+  // 会话模式：预设默认；`WEMIND_ACP_SESSION_MODE=0/false/off` 关闭（让 agent 回到自己的审批流程），
+  // 其它非空值 = 覆盖成该 modeId（自定义 agent 用）。环境变量是一次性覆盖，持久值仍以预设为准。
+  const modeEnv = process.env.WEMIND_ACP_SESSION_MODE?.trim();
+  const modeOff = !!modeEnv && ["0", "false", "off", "no"].includes(modeEnv.toLowerCase());
+  const sessionMode = modeOff ? undefined : modeEnv || preset.sessionMode;
+
   return {
     name: preset.name,
     bin,
@@ -508,6 +542,7 @@ function resolveAgentCore(
     mcpConfigFile: preset.mcpConfigFile ?? "settings/mcp.json",
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},
+    envDefaults: preset.envDefaults ?? {},
     restore: preset.restore,
     firstFrameMs: preset.firstFrameMs,
     heartbeatMs: preset.heartbeatMs,
@@ -518,7 +553,7 @@ function resolveAgentCore(
     model,
     realProfile: preset.realProfile,
     mcpViaAcp: preset.mcpViaAcp ?? false,
-    sessionMode: preset.sessionMode,
+    sessionMode,
     requestedKey,
     source,
     known,

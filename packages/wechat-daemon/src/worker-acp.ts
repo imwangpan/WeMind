@@ -7,7 +7,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { WORKER_HOME, workerMcpServers } from "./worker-sandbox.js";
 import { spawnAgent } from "./spawn-agent.js";
 import { normalizeSessionMap, sessionKey } from "./session-map.js";
-import { acpArgsHint, type ResolvedAgent } from "./brain-agents.js";
+import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
 
 /**
  * worker ACP 连接：**一条连接＝一个 ACP agent 进程**，约 70% 复制自 acp-brain.ts，差异：
@@ -383,10 +383,9 @@ export class WorkerConn {
   private async ensureProcess(): Promise<void> {
     if (this.isAlive() && this.initialized) return;
     this.kill();
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    if (this.agent.homeEnvVar) env[this.agent.homeEnvVar] = WORKER_HOME; // 配置目录（MCP/记忆）走 WORKER_HOME 沙箱
-    for (const [k, v] of Object.entries(this.agent.env ?? {}))
-      env[k] = v.replaceAll("%HOME%", WORKER_HOME);
+    const kept: string[] = [];
+    const env = agentEnv(this.agent, WORKER_HOME, kept); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
+    if (kept.length) dlog(`${this.id} env defaults kept from parent: ${kept.join(",")}`);
     const cwd = this.effectiveCwd();
     const proc = spawnAgent(this.agent, {
       cwd, // 任务工作目录（本地派发可指定，否则默认 WORKER_CWD），区别于沙箱
@@ -436,9 +435,23 @@ export class WorkerConn {
     }
   }
 
+  /** 从 `session/new|load|resume` 的回包里取可用模式 id；agent 不报 `modes` 时返回 null（=不校验，照样尝试）。 */
+  private static availableModeIds(res: any): string[] | null {
+    const list = res?.modes?.availableModes;
+    if (!Array.isArray(list)) return null;
+    const ids = list.map((m: any) => String(m?.id ?? m)).filter(Boolean);
+    return ids.length ? ids : null;
+  }
+
   /** 会话建立/恢复后切到预设声明的模式（免审批）；失败只记日志、不抛——审批请求仍由应答器兜底。 */
-  private async applySessionMode(sid: string): Promise<void> {
+  private async applySessionMode(sid: string, modes: string[] | null = null): Promise<void> {
     if (!this.agent.sessionMode) return;
+    if (modes && !modes.includes(this.agent.sessionMode)) {
+      dlog(
+        `${this.id} session mode ${this.agent.sessionMode} 不在可用模式 [${modes.join(",")}] 里——跳过；审批请求仍由应答器处理`,
+      );
+      return;
+    }
     try {
       await this.request(
         "session/set_mode",
@@ -466,13 +479,13 @@ export class WorkerConn {
         this.agent.restore === "resume" ? ["resume"] : ["load", "resume"];
       for (const method of methods) {
         try {
-          await this.request(
+          const restored = await this.request(
             `session/${method}`,
             { sessionId: saved, cwd: this.effectiveCwd(), mcpServers },
             REQ_TIMEOUT,
           );
           await this.applyModel(saved);
-          await this.applySessionMode(saved);
+          await this.applySessionMode(saved, WorkerConn.availableModeIds(restored));
           this.sessions.set(key, saved);
           dlog(
             `${this.id} session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`,
@@ -494,7 +507,7 @@ export class WorkerConn {
     )) as { sessionId?: string };
     if (!res?.sessionId) throw new Error("session/new returned no sessionId");
     await this.applyModel(res.sessionId);
-    await this.applySessionMode(res.sessionId);
+    await this.applySessionMode(res.sessionId, WorkerConn.availableModeIds(res));
     this.sessions.set(key, res.sessionId);
     // 重新读改写：多个连接并存时，别用陈旧的记录整张覆盖（会抹掉别的任务刚写的 key）
     const fresh = loadSessionMap(this.agent);

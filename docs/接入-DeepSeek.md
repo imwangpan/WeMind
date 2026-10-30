@@ -127,7 +127,7 @@
   - stdio `mcpServers` 被 `session/new` 接受（用一个假 stdio MCP 验证）；HTTP 能力已广告。
   - **stdout 不纯**：DSH 会输出 `[llm-deepseek-account] model listing ...` 这类非 JSON 行；当前 `acp-brain.ts` 的解析器会忽略，不影响 JSON-RPC，但排查时不要把它当协议帧。
 
-- **免审批 / 最高权限（2026-10-30）**：DSH **没有启动 flag**（`dsh --profile acp --help` 只有 `-h`），ACP 也**不广告权限配置项**（`set_config_option` 只认 `model` 与 `reasoning_effort`）。WeMind 预设注入 env `DSH_PERMISSION_MODE=danger-full-access`——这是官方 bundle（`packages/bundle/base` 的 sandbox-policy/approval）读取的默认值来源（**官方文档正文未收录**，升级后可能失效），效果 = 绕过文件沙箱、不产生提权请求。**别把 `approval.policy: never` 当放行**：它的语义是「不问、直接在服务内部拒绝」，必须配合 `danger-full-access`。若该 env 失效，退化为 workspace-write（越界写被拒 + 发 `session/request_permission`，宿主默认拒绝）。等效的手动配置：真实 `~/.dsh/profiles/acp/cordis.patch.yml` 写 `- id: sandbox-policy / config.mode: danger-full-access`（会被原样复制进沙箱，但同时改变终端 dsh 的权限）。
+- **免审批 / 最高权限（2026-10-30）**：DSH **没有启动 flag**（`dsh --profile acp --help` 只有 `-h`），ACP 也**不广告权限配置项**（`set_config_option` 只认 `model` 与 `reasoning_effort`）。WeMind 预设以 `envDefaults` 注入 `DSH_PERMISSION_MODE=danger-full-access`——这是官方 bundle（`packages/bundle/base` 的 sandbox-policy/approval）读取的默认值来源（**官方文档正文未收录**，升级后可能失效），效果 = 绕过文件沙箱、不产生提权请求。**它是「默认值」不是强制值**：daemon 进程环境里已设同名变量时以你的为准（例如设 `DSH_PERMISSION_MODE=workspace-write` 收紧），日志记 `env defaults kept from parent: DSH_PERMISSION_MODE`。**别把 `approval.policy: never` 当放行**：它的语义是「不问、直接在服务内部拒绝」，必须配合 `danger-full-access`。若该 env 失效，退化为 workspace-write（越界写被拒 + 发 `session/request_permission`，宿主默认拒绝）。等效的手动配置：真实 `~/.dsh/profiles/acp/cordis.patch.yml` 写 `- id: sandbox-policy / config.mode: danger-full-access`（会被原样复制进沙箱，但同时改变终端 dsh 的权限）。
 
 - **版本敏感**：更早的 `0.1.0-rc.6` 被社区实测为「仅支持新会话、不广告 load/resume/list、只返回已提交文本、拒绝非空 `mcpServers`」（见 `dsh-openclaw-acp` 的 README）。所以**必须锁版本、以实际安装版本实测为准**。
 
@@ -172,7 +172,7 @@
 | 认证 | 桌面登录走 `deepseek-account`；默认 `deepseek-official` 需 `DEEPSEEK_API_KEY` | `DEEPSEEK_API_KEY` | API key |
 | 模型 | `deepseek-account/{deepseek-flash,v4-pro}`；需 `set_config_option` 切换 | 会话内选择 | 自选 |
 | 反向请求 | 本轮未观察到；权限请求可能存在 | 可能有 | 无 |
-| 沙箱 | DSH `workspace-write` | 同源 | 无 |
+| 沙箱 | DSH 默认 `workspace-write`；WeMind 预设用 `DSH_PERMISSION_MODE=danger-full-access` 放开（父进程同名变量优先） | 同源 | 无 |
 | 供应链/维护 | 官方 | 第三方 | 自己 |
 
 ---
@@ -508,7 +508,7 @@ wemind brain check           # 真起进程跑 initialize + session/new（60s �
 2. 杀 daemon 再启动，追问「上一轮我说了什么」→ 走 `session/resume`，上下文仍在。
 3. 发一个 >30s 的任务 → 不因首帧超时被杀；微信能看到「步骤」进度，且静默期**不会**每 15s 刷一条「还在思考」。
 4. 发「新会话」→ 走 `session/new`，旧上下文清空。
-5. 触发一次越界写（如让它在 `BRAIN_HOME` 外写文件）→ 观察 permission 请求被应答（拒绝或按 env 放行），**不能卡死**。
+5. 越界写与权限请求：预设默认 `DSH_PERMISSION_MODE=danger-full-access`，越界写**不再被拒、也不会发 permission 请求**（2026-10-30 起）。想验证应答器，先在 daemon 环境设 `DSH_PERMISSION_MODE=workspace-write`，再让它在 `BRAIN_HOME` 外写文件 → 观察 permission 请求被应答（拒绝或按 `WEMIND_ACP_AUTO_ALLOW` 放行），**不能卡死**。
 6. ✅ 发一张图片 → 友好拒绝（「当前大脑暂不支持看图…」；日志 `image unsupported by current brain; rejected gracefully`，无 `-32602` 重试；已实测 2026-10-24）。
 7. 两个账号同时跑 → 各自 `brain-home` / `worker-home` 隔离，互不抢会话。
 8. ✅ `加载 <MCP>` → 下一条消息生效（`session/new|resume` 带 `mcpServers`）；`wechat` 仍被禁止；DSH 不读 kiro 的 MCP 文件（M3 已实现，真机验证见附录）。
@@ -536,7 +536,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | R6 | 第三方 `deepseek-acp` 供应链 / 维护 | 长期不可控 | 只作冒烟/回退；锁版本；不默认启用 |
 | R7 | 版本是 RC，ACP 行为可能变化 | 升级即坏 | 锁 `0.2.1-rc.2`；升级先跑 M0 脚本；文档记录版本 |
 | R8 | Node ≥22（社区包明确；官方以安装包为准），而仓库声明 ≥20 | 旧环境起不来 | 文档标注；`agentProblem` 加 `minNode` 检查；M0 记录 |
-| R9 | DSH 的 Windows ACL 沙箱只限制普通 NTFS 写，不限制读/网络/进程可见性 | 微信侧提示注入可外带本机文件 | `allowFrom` 登录者白名单；专用 OS 账号；`workspace-write`；不要把敏感目录设为 worker cwd |
+| R9 | DSH 的 Windows ACL 沙箱只限制普通 NTFS 写，不限制读/网络/进程可见性；预设默认 `danger-full-access` 连写限制也放开 | 微信侧提示注入可外带本机文件 | `allowFrom` 登录者白名单；专用 OS 账号；需要时在 daemon 环境设 `DSH_PERMISSION_MODE=workspace-write` 收紧（预设只是默认值）；不要把敏感目录设为 worker cwd |
 | R10 | 模型/路由选择 | 不干预就落到 official 路由，需 API key（默认已由真实 profile 里的 `- id: acp` 跟随用户日常默认，见 R18） | 配置里的 `model` + 真实 profile 的 `- id: acp`（沙箱原样复制）+ `session/set_config_option`（显式覆盖/兜底）；桌面登录用 `deepseek-account` |
 | R11 | 桌面端 CLI 只有 `dsh.cmd`，无无扩展名 `dsh` | `onPath("dsh")` 找不到，`auto`/agent 判不可用 | 配置里的 `binWin: "dsh.cmd"`；或让 `onPath` 对 `.cmd` 补试；`WEMIND_BRAIN_BIN` 绝对路径兜底 |
 | R12 | 多账号 / pm2 环境变量传递 | key 不生效 | 文档给 pm2 / `Start-Process -Environment` 示例 |

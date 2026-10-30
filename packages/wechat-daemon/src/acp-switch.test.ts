@@ -66,9 +66,11 @@ function handle(f) {
   const delay = (mode === "slow-init" && f.method === "initialize") || (mode === "slow-prompt" && f.method === "session/prompt") ? 700 : 0;
   setTimeout(() => {
     if (f.method === "initialize") out({ jsonrpc: "2.0", id: f.id, result: { protocolVersion: 1, agentCapabilities: {} } });
-    else if (f.method === "session/new") out({ jsonrpc: "2.0", id: f.id, result: { sessionId: "sess-new" } });
+    else if (f.method === "session/new") out({ jsonrpc: "2.0", id: f.id, result: mode === "modes" ? { sessionId: "sess-new", modes: { availableModes: [{ id: "default", name: "Default" }], currentModeId: "default" } } : { sessionId: "sess-new" } });
     else if (f.method === "session/load" || f.method === "session/resume") out({ jsonrpc: "2.0", id: f.id, result: {} });
     else if (f.method === "session/set_config_option") out({ jsonrpc: "2.0", id: f.id, result: {} });
+    // 只有 "modes" 模式的假 agent 认识 session/set_mode；其余回 -32601，模拟不支持该方法的 agent
+    else if (f.method === "session/set_mode" && mode === "modes") out({ jsonrpc: "2.0", id: f.id, result: {} });
     else if (f.method === "session/prompt") {
       out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: f.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "答:" + (f.params.prompt[0].text || "").slice(0, 20) } } } });
       out({ jsonrpc: "2.0", id: f.id, result: { stopReason: "end_turn" } });
@@ -372,6 +374,24 @@ describe("会话（ACP 侧写入 + 严格恢复）", () => {
     expect(pointerOf("u1")).toBe("sess-cur"); // 原来的当前会话记录原样
     expect(methods().some((m) => m.startsWith("session/new"))).toBe(false); // 没有偷偷开新会话
     expect(entries().some((x) => x.sessionId === "sess-ghost")).toBe(false); // 也没登记一条假会话
+  });
+
+  it("免审批会话模式：会话建立后发 session/set_mode；agent 不支持（-32601）时回合照常成功", async () => {
+    setup(); // 默认假 agent 不认识 session/set_mode（回 -32601），模拟不支持的 agent
+    setAgent("brain", { ...getAgent("brain"), sessionMode: "bypassPermissions" });
+    expect(await askBrain("u1", "你好")).toContain("答:"); // 切模式失败不拖垮回合
+    const idxNew = methods().findIndex((m) => m.startsWith("session/new"));
+    const idxMode = methods().findIndex((m) => m.startsWith("session/set_mode"));
+    expect(idxMode).toBeGreaterThan(idxNew); // 必须在会话建立之后（先有 sessionId 才能切）
+    expect(methods()[idxMode]).toContain('"modeId":"bypassPermissions"');
+    expect(methods()[idxMode]).toContain('"sessionId":"sess-new"');
+  });
+
+  it("agent 报告的 availableModes 不含目标模式：跳过 set_mode（不白试），回合仍成功", async () => {
+    setup("modes"); // 这个假 agent 只报 default 一种模式
+    setAgent("brain", { ...getAgent("brain"), sessionMode: "bypassPermissions" });
+    expect(await askBrain("u1", "你好")).toContain("答:");
+    expect(methods().some((m) => m.startsWith("session/set_mode"))).toBe(false);
   });
 });
 

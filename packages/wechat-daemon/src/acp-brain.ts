@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME, activeMcpServers } from "./mcp-sandbox.js";
 import { getAgent } from "./agent-slot.js";
-import { acpArgsHint, type ResolvedAgent } from "./brain-agents.js";
+import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
 import { pidRecordOf, writePidRecords } from "./pid-record.js";
 import { spawnAgent } from "./spawn-agent.js";
 import {
@@ -343,10 +343,9 @@ function promptRequest(ag: ResolvedAgent, params: unknown): Promise<any> {
 async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   if (isAlive() && initialized) return;
   reset();
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  if (ag.homeEnvVar) env[ag.homeEnvVar] = BRAIN_HOME; // 把 brain 沙箱目录传给 agent
-  // 配置里声明的额外环境变量（%HOME% → 沙箱根），如 opencode 的 OPENCODE_DISABLE_PROJECT_CONFIG
-  for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", BRAIN_HOME);
+  const kept: string[] = [];
+  const env = agentEnv(ag, BRAIN_HOME, kept); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
+  if (kept.length) dlog(`env defaults kept from parent: ${kept.join(",")}`); // 部署方显式设置的审批类开关
   const proc = spawnAgent(ag, { cwd: BRAIN_HOME, env });
   child = proc;
   dlog(`spawn ${ag.name} acp pid=${proc.pid} bin=${ag.bin} args=[${ag.args.join(" ")}]`);
@@ -394,11 +393,29 @@ async function applyModel(ag: ResolvedAgent, sid: string): Promise<void> {
   }
 }
 
+/** 从 `session/new|load|resume` 的回包里取可用模式 id；agent 不报 `modes` 时返回 null（=不校验，照样尝试）。 */
+function availableModeIds(res: any): string[] | null {
+  const list = res?.modes?.availableModes;
+  if (!Array.isArray(list)) return null;
+  const ids = list.map((m: any) => String(m?.id ?? m)).filter(Boolean);
+  return ids.length ? ids : null;
+}
+
 /** 会话建立/恢复后切到预设声明的模式（免审批：claude-code 的 bypassPermissions、codex 的 agent-full-access）。
  *  **失败只记日志、不抛**：模式不可用（如 claude-code 以 root 跑却没有 IS_SANDBOX）时进程仍可用，
  *  审批请求继续由应答器处理（默认拒绝，WEMIND_ACP_AUTO_ALLOW=1 放行）；抛错反而会把整轮打成失败。 */
-async function applySessionMode(ag: ResolvedAgent, sid: string): Promise<void> {
+async function applySessionMode(
+  ag: ResolvedAgent,
+  sid: string,
+  modes: string[] | null = null,
+): Promise<void> {
   if (!ag.sessionMode) return;
+  if (modes && !modes.includes(ag.sessionMode)) {
+    dlog(
+      `session mode ${ag.sessionMode} 不在 agent 报告的可用模式 [${modes.join(",")}] 里——跳过；审批请求仍由应答器处理`,
+    );
+    return;
+  }
   try {
     await request("session/set_mode", { sessionId: sid, modeId: ag.sessionMode }, REQ_TIMEOUT);
     dlog(`session mode set ${ag.sessionMode}`);
@@ -420,13 +437,13 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
       ag.restore === "resume" ? ["resume"] : ["load", "resume"];
     for (const method of methods) {
       try {
-        await request(
+        const restored = await request(
           `session/${method}`,
           { sessionId: saved, cwd: BRAIN_HOME, mcpServers },
           REQ_TIMEOUT,
         );
         await applyModel(ag, saved);
-        await applySessionMode(ag, saved);
+        await applySessionMode(ag, saved, availableModeIds(restored));
         userSessions.set(userId, saved);
         markUsed(ag.name, userId, saved); // 会话登记表：把它顶到「最近使用」（列表按此排序）
         dlog(`session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
@@ -441,7 +458,7 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
   };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   await applyModel(ag, res.sessionId);
-  await applySessionMode(ag, res.sessionId);
+  await applySessionMode(ag, res.sessionId, availableModeIds(res));
   userSessions.set(userId, res.sessionId);
   map[keyOf(ag, userId)] = res.sessionId;
   saveSessionMap(map);
@@ -565,9 +582,13 @@ export async function resumeSession(
     let lastErr = "";
     for (const method of methods) {
       try {
-        await request(`session/${method}`, { sessionId, cwd: BRAIN_HOME, mcpServers }, REQ_TIMEOUT);
+        const restored = await request(
+          `session/${method}`,
+          { sessionId, cwd: BRAIN_HOME, mcpServers },
+          REQ_TIMEOUT,
+        );
         await applyModel(ag, sessionId);
-        await applySessionMode(ag, sessionId);
+        await applySessionMode(ag, sessionId, availableModeIds(restored));
         userSessions.set(userId, sessionId);
         const map = loadSessionMap(ag);
         map[keyOf(ag, userId)] = sessionId;

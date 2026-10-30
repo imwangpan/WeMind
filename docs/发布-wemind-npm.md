@@ -202,7 +202,7 @@ check-version（包名+版本一致性）→ npm ci → lint → format:check �
 
 ### 4.9 `packages/wechat-daemon/README.md` 重写
 
-从「源码包里的一张说明」改成**面向 npm 用户的落地页**：标题就是 `@wemind/cli — 命令 wemind`、安装（含「`npx` 必须写全包名」的显式提醒）、三步上手、命令表、常驻原理、数据与安全（`--trust-all-tools` 的告警必须显眼）、环境变量、与 MCP 形态的对比、文档外链。
+从「源码包里的一张说明」改成**面向 npm 用户的落地页**：标题就是 `@wemind/cli — 命令 wemind`、安装（含「`npx` 必须写全包名」的显式提醒）、三步上手、命令表、常驻原理、数据与安全（「内置预设默认免审批」的告警必须显眼）、环境变量、与 MCP 形态的对比、文档外链。
 
 ---
 
