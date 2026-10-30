@@ -96,6 +96,8 @@ wemind brain check                      # 真机自检（真实 ACP 握手）
 
 ```
 agent：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
+参数：   WEMIND_BRAIN_ARGS（整段替换）  >  brain.json 的 args  >  presets[agent 名].args  >  预设 args
+追加：   WEMIND_BRAIN_EXTRA_ARGS  >  brain.json 的 extraArgs  >  presets[agent 名].extraArgs（拼在「参数」结果之后）
 ```
 
 - **`auto`（未配置时的默认）**：按 `kiro → opencode → gemini → deepseek → qoder` 取第一个**二进制在 PATH 上可解析**的 agent；适配器类（`claude-code`/`codex`）不参与（`npx` 几乎总存在，会误选）。
@@ -109,7 +111,8 @@ agent：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
 |------|------|------|
 | `WEMIND_BRAIN` | 选用哪个 agent（见 §5），如 `kiro` / `opencode` / `auto` | `auto`（自动探测） |
 | `WEMIND_BRAIN_BIN` | 覆盖二进制（绝对路径或 PATH 上的名字） | 默认自动在 PATH 解析 |
-| `WEMIND_BRAIN_ARGS` | 覆盖 ACP 启动参数（**空格分隔**） | 内置默认值 |
+| `WEMIND_BRAIN_ARGS` | 覆盖 ACP 启动参数（**空格分隔、整段替换**） | 内置默认值 |
+| `WEMIND_BRAIN_EXTRA_ARGS` | 追加 ACP 启动参数（**空格分隔**，拼在预设/覆盖参数之后；只加开关时用它，不会漏掉 `acp`） | 无 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「配置目录环境变量名」（指向 brain 沙箱） | 内置默认值 |
 | `WEMIND_BRAIN_SHELL` | 是否经 shell 启动（`1`/`true` 开）；npx/`.cmd`/`.bat` 类适配器在 Windows 需要 | 内置默认值（默认 false） |
 | `WEMIND_BRAIN_INHERIT` | 是否继承真实配置目录的记忆/规则/技能（见 §6.5） | `1`（开） |
@@ -123,6 +126,7 @@ agent：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
 ```
 二进制：WEMIND_BRAIN_BIN  >  (kiro agent 时) KIRO_CLI_BIN  >  brain.json 的 bin  >  PATH 查找  >  agent 裸名
 参数：  WEMIND_BRAIN_ARGS（空格切分）  >  brain.json 的 args  >  agent args
+追加：  WEMIND_BRAIN_EXTRA_ARGS（空格切分）  >  brain.json 的 extraArgs  >  （拼在上面结果之后）
 目录变量：WEMIND_BRAIN_HOME_ENV  >  brain.json 的 homeEnvVar  >  agent homeEnvVar
 ```
 

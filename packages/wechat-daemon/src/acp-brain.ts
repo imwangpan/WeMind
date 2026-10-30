@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME, activeMcpServers } from "./mcp-sandbox.js";
 import { getAgent } from "./agent-slot.js";
-import type { ResolvedAgent } from "./brain-agents.js";
+import { acpArgsHint, type ResolvedAgent } from "./brain-agents.js";
 import { pidRecordOf, writePidRecords } from "./pid-record.js";
 import { spawnAgent } from "./spawn-agent.js";
 import {
@@ -358,14 +358,22 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   });
   // 只在"退出的就是当前 child"时才重置，避免旧进程迟到的 exit 误杀新进程
   proc.on("exit", (code) => {
-    dlog(`acp exited code=${code}`);
+    // A：握手前就退出时，把「args 可能漏了 ACP 模式参数」直接写进日志（比只报一行 exited 好查）
+    const hint = child === proc && !initialized ? acpArgsHint(ag) : "";
+    dlog(`acp exited code=${code}${hint}`);
     if (child === proc) reset();
   });
   proc.on("error", (e) => {
     dlog(`acp error ${String(e)}`);
     if (child === proc) reset();
   });
-  await request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
+  try {
+    await request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
+  } catch (e) {
+    // A：initialize 超时/失败最常见的原因是 args 覆盖漏了 ACP 子命令——把诊断提示附在同一行日志里
+    dlog(`initialize failed: ${String(e)}${acpArgsHint(ag)}`);
+    throw e;
+  }
   initialized = true;
   dlog("initialized");
 }

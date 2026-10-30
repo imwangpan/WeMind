@@ -15,7 +15,8 @@ import { readProfileDefaultModel } from "./profile-model.js";
  *  - `WEMIND_BRAIN`            选「对话大脑」agent（默认 `auto`：自动探测已安装的 agent，见 AUTO_PROBE_ORDER）
  *  - `WEMIND_WORKER_BRAIN`     选「任务 worker」agent（未设则回落 `WEMIND_BRAIN`；与文件侧 `worker ?? 顶层` 的回退规则对称）
  *  - `WEMIND_BRAIN_BIN`        覆盖二进制（绝对路径或 PATH 上的名字）
- *  - `WEMIND_BRAIN_ARGS`       覆盖启动参数（空格分隔）
+ *  - `WEMIND_BRAIN_ARGS`       覆盖启动参数（空格分隔；**整段替换**）
+ *  - `WEMIND_BRAIN_EXTRA_ARGS` 追加启动参数（空格分隔；保留预设在前面，适合只加一个开关）
  *  - `WEMIND_BRAIN_HOME_ENV`   覆盖「配置目录环境变量名」
  *  - `WEMIND_BRAIN_SHELL`      是否经 shell 启动（1/true）
  *  - `WEMIND_BRAIN_INHERIT`    是否继承真实配置目录的记忆/规则（默认 1；0 关闭）
@@ -204,6 +205,36 @@ function onPath(exe: string): string | null {
  */
 export const AUTO_PROBE_ORDER = ["kiro", "opencode", "gemini", "deepseek", "qoder"] as const;
 
+/**
+ * 该 agent 预设里「进入 ACP 模式」的标记 token：从默认 args 中挑出含 `acp` 的项。
+ * 只用于整段替换 args 时的静态提醒；适配器（如 codex）的 args 为空 → 返回空数组（不检查）。
+ * 不能只查裸 `acp`：qoder 是 `--acp`、gemini 是 `--experimental-acp`、deepseek 是 `--profile acp`、claude-code 是适配器包名。
+ */
+export function acpModeTokens(name: string): string[] {
+  const preset = ACP_AGENT_PRESETS[name];
+  return preset ? preset.args.filter((a) => /acp/i.test(a)) : [];
+}
+
+/**
+ * 整段替换 args 时的静态提醒（**只提醒、不拒绝**）：新 args 里找不到该 agent 的 ACP 模式标记时返回文案。
+ * `binOverridden`（env / brain.json 指定了自定义 bin）时不检查——自定义入口/包装脚本可能自带 ACP 模式，静态判断不可靠。
+ */
+export function acpArgsWarning(name: string, args: string[], binOverridden: boolean): string | null {
+  if (binOverridden) return null;
+  const markers = acpModeTokens(name);
+  if (!markers.length) return null;
+  if (args.some((a) => markers.includes(a))) return null;
+  return `args 里没有 ${name} 的 ACP 模式参数（预设是 ${markers.map((m) => `\`${m}\``).join(" / ")}）——进程可能起得来但不会说 ACP，首条消息会握手超时。请把它一起写回去，或改用 --extra-args 只追加。`;
+}
+
+/** 运行时诊断：握手失败 / 进程在握手前退出时追加的提示；args 看起来正常、或 bin 是自定义入口时返回空串。 */
+export function acpArgsHint(ag: ResolvedAgent): string {
+  if (ag.binOverridden) return ""; // 自定义入口/包装脚本可能自带 ACP 模式，静态判断不可靠
+  const markers = acpModeTokens(ag.name);
+  if (!markers.length || ag.args.some((a) => markers.includes(a))) return "";
+  return `（当前 args=[${ag.args.join(" ")}] 里没有 ${markers.map((m) => `\`${m}\``).join(" / ")}——若覆盖过 --args，确认没漏 ACP 模式参数；也可改用 --extra-args 只追加）`;
+}
+
 /** agent 在该平台的「可执行文件名」（用于 PATH 探测）。 */
 function presetExe(preset: AcpAgentPreset): string {
   return process.platform === "win32" ? (preset.binWin ?? `${preset.bin}.exe`) : preset.bin;
@@ -276,6 +307,8 @@ export type ResolvedAgent = {
   available: boolean;
   /** 解析到的二进制绝对路径（`available` 时才有）。 */
   binPath: string | null;
+  /** bin 是否来自覆盖（env / brain.json），而不是预设——静态 ACP 标记检查据此跳过（自定义入口可能自带 ACP 模式）。 */
+  binOverridden: boolean;
 };
 
 /** 该角色「选 agent」的环境变量：worker 先看 `WEMIND_WORKER_BRAIN`，未设则回落 `WEMIND_BRAIN`。 */
@@ -350,13 +383,24 @@ function resolveAgentCore(
   const available = known && binPath !== null;
 
   const argsOverride = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_ARGS?.trim();
-  const args = argsOverride
+  const baseArgs = argsOverride
     ? argsOverride.split(/\s+/)
     : overrideCfg?.args && overrideCfg.args.length
       ? overrideCfg.args
       : presetOv?.args && presetOv.args.length
         ? presetOv.args
         : preset.args;
+  // 追加参数：与 args 的「整段替换」不同，extraArgs 永远拼在后面（保留预设里的 ACP 模式参数）。
+  // 来源优先级同 args：env > 本段（该角色）> presets[agent 名]。
+  const extraEnv = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_EXTRA_ARGS?.trim();
+  const extraArgs = extraEnv
+    ? extraEnv.split(/\s+/)
+    : overrideCfg?.extraArgs && overrideCfg.extraArgs.length
+      ? overrideCfg.extraArgs
+      : presetOv?.extraArgs && presetOv.extraArgs.length
+        ? presetOv.extraArgs
+        : [];
+  const args = [...baseArgs, ...extraArgs];
 
   const homeEnvVar =
     (opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_HOME_ENV?.trim()) ||
@@ -418,6 +462,7 @@ function resolveAgentCore(
     known,
     available,
     binPath,
+    binOverridden: !!explicitBin,
   };
 }
 
@@ -459,6 +504,7 @@ export function resolvePresetByName(
   if (cfg?.agent?.trim().toLowerCase() === key) {
     if (cfg.bin) base.bin = cfg.bin;
     if (cfg.args?.length) base.args = cfg.args;
+    if (cfg.extraArgs?.length) base.extraArgs = cfg.extraArgs;
     if (cfg.shell !== undefined) base.shell = cfg.shell;
     if (cfg.homeEnvVar) base.homeEnvVar = cfg.homeEnvVar;
     if (cfg.model) base.model = cfg.model;

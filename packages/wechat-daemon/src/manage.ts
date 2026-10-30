@@ -41,6 +41,7 @@ import {
   resolveAgent,
   agentProblem,
   presetAvailable,
+  acpArgsWarning,
   type ResolvedAgent,
 } from "./brain-agents.js";
 import {
@@ -528,7 +529,7 @@ function describeBrain(key: string): string {
   const ag = resolveAgent(cfg);
   const problem = agentProblem(ag);
   const cfgLine = cfg
-    ? `brain.json → agent=${cfg.agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}${cfg.shell !== undefined ? ` shell=${cfg.shell}` : ""}${cfg.model ? ` model=${cfg.model}` : ""}`
+    ? `brain.json → agent=${cfg.agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}${cfg.extraArgs ? ` extra_args=[${cfg.extraArgs.join(" ")}]` : ""}${cfg.shell !== undefined ? ` shell=${cfg.shell}` : ""}${cfg.model ? ` model=${cfg.model}` : ""}`
     : "（未设置 brain.json）";
   const lines = [
     `账号 ${key}`,
@@ -539,6 +540,9 @@ function describeBrain(key: string): string {
     `  可选 agent：${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
     `  自动探测顺序：${AUTO_PROBE_ORDER.join(" → ")}`,
   ];
+  // D：整段替换 args 后漏了 ACP 模式参数时提醒（只是提醒；运行时另有握手失败的诊断提示）
+  const argsWarn = acpArgsWarning(ag.name, ag.args, ag.binOverridden);
+  if (argsWarn) lines.push(`  ⚠️ ${argsWarn}`);
   // 用户层 profile 缺 `- id: acp` 时给出「你自己补上」的提示（WeMind 只原样同步配置，不替 agent 合成）
   const hint =
     ag.realProfile && ag.realHome && ag.inherit
@@ -548,11 +552,18 @@ function describeBrain(key: string): string {
   return lines.join("\n");
 }
 
-/** `wemind brain set <agent 名|auto>`：把选择按账号写入磁盘（可选 --bin/--args/--shell/--model；--restart 立即重启 daemon）。 */
+/** `wemind brain set <agent 名|auto>`：把选择按账号写入磁盘（可选 --bin/--args/--extra-args/--shell/--model；--restart 立即重启 daemon）。 */
 async function cmdBrainSet(
   agentName: string,
   key: string,
-  opts: { bin?: string; args?: string; shell?: boolean; model?: string; restart: boolean },
+  opts: {
+    bin?: string;
+    args?: string;
+    extraArgs?: string;
+    shell?: boolean;
+    model?: string;
+    restart: boolean;
+  },
 ): Promise<string> {
   const agent = agentName.trim().toLowerCase();
   if (agent !== "auto" && !ACP_AGENT_PRESETS[agent])
@@ -572,6 +583,7 @@ async function cmdBrainSet(
   const customized =
     opts.bin !== undefined ||
     opts.args !== undefined ||
+    opts.extraArgs !== undefined ||
     opts.shell !== undefined ||
     opts.model !== undefined;
   // 只选 agent（没带自定义启动参数）+ 没要求重启时，写入磁盘和「热切换」其实是同一件事：daemon 在跑且认桥就交给它一次做完——
@@ -587,14 +599,26 @@ async function cmdBrainSet(
   const patch: BrainConfig = { agent };
   if (opts.bin) patch.bin = opts.bin;
   if (opts.args !== undefined) patch.args = opts.args.trim() ? opts.args.trim().split(/\s+/) : [];
+  if (opts.extraArgs !== undefined)
+    patch.extraArgs = opts.extraArgs.trim() ? opts.extraArgs.trim().split(/\s+/) : [];
   if (opts.shell !== undefined) patch.shell = opts.shell;
   if (opts.model !== undefined) patch.model = opts.model.trim();
   // 读-改-写：保留 worker 段（任务侧独立选择）与 presets 段（按 agent 名存的启动覆盖），旧 agent 的覆盖自动迁移。
+  const before = loadBrainConfig(dir);
   const cfg = updateBrainConfig(patch, dir);
   const lines = [
-    `已设置 ${key} 的大脑：agent=${agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}${cfg.model ? ` model=${cfg.model}` : ""}`,
+    `已设置 ${key} 的大脑：agent=${agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}${cfg.extraArgs ? ` extra_args=[${cfg.extraArgs.join(" ")}]` : ""}${cfg.model ? ` model=${cfg.model}` : ""}`,
     `配置文件：${brainConfigPath(dir)}`,
   ];
+  // D：整段替换 args 时检查 ACP 模式标记（只提醒，不阻止写入）
+  if (opts.args !== undefined) {
+    const binOverridden =
+      opts.bin !== undefined ||
+      !!before?.presets?.[agent]?.bin ||
+      (before?.agent?.trim().toLowerCase() === agent && !!before?.bin);
+    const warn = acpArgsWarning(agent, cfg.args ?? [], binOverridden);
+    if (warn) lines.push(`⚠️ ${warn}`);
+  }
   if (opts.restart) {
     const dpid = readPid(dir, "daemon.pid");
     if (aliveOurs(dpid)) {
@@ -604,10 +628,14 @@ async function cmdBrainSet(
       lines.push(`daemon 未在运行，未重启（用 wemind start ${key} 启动）。`);
     }
   } else if (customized && bridgeReady(key)) {
-    // --bin/--args/--model 的改动其实可以由 `brain switch <同名 agent>` 当场应用（sameAgent 按这几项判「是不是同一个」）；--shell 不在判据里，只能重启。
-    const viaSwitch = opts.bin !== undefined || opts.args !== undefined || opts.model !== undefined;
+    // --bin/--args/--extra-args/--model 的改动其实可以由 `brain switch <同名 agent>` 当场应用（sameAgent 按这几项判「是不是同一个」）；--shell 不在判据里，只能重启。
+    const viaSwitch =
+      opts.bin !== undefined ||
+      opts.args !== undefined ||
+      opts.extraArgs !== undefined ||
+      opts.model !== undefined;
     lines.push(
-      `（带 --bin/--args/--shell/--model 的改动不能由 brain set 当场应用：控制桥只认 agent 名。重启后生效——wemind stop ${key} && wemind start ${key}${viaSwitch ? `；不想重启的话，接着执行 wemind brain switch ${agent} 也能当场应用（它按 name/bin/args/model 判断是不是同一个，改过就会真切换）` : ""}）`,
+      `（带 --bin/--args/--extra-args/--shell/--model 的改动不能由 brain set 当场应用：控制桥只认 agent 名。重启后生效——wemind stop ${key} && wemind start ${key}${viaSwitch ? `；不想重启的话，接着执行 wemind brain switch ${agent} 也能当场应用（它按 name/bin/args/model 判断是不是同一个，改过就会真切换）` : ""}）`,
     );
   } else if (daemonAlive(key)) {
     lines.push(
@@ -639,7 +667,15 @@ async function cmdBrainCheck(key: string): Promise<string> {
 /** brain 子命令派发：show（默认）/ set / unset / check。 */
 async function cmdBrain(rest: string[]): Promise<string> {
   const argv = [...rest];
-  const FLAGS = new Set(["--bin", "--args", "--shell", "--no-shell", "--model", "--restart"]);
+  const FLAGS = new Set([
+    "--bin",
+    "--args",
+    "--extra-args",
+    "--shell",
+    "--no-shell",
+    "--model",
+    "--restart",
+  ]);
   const takeFlag = (name: string): string | undefined => {
     // 同时认 `--model X` 与 `--model=X`：以前只按整 token 匹配 `--model`，等号写法会被当成未知开关静默丢掉（命令还报成功）。
     const eq = argv.find((t) => t.startsWith(`${name}=`));
@@ -660,6 +696,7 @@ async function cmdBrain(rest: string[]): Promise<string> {
   };
   const bin = takeFlag("--bin");
   const argsOverride = takeFlag("--args");
+  const extraArgsOverride = takeFlag("--extra-args");
   const model = takeFlag("--model");
   const restart = argv.includes("--restart");
   if (restart) argv.splice(argv.indexOf("--restart"), 1);
@@ -673,7 +710,7 @@ async function cmdBrain(rest: string[]): Promise<string> {
   const unknown = argv.filter((x) => x.startsWith("--"));
   if (unknown.length)
     throw new Error(
-      `未知参数：${unknown.join(" ")}（可用：--bin --args --shell --no-shell --model --restart）`,
+      `未知参数：${unknown.join(" ")}（可用：--bin --args --extra-args --shell --no-shell --model --restart）`,
     );
   const pos = argv.filter((x) => x && !x.startsWith("--"));
   const first = (pos[0] || "").toLowerCase();
@@ -689,11 +726,12 @@ async function cmdBrain(rest: string[]): Promise<string> {
     case "set": {
       if (!pos[1])
         throw new Error(
-          '用法: brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]',
+          '用法: brain set <agent 名|auto> [--bin X] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]',
         );
       return await cmdBrainSet(pos[1], pickKey(pos[2]), {
         bin,
         args: argsOverride,
+        extraArgs: extraArgsOverride,
         shell,
         model,
         restart,
@@ -704,12 +742,13 @@ async function cmdBrain(rest: string[]): Promise<string> {
       if (
         bin !== undefined ||
         argsOverride !== undefined ||
+        extraArgsOverride !== undefined ||
         shell !== undefined ||
         model !== undefined
       )
         throw new Error(
-          "`brain switch` 只接受 agent 名（换大脑是「换一个已装好的 agent」，不能带 --bin/--args/--model）。\n" +
-            "需要自定义二进制用 `brain set <agent 名> --bin …`（那是配置变更，只写入磁盘——之后 `wemind brain switch <同名 agent>` 可当场应用，或重启 daemon）；换模型用 `brain set <agent 名> --model …`。",
+          "`brain switch` 只接受 agent 名（换大脑是「换一个已装好的 agent」，不能带 --bin/--args/--extra-args/--model）。\n" +
+            "需要自定义二进制用 `brain set <agent 名> --bin …`（那是配置变更，只写入磁盘——之后 `wemind brain switch <同名 agent>` 可当场应用，或重启 daemon）；追加参数用 `brain set <agent 名> --extra-args …`；换模型用 `brain set <agent 名> --model …`。",
         );
       if (!pos[1]) throw new Error("用法: brain switch <agent 名|auto> [--worker] [<key|label>]");
       const worker = rest.includes("--worker");
@@ -1319,8 +1358,8 @@ export function helpText(): string {
   list                           列出账号、别名、运行状态（含 brain 进程与 worker 池）
   start [key|label]              启动某账号的 daemon（省略 = 默认账号）
   stop [key|label]               停止某账号的 daemon（连带 brain 与全部 worker 进程树；省略 = 默认账号）
-  brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]
-                                 改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用）
+  brain set <agent 名|auto> [--bin X] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]
+                                 改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--extra-args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用；--extra-args 追加在预设参数后，不会漏掉 ACP 子命令）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
   logout <key|label>             停 daemon + 通知下线 + 清凭证（保留目录，可重登）
   delete <key|label>             停 daemon + 删除目录 + 移除注册

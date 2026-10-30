@@ -126,7 +126,7 @@ wemind brain check
 - agent 未知 → `brain set` 会列出可选值；
 - 二进制找不到 → 安装，或 `brain set <agent 名> --bin <绝对路径>`；
 - Windows 只有 `.cmd` → 配置里的 `binWin` 必须是实际文件名（`dsh.cmd`）；`onPath()` 不会自动补 `.cmd`；
-- 自定义 agent → `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_HOME_ENV`。
+- 自定义 agent → `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS`（整段替换）/ `WEMIND_BRAIN_EXTRA_ARGS`（追加）/ `WEMIND_BRAIN_HOME_ENV`。
 
 ### 3.2 daemon 在跑但不回复
 

@@ -1,6 +1,6 @@
 # AGENTS.md — WeMind 的 AI 协作者入口
 
-> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-30（`@wemind/cli@1.2.0` 已发布 / `1.1.1` 上一版） ｜ **维护约定**：改代码时同步本文件；不确定的结论标注「假设/待实测」。
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-30（`@wemind/cli@1.2.0` 已发布 / `1.1.1` 上一版） ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
 >
 > 这份文件写给 AI agent，也写给人。**先读这里，再按链接深入**；不要一上来通读整个 `docs/repowiki/`。
 
@@ -99,6 +99,7 @@ wemind version       # 已安装的 CLI 版本（npm i -g @wemind/cli）
 wemind brain         # 查看当前大脑（含可选 agent/自动探测顺序）
 wemind brain check   # 真机 ACP 握手
 wemind brain switch opencode        # 热切换对话大脑（daemon 在跑就不重启、不打断在途回合）
+wemind brain set gemini --extra-args "--yolo"   # 只追加启动参数（--args 是整段替换，漏掉 ACP 模式参数会握手超时）
 wemind brain switch opencode --worker   # 设默认任务大脑（本次运行内一直生效，不写 brain.json）
 wemind brain handoff # 生成交接摘要（供切走后第一条消息带上）
 wemind session list  # 会话列表（daemon 不在也能读，只是按「下次会用的那个大脑」列）
@@ -127,10 +128,18 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 8. **切换大脑写入磁盘用 `wemind brain set`**；环境变量 `WEMIND_BRAIN*` 是一次性覆盖，不要写进 profile。
 9. **不要把密钥写进 agent/源码**；`DEEPSEEK_API_KEY` 等由 daemon 进程环境提供。
 10. **注释按段落换行，不按行宽折行**：一段一行（多长都不手工断开，编辑器/阅读器自己折行），只有语义上属于不同段落时才另起一行；列表项 / 标题 / 代码围栏 / 分隔线 / 用法表 / 独立命令行各自成行，「标签：内容」行（`用法：` / `退出码：` / `注意：`）另起一行。缩进保留原样——它表达层级，不是折行标记。`oxfmt` 不重排注释，所以别把英文注释按 120 列折回来。
-11. **控制桥只接受「agent 名 + 纯数据」**：`control-bridge.ts` 的请求字段只有 `target`（agent 名）/`ref`/`name`/`text`/`taskId`/`page`，**没有也不可能有 `bin`/`args`/`shell`**——伪造请求最坏只能「选一个已装的 agent 或清掉自己的会话」，绝不能让 daemon 执行任意程序。`wemind brain set` 带 `--bin/--args/--shell/--model` 时**不走桥**（只写入磁盘；其中 `--bin`/`--args`/`--model` 可用随后的 `wemind brain switch <同名 agent>` 当场应用——`sameAgent()` 按 name/bin/args/model 判「是不是同一个」；`--shell` 不在判据里，只能重启 daemon），这是刻意的边界，不要为了「顺手当场应用」把它拆掉。
+11. **控制桥只接受「agent 名 + 纯数据」**：`control-bridge.ts` 的请求字段只有 `target`（agent 名）/`ref`/`name`/`text`/`taskId`/`page`，**没有也不可能有 `bin`/`args`/`shell`**——伪造请求最坏只能「选一个已装的 agent 或清掉自己的会话」，绝不能让 daemon 执行任意程序。`wemind brain set` 带 `--bin/--args/--extra-args/--shell/--model` 时**不走桥**（只写入磁盘；其中 `--bin`/`--args`/`--extra-args`/`--model` 可用随后的 `wemind brain switch <同名 agent>` 当场应用——`sameAgent()` 按 name/bin/args/model 判「是不是同一个」；`--shell` 不在判据里，只能重启 daemon），这是刻意的边界，不要为了「顺手当场应用」把它拆掉。
 12. **「当前是哪个会话」的唯一权威是 `brain-sessions.json`（当前会话表）**：`session-registry.json` 只是**派生元数据**（名字/标题/轮次），坏了最多导致列表空——它的写失败只许记日志，**不得**抛出拖垮回合；`恢复会话` 是**严格恢复**：load/resume 都失败就如实报错、**不回退新建、不改当前会话记录**（宁可报错，也不要「假恢复」）。
 13. **任务侧的两条持久化纪律**：① 结束**在等你回复**的任务时进程**留着复用**（不杀，空闲回收交给池）；**正在跑**的那条被结束时只能力杀（ACP 回合没法优雅取消），`wemind stop`/daemon 退出则杀光整池。② 任务表 `tasks.json` 只用来做「重启后续跑」——**不自动 spawn**（重启后不主动拉起 3 个 agent）、**不做历史归档**（微信聊天记录本身就是归档）；未完成的标「已中断」，用户回「继续」才续跑。切换大脑时**持久化放最后**（成功才写 `brain.json`）：这样失败退回无需撤销。
 14. **优先「用」agent，而不是「改造」它**：WeMind 是**调用方**——模型、MCP、权限、会话、技能这些能力优先直接用 agent 自己的配置与接口（ACP 方法如 `session/set_config_option` / `mcpServers`、CLI 参数、它自己的配置文件），WeMind 只负责选择、传值与编排，**不替 agent 合成或重写配置**来改变它的行为。遇到「agent 的默认不符合需求」：先找它自己提供的开关（文档 / `initialize` / `session/new` 的 `configOptions`）；确实没有，才写适配层，并在代码与文档里写清「为什么不直接用它的」「补的是它的哪个缺口」。判断标准：**我们是在调用一个已有能力，还是在替它发明一个？** 沙箱（`BRAIN_HOME`/`WORKER_HOME`）是**隔离**手段（每账号一份可丢弃的 home、brain/worker 各自的 MCP 视图、微信会话不污染日常会话库），**不是**用来造配置的——镜像真实配置时按原样复制。**注意别把这条读成「什么都别动」**：MCP 视图（brain 默认空 + 按需加载，worker 全量但**永远排除 `wechat`**）是**安全边界**、不是改造 agent——`wechat` 永久禁止进大脑沙箱（一个 token 一个消费者，防回环，见 §4.1），这条不因「用 agent 原样配置」而放松（DSH 的 profile 副本会剔除用户自己挂的微信 MCP 条目——只剔这一种，其余原样保留）；同理，凭据只同步副本、不写进 agent 源码这些纪律都照旧。
+15. **改代码必须同一次改完三件套：代码 + 测试 + 文档**。任何行为 / 接口 / 命令 / 参数 / 环境变量 / 配置字段 / 数据文件结构 / 日志文案的变化，都在**同一个提交**里补齐，不接受「先合代码、文档以后补」「测试回头加」：
+    - **测试**：新增或改变逻辑要有对应用例（正常路径 + 失败/边界路径）；改了既有语义就同步改断言，不许用「旧用例本来就不准」跳过；至少 `npm test` 全绿。
+    - **文档**（按读者找全，漏一个都算文档与代码不一致）：
+      - 面向用户：`README.md`、`docs/新手教程.md`、`packages/*/README.md`（`packages/wechat-daemon/README.md` 会随 npm 包发布，**改了 CLI/环境变量必须同步**）、`docs/使用指南-*.md`、`docs/速查-*.md`；
+      - 技术细节：`docs/repowiki/*`、`docs/接入-*.md`（各 agent 的实测结论）；
+      - AI 上下文：本文件 `AGENTS.md`、`docs/ai/README.md`、`docs/ai/recipes/*`——**命令 / 参数 / 环境变量 / 数据文件 / 目录结构 / 新增模块的变化，AGENTS.md 与 `docs/ai/README.md` 是硬性同步项**（它们标注的「适用版本 / 最后核对」也要跟着改）。
+    - **自检**：`npm run typecheck` + `npm test` + `npm run lint` + `pwsh -NoProfile -File scripts/check-docs.ps1`（相对链接不许断）。
+    - 反例（都按缺陷处理）：改了命令参数没更新 `--help`/README；新增环境变量只写在代码注释里；改了优先级规则但 `docs/接入其它-ACP-Agent.md` 的表还是旧的；改了行为却没有一条能覆盖它的测试。
 
 ---
 
@@ -187,6 +196,8 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 ---
 
 ## 7. 验证标准（别只看「代码写完」）
+
+> 前提：**代码 + 测试 + 文档**在同一次改动里一起完成（§4.15）。下表是「代码对了」之后还要过的最低验证；文档类同步不满足这一条，就当作没做完。
 
 | 改动 | 最低验证 |
 |---|---|

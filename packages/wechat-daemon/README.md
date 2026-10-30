@@ -42,7 +42,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 | `wemind login [--label 名] [--start] [--runner builtin\|pm2]` | 扫码登录；`--start` 顺带拉起常驻 |
 | `wemind list` | 账号、别名、运行状态、当前大脑、worker 池 |
 | `wemind start / stop <key\|label>` | 启停某账号的常驻 |
-| `wemind brain [show\|set\|unset\|check]` | 查看 / 设置（写入磁盘）/ 清除 / 自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`） |
+| `wemind brain [show\|set\|unset\|check]` | 查看 / 设置（写入磁盘）/ 清除 / 自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`）；只加启动开关用 `--extra-args "…"`（追加，保留预设的 ACP 模式参数），`--args "…"` 是整段替换（漏掉 `acp` 会握手超时，`wemind brain` 会警告） |
 | `wemind brain switch <agent 名\|auto>` | **热切换对话大脑**：daemon 在跑也不重启、不打断在途回合；失败自动回滚。`--worker` 设默认任务大脑；`wemind brain handoff` 生成交接摘要 |
 | `wemind session new [名字] / list / resume <ref> / rename <ref> <名> / delete <ref>` | 会话管理：新建 / 列表 / 严格恢复 / 改名 / 删除（`ref` = 序号、名字或 id 前缀） |
 | `wemind task "<描述>" [--agent 名] [--cwd 目录]` | 派发任务给 worker（多任务并行、按编号回话） |
@@ -73,7 +73,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 | `WEMIND_HOME` | 数据根目录，默认 `~/.wemind` |
 | `WECHAT_ACCOUNT` / `WECHAT_DATA_DIR` | 指定账号 / 指定完整数据目录（多账号隔离） |
 | `WEMIND_RUNNER` | `builtin`（默认）或 `pm2` |
-| `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` | 一次性覆盖大脑选择（持久化请用 `wemind brain set`） |
+| `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_EXTRA_ARGS` | 一次性覆盖大脑选择与启动参数（`ARGS` 整段替换、`EXTRA_ARGS` 追加；持久化请用 `wemind brain set`） |
 | `WEMIND_ACP_AUTO_ALLOW=1` | 放行 ACP agent 的一次性权限请求（默认为拒绝） |
 
 ## 与 MCP 形态的区别

@@ -35,6 +35,8 @@ export type AgentConfig = {
   bin?: string;
   /** 覆盖 ACP 启动参数。 */
   args?: string[];
+  /** 追加到启动参数末尾（保留预设里的 ACP 模式参数；只加开关时用它，避免整段替换漏掉 `acp`）。 */
+  extraArgs?: string[];
   /** 覆盖是否经 shell 启动。 */
   shell?: boolean;
   /** 覆盖「配置目录环境变量名」（指向沙箱）。 */
@@ -67,6 +69,10 @@ function normAgentFields(j: any): AgentConfig | null {
   if (Array.isArray(j.args))
     cfg.args = j.args.filter((x: unknown): x is string => typeof x === "string");
   else if (typeof j.args === "string" && j.args.trim()) cfg.args = j.args.trim().split(/\s+/);
+  if (Array.isArray(j.extraArgs))
+    cfg.extraArgs = j.extraArgs.filter((x: unknown): x is string => typeof x === "string");
+  else if (typeof j.extraArgs === "string" && j.extraArgs.trim())
+    cfg.extraArgs = j.extraArgs.trim().split(/\s+/);
   if (typeof j.shell === "boolean") cfg.shell = j.shell;
   if (typeof j.homeEnvVar === "string" && j.homeEnvVar.trim()) cfg.homeEnvVar = j.homeEnvVar.trim();
   if (typeof j.model === "string" && j.model.trim()) cfg.model = j.model.trim();
@@ -80,6 +86,10 @@ function normPresetOverride(j: any): PresetOverride | null {
   if (Array.isArray(j?.args))
     ov.args = j.args.filter((x: unknown): x is string => typeof x === "string");
   else if (typeof j?.args === "string" && j.args.trim()) ov.args = j.args.trim().split(/\s+/);
+  if (Array.isArray(j?.extraArgs))
+    ov.extraArgs = j.extraArgs.filter((x: unknown): x is string => typeof x === "string");
+  else if (typeof j?.extraArgs === "string" && j.extraArgs.trim())
+    ov.extraArgs = j.extraArgs.trim().split(/\s+/);
   if (typeof j?.shell === "boolean") ov.shell = j.shell;
   if (typeof j?.homeEnvVar === "string" && j.homeEnvVar.trim()) ov.homeEnvVar = j.homeEnvVar.trim();
   if (typeof j?.model === "string" && j.model.trim()) ov.model = j.model.trim();
@@ -153,6 +163,7 @@ export function mergeBrainConfig(existing: BrainConfig | null, patch: BrainConfi
     const legacy: PresetOverride = {};
     if (existing?.bin) legacy.bin = existing.bin;
     if (existing?.args?.length) legacy.args = existing.args;
+    if (existing?.extraArgs?.length) legacy.extraArgs = existing.extraArgs;
     if (existing?.shell !== undefined) legacy.shell = existing.shell;
     if (existing?.homeEnvVar) legacy.homeEnvVar = existing.homeEnvVar;
     if (existing?.model) legacy.model = existing.model;
@@ -162,6 +173,7 @@ export function mergeBrainConfig(existing: BrainConfig | null, patch: BrainConfi
   const next: BrainConfig = { agent: patch.agent };
   if (patch.bin) next.bin = patch.bin;
   if (patch.args) next.args = patch.args;
+  if (patch.extraArgs) next.extraArgs = patch.extraArgs;
   if (patch.shell !== undefined) next.shell = patch.shell;
   if (patch.homeEnvVar) next.homeEnvVar = patch.homeEnvVar;
   if (patch.model) next.model = patch.model;
@@ -170,15 +182,24 @@ export function mergeBrainConfig(existing: BrainConfig | null, patch: BrainConfi
   if (prev && prev === nextAgent) {
     if (!patch.bin && existing?.bin) next.bin = existing.bin;
     if (!patch.args && existing?.args?.length) next.args = existing.args;
+    if (!patch.extraArgs && existing?.extraArgs?.length) next.extraArgs = existing.extraArgs;
     if (patch.shell === undefined && existing?.shell !== undefined) next.shell = existing.shell;
     if (!patch.homeEnvVar && existing?.homeEnvVar) next.homeEnvVar = existing.homeEnvVar;
     if (!patch.model && existing?.model) next.model = existing.model;
   }
 
-  if (next.bin || next.args?.length || next.shell !== undefined || next.homeEnvVar || next.model) {
+  if (
+    next.bin ||
+    next.args?.length ||
+    next.extraArgs?.length ||
+    next.shell !== undefined ||
+    next.homeEnvVar ||
+    next.model
+  ) {
     const ov: PresetOverride = { ...presets[nextAgent] };
     if (next.bin) ov.bin = next.bin;
     if (next.args?.length) ov.args = next.args;
+    if (next.extraArgs?.length) ov.extraArgs = next.extraArgs;
     if (next.shell !== undefined) ov.shell = next.shell;
     if (next.homeEnvVar) ov.homeEnvVar = next.homeEnvVar;
     if (next.model) ov.model = next.model;

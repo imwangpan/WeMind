@@ -7,7 +7,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { WORKER_HOME, workerMcpServers } from "./worker-sandbox.js";
 import { spawnAgent } from "./spawn-agent.js";
 import { normalizeSessionMap, sessionKey } from "./session-map.js";
-import type { ResolvedAgent } from "./brain-agents.js";
+import { acpArgsHint, type ResolvedAgent } from "./brain-agents.js";
 
 /**
  * worker ACP 连接：**一条连接＝一个 ACP agent 进程**，约 70% 复制自 acp-brain.ts，差异：
@@ -402,14 +402,21 @@ export class WorkerConn {
       /* ignore */
     });
     proc.on("exit", (code) => {
-      dlog(`${this.id}(${this.agent.name}) exited code=${code}`);
+      // A：握手前就退出时附上 args 诊断（与 brain 侧同一提示，见 brain-agents.ts 的 acpArgsHint）
+      const hint = this.child === proc && !this.initialized ? acpArgsHint(this.agent) : "";
+      dlog(`${this.id}(${this.agent.name}) exited code=${code}${hint}`);
       if (this.child === proc) this.kill();
     });
     proc.on("error", (e) => {
       dlog(`${this.id}(${this.agent.name}) error ${String(e)}`);
       if (this.child === proc) this.kill();
     });
-    await this.request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
+    try {
+      await this.request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
+    } catch (e) {
+      dlog(`${this.id}(${this.agent.name}) initialize failed: ${String(e)}${acpArgsHint(this.agent)}`);
+      throw e;
+    }
     this.initialized = true;
     dlog(`${this.id} initialized`);
   }

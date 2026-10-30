@@ -55,6 +55,13 @@ describe("loadBrainConfig（宽松归一化）", () => {
     });
   });
 
+  it("extraArgs 字符串按空格切；数组原样保留", () => {
+    write({ agent: "kiro", extraArgs: "--foo --bar" });
+    expect(loadBrainConfig(dir)!.extraArgs).toEqual(["--foo", "--bar"]);
+    write({ agent: "kiro", extraArgs: ["--a", "--b"] });
+    expect(loadBrainConfig(dir)!.extraArgs).toEqual(["--a", "--b"]);
+  });
+
   it("worker 段缺 agent（只有 bin）视为无效，不写进配置", () => {
     write({ agent: "kiro", worker: { bin: "x" } });
     expect(loadBrainConfig(dir)!.worker).toBeUndefined();
@@ -134,6 +141,21 @@ describe("mergeBrainConfig（读-改-写，不丢段）", () => {
     const next = mergeBrainConfig(existing, { agent: "deepseek" });
     expect(next.bin).toBe("C:\\dsh\\dsh.cmd");
     expect(next.args).toEqual(["--profile", "acp"]);
+  });
+
+  it("extraArgs 与其他启动覆盖同规则：换 agent 迁进 presets，同 agent 重设时保留", () => {
+    const existing: BrainConfig = { agent: "kiro", extraArgs: ["--keep"] };
+    const same = mergeBrainConfig(existing, { agent: "kiro" });
+    expect(same.extraArgs).toEqual(["--keep"]);
+    expect(same.presets?.kiro.extraArgs).toEqual(["--keep"]);
+
+    const switched = mergeBrainConfig(existing, { agent: "opencode" });
+    expect(switched.extraArgs).toBeUndefined();
+    expect(switched.presets?.kiro.extraArgs).toEqual(["--keep"]);
+
+    const updated = mergeBrainConfig(existing, { agent: "kiro", extraArgs: ["--new"] });
+    expect(updated.extraArgs).toEqual(["--new"]);
+    expect(updated.presets?.kiro.extraArgs).toEqual(["--new"]);
   });
 
   it("换 agent 时模型覆盖也迁进 presets（切回来仍按它建会话）", () => {

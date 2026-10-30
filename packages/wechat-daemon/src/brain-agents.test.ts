@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveAgent, agentProblem, AUTO_PROBE_ORDER } from "./brain-agents.js";
+import { resolveAgent, agentProblem, AUTO_PROBE_ORDER, acpArgsWarning, acpModeTokens } from "./brain-agents.js";
 import {
   presetAvailable,
   presetNames,
@@ -16,6 +16,7 @@ const VARS = [
   "WEMIND_WORKER_BRAIN",
   "WEMIND_BRAIN_BIN",
   "WEMIND_BRAIN_ARGS",
+  "WEMIND_BRAIN_EXTRA_ARGS",
   "WEMIND_BRAIN_SHELL",
   "WEMIND_BRAIN_HOME_ENV",
   "WEMIND_BRAIN_INHERIT",
@@ -70,6 +71,28 @@ afterAll(() => {
   if (saved.WEMIND_BRAIN_REAL_HOME === undefined) delete process.env.WEMIND_BRAIN_REAL_HOME;
 });
 
+describe("ACP 模式参数检查（D）", () => {
+  it("标记从预设默认 args 派生，不是只查裸 acp", () => {
+    expect(acpModeTokens("kiro")).toEqual(["acp"]);
+    expect(acpModeTokens("opencode")).toEqual(["acp"]);
+    expect(acpModeTokens("qoder")).toEqual(["--acp"]);
+    expect(acpModeTokens("gemini")).toEqual(["--experimental-acp"]);
+    expect(acpModeTokens("deepseek")).toEqual(["acp"]); // `--profile acp` 的值
+    expect(acpModeTokens("claude-code")).toEqual(["@zed-industries/claude-code-acp"]);
+    expect(acpModeTokens("codex")).toEqual([]); // 适配器本体就是 ACP，args 为空
+  });
+
+  it("整段替换漏标记时提醒；保留标记 / 自定义 bin / 无标记预设时不提醒", () => {
+    expect(acpArgsWarning("kiro", ["acp", "--trust-all-tools"], false)).toBeNull();
+    expect(acpArgsWarning("kiro", ["--foo"], false)).toMatch(/没有 kiro 的 ACP 模式参数/);
+    expect(acpArgsWarning("qoder", ["--yolo"], false)).toMatch(/--acp/);
+    expect(acpArgsWarning("qoder", ["--acp", "--yolo"], false)).toBeNull();
+    expect(acpArgsWarning("kiro", ["--foo"], true)).toBeNull(); // 自定义 bin 跳过
+    expect(acpArgsWarning("codex", [], false)).toBeNull(); // 适配器无标记
+    expect(acpArgsWarning("nope", ["x"], false)).toBeNull(); // 未知 agent
+  });
+});
+
 describe("resolveAgent agent", () => {
   it("显式 kiro：沿用 kiro 约定（沙箱根 / settings/mcp.json / 格式 kiro）", () => {
     clearVars();
@@ -103,6 +126,32 @@ describe("resolveAgent agent", () => {
     expect(ag.inheritDirs).toEqual(["skills", "agents", "commands"]);
     expect(ag.inheritFiles).toEqual(["AGENTS.md"]);
     expect(ag.env).toEqual({ OPENCODE_DISABLE_PROJECT_CONFIG: "1" });
+  });
+
+  it("extraArgs：追加在预设参数之后（保留 ACP 子命令）", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "kiro";
+    expect(resolveAgent({ agent: "kiro", extraArgs: ["--foo", "--bar"] }).args).toEqual([
+      "acp",
+      "--trust-all-tools",
+      "--foo",
+      "--bar",
+    ]);
+  });
+
+  it("WEMIND_BRAIN_EXTRA_ARGS：一次性追加（空格分隔），不替换预设", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "kiro";
+    process.env.WEMIND_BRAIN_EXTRA_ARGS = "--a --b";
+    expect(resolveAgent().args).toEqual(["acp", "--trust-all-tools", "--a", "--b"]);
+  });
+
+  it("args 与 extraArgs 同时给：extraArgs 拼在整段 args 后面", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "qoder";
+    expect(
+      resolveAgent({ agent: "qoder", args: ["--acp", "--yolo"], extraArgs: ["--x"] }).args,
+    ).toEqual(["--acp", "--yolo", "--x"]);
   });
 
   it("deepseek：dsh.cmd + DSH_HOME + resume/model/images=false", () => {
