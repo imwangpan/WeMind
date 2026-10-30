@@ -535,7 +535,7 @@ function describeBrain(key: string): string {
     `账号 ${key}`,
     `  配置：${cfgLine}`,
     `  请求：${ag.requestedKey}    来源：${BRAIN_SRC_LABEL[ag.source]}`,
-    `  生效：name=${ag.name}  bin=${ag.bin}  args=[${ag.args.join(" ")}]  shell=${ag.shell}  home_env=${ag.homeEnvVar ?? "(无)"}  model=${ag.model ?? "(agent 默认)"}`,
+    `  生效：name=${ag.name}  bin=${ag.bin}  args=[${ag.args.join(" ")}]  shell=${ag.shell}  home_env=${ag.homeEnvVar ?? "(无)"}  model=${ag.model ?? "(agent 默认)"}  session_mode=${ag.sessionMode ?? "(无)"}`,
     `  可用：${problem ? `❌ ${problem}` : `✅ ${ag.binPath ?? ag.bin}`}`,
     `  可选 agent：${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
     `  自动探测顺序：${AUTO_PROBE_ORDER.join(" → ")}`,

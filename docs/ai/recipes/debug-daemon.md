@@ -279,7 +279,7 @@ wemind start <key>
 
 ## 4. 不要做的事
 
-- 不要为了「让它回」而关掉 `allowFrom`（它是 `--trust-all-tools` 下唯一的安全闸，默认只放行登录者）；
+- 不要为了「让它回」而关掉 `allowFrom`（在默认免审批的大脑/worker 下它是唯一的安全闸，默认只放行登录者）；
 - 不要让 brain 加载 `wechat` MCP；
 - 不要在同一 token 上同时跑 MCP 形态与 daemon；
 - 不要把 `WEMIND_BRAIN*` 写进系统 profile 当默认（用 `brain.json`）；

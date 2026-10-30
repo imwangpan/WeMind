@@ -101,7 +101,7 @@ wemind task-stop 2      # 结束 2 号；不带编号只在恰好一条活跃任
 - **模型/账号侧出错（如余额不足）的任务不会抢你的消息**：这类错误重试也不会好，所以任务一轮失败就直接转**「已中断」**（不再停在「等你回复」——那种状态会把你之后的日常消息都吞进去、只是再白失败一轮）。提示里会说清是哪类问题（额度/余额不足 · 密钥/鉴权有问题 · 计费问题 · 模型不可用），你处理完账号后回 `继续`（多条时 `#<编号> 继续`）从中断处续跑。限流（429）与超时**不在此列**，仍按原样停在「等你回复」。
 - **升级 CLI 后重启一次 daemon**：换大脑、开新会话/恢复会话这类命令**必须由 daemon 执行**（经控制桥）；daemon 还在跑旧版本时，它们会在发出前拒绝并提示 `wemind stop <账号> && wemind start <账号>`。**本来就是读写登记表**的 `session list`/`rename`/`delete` 照常能用（`list` 会多一行说明：它是按「下次会用的那个大脑」列的）。任务侧不受影响：`task-list` / `task-status` 直接读文件（从不过桥；daemon 没跑时会注明显示的「运行中」只是上次留下的记录）。
 - **安全**：**内置预设默认免审批**（kiro `--trust-all-tools`、qoder `--yolo`、gemini yolo、opencode 沙箱 `permission: allow`、DSH `danger-full-access`、claude-code `bypassPermissions`、codex `agent-full-access`），能在指定目录全权操作（含 shell/写文件）。微信侧本来只有登录者能发消息（平台限制），另有 allowFrom 登录者白名单兜底（默认只放行登录者）；本地侧 = 能在你电脑敲命令的人（机主）。控制桥只接受**agent 名与纯数据**（不接受自定义二进制路径/参数），伪造请求最坏也只能「选一个已安装的 agent」。
-- **DeepSeek（DSH）大脑的沙箱边界**：微信派发的 worker 工作目录默认是**用户主目录**，DSH 的 `workspace-write` 只允许写工作区+临时目录——跨盘/工作区外的写入会被拒，模型申请提权时默认**拒绝**（`WEMIND_ACP_AUTO_ALLOW=1` 才放行）。跨盘任务建议本地 `task --cwd <目标目录>` 派发或设 `WEMIND_WORKER_CWD`；另注意 cwd=主目录时 `TEMP` 在工作区内，DSH 的 pwsh 工具会报 `Windows ACL temp root must be outside the workspace`。
+- **DSH（DeepSeek）的权限与沙箱边界**：内置预设把 `DSH_PERMISSION_MODE` 默认设成 `danger-full-access`（官方 bundle 的默认值来源），所以**默认不受 workspace-write 的工作区限制**。想收紧就在 **daemon 进程环境**里设 `DSH_PERMISSION_MODE=workspace-write`——预设给的是**默认值**，父进程已设同名变量时以你的为准。收紧后：微信派发的 worker 工作目录默认是**用户主目录**，只允许写工作区+临时目录，跨盘/工作区外的写入会被拒，模型申请提权时默认**拒绝**（`WEMIND_ACP_AUTO_ALLOW=1` 才放行）；跨盘任务建议本地 `task --cwd <目标目录>` 派发或设 `WEMIND_WORKER_CWD`，并注意 cwd=主目录时 `TEMP` 在工作区内，DSH 的 pwsh 工具会报 `Windows ACL temp root must be outside the workspace`。
 
 ---
 

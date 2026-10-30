@@ -73,9 +73,9 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 | 命令 | 作用 |
 |------|------|
 | `wemind brain [<key\|label>]` | 查看：配置、生效值、来源、二进制是否可用 |
-| `wemind brain set <agent 名\|auto> [--bin X] [--args "…"] [--shell\|--no-shell] [--model X\|auto] [--restart] [<key\|label>]` | 写入 brain.json；daemon 在跑且认控制桥时，**只给 agent 名**会当场热切换（成功才写入磁盘，失败不改 brain.json）；带 `--bin`/`--args`/`--shell`/`--model` 不能由它当场应用（控制桥只认 agent 名）——重启后生效，或（除 `--shell` 外）随后 `wemind brain switch <同名 agent>` 当场应用；`--restart` 顺带重启 daemon 立即生效 |
+| `wemind brain set <agent 名\|auto> [--bin X] [--args "…"] [--extra-args "…"] [--shell\|--no-shell] [--model X\|auto] [--restart] [<key\|label>]` | 写入 brain.json；daemon 在跑且认控制桥时，**只给 agent 名**会当场热切换（成功才写入磁盘，失败不改 brain.json）；带 `--bin`/`--args`/`--extra-args`/`--shell`/`--model` 不能由它当场应用（控制桥只认 agent 名）——重启后生效，或（除 `--shell` 外）随后 `wemind brain switch <同名 agent>` 当场应用；`--restart` 顺带重启 daemon 立即生效 |
 | `wemind brain unset [<key\|label>]` | 删除 brain.json，回退到自动探测/默认 |
-| `wemind brain check [<key\|label>]` | 真起一个进程跑 ACP 握手（`initialize` + `session/new`），验证「不仅找得到、而且能说 ACP」 |
+| `wemind brain check [<key\|label>]` | 真起一个进程跑 ACP 握手（`initialize` + `session/new`；预设带 `sessionMode` 时再补一次 `session/set_mode`，失败只写进结论不判整体失败），验证「不仅找得到、而且能说 ACP」 |
 
 ```powershell
 wemind brain set opencode --restart    # 切到 OpenCode 并立即重启 daemon
@@ -113,6 +113,7 @@ agent：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
 | `WEMIND_BRAIN_BIN` | 覆盖二进制（绝对路径或 PATH 上的名字） | 默认自动在 PATH 解析 |
 | `WEMIND_BRAIN_ARGS` | 覆盖 ACP 启动参数（**空格分隔、整段替换**） | 内置默认值 |
 | `WEMIND_BRAIN_EXTRA_ARGS` | 追加 ACP 启动参数（**空格分隔**，拼在预设/覆盖参数之后；只加开关时用它，不会漏掉 `acp`） | 无 |
+| `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的 `sessionMode`：`0`/`false`/`off` 关闭 `session/set_mode`，其它非空值 = 该 modeId（影响 claude-code / codex 的免审批） | 用预设值 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「配置目录环境变量名」（指向 brain 沙箱） | 内置默认值 |
 | `WEMIND_BRAIN_SHELL` | 是否经 shell 启动（`1`/`true` 开）；npx/`.cmd`/`.bat` 类适配器在 Windows 需要 | 内置默认值（默认 false） |
 | `WEMIND_BRAIN_INHERIT` | 是否继承真实配置目录的记忆/规则/技能（见 §6.5） | `1`（开） |
@@ -189,7 +190,9 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `mcpFormat` | 否 | MCP 配置格式：`kiro`（`mcpServers`）或 `opencode`（`mcp.servers`）；默认 `kiro` |
 | `mcpConfigFile` | 否 | MCP 配置文件相对配置目录的路径（默认 `settings/mcp.json`） |
 | `catalogFile` | 否 | 可选 MCP 目录来源文件相对 `realHome` 的路径（默认 `settings/mcp.json`） |
-| `env` | 否 | 额外注入的环境变量（值里 `%HOME%` → 沙箱根），如 opencode 的 `OPENCODE_DISABLE_PROJECT_CONFIG` |
+| `env` | 否 | 额外注入的环境变量（强制；值里 `%HOME%` → 沙箱根），如 opencode 的 `OPENCODE_DISABLE_PROJECT_CONFIG` |
+| `envDefaults` | 否 | **默认值**环境变量：父进程已设同名变量时**不覆盖**（如 DSH `DSH_PERMISSION_MODE`、codex `INITIAL_AGENT_MODE`）。审批/沙箱类开关用它，部署方可在 daemon 环境里收紧权限；跳过时会记日志 `env defaults kept from parent: …` |
+| `sessionMode` | 否 | 会话建立/恢复后经 `session/set_mode { sessionId, modeId }` 切到的模式（**agent 自己的 ACP 接口**；用于免审批：claude-code `bypassPermissions`、codex `agent-full-access`）。会话回包报告 `modes.availableModes` 且不含该值时**跳过**并记日志；调用失败只记日志、不拖垮回合。`WEMIND_ACP_SESSION_MODE=0/false/off` 关闭，其它非空值 = 覆盖 modeId |
 | `fallbackBinPaths` | 否 | `onPath()` 失败时依次尝试的绝对路径（官方安装不在 PATH 时兜底；auto 探测仍只看 PATH） |
 | `settingsBase` | 否 | 以 `realHome` 下该文件为基底生成沙箱设置：剥离 `mcpServers` / `enabledPlugins` / `providers` / `model`，强制 `general.enableAutoUpdate=false`（qoder 用 `settings.json`） |
 | `credentialFiles` | 否 | 需从 `realHome` 同步进沙箱配置目录的凭据文件（新者胜；DSH `.credentials.yaml`、qoder `.auth/user`） |
@@ -213,10 +216,10 @@ ACP agent 分两类，接入方式不同：
 | `deepseek` | DeepSeek Harness `dsh` | 原生（官方 ACP profile） | ✅ **已内置/已实测**：prompt / 工具 / resume 上下文 / stdio MCP；`load` ❌、`image:false`（收图友好拒绝） | `dsh --profile acp`，`DSH_HOME`；建议 `--bin` 绝对路径（详见 [接入-DeepSeek.md](接入-DeepSeek.md)） |
 | `qoder` | Qoder CLI `qodercli` | 原生（`--acp`） | ✅ **已内置/已实测**：`load`/`resume`、图片、stdio/HTTP/SSE MCP、`--yolo` 下 0 反向请求；M1 沙箱 + M3 真机 E2E 均通过（详见 [接入-Qoder.md](接入-Qoder.md)） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`；直接起本体，**不要**走 `qoder` 分发器；需同步 `.auth/user` + `.auth/machine_id` |
 | `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME`（0.66+；`--acp` 已取代弃用的 `--experimental-acp`；目录未信任会把 yolo 静默降回 default，故带 `--skip-trust`） |
-| `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @agentclientprotocol/claude-agent-acp`（官方维护的新包，旧包 `@zed-industries/claude-code-acp` 已弃用；**Node ≥22**）。适配器不解析 CLI 权限 flag，免审批走 `session/set_mode {modeId:"bypassPermissions"}` |
-| `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，需自行安装其二进制；Codex 本身暂不原生支持 ACP）。免审批：env `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode {modeId:"agent-full-access"}`；codex 的 `--yolo` 不被适配器转发 |
+| `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @agentclientprotocol/claude-agent-acp`（官方维护的新包，旧包 `@zed-industries/claude-code-acp` 已弃用；**Node ≥22**）。适配器不解析 CLI 权限 flag，免审批走 `session/set_mode {modeId:"bypassPermissions"}`（**以 root 跑且未设 `IS_SANDBOX=1` 时该模式不可用**，会话回包的 `availableModes` 里没有它，WeMind 会跳过并记日志） |
+| `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，npm 包 `@agentclientprotocol/codex-acp`；Windows 上装出来的是 **`codex-acp.cmd`**，故预设 `binWin: "codex-acp.cmd"` + `shell: true`）。免审批：env `INITIAL_AGENT_MODE=agent-full-access`（预设 `envDefaults`）+ `session/set_mode {modeId:"agent-full-access"}`；codex 的 `--yolo` 不被适配器转发 |
 
-> **内置预设默认免审批**（2026-10-30 起）：每个 agent 用**自己官方**的机制——kiro `--trust-all-tools`、gemini `--approval-mode yolo (+ --skip-trust)`、qoder `--yolo`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`，官方 issue #52216）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`。**这不是统一开关**：写进 `--args` 的 CLI flag 只在 agent 真的解析它时才有效（claude-code / codex 适配器都不解析）。边缘情况（各 agent 的 ask 规则、MCP 工具审批）仍可能发 `session/request_permission`：WeMind 默认**拒绝**，要全放行设 `WEMIND_ACP_AUTO_ALLOW=1`——它只是「每次自动点允许」，不放宽沙箱。**「免审批」≠「最高权限」**：DSH/codex 还有沙箱层，默认预设已把两层都放开。
+> **内置预设默认免审批**（2026-10-30 起）：每个 agent 用**自己官方**的机制——kiro `--trust-all-tools`、gemini `--approval-mode yolo (+ --skip-trust)`、qoder `--yolo`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`，官方 issue #52216）、DSH `DSH_PERMISSION_MODE=danger-full-access`（`envDefaults`：daemon 进程已设同名变量时以你的为准）、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`（`INITIAL_AGENT_MODE` 兜底 + `set_mode`）。**这不是统一开关**：写进 `--args` 的 CLI flag 只在 agent 真的解析它时才有效（claude-code / codex 适配器都不解析）。想收紧：审批类环境变量（`DSH_PERMISSION_MODE`、`INITIAL_AGENT_MODE`）在 daemon 环境里设了就不被预设覆盖；`WEMIND_ACP_SESSION_MODE=0/false/off` 关掉 `session/set_mode`。边缘情况（各 agent 的 ask 规则、MCP 工具审批）仍可能发 `session/request_permission`：WeMind 默认**拒绝**，要全放行设 `WEMIND_ACP_AUTO_ALLOW=1`——它只是「每次自动点允许」，不放宽沙箱。**「免审批」≠「最高权限」**：DSH/codex 还有沙箱层，默认预设已把两层都放开。
 
 > ⚠️ 除 `kiro`、`opencode`、`deepseek`、`qoder` 外均为**示例/评估**：包名、参数、二进制、ACP 能力可能随上游变化，**接入前务必对照各自官方/仓库核对**，并跑 §8 的验证。
 >
@@ -224,8 +227,8 @@ ACP agent 分两类，接入方式不同：
 
 **适配器类的准备工作（示例）**：
 
-- **Claude Code**：agent 用 `npx -y @agentclientprotocol/claude-agent-acp`（`shell:true`，因 Windows 上是 `npx.cmd`；**Node ≥22**）。需先装好 Claude Code 并完成认证（登录或设 `ANTHROPIC_API_KEY`）。该适配器把 Claude Code 暴露成 ACP server over stdio；**CLI 权限 flag 不会被解析**，WeMind 在会话建立后调用 `session/set_mode {modeId:"bypassPermissions"}`。
-- **Codex**：需先安装社区适配器 `codex-acp`（见其仓库说明，多为 Rust 构建出的二进制），把它放到 PATH（或用 `WEMIND_BRAIN_BIN` 指向）。免审批由预设注入的 `INITIAL_AGENT_MODE=agent-full-access` 与会话建立后的 `session/set_mode` 完成；`codex` 自己的 `--yolo`/`--full-auto` 都不经适配器转发（`--full-auto` 在官方 CLI 里也不存在）。
+- **Claude Code**：agent 用 `npx -y @agentclientprotocol/claude-agent-acp`（`shell:true`，因 Windows 上是 `npx.cmd`；**Node ≥22**）。需先装好 Claude Code 并完成认证（登录或设 `ANTHROPIC_API_KEY`）。该适配器把 Claude Code 暴露成 ACP server over stdio；**CLI 权限 flag 不会被解析**，WeMind 在会话建立后调用 `session/set_mode {modeId:"bypassPermissions"}`。注意：Claude Code 以 **root** 运行时 `bypassPermissions` 不可用，除非设 `IS_SANDBOX=1`——此时会话回包的 `availableModes` 里没有它，WeMind 记录「跳过」日志，审批请求回到应答器（默认拒绝）。
+- **Codex**：需先安装社区适配器 `codex-acp`：`npm i -g @agentclientprotocol/codex-acp`（Windows 产出 `codex-acp.cmd`，预设已按 `.cmd` 记录并通过 shell 启动），或用它仓库提供的 standalone 二进制并把 `--bin` 指向绝对路径。免审批由预设注入的 `INITIAL_AGENT_MODE=agent-full-access` 与会话建立后的 `session/set_mode` 完成；`codex` 自己的 `--yolo`/`--full-auto` 都不经适配器转发（`--full-auto` 在官方 CLI 里也不存在）。
 
 ---
 

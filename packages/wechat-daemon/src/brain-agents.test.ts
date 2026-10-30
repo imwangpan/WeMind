@@ -3,7 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveAgent, agentProblem, AUTO_PROBE_ORDER, acpArgsWarning, acpModeTokens } from "./brain-agents.js";
+import {
+  resolveAgent,
+  agentProblem,
+  AUTO_PROBE_ORDER,
+  acpArgsWarning,
+  acpModeTokens,
+  agentEnv,
+} from "./brain-agents.js";
 import {
   presetAvailable,
   presetNames,
@@ -22,6 +29,7 @@ const VARS = [
   "WEMIND_BRAIN_INHERIT",
   "WEMIND_BRAIN_REAL_HOME",
   "WEMIND_BRAIN_INHERIT_DIRS",
+  "WEMIND_ACP_SESSION_MODE",
   "KIRO_CLI_BIN",
 ];
 
@@ -90,6 +98,8 @@ describe("ACP 模式参数检查（D）", () => {
     expect(acpArgsWarning("kiro", ["--foo"], true)).toBeNull(); // 自定义 bin 跳过
     expect(acpArgsWarning("codex", [], false)).toBeNull(); // 适配器无标记
     expect(acpArgsWarning("nope", ["x"], false)).toBeNull(); // 未知 agent
+    // 宽匹配：gemini 旧版仍在用的 --experimental-acp 也算 ACP 模式参数（不能被误判成漏参数）
+    expect(acpArgsWarning("gemini", ["--experimental-acp"], false)).toBeNull();
   });
 });
 
@@ -171,7 +181,8 @@ describe("resolveAgent agent", () => {
     expect(ag.model).toBe('["deepseek-account","deepseek-flash"]');
     expect(ag.mcpViaAcp).toBe(true); // MCP 走 session/new|resume 的 mcpServers，不写文件
     // 免审批默认：DSH 没有 flag 也没有会话级权限配置项，靠官方 bundle 读的 DSH_PERMISSION_MODE
-    expect(ag.env).toEqual({ DSH_PERMISSION_MODE: "danger-full-access" });
+    expect(ag.envDefaults).toEqual({ DSH_PERMISSION_MODE: "danger-full-access" });
+    expect(ag.env).toEqual({}); // envDefaults 不是强制 env：父进程设了同名变量就以父进程为准
   });
 
   it("免审批默认：各预设用自己 agent 的机制（flag / env / 会话模式），不是统一开关", () => {
@@ -192,11 +203,35 @@ describe("resolveAgent agent", () => {
     expect(cc.sessionMode).toBe("bypassPermissions");
     // codex：适配器同样不解析 CLI 参数；sessionMode + INITIAL_AGENT_MODE 双保险
     const cx = resolveAgent({ agent: "codex" });
-    expect(cx.env).toEqual({ INITIAL_AGENT_MODE: "agent-full-access" });
+    expect(cx.envDefaults).toEqual({ INITIAL_AGENT_MODE: "agent-full-access" });
     expect(cx.sessionMode).toBe("agent-full-access");
     // 没用会话模式的 agent 不乱调 set_mode
     expect(resolveAgent({ agent: "kiro" }).sessionMode).toBeUndefined();
     expect(resolveAgent({ agent: "deepseek" }).sessionMode).toBeUndefined();
+  });
+
+  it("审批类 env 是默认值：父进程显式设置时保留（部署方可收紧）；sessionMode 可关闭/覆盖", () => {
+    clearVars();
+    const dsh = resolveAgent({ agent: "deepseek" });
+    const env = agentEnv(dsh, "/tmp/wemind-home");
+    expect(env.DSH_HOME).toBe("/tmp/wemind-home");
+    expect(env.DSH_PERMISSION_MODE).toBe("danger-full-access");
+    process.env.DSH_PERMISSION_MODE = "workspace-write";
+    try {
+      const kept: string[] = [];
+      expect(agentEnv(dsh, "/tmp/wemind-home", kept).DSH_PERMISSION_MODE).toBe("workspace-write");
+      expect(kept).toEqual(["DSH_PERMISSION_MODE"]);
+    } finally {
+      delete process.env.DSH_PERMISSION_MODE;
+    }
+
+    // WEMIND_ACP_SESSION_MODE：0/false/off 关闭 set_mode（回到 agent 自己的审批流程）；其它值 = 用它
+    process.env.WEMIND_ACP_SESSION_MODE = "0";
+    expect(resolveAgent({ agent: "claude-code" }).sessionMode).toBeUndefined();
+    process.env.WEMIND_ACP_SESSION_MODE = "custom-mode";
+    expect(resolveAgent({ agent: "claude-code" }).sessionMode).toBe("custom-mode");
+    delete process.env.WEMIND_ACP_SESSION_MODE;
+    expect(resolveAgent({ agent: "claude-code" }).sessionMode).toBe("bypassPermissions");
   });
 
   it("模型可覆盖：presets[agent 名].model 优先于预设值（切走再切回也还在）", () => {

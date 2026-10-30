@@ -56,7 +56,10 @@ describe("opencode 沙箱：免审批默认", () => {
       JSON.stringify({ permission: { "*": "ask", bash: "deny" } }, null, 2),
     );
     const { ensureBrainHome } = await import("./mcp-sandbox.js");
+    const { ensureWorkerHome } = await import("./worker-sandbox.js");
     ensureBrainHome();
+    ensureWorkerHome();
     expect(readJson(brainCfg).permission).toEqual({ "*": "ask", bash: "deny" });
+    expect(readJson(workerCfg).permission).toEqual({ "*": "ask", bash: "deny" });
   });
 });
