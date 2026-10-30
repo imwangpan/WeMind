@@ -212,9 +212,11 @@ ACP agent 分两类，接入方式不同：
 | `opencode` | OpenCode | 原生 | ✅ **已实测** | `opencode acp`，`XDG_CONFIG_HOME`（详见 [接入-OpenCode.md](接入-OpenCode.md)） |
 | `deepseek` | DeepSeek Harness `dsh` | 原生（官方 ACP profile） | ✅ **已内置/已实测**：prompt / 工具 / resume 上下文 / stdio MCP；`load` ❌、`image:false`（收图友好拒绝） | `dsh --profile acp`，`DSH_HOME`；建议 `--bin` 绝对路径（详见 [接入-DeepSeek.md](接入-DeepSeek.md)） |
 | `qoder` | Qoder CLI `qodercli` | 原生（`--acp`） | ✅ **已内置/已实测**：`load`/`resume`、图片、stdio/HTTP/SSE MCP、`--yolo` 下 0 反向请求；M1 沙箱 + M3 真机 E2E 均通过（详见 [接入-Qoder.md](接入-Qoder.md)） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`；直接起本体，**不要**走 `qoder` 分发器；需同步 `.auth/user` + `.auth/machine_id` |
-| `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --experimental-acp`，`GEMINI_CLI_HOME`（flag 以官方为准） |
-| `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @zed-industries/claude-code-acp`（Zed 官方适配器；需 Claude Code 登录或 `ANTHROPIC_API_KEY`） |
-| `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，需自行安装其二进制；Codex 本身暂不原生支持 ACP） |
+| `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME`（0.66+；`--acp` 已取代弃用的 `--experimental-acp`；目录未信任会把 yolo 静默降回 default，故带 `--skip-trust`） |
+| `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @agentclientprotocol/claude-agent-acp`（官方维护的新包，旧包 `@zed-industries/claude-code-acp` 已弃用；**Node ≥22**）。适配器不解析 CLI 权限 flag，免审批走 `session/set_mode {modeId:"bypassPermissions"}` |
+| `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，需自行安装其二进制；Codex 本身暂不原生支持 ACP）。免审批：env `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode {modeId:"agent-full-access"}`；codex 的 `--yolo` 不被适配器转发 |
+
+> **内置预设默认免审批**（2026-10-30 起）：每个 agent 用**自己官方**的机制——kiro `--trust-all-tools`、gemini `--approval-mode yolo (+ --skip-trust)`、qoder `--yolo`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`，官方 issue #52216）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`。**这不是统一开关**：写进 `--args` 的 CLI flag 只在 agent 真的解析它时才有效（claude-code / codex 适配器都不解析）。边缘情况（各 agent 的 ask 规则、MCP 工具审批）仍可能发 `session/request_permission`：WeMind 默认**拒绝**，要全放行设 `WEMIND_ACP_AUTO_ALLOW=1`——它只是「每次自动点允许」，不放宽沙箱。**「免审批」≠「最高权限」**：DSH/codex 还有沙箱层，默认预设已把两层都放开。
 
 > ⚠️ 除 `kiro`、`opencode`、`deepseek`、`qoder` 外均为**示例/评估**：包名、参数、二进制、ACP 能力可能随上游变化，**接入前务必对照各自官方/仓库核对**，并跑 §8 的验证。
 >
@@ -222,8 +224,8 @@ ACP agent 分两类，接入方式不同：
 
 **适配器类的准备工作（示例）**：
 
-- **Claude Code**：agent 用 `npx -y @zed-industries/claude-code-acp`（`shell:true`，因 Windows 上是 `npx.cmd`）。需先装好 Claude Code 并完成认证（登录或设 `ANTHROPIC_API_KEY`）。该适配器把 Claude Code 暴露成 ACP server over stdio。
-- **Codex**：需先安装社区适配器 `codex-acp`（见其仓库说明，多为 Rust 构建出的二进制），把它放到 PATH（或用 `WEMIND_BRAIN_BIN` 指向）。Codex 官方原生 ACP 仍在推进中（openai/codex#2785）。
+- **Claude Code**：agent 用 `npx -y @agentclientprotocol/claude-agent-acp`（`shell:true`，因 Windows 上是 `npx.cmd`；**Node ≥22**）。需先装好 Claude Code 并完成认证（登录或设 `ANTHROPIC_API_KEY`）。该适配器把 Claude Code 暴露成 ACP server over stdio；**CLI 权限 flag 不会被解析**，WeMind 在会话建立后调用 `session/set_mode {modeId:"bypassPermissions"}`。
+- **Codex**：需先安装社区适配器 `codex-acp`（见其仓库说明，多为 Rust 构建出的二进制），把它放到 PATH（或用 `WEMIND_BRAIN_BIN` 指向）。免审批由预设注入的 `INITIAL_AGENT_MODE=agent-full-access` 与会话建立后的 `session/set_mode` 完成；`codex` 自己的 `--yolo`/`--full-auto` 都不经适配器转发（`--full-auto` 在官方 CLI 里也不存在）。
 
 ---
 
@@ -365,9 +367,9 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 - 未内置（示例/评估）：Goose、OpenHands、Cline、Cursor、GitHub Copilot（公开预览）、Junie（JetBrains）、Kimi CLI、Hermes Agent、Docker cagent、fast-agent、Augment Code、Factory Droid、AgentPool、AutoDev、Blackbox AI、Code Assistant、crow-cli、Minion Code、Mistral Vibe、fount、OpenClaw…
 
 **需经适配器（CLI 本身不原生实现 ACP，需先起桥接进程）**：
-- 已内置（未实测）：Claude Code → `@zed-industries/claude-code-acp`（npx）；Codex CLI → `codex-acp`（社区适配器）。
+- 已内置（未实测）：Claude Code → `@agentclientprotocol/claude-agent-acp`（npx，旧包 `@zed-industries/claude-code-acp` 已弃用）；Codex CLI → `codex-acp`（社区适配器）。
 - 未内置：Bub → `bub-acp-server`；Pi → `pi-acp`…
 
-> 接入任一 agent 的通用步骤见本文 §2–§5；带「适配器」的把 `WEMIND_BRAIN_BIN/ARGS` 指向适配器启动命令（如 `npx -y @zed-industries/claude-code-acp`）。除 §5 里 4 个已实测的内置预设外，均建议先实测。
+> 接入任一 agent 的通用步骤见本文 §2–§5；带「适配器」的把 `WEMIND_BRAIN_BIN/ARGS` 指向适配器启动命令（如 `npx -y @agentclientprotocol/claude-agent-acp`）。除 §5 里 4 个已实测的内置预设外，均建议先实测。
 >
 > 远程 ACP（HTTP/WebSocket）官方仍在完善——成熟后可把工作机部署到独立/更强机器（见《方案C-受控ACP工作机设计》）。

@@ -81,7 +81,7 @@ WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文�
 | MCP 配置格式 | `{ "mcpServers": { 名: {command, args, env} } }` | `{ "mcp": { "servers": { 名: {type:"local", command:[...], environment:{...}} } } }` |
 | 模型选择 | `settings/cli.json` 的 `chat.defaultModel` | `opencode.json` 的 `model` 字段 |
 | 记忆/技能 | 目录式 `steering/ memories/ skills/ …` | 目录式 `skills/ agents/ commands/`；另有单文件 `AGENTS.md` |
-| 权限 | `--trust-all-tools` | ACP 内部**自动批准**（等价放开）；WeMind 侧 `clientCapabilities:{}` 已够（实测无反向请求） |
+| 权限 | `--trust-all-tools` | `opencode acp` **不接受** `--auto`（官方 issue #52216）；WeMind 在沙箱 `opencode.json` 写 `"permission": "allow"`（用户自己配了 permission 则保留用户的）；ACP 仍可能发 `session/request_permission`，宿主默认拒绝、`WEMIND_ACP_AUTO_ALLOW=1` 放行 |
 | 凭证/数据 | `KIRO_HOME` 移动 = 同目录规则 | 数据在 `~/.local/share/opencode`（**与配置分离**）→ 隔离配置不丢登录态 |
 
 ### 3.3 M1 实测结果（已验证事实）

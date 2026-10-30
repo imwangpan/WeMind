@@ -194,6 +194,9 @@ function applySandbox(ag: ResolvedAgent): void {
   const file = brainMcpJson(ag);
   const existing = readJson(file) ?? {};
   const next = withMcpServers(existing, servers, ag.mcpFormat);
+  // opencode 的免审批只能走配置（`opencode acp` 不接受 --auto，官方 issue #52216）：默认给 "allow"；
+  // 用户自己在 opencode.json 里写了 permission（含 deny）就以用户的为准，不覆盖。
+  if (ag.mcpFormat === "opencode" && next.permission === undefined) next.permission = "allow";
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(next, null, 2), "utf-8");
 }

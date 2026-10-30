@@ -2,6 +2,17 @@
 
 本文件记录本 Fork 相对上游 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server) 的改动。
 
+## [Unreleased]
+
+### Added
+
+- **内置预设默认免审批（2026-10-30）**：7 个 agent 预设各自用该 agent **自己官方**的机制，不再只是 kiro / qoder——gemini 改 `--acp --approval-mode yolo --skip-trust`（`--acp` 取代已弃用的 `--experimental-acp`；未信任目录会把 yolo 静默降回 default）；opencode 在沙箱 `opencode.json` 写 `"permission": "allow"`（`opencode acp` 不接受 `--auto`，官方 issue #52216；用户自己配了 permission 则以用户的为准）；DSH 预设注入 `DSH_PERMISSION_MODE=danger-full-access`（官方 bundle 的默认值来源，文档正文未收录；`approval.policy: never` 是「不问并拒绝」，不能单独用）；claude-code 改用官方维护的新适配器 `@agentclientprotocol/claude-agent-acp`（旧包已弃用，**Node ≥22**），免审批走会话建立后的 `session/set_mode {modeId:"bypassPermissions"}`；codex 用 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`（适配器不解析 CLI 参数，codex 的 `--yolo` / `--full-auto` 均不适用）。
+- **ACP 会话模式（`sessionMode`）**：预设新增 `sessionMode` 字段，`acp-brain.ts` / `worker-acp.ts` 在 session/new|load|resume 之后调用 `session/set_mode`（agent 自己的 ACP 接口）；调用失败只记日志、不拖垮会话（模式不可用时审批请求仍由应答器兜底）。宿主应答器**仍默认拒绝** `session/request_permission`，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行——「免审批」是 agent 侧默认，不是把宿主改成默认放行。
+
+### Docs
+
+- 同步 README / 新手教程 / 随包 README / 接入其它-ACP-Agent / 接入-OpenCode / 接入-DeepSeek / repowiki 06·09 / docs/ai/README / AGENTS（新增「内置预设默认免审批」已知项与 kiro V3、codex `binWin` 风险条目）。
+
 ## [1.2.0] 运行时切换大脑 · 多 worker 进程池 · 完整会话管理（2026-10-30）
 
 ### Added

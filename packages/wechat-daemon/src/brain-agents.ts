@@ -61,6 +61,7 @@ export type AcpAgentPreset = {
   model?: string; // 默认模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）：经 session/set_config_option（agent 自己的 ACP 接口）在会话建立后下发一次；可用 brain.json / `brain set --model` 覆盖，`auto` = 跟随默认；配了 realProfile 时默认值优先从真实 profile 读
   realProfile?: string; // 真实 home 里该 agent 的 profile 名（`profiles/<名>/cordis.patch.yml` 是用户/桌面端维护的用户层：沙箱**原样复制**、不追加条目，默认模型从它读——优先 `- id: acp`，否则 `agent-default-model`）；如 DSH 的 "acp"
   mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
+  sessionMode?: string; // 会话建立/恢复后经 `session/set_mode` 切到的模式 id（agent 自己的 ACP 接口）；用于「免审批」模式：claude-code 的 bypassPermissions、codex 的 agent-full-access。留空=不调用
 };
 
 /**
@@ -80,12 +81,12 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     realHome: path.join(os.homedir(), ".kiro"),
     inheritDirs: ["steering", "memories", "skills", "agents", "powers", "tasks", "extensions"],
   },
-  // Gemini CLI 实验性 ACP（未实测，flag 以官方为准）。注：Gemini 的「记忆」是 ~/.gemini/GEMINI.md 等文件而非目录，与 kiro 的目录式不同，故未预置 inheritDirs；需要时按其布局用 WEMIND_BRAIN_REAL_HOME/_INHERIT_DIRS 配置或填此处。
+  // Gemini CLI（原生 ACP，0.66+）。`--acp` 取代已弃用的 `--experimental-acp`；`--approval-mode yolo` 自动批准所有工具调用（与 `--yolo` 互斥，二选一）；`--skip-trust` 信任当前工作区——**未信任的目录会把 yolo 静默降回 default**，所以必须带上（或用 GEMINI_CLI_TRUST_WORKSPACE=true）。注：Gemini 的「记忆」是 ~/.gemini/GEMINI.md 等文件而非目录，与 kiro 的目录式不同，故未预置 inheritDirs；需要时按其布局用 WEMIND_BRAIN_REAL_HOME/_INHERIT_DIRS 配置或填此处。
   gemini: {
     name: "gemini",
     bin: "gemini",
     binWin: "gemini.cmd",
-    args: ["--experimental-acp"],
+    args: ["--acp", "--approval-mode", "yolo", "--skip-trust"],
     homeEnvVar: "GEMINI_CLI_HOME",
     shell: true,
   },
@@ -146,6 +147,10 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     realProfile: "acp",
     model: '["deepseek-account","deepseek-flash"]',
     mcpViaAcp: true, // 不写 mcp.json；激活集转成 ACP mcpServers 传给 session/new|resume
+    // 免审批：DSH 没有启动 flag，也没有会话级权限配置项；`DSH_PERMISSION_MODE` 是官方 bundle 读的默认值来源
+    // （文档正文未收录，升级后若失效见 docs/接入-DeepSeek.md），取值 danger-full-access = 绕过文件沙箱、不产生提权请求。
+    // 注意 `approval.policy: never` 是「不问并拒绝」，不能单独拿来放行——这里只用 danger-full-access。
+    env: { DSH_PERMISSION_MODE: "danger-full-access" },
   },
 
   // Qoder CLI（官方原生 ACP，qodercli 1.1.78 实测）。
@@ -180,16 +185,28 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   },
 
   // —— 需适配器（CLI 不原生支持 ACP，经第三方适配器桥接；未实测）——
-  // Claude Code：Zed 官方适配器 @zed-industries/claude-code-acp（npx 运行；需 Claude Code 登录/ANTHROPIC_API_KEY）
+  // Claude Code：官方维护的 ACP 适配器 @agentclientprotocol/claude-agent-acp（npx 运行；需 Claude Code 登录/ANTHROPIC_API_KEY；**Node ≥22**）。
+  // 旧包 @zed-industries/claude-code-acp 已弃用并改名（0.16.2 停更）。适配器**不解析** --dangerously-skip-permissions 之类的 CLI flag，
+  // 免审批走 ACP：会话建立后 `session/set_mode {modeId:"bypassPermissions"}`（新旧包都支持；见 sessionMode）。
   "claude-code": {
     name: "claude-code",
     bin: "npx",
     binWin: "npx.cmd",
-    args: ["-y", "@zed-industries/claude-code-acp"],
+    args: ["-y", "@agentclientprotocol/claude-agent-acp"],
     shell: true,
+    sessionMode: "bypassPermissions",
   },
-  // Codex：社区适配器 codex-acp（agentclientprotocol/codex-acp，需自行安装其二进制；Codex 本身暂不原生支持 ACP）
-  codex: { name: "codex", bin: "codex-acp", binWin: "codex-acp.exe", args: [] },
+  // Codex：社区适配器 codex-acp（agentclientprotocol/codex-acp，需自行安装；Codex 本身暂不原生支持 ACP）。
+  // codex-acp **不解析** CLI 参数（codex 的 --yolo/--full-auto 都不适用）；免审批走 ACP `session/set_mode {modeId:"agent-full-access"}`
+  // （= approval never + sandbox danger-full-access），并同时用 README 记录的环境变量 INITIAL_AGENT_MODE 兜底（旧版本无 set_mode 时仍生效）。
+  codex: {
+    name: "codex",
+    bin: "codex-acp",
+    binWin: "codex-acp.exe",
+    args: [],
+    env: { INITIAL_AGENT_MODE: "agent-full-access" },
+    sessionMode: "agent-full-access",
+  },
 };
 
 function onPath(exe: string): string | null {
@@ -208,7 +225,7 @@ export const AUTO_PROBE_ORDER = ["kiro", "opencode", "gemini", "deepseek", "qode
 /**
  * 该 agent 预设里「进入 ACP 模式」的标记 token：从默认 args 中挑出含 `acp` 的项。
  * 只用于整段替换 args 时的静态提醒；适配器（如 codex）的 args 为空 → 返回空数组（不检查）。
- * 不能只查裸 `acp`：qoder 是 `--acp`、gemini 是 `--experimental-acp`、deepseek 是 `--profile acp`、claude-code 是适配器包名。
+ * 不能只查裸 `acp`：qoder 是 `--acp`、gemini 是 `--acp`、deepseek 是 `--profile acp`、claude-code 是适配器包名。
  */
 export function acpModeTokens(name: string): string[] {
   const preset = ACP_AGENT_PRESETS[name];
@@ -297,6 +314,8 @@ export type ResolvedAgent = {
   model?: string;
   realProfile?: string;
   mcpViaAcp: boolean;
+  /** 会话建立/恢复后切到的模式 id（`session/set_mode`）；「免审批」用，留空=不调用。 */
+  sessionMode?: string;
   /** 请求的原始值（来自 env / brain.json / 缺省 `auto`）。 */
   requestedKey: string;
   /** `requestedKey` 的来源。 */
@@ -457,6 +476,7 @@ function resolveAgentCore(
     model,
     realProfile: preset.realProfile,
     mcpViaAcp: preset.mcpViaAcp ?? false,
+    sessionMode: preset.sessionMode,
     requestedKey,
     source,
     known,

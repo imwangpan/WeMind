@@ -76,9 +76,9 @@ describe("ACP 模式参数检查（D）", () => {
     expect(acpModeTokens("kiro")).toEqual(["acp"]);
     expect(acpModeTokens("opencode")).toEqual(["acp"]);
     expect(acpModeTokens("qoder")).toEqual(["--acp"]);
-    expect(acpModeTokens("gemini")).toEqual(["--experimental-acp"]);
+    expect(acpModeTokens("gemini")).toEqual(["--acp"]);
     expect(acpModeTokens("deepseek")).toEqual(["acp"]); // `--profile acp` 的值
-    expect(acpModeTokens("claude-code")).toEqual(["@zed-industries/claude-code-acp"]);
+    expect(acpModeTokens("claude-code")).toEqual(["@agentclientprotocol/claude-agent-acp"]);
     expect(acpModeTokens("codex")).toEqual([]); // 适配器本体就是 ACP，args 为空
   });
 
@@ -170,6 +170,33 @@ describe("resolveAgent agent", () => {
     expect(ag.credentialFiles).toEqual([".credentials.yaml"]);
     expect(ag.model).toBe('["deepseek-account","deepseek-flash"]');
     expect(ag.mcpViaAcp).toBe(true); // MCP 走 session/new|resume 的 mcpServers，不写文件
+    // 免审批默认：DSH 没有 flag 也没有会话级权限配置项，靠官方 bundle 读的 DSH_PERMISSION_MODE
+    expect(ag.env).toEqual({ DSH_PERMISSION_MODE: "danger-full-access" });
+  });
+
+  it("免审批默认：各预设用自己 agent 的机制（flag / env / 会话模式），不是统一开关", () => {
+    clearVars();
+    // kiro / qoder：启动 flag 就是免审批（已是默认，防止被误改）
+    expect(resolveAgent({ agent: "kiro" }).args).toEqual(["acp", "--trust-all-tools"]);
+    expect(resolveAgent({ agent: "qoder" }).args).toEqual(["--acp", "--yolo"]);
+    // gemini：--acp 取代废弃的 --experimental-acp；yolo + skip-trust（未信任目录会把 yolo 静默降回 default）
+    expect(resolveAgent({ agent: "gemini" }).args).toEqual([
+      "--acp",
+      "--approval-mode",
+      "yolo",
+      "--skip-trust",
+    ]);
+    // claude-code：适配器不解析 CLI flag，免审批走会话建立后的 session/set_mode；包名已换成官方维护的新包
+    const cc = resolveAgent({ agent: "claude-code" });
+    expect(cc.args).toEqual(["-y", "@agentclientprotocol/claude-agent-acp"]);
+    expect(cc.sessionMode).toBe("bypassPermissions");
+    // codex：适配器同样不解析 CLI 参数；sessionMode + INITIAL_AGENT_MODE 双保险
+    const cx = resolveAgent({ agent: "codex" });
+    expect(cx.env).toEqual({ INITIAL_AGENT_MODE: "agent-full-access" });
+    expect(cx.sessionMode).toBe("agent-full-access");
+    // 没用会话模式的 agent 不乱调 set_mode
+    expect(resolveAgent({ agent: "kiro" }).sessionMode).toBeUndefined();
+    expect(resolveAgent({ agent: "deepseek" }).sessionMode).toBeUndefined();
   });
 
   it("模型可覆盖：presets[agent 名].model 优先于预设值（切走再切回也还在）", () => {

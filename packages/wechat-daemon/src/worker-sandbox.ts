@@ -111,6 +111,8 @@ function applyWorkerSandbox(ag: ResolvedAgent): void {
   const file = workerMcpJson(ag);
   const existing = readJson(file) ?? {};
   const next = withMcpServers(existing, servers, ag.mcpFormat);
+  // opencode 的免审批只能走配置（`opencode acp` 不接受 --auto）：默认 "allow"，用户自己配了 permission 则以用户的为准。
+  if (ag.mcpFormat === "opencode" && next.permission === undefined) next.permission = "allow";
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(next, null, 2), "utf-8");
 }

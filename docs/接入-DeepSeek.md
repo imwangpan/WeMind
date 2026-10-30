@@ -127,6 +127,8 @@
   - stdio `mcpServers` 被 `session/new` 接受（用一个假 stdio MCP 验证）；HTTP 能力已广告。
   - **stdout 不纯**：DSH 会输出 `[llm-deepseek-account] model listing ...` 这类非 JSON 行；当前 `acp-brain.ts` 的解析器会忽略，不影响 JSON-RPC，但排查时不要把它当协议帧。
 
+- **免审批 / 最高权限（2026-10-30）**：DSH **没有启动 flag**（`dsh --profile acp --help` 只有 `-h`），ACP 也**不广告权限配置项**（`set_config_option` 只认 `model` 与 `reasoning_effort`）。WeMind 预设注入 env `DSH_PERMISSION_MODE=danger-full-access`——这是官方 bundle（`packages/bundle/base` 的 sandbox-policy/approval）读取的默认值来源（**官方文档正文未收录**，升级后可能失效），效果 = 绕过文件沙箱、不产生提权请求。**别把 `approval.policy: never` 当放行**：它的语义是「不问、直接在服务内部拒绝」，必须配合 `danger-full-access`。若该 env 失效，退化为 workspace-write（越界写被拒 + 发 `session/request_permission`，宿主默认拒绝）。等效的手动配置：真实 `~/.dsh/profiles/acp/cordis.patch.yml` 写 `- id: sandbox-policy / config.mode: danger-full-access`（会被原样复制进沙箱，但同时改变终端 dsh 的权限）。
+
 - **版本敏感**：更早的 `0.1.0-rc.6` 被社区实测为「仅支持新会话、不广告 load/resume/list、只返回已提交文本、拒绝非空 `mcpServers`」（见 `dsh-openclaw-acp` 的 README）。所以**必须锁版本、以实际安装版本实测为准**。
 
 **优点**：官方维护、与模型/工具/沙箱同源、无第三方供应链；resume / list / close、工具生命周期、stdio+HTTP MCP 已具备，桌面登录态可用。

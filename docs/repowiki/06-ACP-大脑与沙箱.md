@@ -180,11 +180,13 @@ agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的�
 | `opencode` | OpenCode | 原生 ACP | ✅ 已实测 | `opencode acp`，`XDG_CONFIG_HOME` |
 | `deepseek` | DeepSeek Harness `dsh` | 原生 ACP | ✅ 已内置/已实测（prompt/resume/MCP；`load` ❌、`image` ❌） | `dsh --profile acp`，`DSH_HOME`（见 [接入-DeepSeek](../接入-DeepSeek.md)） |
 | `qoder` | Qoder CLI `qodercli` | 原生 ACP | ✅ 已内置/已实测（load/resume/图片/MCP） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`（见 [接入-Qoder](../接入-Qoder.md)） |
-| `gemini` | Gemini CLI | 原生 ACP | ⚠️ 未实测 | `gemini --experimental-acp`，`GEMINI_CLI_HOME` |
-| `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @zed-industries/claude-code-acp` |
-| `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器） |
+| `gemini` | Gemini CLI | 原生 ACP | ⚠️ 未实测 | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME`（`--acp` 取代弃用的 `--experimental-acp`） |
+| `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @agentclientprotocol/claude-agent-acp`（Node ≥22；免审批走 `session/set_mode bypassPermissions`，适配器不解析 CLI flag） |
+| `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器；免审批 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`） |
 
 两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不说 ACP，要起一个桥接进程）。`auto` 只在 5 个原生预设中探测；两个适配器不参与（`npx` 几乎总在 PATH 上），只能显式选用。
+
+**内置预设默认免审批**（2026-10-30 起，各用自己官方的机制）：kiro `--trust-all-tools`、gemini `--approval-mode yolo --skip-trust`、qoder `--yolo`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code / codex 会话建立后 `session/set_mode`（`bypassPermissions` / `agent-full-access`）。宿主应答器仍默认**拒绝** `session/request_permission`（边缘 ask 规则才会触发；`WEMIND_ACP_AUTO_ALLOW=1` 逐次放行）。
 
 ### 选择与覆盖
 

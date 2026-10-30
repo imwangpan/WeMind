@@ -394,6 +394,19 @@ async function applyModel(ag: ResolvedAgent, sid: string): Promise<void> {
   }
 }
 
+/** 会话建立/恢复后切到预设声明的模式（免审批：claude-code 的 bypassPermissions、codex 的 agent-full-access）。
+ *  **失败只记日志、不抛**：模式不可用（如 claude-code 以 root 跑却没有 IS_SANDBOX）时进程仍可用，
+ *  审批请求继续由应答器处理（默认拒绝，WEMIND_ACP_AUTO_ALLOW=1 放行）；抛错反而会把整轮打成失败。 */
+async function applySessionMode(ag: ResolvedAgent, sid: string): Promise<void> {
+  if (!ag.sessionMode) return;
+  try {
+    await request("session/set_mode", { sessionId: sid, modeId: ag.sessionMode }, REQ_TIMEOUT);
+    dlog(`session mode set ${ag.sessionMode}`);
+  } catch (e) {
+    dlog(`session mode set failed (${String(e)})——继续；审批请求仍由应答器处理`);
+  }
+}
+
 async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string> {
   const existing = userSessions.get(userId);
   if (existing) return existing;
@@ -413,6 +426,7 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
           REQ_TIMEOUT,
         );
         await applyModel(ag, saved);
+        await applySessionMode(ag, saved);
         userSessions.set(userId, saved);
         markUsed(ag.name, userId, saved); // 会话登记表：把它顶到「最近使用」（列表按此排序）
         dlog(`session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
@@ -427,6 +441,7 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
   };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   await applyModel(ag, res.sessionId);
+  await applySessionMode(ag, res.sessionId);
   userSessions.set(userId, res.sessionId);
   map[keyOf(ag, userId)] = res.sessionId;
   saveSessionMap(map);
@@ -552,6 +567,7 @@ export async function resumeSession(
       try {
         await request(`session/${method}`, { sessionId, cwd: BRAIN_HOME, mcpServers }, REQ_TIMEOUT);
         await applyModel(ag, sessionId);
+        await applySessionMode(ag, sessionId);
         userSessions.set(userId, sessionId);
         const map = loadSessionMap(ag);
         map[keyOf(ag, userId)] = sessionId;

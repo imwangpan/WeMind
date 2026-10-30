@@ -436,6 +436,21 @@ export class WorkerConn {
     }
   }
 
+  /** 会话建立/恢复后切到预设声明的模式（免审批）；失败只记日志、不抛——审批请求仍由应答器兜底。 */
+  private async applySessionMode(sid: string): Promise<void> {
+    if (!this.agent.sessionMode) return;
+    try {
+      await this.request(
+        "session/set_mode",
+        { sessionId: sid, modeId: this.agent.sessionMode },
+        REQ_TIMEOUT,
+      );
+      dlog(`${this.id} session mode set ${this.agent.sessionMode}`);
+    } catch (e) {
+      dlog(`${this.id} session mode set failed (${String(e)})——继续；审批请求仍由应答器处理`);
+    }
+  }
+
   /** 取会话：内存 → 磁盘（load/resume 恢复） → 新建。key 由调用方给（每任务一个）。
    *  `strictResume`：有旧会话但恢复失败 → 抛「接不上」，绝不静默新建空会话。 */
   private async ensureSession(key: string, strictResume = false): Promise<string> {
@@ -457,6 +472,7 @@ export class WorkerConn {
             REQ_TIMEOUT,
           );
           await this.applyModel(saved);
+          await this.applySessionMode(saved);
           this.sessions.set(key, saved);
           dlog(
             `${this.id} session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`,
@@ -478,6 +494,7 @@ export class WorkerConn {
     )) as { sessionId?: string };
     if (!res?.sessionId) throw new Error("session/new returned no sessionId");
     await this.applyModel(res.sessionId);
+    await this.applySessionMode(res.sessionId);
     this.sessions.set(key, res.sessionId);
     // 重新读改写：多个连接并存时，别用陈旧的记录整张覆盖（会抹掉别的任务刚写的 key）
     const fresh = loadSessionMap(this.agent);
