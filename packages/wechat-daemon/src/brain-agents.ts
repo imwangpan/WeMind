@@ -184,6 +184,36 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     identityFiles: [".auth/machine_id"],
   },
 
+  // Cline CLI（官方原生 ACP，cline 3.0.74 实测；`cline-acp` 适配器已归档，官方让直接用 `cline --acp`）。
+  // - `CLINE_DIR` 指到 <沙箱>/cline（不用沙箱根：大脑 cwd 就是沙箱根，避免把 agent 自己的配置目录当工作区）；
+  // - 登录态：ACP 只自动恢复它自己的 3 种登录（cline / cline-pass / openai-codex，读 data/settings/providers.json）；
+  //   自定义/API-key provider（如 openai-compatible）必须由 daemon 进程环境提供 CLINE_PROVIDER + CLINE_API_KEY，
+  //   否则 session/new 直接 `-32000 Authentication required`（Cline 不会去看 lastUsedProvider）；
+  // - MCP：data/settings/cline_mcp_settings.json（{mcpServers}，与 kiro 同格式）；沙箱用 CLINE_MCP_SETTINGS_PATH 指到
+  //   <沙箱>/cline/mcp.json，真实文件不动。ACP `session/new.mcpServers` 不被 Cline 使用（它只存不用）→ mcpViaAcp 保持 false；
+  // - 免审批：`--auto-approve true`（Cline 自己文档给的 ACP 启动开关）；宿主应答器仍默认拒绝权限请求；
+  // - 能力：loadSession / images 可用，重启后 session/load 能接回上下文；session/close 未实现（-32601，WeMind 不调用）。
+  cline: {
+    name: "cline",
+    bin: "cline",
+    binWin: "cline.cmd",
+    args: ["--acp", "--auto-approve", "true"],
+    shell: true,
+    env: {
+      CLINE_DIR: `%HOME%${path.sep}cline`,
+      CLINE_DATA_DIR: `%HOME%${path.sep}cline${path.sep}data`,
+      CLINE_MCP_SETTINGS_PATH: `%HOME%${path.sep}cline${path.sep}mcp.json`,
+    },
+    realHome: path.join(os.homedir(), ".cline"),
+    // 用户级规则/技能/agent 定义与日常 Cline 共用一份；hooks/plugins 不继承（插件可自带 MCP，沙箱不允许 wechat 之外的意外入口）
+    inheritDirs: ["rules", "skills", "agents"],
+    configSubdir: "cline",
+    mcpFormat: "kiro",
+    mcpConfigFile: "mcp.json",
+    catalogFile: "data/settings/cline_mcp_settings.json",
+    credentialFiles: ["data/settings/providers.json"],
+  },
+
   // —— 需适配器（CLI 不原生支持 ACP，经第三方适配器桥接；未实测）——
   // Claude Code：官方维护的 ACP 适配器 @agentclientprotocol/claude-agent-acp（npx 运行；需 Claude Code 登录/ANTHROPIC_API_KEY；**Node ≥22**）。
   // 旧包 @zed-industries/claude-code-acp 已弃用并改名（0.16.2 停更）。适配器**不解析** --dangerously-skip-permissions 之类的 CLI flag，
@@ -219,8 +249,16 @@ function onPath(exe: string): string | null {
 /**
  * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的 agent。
  * 只收纳**原生 ACP 且二进制可直接判定**的 agent——适配器类（`claude-code` 走 `npx`、`codex` 走 `codex-acp`）不参与自动探测（`npx` 几乎总在 PATH 上，会把它们误选出来）。
+ * 新 agent 一律追加在末尾：老机器上已装的前几个仍按原顺序被选中，不改变既有用户的默认大脑。
  */
-export const AUTO_PROBE_ORDER = ["kiro", "opencode", "gemini", "deepseek", "qoder"] as const;
+export const AUTO_PROBE_ORDER = [
+  "kiro",
+  "opencode",
+  "gemini",
+  "deepseek",
+  "qoder",
+  "cline",
+] as const;
 
 /**
  * 该 agent 预设里「进入 ACP 模式」的标记 token：从默认 args 中挑出含 `acp` 的项。
@@ -236,7 +274,11 @@ export function acpModeTokens(name: string): string[] {
  * 整段替换 args 时的静态提醒（**只提醒、不拒绝**）：新 args 里找不到该 agent 的 ACP 模式标记时返回文案。
  * `binOverridden`（env / brain.json 指定了自定义 bin）时不检查——自定义入口/包装脚本可能自带 ACP 模式，静态判断不可靠。
  */
-export function acpArgsWarning(name: string, args: string[], binOverridden: boolean): string | null {
+export function acpArgsWarning(
+  name: string,
+  args: string[],
+  binOverridden: boolean,
+): string | null {
   if (binOverridden) return null;
   const markers = acpModeTokens(name);
   if (!markers.length) return null;
@@ -548,6 +590,21 @@ export function agentProblem(ag: ResolvedAgent): string | null {
       ? `找不到 DeepSeek 的「${ag.bin}」。桌面端通常有 dsh.cmd；把它的绝对路径传给 \`wemind brain set deepseek --bin "<...>\\dsh.cmd"\``
       : ag.name === "qoder"
         ? `找不到 Qoder CLI 的「${ag.bin}」。官方安装会放在 ~/.qoder/bin/qodercli/ 并加入 PATH；确认后重开终端，或 \`wemind brain set qoder --bin "<...>\\qodercli.exe"\``
-        : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <agent 名>\` 切换`;
+        : ag.name === "cline"
+          ? `找不到 Cline CLI 的「${ag.bin}」。安装：\`npm i -g cline\`（Node 20+），装完后重开终端；或用 \`wemind brain set cline --bin "<...>\\cline.cmd"\``
+          : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <agent 名>\` 切换`;
   return null;
+}
+
+/**
+ * 认证失败时按 agent 补一句可执行的建议（`wemind brain check` 与 daemon 日志复用）。
+ * Cline 的 ACP 只自动恢复它自己的 3 种登录；自定义 provider 必须靠环境变量——
+ * 「重启 daemon」对它没用，所以不能只套用通用的「密钥/鉴权」提示。
+ * 其它 agent 返回空串（不改变既有文案）。
+ */
+export function authHint(agentName: string, message: string): string {
+  if (agentName !== "cline") return "";
+  if (!/authentication required|authenticate|unauthorized|not authenticated/i.test(message))
+    return "";
+  return "Cline 的 ACP 只自动恢复 cline / cline-pass / openai-codex 三种登录；用自定义 provider（如 openai-compatible）时，请在启动 wemind 的环境里设置 CLINE_PROVIDER 与 CLINE_API_KEY（设置后重启一次 daemon）。";
 }

@@ -1,6 +1,6 @@
 # 配方：端到端验收
 
-> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-30
 >
 > 目标：用最短路径证明「微信 → daemon → ACP 大脑 → 微信」真的通，而不是只看编译通过。
 > 前置：已构建、已登录一个 bot、`allowFrom` 包含你的微信（登录时自动写入，通常无需手动加）、至少一个 ACP agent 可用。
@@ -246,7 +246,7 @@ MCP
 | 6 | 同一 agent 两个进程共用配置目录是否互踩（kiro/opencode/qoder 各一次） | 同 agent 并发两条任务 | 是否要禁止同 agent 并发 |
 | 7 | 被强杀后各 agent 能否 `session/load\|resume` 回该任务会话（kiro/opencode/qoder/DSH 各一次） | ⑤ 的做法，四家各跑一遍 | 「重启后续跑」的**可行边界** |
 
-### 7.3 实测结论（2026-10-29，本机；deepseek DSH 0.2.1-rc.2 / opencode 2.0.32 / qoder 1.1.78）
+### 7.3 实测结论（2026-10-29，本机；deepseek DSH 0.2.1-rc.2 / opencode 2.0.32 / qoder 1.1.78；cline 3.0.74 于 2026-10-30 补测）
 
 测量脚本：`%TEMP%\acp-measure.mjs`（起真进程 → `initialize`/`session/new` 计时 → 一轮 prompt → 在新会话上探 `session/delete` → **强杀** → 新进程 `session/load`，失败再 `session/resume` → 数回放帧 → 用第二问验证上下文是否还在）。三家全程**零反向请求**。
 
@@ -259,6 +259,7 @@ MCP
 | 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 wrapper+daemon+worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
 | 6 | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。 |
 | 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑未单独测（按同一 ACP 路径推断可用）。 |
+| 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 广告 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt 被接受（~10s，取决于模型）；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证是唯一硬前置：自定义 provider 需 `CLINE_PROVIDER`+`CLINE_API_KEY`。 |
 
 ### 7.4 真机踩到的坑：重启后旧 `context_token`（2026-10-29 已修）
 

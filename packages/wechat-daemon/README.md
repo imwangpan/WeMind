@@ -16,7 +16,7 @@ wemind version           # → wemind 1.2.0 (@wemind/cli, node …, win32-x64)  
 npx -y @wemind/cli list
 ```
 
-要求：**Node.js >= 20**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / 桌面端 `dsh` / `qodercli` 等；未配置时自动探测 `kiro → opencode → gemini → deepseek → qoder`）。
+要求：**Node.js >= 20**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / 桌面端 `dsh` / `qodercli` / `cline` 等；未配置时自动探测 `kiro → opencode → gemini → deepseek → qoder → cline`）。
 
 ## 升级
 
@@ -62,7 +62,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 ## 数据与安全
 
 - 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标（读到哪条消息了）、`allowFrom.json` 授权清单、`brain-home/` 大脑沙箱、`daemon.log` 日志。
-- ⚠️ **daemon 会让大脑免确认执行工具**（**7 个内置预设默认都免审批**：kiro `--trust-all-tools`、gemini `--approval-mode yolo`、qoder `--yolo`、opencode 沙箱 `permission: allow`、DSH `danger-full-access`、claude-code `bypassPermissions`、codex `agent-full-access`）：能给这个 bot 发消息的人，即可让大脑在本机执行任意工具（shell / 写文件）。唯一安全闸是**发件人授权（allowFrom）**：扫码登录者自动授权，**勿清空**。边缘权限请求默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行。
+- ⚠️ **daemon 会让大脑免确认执行工具**（**8 个内置预设默认都免审批**：kiro `--trust-all-tools`、gemini `--approval-mode yolo`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `permission: allow`、DSH `danger-full-access`、claude-code `bypassPermissions`、codex `agent-full-access`）：能给这个 bot 发消息的人，即可让大脑在本机执行任意工具（shell / 写文件）。唯一安全闸是**发件人授权（allowFrom）**：扫码登录者自动授权，**勿清空**。边缘权限请求默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行。
 - `account.json` 里 bot token 是明文（POSIX 上 chmod 600；Windows 请用目录权限或磁盘加密）。
 - 同一个 bot token **只能有一个消费者**：`wemind` daemon 与 `@wemind/wechat-mcp` 二选一，否则互相抢消息。
 

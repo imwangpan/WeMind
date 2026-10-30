@@ -91,6 +91,22 @@ describe("brainFailurePlan / brainErrorMessage（大脑失败的处置）", () =
     expect(brainFailurePlan(model)).toEqual({ attemptLimit: 1, category: "provider：模型不可用" });
   });
 
+  it("Cline 的认证失败给环境变量建议，而不是「重启就好」", () => {
+    const auth = new Error(
+      "-32000 Authentication required: Call authenticate before starting a session",
+    );
+    expect(brainFailurePlan(auth)).toEqual({
+      attemptLimit: 1,
+      category: "provider：密钥/鉴权有问题",
+    });
+    const msg = brainErrorMessage(auth, "cline");
+    expect(msg).toMatch(/CLINE_PROVIDER/);
+    expect(msg).toMatch(/CLINE_API_KEY/);
+    expect(msg).not.toMatch(/wemind stop && wemind start/); // 通用建议被 agent 专属提示顶掉
+    // 不传 agent 名时沿用通用文案（其它调用方/旧测试不受影响）
+    expect(brainErrorMessage(auth)).toMatch(/重启一次 daemon/);
+  });
+
   it("限流仍是 backend（重试 3 次）——不能把「等一会儿就好」误判成账号问题", () => {
     const rl = new Error("-32603 internal error: rate limit exceeded, please try again");
     expect(brainFailurePlan(rl)).toEqual({ attemptLimit: 3, category: "backend" });

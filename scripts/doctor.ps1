@@ -96,7 +96,7 @@ if (Test-Path -LiteralPath $DataRoot) {
         Item "  brain.json" "存在但无法解析：$brainCfg"
       }
     } else {
-      Item "  brain.json" "未设置（走 auto：kiro → opencode → gemini → deepseek → qoder）"
+      Item "  brain.json" "未设置（走 auto：kiro → opencode → gemini → deepseek → qoder → cline）"
     }
     $sess = Join-Path $a.FullName "brain-sessions.json"
     if (Test-Path -LiteralPath $sess) {
@@ -136,6 +136,7 @@ $agents = @(
   @{ Name = "dsh.cmd"; Preset = "deepseek（已内置预设）" },
   @{ Name = "deepseek-acp"; Preset = "社区 DeepSeek 适配器（评估中）" },
   @{ Name = "gemini"; Preset = "gemini（示例预设）" },
+  @{ Name = "cline"; Preset = "cline（已内置预设）" },
   @{ Name = "codex-acp"; Preset = "codex（示例预设）" },
   @{ Name = "npx"; Preset = "适配器启动器（claude-code 等）" }
 )

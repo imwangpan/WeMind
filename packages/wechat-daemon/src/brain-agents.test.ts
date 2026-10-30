@@ -3,7 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveAgent, agentProblem, AUTO_PROBE_ORDER, acpArgsWarning, acpModeTokens } from "./brain-agents.js";
+import {
+  resolveAgent,
+  agentProblem,
+  authHint,
+  AUTO_PROBE_ORDER,
+  acpArgsWarning,
+  acpModeTokens,
+} from "./brain-agents.js";
 import {
   presetAvailable,
   presetNames,
@@ -76,6 +83,7 @@ describe("ACP 模式参数检查（D）", () => {
     expect(acpModeTokens("kiro")).toEqual(["acp"]);
     expect(acpModeTokens("opencode")).toEqual(["acp"]);
     expect(acpModeTokens("qoder")).toEqual(["--acp"]);
+    expect(acpModeTokens("cline")).toEqual(["--acp"]);
     expect(acpModeTokens("gemini")).toEqual(["--acp"]);
     expect(acpModeTokens("deepseek")).toEqual(["acp"]); // `--profile acp` 的值
     expect(acpModeTokens("claude-code")).toEqual(["@agentclientprotocol/claude-agent-acp"]);
@@ -261,6 +269,44 @@ describe("resolveAgent agent", () => {
     expect(ag.mcpViaAcp).toBe(false);
   });
 
+  it("cline：原生 cline --acp + CLINE_DIR 沙箱 + mcp.json + providers.json 凭据", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "cline";
+    const ag = resolveAgent();
+    expect(ag.name).toBe("cline");
+    expect(ag.bin).toMatch(/cline(\.cmd)?$/);
+    expect(ag.args).toEqual(["--acp", "--auto-approve", "true"]);
+    expect(ag.shell).toBe(true); // Windows 上是 npm shim（cline.cmd）
+    expect(ag.homeEnvVar).toBeUndefined(); // 用 env 指到「配置目录」本身，而非沙箱根（与 qoder 同理）
+    expect(ag.env.CLINE_DIR).toMatch(/^%HOME%[\\/]cline$/);
+    expect(ag.env.CLINE_DATA_DIR).toMatch(/^%HOME%[\\/]cline[\\/]data$/);
+    expect(ag.env.CLINE_MCP_SETTINGS_PATH).toMatch(/^%HOME%[\\/]cline[\\/]mcp\.json$/);
+    expect(ag.configSubdir).toBe("cline");
+    expect(ag.mcpFormat).toBe("kiro"); // cline_mcp_settings.json 的键名同为 mcpServers
+    expect(ag.mcpConfigFile).toBe("mcp.json");
+    expect(ag.catalogFile).toBe("data/settings/cline_mcp_settings.json");
+    expect(ag.credentialFiles).toEqual(["data/settings/providers.json"]);
+    expect(ag.inheritDirs).toEqual(["rules", "skills", "agents"]);
+    expect(ag.mcpViaAcp).toBe(false); // ACP session/new 的 mcpServers 不被 Cline 使用
+    expect(ag.restore).toBeUndefined(); // 有 session/load，用默认
+    expect(ag.images).toBe(true);
+  });
+
+  it("cline 找不到二进制时给安装命令（而不是泛泛的「安装它」）", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "cline";
+    process.env.PATH = emptyBin;
+    expect(agentProblem(resolveAgent())).toMatch(/npm i -g cline/);
+  });
+
+  it("authHint 只对 cline 的认证失败给出环境变量建议；其它 agent 不动原有文案", () => {
+    const auth = "-32000 Authentication required: Call authenticate before starting a session";
+    expect(authHint("cline", auth)).toMatch(/CLINE_PROVIDER/);
+    expect(authHint("cline", auth)).toMatch(/CLINE_API_KEY/);
+    expect(authHint("cline", "boom")).toBe("");
+    expect(authHint("qoder", auth)).toBe("");
+  });
+
   it("kiro/opencode：mcpViaAcp 默认 false（仍走沙箱配置文件）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
@@ -362,9 +408,25 @@ describe("resolveAgent auto 探测", () => {
     expect(agentProblem(ag)).toMatch(/找不到大脑/);
   });
 
-  it("auto 探测把 qoder 排在最后，不影响老用户", () => {
-    expect(AUTO_PROBE_ORDER[AUTO_PROBE_ORDER.length - 1]).toBe("qoder");
+  it("auto 探测把新 agent 追加在末尾（当前 cline 最后），不影响老用户", () => {
+    expect(AUTO_PROBE_ORDER[AUTO_PROBE_ORDER.length - 1]).toBe("cline");
+    expect(AUTO_PROBE_ORDER.indexOf("cline")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("qoder"));
     expect(AUTO_PROBE_ORDER.indexOf("qoder")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("deepseek"));
+  });
+
+  it("auto 只有一个 cline 时也能选中它", () => {
+    clearVars();
+    const onlyCline = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-cline-"));
+    try {
+      fs.writeFileSync(path.join(onlyCline, "cline"), "");
+      fs.writeFileSync(path.join(onlyCline, "cline.cmd"), "");
+      process.env.PATH = onlyCline;
+      const ag = resolveAgent();
+      expect(ag.name).toBe("cline");
+      expect(ag.available).toBe(true);
+    } finally {
+      fs.rmSync(onlyCline, { recursive: true, force: true });
+    }
   });
 });
 
@@ -422,6 +484,7 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
     expect(names).toContain("kiro");
     expect(names).toContain("deepseek");
     expect(names).toContain("opencode");
+    expect(names).toContain("cline");
     expect(names).not.toContain("auto"); // auto 只是「自动探测」开关，不是 agent，不进列表
   });
 

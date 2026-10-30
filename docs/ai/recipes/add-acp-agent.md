@@ -1,6 +1,6 @@
 # 配方：接入一个新的 ACP Agent
 
-> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-30
 >
 > 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)。
 
@@ -42,7 +42,7 @@ node scripts/acp-probe.mjs
 | 有反向请求 | 先做 M2 应答器，否则会挂到超时 |
 | `image:false` | 在 `askBrain` 前拦截图片，或换支持图片的 agent |
 | 正文非逐 token | 调 `firstFrameMs` + 心跳策略（见 M2） |
-| `mcpServers` 被拒绝 | MCP 只能走该 agent 自己的配置文件，或先不做动态 MCP |
+| `session/new` 先要求 `authenticate`（`-32000 Authentication required`） | 先看能否靠**复制凭据**自动恢复（`credentialFiles`；Cline 只自动恢复它自己的 3 种 OAuth provider）；不能就要求部署方提供 agent 官方文档里的环境变量（如 `CLINE_PROVIDER` + `CLINE_API_KEY`）。**不要**在 daemon 里实现交互式 `authenticate`——无头环境会卡在浏览器/输入上；把可执行的提示写进 `brain check` 与失败回复（参考 `authHint()`） |
 | 默认模型路由需要 API key / 桌面登录要切 account | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖 |
 | 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：沙箱**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在），并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
 

@@ -2,7 +2,7 @@
 
 > 上一页：[5. daemon](05-daemon.md) ｜ 下一页：[7. 远程任务 Worker](07-远程任务-Worker.md)
 >
-> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28 ｜ 代码以当前 `main` 为准。
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-30 ｜ 代码以当前 `main` 为准。
 
 daemon 的「大脑」是一个常驻的 AI agent 子进程，通过 ACP 协议驱动。本章讲清大脑的进程生命周期、会话管理、MCP 沙箱与记忆继承，以及如何换成别的 agent。
 
@@ -166,7 +166,7 @@ agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的�
 
 ## 6.4 可配置的 agent（brain-agents.ts）
 
-大脑通过 ACP 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini → deepseek → qoder` 探测已安装者）。**多数原生 ACP agent 可以零代码接入**（加 agent/环境变量）；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 §6.6）。
+大脑通过 ACP 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini → deepseek → qoder → cline` 探测已安装者）。**多数原生 ACP agent 可以零代码接入**（加 agent/环境变量）；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 §6.6）。
 
 ### AcpAgentPreset 与解析
 
@@ -180,13 +180,14 @@ agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的�
 | `opencode` | OpenCode | 原生 ACP | ✅ 已实测 | `opencode acp`，`XDG_CONFIG_HOME` |
 | `deepseek` | DeepSeek Harness `dsh` | 原生 ACP | ✅ 已内置/已实测（prompt/resume/MCP；`load` ❌、`image` ❌） | `dsh --profile acp`，`DSH_HOME`（见 [接入-DeepSeek](../接入-DeepSeek.md)） |
 | `qoder` | Qoder CLI `qodercli` | 原生 ACP | ✅ 已内置/已实测（load/resume/图片/MCP） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`（见 [接入-Qoder](../接入-Qoder.md)） |
+| `cline` | Cline CLI `cline` | 原生 ACP | ✅ 已内置/已实测（loadSession/图片；自定义 provider 需 `CLINE_PROVIDER`+`CLINE_API_KEY`） | `cline --acp --auto-approve true`，`CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH`（见 [接入-Cline](../接入-Cline.md)） |
 | `gemini` | Gemini CLI | 原生 ACP | ⚠️ 未实测 | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME`（`--acp` 取代弃用的 `--experimental-acp`） |
 | `claude-code` | Claude Code | 需适配器 | ⚠️ 未实测 | `npx -y @agentclientprotocol/claude-agent-acp`（Node ≥22；免审批走 `session/set_mode bypassPermissions`，适配器不解析 CLI flag） |
 | `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器；免审批 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`） |
 
-两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不说 ACP，要起一个桥接进程）。`auto` 只在 5 个原生预设中探测；两个适配器不参与（`npx` 几乎总在 PATH 上），只能显式选用。
+两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不说 ACP，要起一个桥接进程）。`auto` 只在 6 个原生预设中探测（`kiro → opencode → gemini → deepseek → qoder → cline`）；两个适配器不参与（`npx` 几乎总在 PATH 上），只能显式选用。
 
-**内置预设默认免审批**（2026-10-30 起，各用自己官方的机制）：kiro `--trust-all-tools`、gemini `--approval-mode yolo --skip-trust`、qoder `--yolo`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code / codex 会话建立后 `session/set_mode`（`bypassPermissions` / `agent-full-access`）。宿主应答器仍默认**拒绝** `session/request_permission`（边缘 ask 规则才会触发；`WEMIND_ACP_AUTO_ALLOW=1` 逐次放行）。
+**内置预设默认免审批**（2026-10-30 起，各用自己官方的机制）：kiro `--trust-all-tools`、gemini `--approval-mode yolo --skip-trust`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code / codex 会话建立后 `session/set_mode`（`bypassPermissions` / `agent-full-access`）。宿主应答器仍默认**拒绝** `session/request_permission`（边缘 ask 规则才会触发；`WEMIND_ACP_AUTO_ALLOW=1` 逐次放行）。
 
 ### 选择与覆盖
 
@@ -196,7 +197,7 @@ agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的�
 |----|------|------|
 | 环境变量 | `WEMIND_BRAIN` / `_BIN` / `_ARGS` / `_HOME_ENV` / `_SHELL` / `_INHERIT` / `_REAL_HOME` / `_INHERIT_DIRS` / `KIRO_CLI_BIN`；worker 侧 `WEMIND_WORKER_BRAIN` | 一次性覆盖（临时试别的 agent，别写进 profile） |
 | 账号配置 | `<数据目录>/brain.json`：`{ agent, bin?, args?, shell?, homeEnvVar?, model?, worker?: {…}, presets?: { <agent 名>: {…} } }` | **持久选择**，任何入口重启都复现 |
-| `auto` | 未配置时按 `kiro → opencode → gemini → deepseek → qoder` 探测第一个可用 agent | 缺省兜底 |
+| `auto` | 未配置时按 `kiro → opencode → gemini → deepseek → qoder → cline` 探测第一个可用 agent | 缺省兜底 |
 
 - **`presets` 段（1.2.0 新增）**：按**agent 名**保存启动覆盖（`--bin`/`--args`/`--shell`/`homeEnvVar`/`model`）。因为顶层那几个字段是「当前 agent 的覆盖」，切走再切回就会丢（典型：DSH 的 `--bin <绝对路径>`）——换 agent 时旧覆盖自动迁进 `presets[旧 agent]`，同一 agent 再次 `set` 时沿用未给出的字段。
 - **`worker` 段**：默认任务大脑（`{agent, bin?, args?, shell?, homeEnvVar?, model?}`，与顶层同字段；`model` 同样在会话建立/恢复后经 `session/set_config_option` 下发）。它也带 `presets` 查找上下文——`agentConfigFor("worker")` 会把顶层的 `presets` 带进 worker 段，否则「有 `worker.agent` 时 `presets[agent]` 查不到」、`--bin` 之类覆盖会静默失效。

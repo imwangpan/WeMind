@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-28（`@wemind/cli@1.1.1` 已发布，1.2.0 待发布；`@wemind/wechat-mcp@1.0.5` 已发布）
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-30（`@wemind/cli@1.2.0` 已发布；`@wemind/wechat-mcp@1.0.5` 已发布）
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -114,7 +114,7 @@ poller（长轮询，不被大脑阻塞）
 | **反向请求** | agent 发给 client 的请求（`session/request_permission`、`fs/*`、`terminal/*`）；不应答会挂起 |
 | **committed-only** | agent 只在消息提交后发正文（非逐 token），如 DSH 官方 ACP |
 | **brain.json** | 账号级大脑选择，`<数据目录>/brain.json`；`wemind brain set` 写入 |
-| **auto** | 未配置时的探测顺序：`kiro → opencode → gemini → deepseek → qoder` |
+| **auto** | 未配置时的探测顺序：`kiro → opencode → gemini → deepseek → qoder → cline` |
 
 ### 4.1 中英术语对照（写作口径）
 
@@ -193,6 +193,7 @@ poller（长轮询，不被大脑阻塞）
 | `wemind brain check` 默认 60s | ✅ 代码 | 冷启动慢的 agent 仍可能误报 |
 | `deepseek` agent 已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验 |
 | `qoder` agent 已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0–M3 全部已验：发图、动态 MCP、冷重启 `session/load`、worker 中断续跑、`memory/` junction 继承 |
+| `cline` agent 已内置 | ✅ 代码/实测（3.0.74） | `cline --acp --auto-approve true` + `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 沙箱（`configSubdir: "cline"`）；`providers.json` 同步；**自定义 provider 必须在启动环境设 `CLINE_PROVIDER`+`CLINE_API_KEY`**（ACP 只自动恢复 cline/cline-pass/openai-codex）；`loadSession`/图片/硬杀后 `session/load` 已验证；ACP `mcpServers` 不生效→文件式 MCP；`session/close` 无 |
 | `gemini` 预设存在但未实测 | 🟡 未实测（示例） | `gemini --acp --approval-mode yolo --skip-trust` + `GEMINI_CLI_HOME`；在 `AUTO_PROBE_ORDER` 第 3 位——装过 Gemini CLI 的机器可能被自动选中 |
 | `claude-code` / `codex` 预设存在但未实测 | 🟡 未实测（示例，需适配器） | claude-code：`npx -y @agentclientprotocol/claude-agent-acp`（Node ≥22）+ `session/set_mode bypassPermissions`；codex：`codex-acp` + `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`；适配器不读沙箱、动态挂 MCP 不适用；**不在** `AUTO_PROBE_ORDER`（`npx` 几乎总在 PATH 上），只能显式选用 |
 | Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |

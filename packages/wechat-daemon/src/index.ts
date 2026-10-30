@@ -45,6 +45,7 @@ import {
 } from "./acp-brain.js";
 import {
   agentProblem,
+  authHint,
   BRAIN_CONFIG_EXIT_CODE,
   presetAvailable,
   presetNames,
@@ -145,15 +146,19 @@ export function brainFailurePlan(e: unknown): { attemptLimit: number; category: 
   const cat = classifyBrainError(e);
   return { attemptLimit: cat === "backend" ? 3 : 2, category: cat };
 }
-/** 按错误类型给用户的失败提示。 */
-export function brainErrorMessage(e: unknown): string {
+/** 按错误类型给用户的失败提示。`agentName` 用于给特定 agent 补专属建议（如 Cline 的自定义 provider 要设环境变量）。 */
+export function brainErrorMessage(e: unknown, agentName?: string): string {
   const prov = providerIssue(e);
   if (prov) {
     // 余额/计费在 provider 侧处理完，重发消息即可（daemon 不用重启）；
     // 密钥/模型类常常是刚在本机改过登录态或 brain.json——运行中的 daemon 不重读配置、也不重新同步凭据（槽位启动时种入），
     // 必须重启一次才生效，所以这句提示要说全，否则用户会陷入「改了、重发、还是错」。
-    const hint =
-      prov === "密钥/鉴权有问题" || prov === "模型不可用"
+    // Cline 是例外：自定义 provider 只认启动环境里的 CLINE_PROVIDER/CLINE_API_KEY，重启不带变量照样失败——
+    // 用 agent 专属提示顶掉通用那句（`authHint`）。
+    const auth = agentName ? authHint(agentName, String(e instanceof Error ? e.message : e)) : "";
+    const hint = auth
+      ? ` ${auth}`
+      : prov === "密钥/鉴权有问题" || prov === "模型不可用"
         ? "若刚在本机改过登录态或模型配置，还要重启一次 daemon（wemind stop && wemind start）才会读到。"
         : "";
     return `（这次没答上来：${prov}。这类问题重试不会好——把账号/模型处理好后把消息再发一次就行。${hint}）`;
@@ -824,7 +829,7 @@ async function handleMessage(
     answer = await runWithRetry(text, images);
   } catch (e2) {
     ok = false; // 重试也失败 → 只是把错误提示当回复发出去，不算「答成」（交接摘要据此决定留不留）
-    answer = brainErrorMessage(e2);
+    answer = brainErrorMessage(e2, getAgent("brain").name);
   } finally {
     clearInterval(keepAlive);
     clearInterval(heartbeat);

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ResolvedAgent } from "./brain-agents.js";
+import { authHint, type ResolvedAgent } from "./brain-agents.js";
 import { copyProfilePatch } from "./profile-model.js";
 import { spawnAgent } from "./spawn-agent.js";
 
@@ -125,8 +125,10 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
       lines.find((l) => /^(Error|YAMLException)\b/.test(l)) ??
       lines.find((l) => /failed to parse|YAMLException/i.test(l)) ??
       lines[0];
+    const msg = e instanceof Error ? e.message : String(e);
+    const hint = authHint(ag.name, msg);
     const tail = all.slice(-400);
-    const detail = `${e instanceof Error ? e.message : String(e)}${head ? `\n  stderr: ${head}` : ""}${tail && !head?.includes(tail.trim()) ? `\n  …${tail}` : ""}`;
+    const detail = `${msg}${head ? `\n  stderr: ${head}` : ""}${tail && !head?.includes(tail.trim()) ? `\n  …${tail}` : ""}${hint ? `\n  提示：${hint}` : ""}`;
     return {
       ok: false,
       detail,
