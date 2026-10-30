@@ -141,7 +141,7 @@ stateDiagram-v2
 
 `WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain 沙箱**策略相反**：worker 是无人值守的任务执行机，继承 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）—— 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。写入磁盘方式按 agent：kiro/opencode 由 `applyWorkerSandbox` 写沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。记忆/技能（`mirrorRealKiro`）与 settings（`syncSettings`，含模型/信任）继承与 brain 一致。
 
-> **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个配置目录（会话/缓存文件是否互踩**待实测**）。
+> **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个配置目录（2026-10-29 一轮样本未见互踩，长期风险仍在）。
 >
 > worker 沙箱代码与 brain 沙箱有少量重复（`mirrorRealKiro`/`syncSettings`），刻意复制以隔离演进、不动已稳定的 brain 沙箱。
 
@@ -278,7 +278,7 @@ worker 指向真实目录 + `--trust-all-tools` → 微信回复即可驱动它�
 - **同时运行的任务数有上限**（默认 3，`WEMIND_MAX_WORKERS`），超出直接拒绝（不排队）。
 - **连续发送上限共享**：worker 进展回传与对话大脑共用同一份约 10 条额度（一轮通常只推 1 条，几乎不触发；多任务并发时才需要留意）。
 - **资源占用**：池里每个进程都是一个完整 agent（内存/网络），靠空闲回收与上限约束。
-- 中断续跑的可行性最终取决于各 agent 能否 `load`/`resume` 回该会话（**待实测**，见 §7.9 与 `docs/ai/recipes/run-e2e.md`）。
+- 中断续跑的可行性最终取决于各 agent 能否 `load`/`resume` 回该会话（2026-10-29 实测：DSH `resume` 与 opencode `load` 能接回同一 sessionId；qoder 的任务续跑未单独测。见 §7.9 与 `docs/ai/recipes/run-e2e.md`）。
 
 ## 7.8 配置项
 
@@ -306,7 +306,7 @@ worker 指向真实目录 + `--trust-all-tools` → 微信回复即可驱动它�
 - `task-store.test.ts`：`tasks.json` 往返、损坏降级为空表、中断态标记、编号跨重启连续。
 - `pid-record.test.ts`：`brain.pid`/`workers.pid.json` 的整数/JSON/数组三种形态兼容读。
 
-**待实测**（先量再写结论）：同 agent 并发共用配置目录是否互踩；`taskkill /T /F` 杀池中特定进程的行为；被强杀后各 agent 能否恢复该任务会话。
+**已实测（2026-10-29）**：同 agent 并发（opencode 两条）一轮样本未见互踩（长期风险仍在）；被强杀后 DSH（`resume`）/opencode（`load`）能接回原任务会话，qoder 任务续跑未单独测。**仍未单独测**：`taskkill /T /F` 在 `session/load` 途中、以及杀池中某个特定 pid 的行为。结论与测量脚本见 `docs/ai/recipes/run-e2e.md` §7.3。
 
 ---
 

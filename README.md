@@ -23,7 +23,7 @@ wemind list                          # 查看运行状态
 
 ### AI 大脑：能接什么 agent
 
-常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 agent 已覆盖 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder`，未配置时按此顺序自动探测。判断某个 agent 能不能用：
+常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **7 个 agent 预设**：原生 ACP 的 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder`（**未配置时按此顺序自动探测**；其中 kiro / opencode / deepseek / qoder 已实测，`gemini` 未实测），以及两个需第三方适配器的 `claude-code` / `codex`（**未实测**，只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
 
 | 必要条件 | 说明 | 不满足怎么办 |
 | --- | --- | --- |
@@ -574,4 +574,4 @@ daemon 用 `--trust-all-tools`（内置的 kiro），**消息一旦被接受**�
 
 ---
 
-> **文档版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-27 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。
+> **文档版本**：WeMind 1.2.0（`@wemind/cli` 1.2.0 已发布 / 1.1.1 上一版）｜ **最后核对**：2026-10-30 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。

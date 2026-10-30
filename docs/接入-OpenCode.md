@@ -2,7 +2,7 @@
 
 > **状态**：M1 冒烟验证 **已完成 ✅** · M2（agent + 沙箱）**已实现 ✅**；M3+ 见 §3.6。
 > **实测环境**：Windows 11 / Node ≥20 / OpenCode **v2.0.29** / WeMind 1.0.1。
-> **最后核对**：2026-10-24 ｜ 本文结论**仅适用于 OpenCode v2.0.29**；其它 agent 的能力（load/image/MCP）可能不同。
+> **最后核对**：2026-10-30 ｜ 本文结论**基于 OpenCode v2.0.29**；2026-10-29 在 2.0.32 上复测了 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](ai/recipes/run-e2e.md)）；其它 agent 的能力（load/image/MCP）可能不同。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](repowiki/06-ACP-大脑与沙箱.md)。
 
 ---
@@ -230,7 +230,7 @@ npm run build; npm run daemon
 | M1 | 冒烟：`opencode acp` 可被现有 ACP 客户端驱动，确认无反向请求 | ✅ 完成 |
 | M2 | Step 1–3：agent + 多 env 注入 + 沙箱 strategy（brain 默认空、动态 MCP） | ✅ 完成 |
 | M3 | Step 4–6：记忆/技能继承 + worker 改造 + 模型注入 | ✅ 完成 |
-| M4 | Step 7–8 + 文档：Windows 兼容、验证脚本、更新 [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) 与 README 的 OpenCode 片段 | ✅ 文档/脚本就绪；⏳ 微信端到端待跑（需登录 bot） |
+| M4 | Step 7–8 + 文档：Windows 兼容、验证脚本、更新 [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) 与 README 的 OpenCode 片段 | ✅ 文档/脚本就绪；**worker 侧**任务结果推送已于 2026-10-29 实测（见 [run-e2e §7.3](ai/recipes/run-e2e.md)）；**对话大脑**的微信端到端待跑 |
 
 **实现清单（本次改动）**：
 
