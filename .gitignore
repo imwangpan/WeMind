@@ -5,3 +5,7 @@ dist/
 .wemind/
 daemon.log
 _daemon.*
+.qoder/
+.agents/
+.claude/
+.vscode/
