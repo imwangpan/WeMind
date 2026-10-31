@@ -244,6 +244,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 - Qoder 接入设计与实测：[`docs/接入-Qoder.md`](docs/接入-Qoder.md)
 - Cline 接入实测：[`docs/接入-Cline.md`](docs/接入-Cline.md)
 - DeepSeek 后续待办（M3–M5）：[`docs/待办-DeepSeek-M3-M5.md`](docs/待办-DeepSeek-M3-M5.md)
+- 任务编号语义与记录体积（暂缓）：[`docs/待办-任务编号与记录体积.md`](docs/待办-任务编号与记录体积.md)
 - 机器可读索引：[`llms.txt`](llms.txt)
 
 ---
