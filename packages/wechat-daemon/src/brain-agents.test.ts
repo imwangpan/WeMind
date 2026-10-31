@@ -335,7 +335,7 @@ describe("resolveAgent agent", () => {
     expect(ag.inheritDirs).toEqual(["rules", "skills", "agents"]);
     expect(ag.mcpViaAcp).toBe(false); // ACP session/new 的 mcpServers 不被 Cline 使用
     expect(ag.restore).toBeUndefined(); // 有 session/load，用默认
-    expect(ag.images).toBe(true);
+    expect(ag.images).toBe(false); // 3.0.74 ACP 广告 image:true 但 de() 只保留 text（图片被丢）
   });
 
   it("cline：父进程没给认证变量时，从真实 providers.json 派生 CLINE_PROVIDER/KEY；显式 env 优先", () => {

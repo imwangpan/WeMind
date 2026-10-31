@@ -207,6 +207,9 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     binWin: "cline.cmd",
     args: ["--acp", "--auto-approve", "true"],
     shell: true,
+    // 3.0.74 实测：initialize 广告 image:true，但 ACP prompt 的 de() 只保留 text 块（image 被直接丢弃），
+    // 模型只会看到「用户发来一张图片」的文字提示。按「实际不支持」处理，让 daemon 友好拒绝而不是让模型猜。
+    images: false,
     env: {
       CLINE_DIR: `%HOME%${path.sep}cline`,
       CLINE_DATA_DIR: `%HOME%${path.sep}cline${path.sep}data`,

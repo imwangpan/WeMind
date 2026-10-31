@@ -17,7 +17,7 @@
   -32000 Authentication required: Call authenticate before starting a session
   ```
 
-- 协议能力（3.0.74）：`loadSession:true`、`image:true`、`agent_thought_chunk` / `agent_message_chunk` / `session_info_update`、**0 反向请求**、硬杀后 `session/load` 能接回上下文；`session/close` ❌（`-32601`，WeMind 不调用）。
+- 协议能力（3.0.74）：`loadSession:true`、`agent_thought_chunk` / `agent_message_chunk` / `session_info_update`、**0 反向请求**、硬杀后 `session/load` 能接回上下文；`session/close` ❌（`-32601`，WeMind 不调用）。**图片 ❌**：`initialize` 虽然广告 `image:true`，但 ACP `prompt` 的 `de()` 只保留 `text` 块（图片被丢弃），所以预设显式 `images:false`。
 - **MCP 只能走配置文件**：Cline 收到 `session/new.mcpServers` 只存不用；预设用 `CLINE_MCP_SETTINGS_PATH` 指到 `<沙箱>/cline/mcp.json`（`{ "mcpServers": {…} }`，与 kiro 同格式）。
 
 ---
@@ -105,9 +105,9 @@ node scripts/acp-probe.mjs
 | Q3 | 首帧 / 更新类型 | prompt 首帧 **4.1s**、首字 **4.4s**；帧类型 `agent_thought_chunk` / `agent_message_chunk` / `session_info_update` |
 | Q4 | 反向请求 | **0 个**（未触发 `session/request_permission` / `fs/*` / `terminal/*`） |
 | Q5 | 硬杀后恢复 | `session/load` **成功**，`PINEAPPLE` 上下文保留（首字 2.1s）；`session/close` → `-32601` |
-| Q6 | 图片 / MCP | 带图 prompt 被接受（~10s，取决于模型）；`session/new` 的 `mcpServers` **不生效**（代码里只存进 session 对象，`buildConfig` 不再使用），MCP 走配置文件 |
+| Q6 | 图片 / MCP | **图片实际不可用**：`initialize` 广告 `image:true`，但 3.0.74 的 ACP `prompt` 里 `de(e.prompt)` 只 `filter(type==="text")`，image 块被直接丢弃（2026-10-31 真机：模型只看到「用户发来一张图片」文字，回复没收到图）→ 预设 `images:false`；`session/new` 的 `mcpServers` **不生效**（只存进 session 对象，`buildConfig` 不再使用），MCP 走配置文件 |
 
-结论：**协议层零改动**——默认 `restore: "load"`、`images: true`、默认首帧/心跳都够用；只要 agent + 沙箱。
+结论：**协议层零改动**——默认 `restore: "load"`、默认首帧/心跳都够用；只要 agent + 沙箱。图片例外：预设显式 `images:false`（见 Q6）。
 
 ---
 
@@ -187,8 +187,9 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 2. **`session/close` 不存在**（`-32601`）：WeMind 目前不调用它，杀进程即可；若未来加「优雅关闭」，要对 Cline 跳过。
 3. **MCP 走 ACP 不支持**：`mcpViaAcp` 必须保持 `false`；改用 `CLINE_MCP_SETTINGS_PATH`。
 4. **OAuth token 单向同步**：沙箱内刷新不会回写真实 `providers.json`（见 §3）。API-key provider 不受影响。
-5. **微信真机 E2E 未做**：ACP 探针、沙箱单测、`cline config mcp` 已验证；「扫码登录 → 微信消息 → 回复」按 [run-e2e.md](ai/recipes/run-e2e.md) §2 补测。
-6. **同 agent 并发**：两个 worker 共用 `<worker-home>/cline`（与其它 agent 相同）；Cline 的会话库是 SQLite，长期并发风险要观察。
+5. **图片不支持（实测）**：`initialize` 广告 `image:true`，但 3.0.74 ACP `prompt` 的 `de()` 只保留 `text` 块，image 被丢弃；预设显式 `images:false`，daemon 收到图片会直接回「当前大脑暂不支持看图」，不再让模型猜。
+6. **微信真机 E2E 已完成（2026-10-31）**：文本消息/回复、多轮上下文、重启后 `session/load`（PINEAPPLE）、worker 任务均通过。
+7. **同 agent 并发**：两个 worker 共用 `<worker-home>/cline`（与其它 agent 相同）；Cline 的会话库是 SQLite，长期并发风险要观察。
 
 ---
 
