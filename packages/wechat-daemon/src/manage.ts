@@ -54,6 +54,7 @@ import {
 import { checkAgent } from "./brain-check.js";
 import { acpOverrideHint } from "./profile-model.js";
 import { readPidRecords, recordMarkers } from "./pid-record.js";
+import { BRAIN_RUNTIME_FILE, readBrainState, type BrainRuntime } from "./brain-state.js";
 import { CLI_VERSION, versionLine } from "./version.js";
 import { renderHelp } from "./chat-commands.js";
 import {
@@ -306,7 +307,14 @@ function stopDaemon(key: string): string {
   }
   // 身份校验都通过了才动手：一次性杀掉这些进程**及其子进程树**（见 killProcessTrees 注释）。
   killProcessTrees(toKill);
-  for (const f of ["wrapper.pid", "daemon.pid", "brain.pid", "worker.pid", "workers.pid.json"]) {
+  for (const f of [
+    "wrapper.pid",
+    "daemon.pid",
+    "brain.pid",
+    "worker.pid",
+    "workers.pid.json",
+    BRAIN_RUNTIME_FILE,
+  ]) {
     try {
       fs.unlinkSync(path.join(dir, f));
     } catch {
@@ -477,6 +485,8 @@ function cmdList(): string {
       // 身份记录里是「起进程时真实用的」bin/args，比配置值可靠（brain set 未重启 / 热切换窗口 / brain≠worker）
       brainMarkers: brec.markers ?? brainPidMarkers(ag.bin, ag.args),
       brainAgent: brec.agent,
+      // daemon 启动/热切换后写入的「实际生效大脑」；只在 daemon 活着时采信（下面按 dpid 判）
+      brainRuntime: readBrainState(dir),
       // 多 task worker：`workers.pid.json` 是记录数组（每条一个 agent/任务），逐条按自己的身份校验
       workers: readPidRecords(path.join(dir, "workers.pid.json")).map((w) => ({
         pid: w.pid,
@@ -494,7 +504,8 @@ function cmdList(): string {
     !!pid && matchesMarkers(lines.get(pid), markers);
   return entries
     .map((e) => {
-      const running = aliveOursIn(e.dpid, CLI_PID_MARKERS) ? `运行中(pid ${e.dpid})` : "已停止";
+      const runningNow = aliveOursIn(e.dpid, CLI_PID_MARKERS);
+      const running = runningNow ? `运行中(pid ${e.dpid})` : "已停止";
       const brainPid = aliveOursIn(e.bpid, e.brainMarkers)
         ? `  brain(pid ${e.bpid}${e.brainAgent ? ` ${e.brainAgent}` : ""})`
         : "";
@@ -502,7 +513,7 @@ function cmdList(): string {
       const pool = live.length
         ? `  pool[${live.map((w) => `${w.agent}${w.taskId ? `#${w.taskId}` : ""}:${w.state}`).join(", ")}]`
         : "";
-      return `- ${e.a.key}${e.a.key === def ? " [默认]" : ""}  label=${e.a.label}  botId=${e.a.botId}  agent=${agentLabel(e.dir)}  ${running}${brainPid}${pool}`;
+      return `- ${e.a.key}${e.a.key === def ? " [默认]" : ""}  label=${e.a.label}  botId=${e.a.botId}  agent=${agentLabel(e.dir, runningNow ? e.brainRuntime : null)}  ${running}${brainPid}${pool}`;
     })
     .join("\n");
 }
@@ -515,11 +526,25 @@ const BRAIN_SRC_LABEL: Record<ResolvedAgent["source"], string> = {
 };
 
 /** list 用：账号「配置 / 自动探测」得到的大脑标签（不看当前 shell 的 env，避免误导）。 */
-function agentLabel(dir: string): string {
+function configAgentLabel(dir: string): string {
   const cfg = loadBrainConfig(dir);
   if (cfg?.agent && cfg.agent.toLowerCase() !== "auto") return cfg.agent;
   const picked = AUTO_PROBE_ORDER.find((k) => presetAvailable(k));
   return picked ? `${picked}（自动）` : "（无可用）";
+}
+
+/**
+ * list 用的 agent 列：daemon **在跑**时优先显示它实际生效的大脑（`brain-runtime.json`，
+ * 来自 daemon 自己的解析，含 `WEMIND_BRAIN` 覆盖/热切换结果）；daemon 没跑时仍只显示配置/自动探测。
+ * 运行时与配置不一致时把两者都写出来，避免「看着是 deepseek、实际在跑 cline」。
+ */
+export function agentLabel(dir: string, runtime: BrainRuntime | null = null): string {
+  const cfg = configAgentLabel(dir);
+  if (!runtime?.agent?.trim()) return cfg;
+  const name = runtime.agent.trim();
+  const cfgName = cfg.replace(/（[^）]*）$/, "");
+  if (name === cfgName) return cfg;
+  return `${name}（运行，来源 ${runtime.source}；配置 ${cfg}）`;
 }
 
 /** `wemind brain`（show）：打印某账号大脑的「配置」与「生效」情况。 */

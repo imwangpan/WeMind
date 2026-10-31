@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { descendantPids, helpText } from "./manage.js";
+import { descendantPids, helpText, agentLabel } from "./manage.js";
 import { isAlive } from "./proc-identity.js";
 
 /*
@@ -232,6 +232,36 @@ describe.skipIf(!isPosix)("descendantPids（POSIX 进程树）", () => {
       parent.on("error", reject);
     });
     spawned.push(childPid);
+
+    describe("agentLabel（list 的 agent 列）", () => {
+      it("daemon 没跑时只看配置；运行中优先显示实际大脑，不一致时两者都写", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-manage-label-"));
+        try {
+          fs.writeFileSync(path.join(dir, "brain.json"), JSON.stringify({ agent: "deepseek" }));
+          expect(agentLabel(dir)).toBe("deepseek");
+          expect(
+            agentLabel(dir, {
+              agent: "deepseek",
+              source: "file",
+              bin: "dsh.cmd",
+              args: [],
+              startedAt: 1,
+            }),
+          ).toBe("deepseek");
+          expect(
+            agentLabel(dir, {
+              agent: "cline",
+              source: "env",
+              bin: "cline.cmd",
+              args: ["--acp"],
+              startedAt: 1,
+            }),
+          ).toBe("cline（运行，来源 env；配置 deepseek）");
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      });
+    });
 
     const desc = descendantPids(parent.pid as number);
     expect(desc).toContain(childPid);

@@ -11,6 +11,10 @@
 - **预设环境变量分两层：`env` 与 `envDefaults`**：`env` 强制注入；`envDefaults` 是默认值——父进程已设同名变量时**不覆盖**（审批/沙箱类开关用它，部署方可在 daemon 环境里收紧权限），跳过时日志记 `env defaults kept from parent: …`。三个 spawn 点（`acp-brain.ts` / `worker-acp.ts` / `brain-check.ts`）统一走 `brain-agents.ts` 的 `agentEnv()`。
 - **ACP 会话模式（`sessionMode`）**：预设新增 `sessionMode` 字段，`acp-brain.ts` / `worker-acp.ts` 在 session/new|load|resume 之后调用 `session/set_mode`（agent 自己的 ACP 接口）；会核对回包的 `modes.availableModes`（不含目标值时跳过并记日志，如 claude-code 以 root 跑且没设 `IS_SANDBOX=1`）；调用失败只记日志、不拖垮会话（模式不可用时审批请求仍由应答器兜底）。新增 `WEMIND_ACP_SESSION_MODE`（`0`/`false`/`off` 关闭，其它非空值 = 覆盖 modeId），`wemind brain` 的「生效」行显示 `session_mode=`；`wemind brain check` 在预设带 `sessionMode` 时补验一次 `set_mode`（失败写进结论、不判整体失败）。宿主应答器**仍默认拒绝** `session/request_permission`，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行——「免审批」是 agent 侧默认，不是把宿主改成默认放行。
 
+### Fixed
+
+- **`wemind list` 在 daemon 运行时显示实际大脑（2026-10-31）**：此前 `agent=` 只按 `brain.json`/自动探测显示，而 `brain.pid` 要等 ACP 懒启动才生成——用 `WEMIND_BRAIN=cline` 启动 daemon（或热切换后、首条消息前）会一直显示配置里的 `deepseek`，看起来像切换没生效。新增 `<账号目录>/brain-runtime.json`（`brain-state.ts`）：daemon 启动成功与热切换成功后写入 `{agent, source, bin, args, startedAt}`，`stop` 删除；`list` 只在 daemon 活着时采信，与配置不同时显示 `cline（运行，来源 env；配置 deepseek）`。`agentLabel()` 可单测。
+
 ### Docs
 
 - 同步 README / 新手教程 / 随包 README / 接入其它-ACP-Agent / 接入-OpenCode / 接入-DeepSeek / 接入-Cline / 使用指南-远程任务 / 速查-数据目录与环境变量 / repowiki 01·02·03·06·07·08·09 / docs/ai/README / run-e2e / AGENTS（新增「内置预设默认免审批」「`envDefaults` / `sessionMode`」「Cline 认证与 MCP」已知项，以及 kiro V3、codex `binWin` 风险条目）。

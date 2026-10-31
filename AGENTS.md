@@ -75,6 +75,7 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 | `packages/wechat-daemon/src/task-inbox.ts` | 任务收件箱两个通道（`task-inbox/` 命令 + `task-out/` 答复，两侧共用；派发的答复等起进程有结果才发） |
 | `packages/wechat-daemon/src/chat-commands.ts` | 命令表（解析 + 帮助**同表**驱动） |
 | `packages/wechat-daemon/src/pid-record.ts` | `brain.pid` / `workers.pid.json` 身份记录（JSON，含起进程时真实用的 bin/args） |
+| `packages/wechat-daemon/src/brain-state.ts` | `brain-runtime.json`：daemon 实际生效的大脑（启动/热切换写入；`list` 只在 daemon 活着时采信） |
 | `packages/wechat-daemon/src/brain-agents.ts` | `ACP_AGENT_PRESETS`（含 `model` / `realProfile` / `envDefaults` / `sessionMode` 字段）、`resolveAgent()`、`resolveAgentFor(cfg, role)`、`agentEnv()`、`agentProblem()` |
 | `packages/wechat-daemon/src/profile-model.ts` | 真实 profile 用户层三件事：`readProfileDefaultModel`（读默认模型——**优先用户自己写的 `- id: acp`**，否则 `agent-default-model`）；`acpOverrideHint`（缺 `- id: acp` 时在 `wemind brain` 里给出可粘贴的片段——**只提示，不替 agent 改配置**，§4.14）；`stripWechatMcpEntries`（复制进沙箱前剔除用户自己挂的微信 MCP 条目，防回环，§4.1） |
 | `packages/wechat-daemon/src/mcp-sandbox.ts` | brain 沙箱、MCP 激活集、记忆/技能继承 |
@@ -168,6 +169,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 ## 6. 已知坑 / 文档与代码不一致（2026-10-24 已核对）
 
 - **默认大脑不是 kiro**：未配置时是 `auto`，按 `kiro → opencode → gemini → deepseek → qoder → cline` 探测；写入磁盘配置在 `<数据目录>/brain.json`。
+- **`wemind list` 的 `agent=` 是「实际生效」而不是「配置文件」**（2026-10-31 修）：daemon 在跑时优先读 `<数据目录>/brain-runtime.json`（启动成功/热切换成功后写入，含 `source`），与 `brain.json` 不同时显示 `X（运行，来源 env；配置 Y）`；daemon 没跑时仍只显示配置/自动探测。**不能拿 `brain.pid` 判断刚启动时用哪个大脑**——ACP 是懒启动，第一条消息之前根本没有 `brain.pid`；这正是 `WEMIND_BRAIN=cline` 启动却显示 deepseek 的原因。`stop` 会删 `brain-runtime.json`。
 - **内置预设 8 个，`auto` 只探测其中 6 个原生 ACP**：8 个里**已实测的有 kiro / opencode / deepseek / qoder / cline**；`gemini` 与两个需第三方适配器的示例预设 `claude-code`（`npx -y @agentclientprotocol/claude-agent-acp`；旧包 `@zed-industries/claude-code-acp` 已弃用，新包 **Node ≥22**）/ `codex`（社区 `codex-acp`）均**未实测**。两个适配器还**不在 `AUTO_PROBE_ORDER`**（`npx` 几乎总在 PATH 上，参与探测会把它们误选出来），要显式选用：`wemind brain set|switch <agent 名>`、一次性的 `WEMIND_BRAIN=<agent 名>`，或微信「切换大脑 <agent 名>」。完整表见 [`docs/接入其它-ACP-Agent.md`](docs/接入其它-ACP-Agent.md) §5。
 - **DeepSeek 已内置 agent**：官方 DSH `dsh --profile acp`；桌面端通常要用 `wemind brain set deepseek --bin "<...>\dsh.cmd"` 落绝对路径，并依赖 `DSH_HOME` 沙箱里的 `.credentials.yaml`（从 `~/.dsh` 同步）。微信 brain/worker E2E、动态 MCP（`mcpViaAcp`）、记忆/技能继承均已验证。详见 [`docs/接入-DeepSeek.md`](docs/接入-DeepSeek.md)。
 - **「无需改代码」有边界**：只对满足「有 `session/load`、不发反向请求、首帧快、MCP 走配置文件」的 agent 成立。DSH 不满足，但已用 agent 配置字段 + M2 适配补齐。

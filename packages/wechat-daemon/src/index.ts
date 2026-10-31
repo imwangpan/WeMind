@@ -55,6 +55,7 @@ import type { ResolvedAgent } from "./brain-agents.js";
 import { agentConfigFor, loadBrainConfig } from "./brain-config.js";
 import { getAgent, seedSlots, setAgent } from "./agent-slot.js";
 import { preflightSwitch, switchBrain, switchInFlightTarget } from "./brain-switch.js";
+import { writeBrainState } from "./brain-state.js";
 import {
   isOwnerOnly,
   renderHelp,
@@ -1353,6 +1354,8 @@ export async function runDaemon(): Promise<void> {
   log(
     `brain=${agent.name} bin=${agent.bin} args=[${agent.args.join(" ")}] shell=${agent.shell} (source: ${agent.source})`,
   );
+  // 运行时身份：list 在 daemon 活着时据此显示「实际生效的大脑」（brain.pid 要等 ACP 懒启动才有）
+  writeBrainState(DATA_DIR, agent);
   const wagent = getAgent("worker");
   if (wagent.name !== agent.name)
     log(

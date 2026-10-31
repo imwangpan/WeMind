@@ -4,6 +4,7 @@ import { getAgent, setAgent } from "./agent-slot.js";
 import { resolvePresetByName, type ResolvedAgent } from "./brain-agents.js";
 import { loadBrainConfig, updateBrainConfig } from "./brain-config.js";
 import { ensureBrainHome } from "./mcp-sandbox.js";
+import { writeBrainState } from "./brain-state.js";
 import { beginSwitch, drainTurn, endSwitch, restart, warmup } from "./acp-brain.js";
 
 /**
@@ -136,6 +137,7 @@ async function runSwitch(
   if (pre.already) {
     // 已经是它：不重启进程（免得白白打断上下文），只把选择落实到磁盘
     if (opts.persist !== false) updateBrainConfig({ agent: key }, dir);
+    writeBrainState(dir, target); // 运行时身份：list 显示实际生效的大脑
     return {
       ok: true,
       agent: target,
@@ -161,6 +163,7 @@ async function runSwitch(
       await withTimeout(warmup(target, opts.userId ?? ""), TIMEOUT_MS, warmupTimeoutMsg());
       setAgent("brain", target); // 成功之后才更新槽位
       if (opts.persist !== false) updateBrainConfig({ agent: key }, dir); // 持久化放最后：失败无需撤销
+      writeBrainState(dir, target); // 运行时身份：list 显示实际生效的大脑
       const ms = Date.now() - t0;
       return {
         ok: true,
