@@ -102,7 +102,7 @@ describe("ACP 模式参数检查（D）", () => {
     expect(acpModeTokens("cline")).toEqual(["--acp"]);
     expect(acpModeTokens("gemini")).toEqual(["--acp"]);
     expect(acpModeTokens("deepseek")).toEqual(["acp"]); // `--profile acp` 的值
-    expect(acpModeTokens("claude-code")).toEqual(["@agentclientprotocol/claude-agent-acp"]);
+    expect(acpModeTokens("claude-code")).toEqual([]); // 适配器本体就是 ACP server，args 为空
     expect(acpModeTokens("codex")).toEqual([]); // 适配器本体就是 ACP，args 为空
   });
 
@@ -213,9 +213,10 @@ describe("resolveAgent agent", () => {
       "yolo",
       "--skip-trust",
     ]);
-    // claude-code：适配器不解析 CLI flag，免审批走会话建立后的 session/set_mode；包名已换成官方维护的新包
+    // claude-code：适配器不解析 CLI flag，免审批走会话建立后的 session/set_mode；适配器必须全局安装（不再走 npx）
     const cc = resolveAgent({ agent: "claude-code" });
-    expect(cc.args).toEqual(["-y", "@agentclientprotocol/claude-agent-acp"]);
+    expect(cc.args).toEqual([]);
+    expect(cc.bin).toBe(process.platform === "win32" ? "claude-agent-acp.cmd" : "claude-agent-acp");
     expect(cc.sessionMode).toBe("bypassPermissions");
     // codex：适配器同样不解析 CLI 参数；sessionMode + INITIAL_AGENT_MODE 双保险
     const cx = resolveAgent({ agent: "codex" });
@@ -371,6 +372,38 @@ describe("resolveAgent agent", () => {
     expect(authHint("qoder", auth)).toBe("");
   });
 
+  it("claude-code：全局适配器 + CLAUDE_CONFIG_DIR 沙箱 + mcpViaAcp（能力见 docs/接入-ClaudeCode.md）", () => {
+    clearVars();
+    delete process.env.WEMIND_BRAIN_REAL_HOME; // 本用例要断言预设的 realHome（clearVars 统一指到空目录）
+    process.env.WEMIND_BRAIN = "claude-code";
+    const ag = resolveAgent();
+    expect(ag.name).toBe("claude-code");
+    // 适配器全局安装（不是 npx）：npm 在 Windows 产出 .cmd shim → shell:true
+    expect(ag.bin).toBe(process.platform === "win32" ? "claude-agent-acp.cmd" : "claude-agent-acp");
+    expect(ag.args).toEqual([]); // 适配器本体就是 ACP server，没有模式参数
+    expect(ag.shell).toBe(true);
+    // 沙箱：配置目录 <BRAIN_HOME>/claude（用 env 指到目录本身，不用 homeEnvVar）
+    expect(ag.homeEnvVar).toBeUndefined();
+    expect(ag.env.CLAUDE_CONFIG_DIR).toMatch(/^%HOME%[\\/]claude$/);
+    expect(ag.configSubdir).toBe("claude");
+    expect(agentEnv(ag, path.join("/tmp", "wemind-home")).CLAUDE_CONFIG_DIR).toBe(
+      path.join("/tmp", "wemind-home", "claude"),
+    );
+    // 记忆/技能继承；凭据同步（OAuth 登录态）
+    expect(ag.realHome).toBe(path.join(os.homedir(), ".claude"));
+    expect(ag.inheritDirs).toEqual(["skills", "agents", "commands"]);
+    expect(ag.inheritFiles).toEqual(["CLAUDE.md"]);
+    expect(ag.credentialFiles).toEqual([".credentials.json"]);
+    // MCP：走 ACP session/new|load 的 mcpServers；目录是真实 ~/.claude.json（与 realHome 同级）
+    expect(ag.mcpViaAcp).toBe(true);
+    expect(ag.catalogFile).toBe(path.join("..", ".claude.json"));
+    // 能力默认：load 恢复、支持图片、不覆盖模型
+    expect(ag.restore).toBeUndefined();
+    expect(ag.images).toBe(true);
+    expect(ag.model).toBeUndefined();
+    expect(ag.sessionMode).toBe("bypassPermissions");
+  });
+
   it("kiro/opencode：mcpViaAcp 默认 false（仍走沙箱配置文件）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
@@ -470,6 +503,17 @@ describe("resolveAgent auto 探测", () => {
     const ag = resolveAgent();
     expect(ag.available).toBe(false);
     expect(agentProblem(ag)).toMatch(/找不到大脑/);
+  });
+
+  it("claude-code 适配器没装 → 给出可粘贴的全局安装命令（而不是干巴巴一句「找不到」）", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "claude-code";
+    process.env.PATH = emptyBin;
+    const ag = resolveAgent();
+    expect(ag.available).toBe(false);
+    const problem = agentProblem(ag) ?? "";
+    expect(problem).toMatch(/npm i -g @agentclientprotocol\/claude-agent-acp/);
+    expect(problem).toMatch(/--bin/); // 装完仍找不到 → 给绝对路径的兜底
   });
 
   it("auto 探测把新 agent 追加在末尾（当前 cline 最后），不影响老用户", () => {

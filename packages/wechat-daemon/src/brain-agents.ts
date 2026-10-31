@@ -230,17 +230,36 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     credentialEnv: clineCredentialEnv,
   },
 
-  // —— 需适配器（CLI 不原生支持 ACP，经第三方适配器桥接；未实测）——
-  // Claude Code：官方维护的 ACP 适配器 @agentclientprotocol/claude-agent-acp（npx 运行；需 Claude Code 登录/ANTHROPIC_API_KEY；**Node ≥22**）。
-  // 旧包 @zed-industries/claude-code-acp 已弃用并改名（0.16.2 停更）。适配器**不解析** --dangerously-skip-permissions 之类的 CLI flag，
-  // 免审批走 ACP：会话建立后 `session/set_mode {modeId:"bypassPermissions"}`（新旧包都支持；见 sessionMode）。
-  // 以 root 运行且未设 `IS_SANDBOX=1` 时该模式不可用——会话回包的 availableModes 里没有它，applySessionMode 会跳过并记日志。
+  // —— 需适配器（CLI 不原生支持 ACP，经官方/第三方适配器桥接）——
+  // Claude Code：官方 ACP 适配器 @agentclientprotocol/claude-agent-acp（bin: claude-agent-acp；**Node ≥22**）。
+  // - **全局安装，不用 npx**（口径同 codex）：daemon 常驻、worker 每条任务起进程，npx 每次冷启动都要问 registry/现下包，离线不可用且版本漂移；
+  //   `npm i -g @agentclientprotocol/claude-agent-acp`。适配器自带 @anthropic-ai/claude-agent-sdk（含平台原生二进制）；
+  //   若装的时候漏了 optional 依赖（native binary not found），可用 CLAUDE_CODE_EXECUTABLE 指向本机已装的 claude 二进制。
+  // - 免审批：适配器**不解析** --dangerously-skip-permissions 之类 CLI flag；会话建立/恢复后走 `session/set_mode {modeId:"bypassPermissions"}`（见 sessionMode）。
+  //   以 root 运行且未设 IS_SANDBOX=1 时该模式不可用——会话回包的 availableModes 里没有它，applySessionMode 会跳过并记日志。
+  // - 沙箱：CLAUDE_CONFIG_DIR 指向 <BRAIN_HOME>/claude（实测会把 ~/.claude.json 一起搬进该目录，用户级 mcpServers 不会漏进大脑）；
+  //   CLAUDE.md/skills/agents/commands 与日常使用共享；OAuth 登录态 .credentials.json 同步进沙箱。
+  //   **不复制 settings.json**：它常含网关 token（env），按 §4.9 密钥由 daemon 进程环境提供；需要网关时设 ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL。
+  // - MCP：走 ACP session/new|load 的 mcpServers（mcpViaAcp），不写配置文件；目录取真实 ~/.claude.json 的 mcpServers（`catalogFile` 用 `..` 回到 home）。
+  //   探针实测 stdio MCP 可用（尽管 initialize 的 mcpCapabilities 只声明 http/sse——能力字段不可信的又一例）。
+  // - 2026-10-30 探针实测（claude-agent-acp 0.99.1 / Claude Code 2.1.314，Windows）：
+  //   loadSession ✅、sessionCapabilities.resume/close/delete/fork/list ✅、image ✅、stdio MCP ✅、bypassPermissions 下 0 反向请求；
+  //   重启后 session/load 上下文保留；session/new ~1.2s、首帧 ~2ms、首段正文 ~8–12s。详见 docs/接入-ClaudeCode.md（真机微信 E2E 未做）。
   "claude-code": {
     name: "claude-code",
-    bin: "npx",
-    binWin: "npx.cmd",
-    args: ["-y", "@agentclientprotocol/claude-agent-acp"],
+    bin: "claude-agent-acp",
+    binWin: "claude-agent-acp.cmd",
+    args: [],
     shell: true,
+    env: { CLAUDE_CONFIG_DIR: `%HOME%${path.sep}claude` },
+    realHome: path.join(os.homedir(), ".claude"),
+    inheritDirs: ["skills", "agents", "commands"],
+    inheritFiles: ["CLAUDE.md"],
+    configSubdir: "claude",
+    // 真实 ~/.claude.json 与 realHome 同级；path.join 后得到 ~/.claude/../.claude.json
+    catalogFile: path.join("..", ".claude.json"),
+    credentialFiles: [".credentials.json"],
+    mcpViaAcp: true,
     sessionMode: "bypassPermissions",
   },
   // Codex：社区适配器 codex-acp（agentclientprotocol/codex-acp，npm 包 `@agentclientprotocol/codex-acp`，需自行安装）。
@@ -267,7 +286,8 @@ function onPath(exe: string): string | null {
 
 /**
  * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的 agent。
- * 只收纳**原生 ACP 且二进制可直接判定**的 agent——适配器类（`claude-code` 走 `npx`、`codex` 走 `codex-acp`）不参与自动探测（`npx` 几乎总在 PATH 上，会把它们误选出来）。
+ * 只收纳**原生 ACP 且二进制可直接判定**的 agent——适配器类（`claude-code` 走 `claude-agent-acp`、`codex` 走 `codex-acp`）不参与自动探测：
+ * 它们是独立安装的桥接进程、各有自己的认证，误选中会让「装了但没登录」的机器静默换脑；显式选用（`wemind brain set|switch <名>`）更安全。
  * 新 agent 一律追加在末尾：老机器上已装的前几个仍按原顺序被选中，不改变既有用户的默认大脑。
  */
 export const AUTO_PROBE_ORDER = [
@@ -281,8 +301,8 @@ export const AUTO_PROBE_ORDER = [
 
 /**
  * 该 agent 预设里「进入 ACP 模式」的标记 token：从默认 args 中挑出含 `acp` 的项。
- * 只用于整段替换 args 时的静态提醒；适配器（如 codex）的 args 为空 → 返回空数组（不检查）。
- * 不能只查裸 `acp`：qoder 是 `--acp`、gemini 是 `--acp`、deepseek 是 `--profile acp`、claude-code 是适配器包名。
+ * 只用于整段替换 args 时的静态提醒；适配器（claude-code / codex）的 args 为空 → 返回空数组（不检查——适配器本体就是 ACP server，没有模式参数）。
+ * 不能只查裸 `acp`：qoder 是 `--acp`、gemini 是 `--acp`、deepseek 是 `--profile acp`。
  */
 export function acpModeTokens(name: string): string[] {
   const preset = ACP_AGENT_PRESETS[name];
@@ -635,6 +655,15 @@ export function resolvePresetByName(
 }
 
 /**
+ * 适配器类 agent 的安装指引：找不到适配器二进制时**直接给出可粘贴的命令**。
+ * 口径：**适配器一律全局安装**（daemon 常驻、worker 每条任务起进程；npx 每次冷启动要联网现下、版本不可复现）。
+ */
+const ADAPTER_INSTALL_HINT: Record<string, string> = {
+  "claude-code":
+    "`npm i -g @agentclientprotocol/claude-agent-acp`（装完得到 claude-agent-acp；Windows 上是 claude-agent-acp.cmd；**需 Node ≥22**）",
+};
+
+/**
  * 校验解析后的大脑是否可用：可用返回 null，否则返回一句面向用户的说明。
  * 供 daemon 启动校验（早失败、说人话）与 `wemind brain` / `wemind brain check` 复用。
  */
@@ -643,7 +672,10 @@ export function agentProblem(ag: ResolvedAgent): string | null {
     return `未知 agent「${ag.requestedKey}」。可选：${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制可用 WEMIND_BRAIN_BIN 或 brain set --bin 指定）`;
   if (ag.requestedKey === "auto" && !ag.available)
     return `自动探测未找到可用的大脑（已试：${AUTO_PROBE_ORDER.join("、")}）。请安装其中之一，或运行 \`wemind brain set <agent 名>\``;
-  if (!ag.available)
+  if (!ag.available) {
+    const hint = ADAPTER_INSTALL_HINT[ag.name];
+    if (hint)
+      return `找不到大脑「${ag.name}」的适配器「${ag.bin}」。先装适配器：${hint}；装完仍找不到就 \`wemind brain set ${ag.name} --bin "<绝对路径>"\` 指定它。`;
     return ag.name === "deepseek"
       ? `找不到 DeepSeek 的「${ag.bin}」。桌面端通常有 dsh.cmd；把它的绝对路径传给 \`wemind brain set deepseek --bin "<...>\\dsh.cmd"\``
       : ag.name === "qoder"
@@ -651,6 +683,7 @@ export function agentProblem(ag: ResolvedAgent): string | null {
         : ag.name === "cline"
           ? `找不到 Cline CLI 的「${ag.bin}」。安装：\`npm i -g cline\`（Node 20+），装完后重开终端；或用 \`wemind brain set cline --bin "<...>\\cline.cmd"\``
           : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <agent 名>\` 切换`;
+  }
   return null;
 }
 

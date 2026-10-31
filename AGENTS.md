@@ -1,6 +1,6 @@
 # AGENTS.md — WeMind 的 AI 协作者入口
 
-> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-30（`@wemind/cli@1.2.0` 已发布 / `1.1.1` 上一版） ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-31（`@wemind/cli@1.2.0` 已发布 / `1.1.1` 上一版） ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
 >
 > 这份文件写给 AI agent，也写给人。**先读这里，再按链接深入**；不要一上来通读整个 `docs/repowiki/`。
 
@@ -122,7 +122,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
    - **image / restore(load|resume) / mcpViaAcp 目前来自「agent 配置字段」，不来自 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。所以接新 agent 时必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进 `brain-agents.ts` 的 agent；不要以为代码会自动适配；
    - agent 可能发反向请求（`session/request_permission`、`fs/*`、`terminal/*`）。`acp-brain.ts` / `worker-acp.ts` 已内置应答器：权限请求默认拒绝，未知 method 回 `-32601`；可信部署可设 `WEMIND_ACP_AUTO_ALLOW=1` 放行一次性权限。
 3. **brain 是一个 ACP 进程、worker 是 N 个（进程池）**：协议改动要同步 `acp-brain.ts` 和 `worker-acp.ts`（后者已类化，别再把状态写在模块级）。
-4. **MCP 按 agent 分派**：kiro 读 `settings/mcp.json`；opencode 读 `opencode.json` 的 `mcp.servers`；DSH 走 ACP `session/new` 的 `mcpServers`。**不要让 A 读 B 的配置文件**。
+4. **MCP 按 agent 分派**：kiro 读 `settings/mcp.json`；opencode 读 `opencode.json` 的 `mcp.servers`；qoder 读 `settings.json` 的 `mcpServers`；DSH 与 Claude Code 走 ACP `session/new` 的 `mcpServers`（Claude Code 的目录是真实 `~/.claude.json`）。**不要让 A 读 B 的配置文件**。
 5. **微信有连发上限（约 10 条）**：进度消息会占额度；`index.ts` 的 15s 心跳在「无 activity 帧」时会持续发，接入 committed-only agent 要单独处理。
 6. **Windows `.cmd`/`.bat` 必须经 shell**：统一用 `spawnAgent()`，不要直接 `spawn(bin,args,{shell:true})`（DEP0190 + 注入面）。
 7. **数据按账号隔离**：默认 `~/.wemind/<账号>/`；不要跨账号共用 `brain-sessions.json` / `brain-home`。**一个账号一个 daemon、各有自己的「登录者」**（扫码登录它的那个微信号；不是「主号」，账号之间没有任何隶属关系）：换大脑是**账号级**的，微信侧只有该账号的登录者能切**它自己**那个 daemon，本机 CLI 可用 `key|label` 指定任意账号（范围/限制/两入口区别见 README「多账号管理」与 `docs/repowiki/06`）。
@@ -166,12 +166,13 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 
 ---
 
-## 6. 已知坑 / 文档与代码不一致（2026-10-24 已核对）
+## 6. 已知坑 / 文档与代码不一致（2026-10-31 已核对）
 
 - **默认大脑不是 kiro**：未配置时是 `auto`，按 `kiro → opencode → gemini → deepseek → qoder → cline` 探测；写入磁盘配置在 `<数据目录>/brain.json`。
 - **`wemind list` 的 `agent=` 是「实际生效」而不是「配置文件」**（2026-10-31 修）：daemon 在跑时优先读 `<数据目录>/brain-runtime.json`（启动成功/热切换成功后写入，含 `source`），与 `brain.json` 不同时显示 `X（运行，来源 env；配置 Y）`；daemon 没跑时仍只显示配置/自动探测。**不能拿 `brain.pid` 判断刚启动时用哪个大脑**——ACP 是懒启动，第一条消息之前根本没有 `brain.pid`；这正是 `WEMIND_BRAIN=cline` 启动却显示 deepseek 的原因。`stop` 会删 `brain-runtime.json`。
-- **内置预设 8 个，`auto` 只探测其中 6 个原生 ACP**：8 个里**已实测的有 kiro / opencode / deepseek / qoder / cline**；`gemini` 与两个需第三方适配器的示例预设 `claude-code`（`npx -y @agentclientprotocol/claude-agent-acp`；旧包 `@zed-industries/claude-code-acp` 已弃用，新包 **Node ≥22**）/ `codex`（社区 `codex-acp`）均**未实测**。两个适配器还**不在 `AUTO_PROBE_ORDER`**（`npx` 几乎总在 PATH 上，参与探测会把它们误选出来），要显式选用：`wemind brain set|switch <agent 名>`、一次性的 `WEMIND_BRAIN=<agent 名>`，或微信「切换大脑 <agent 名>」。完整表见 [`docs/接入其它-ACP-Agent.md`](docs/接入其它-ACP-Agent.md) §5。
+- **内置预设 8 个，`auto` 只探测其中 6 个原生 ACP**：8 个里**已实测的有 kiro / opencode / deepseek / qoder / cline，加上探针级实测的 claude-code**；`gemini` 与 `codex`（社区适配器 `codex-acp`）**未实测**。`claude-code`（官方适配器 `@agentclientprotocol/claude-agent-acp`，bin `claude-agent-acp`；旧包 `@zed-industries/claude-code-acp` 已弃用，**Node ≥22**）与 `codex` 两个适配器预设**不在 `AUTO_PROBE_ORDER`**（各自独立安装、各有认证，装在机器上不代表登录过；参与探测会让「装了但没登录」的机器静默换脑），要显式选用：`wemind brain set|switch <agent 名>`、一次性的 `WEMIND_BRAIN=<agent 名>`，或微信「切换大脑 <agent 名>」。完整表见 [`docs/接入其它-ACP-Agent.md`](docs/接入其它-ACP-Agent.md) §5。
 - **DeepSeek 已内置 agent**：官方 DSH `dsh --profile acp`；桌面端通常要用 `wemind brain set deepseek --bin "<...>\dsh.cmd"` 落绝对路径，并依赖 `DSH_HOME` 沙箱里的 `.credentials.yaml`（从 `~/.dsh` 同步）。微信 brain/worker E2E、动态 MCP（`mcpViaAcp`）、记忆/技能继承均已验证。详见 [`docs/接入-DeepSeek.md`](docs/接入-DeepSeek.md)。
+- **Claude Code 已内置（探针级实测，2026-10-31）**：经官方适配器 `@agentclientprotocol/claude-agent-acp`（bin `claude-agent-acp`；**Node ≥22**，旧包 `@zed-industries/claude-code-acp` 已弃用）。**优先全局安装**：`npm i -g @agentclientprotocol/claude-agent-acp`；预设走 PATH（Windows `claude-agent-acp.cmd` + `shell: true`），**不再用 `npx`**（每次冷启动问 registry、版本漂移、离线不可用，常驻 daemon/worker 每条任务起进程都要付这个代价）。没装时 `agentProblem()` 直接给可粘贴的安装命令（`ADAPTER_INSTALL_HINT`）。沙箱：`CLAUDE_CONFIG_DIR=<BRAIN_HOME>/claude`（实测连 `~/.claude.json` 一起隔离），`CLAUDE.md` 复制、`skills/agents/commands` junction 共享，`settings.json`/`plugins` 不继承（凭据由 daemon 环境提供，§4.9）；`.credentials.json`（OAuth 登录态）同步。MCP 走 `mcpViaAcp: true`（目录取真实 `~/.claude.json` 的 `mcpServers`；`initialize` 只声明 http/sse，**实测 stdio 可用**）。免审批用 `sessionMode: "bypassPermissions"`（适配器不解析 CLI flag；实测该模式下 MCP 工具调用 0 反向请求）。探针结论：`loadSession: true`、`sessionCapabilities.resume/close/delete/fork/list`、`promptCapabilities.image: true`（本机网关对 1×1 PNG 报 400，属上游限制）、`session/new` ~1.2s、`session/load` ~1.0s、首段正文 7.9–11.9s、强杀后 `load` 上下文保留。**真机微信 E2E 未做**。详见 [`docs/接入-ClaudeCode.md`](docs/接入-ClaudeCode.md)。
 - **「无需改代码」有边界**：只对满足「有 `session/load`、不发反向请求、首帧快、MCP 走配置文件」的 agent 成立。DSH 不满足，但已用 agent 配置字段 + M2 适配补齐。
 - **仓库没有 `Brain` 接口（当前建议）**：ACP agent 本身就是大脑边界；目前只有 ACP 一种实现，当前建议先不抽接口，避免增加间接层。等真的要做「裸 API 大脑」时再抽 `ask/newSession/restart` 契约，并同步 `index.ts` 调用方。
 - **会话映射按大脑分开存**：`brain-sessions.json` 键为 `<agent>:<userId>`、`worker-sessions.json` 为 `<agent>:task`；换大脑不会再拿旧 agent 的 sessionId 去 `session/load`（Qoder 回 `-32602 INVALID_SESSION_IDENTIFIER`，DSH 回 `-32601`），切回原大脑仍能恢复上下文。旧格式（裸 `userId` / `task`）首次读取时自动迁移并回写（`session-map.ts`）。
@@ -218,6 +219,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 | **多任务并行** | `任务 kiro：…` + `任务 opencode：…` 同时跑且都出结果；第三条超上限被拒；结束「等你回复」的任务后进程留着复用、空闲 5 分钟后消失（`wemind list`/进程管理器验；结束「正在跑」的那条只能力杀）；`wemind stop` 一次杀光所有 worker |
 | **任务中断续跑** | 跑到一半 `taskkill` daemon → 重启后 `任务列表` 显示「已中断」→ 回「继续」上下文确实接上；agent 不支持恢复时给诚实文案且编号连续 |
 | **provider 报错不抢消息** | 派一条注定失败的任务（如 DSH 余额不足）→ 推送说「中断了（额度/余额不足）」且 `任务列表` 显示「已中断」→ 之后发一条**无编号**的普通消息要**走大脑**（不能再白喂给那条任务）→ **账号修好后**回「继续」能续跑（没修好时续跑只是又失败一轮、退回「已中断」，这是预期） |
+| **Claude Code 接入** | `npm i -g @agentclientprotocol/claude-agent-acp`；`wemind brain set claude-code --restart` → `wemind brain`（bin=`claude-agent-acp(.cmd)`、args=[]、`session_mode=bypassPermissions`）→ `wemind brain check`（结论带 `mode=bypassPermissions`）；真机微信一轮消息 + 杀 daemon 后追问上下文仍在（`session/load`）+ `加载 <MCP>` 生效且 `wechat` 仍被拒 |
 | **重启后补发** | 重启 daemon → **不在微信发消息**、本地派一条任务 → 日志见「`send -2（旧 token）→ 挂起`」→ 微信发任意一条消息 → 日志「`新 token 已到 → 补发挂起消息 N 条`」且结果真的收到（旧 token 的 `-2` 不再静默丢） |
 | **会话四件套** | 会话 A 塞暗号 → 新会话 → 列表 → 恢复 → 暗号回来；恢复不存在的 id → 失败且当前会话不变；删当前会话后下条消息开新的；会话与任务只见登录者自己的 |
 | **交接** | 交接 → 切脑 → 问只靠旧上下文能答的问题 → 文件已消费、第二条不重复带上 |
@@ -243,6 +245,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 - DeepSeek 评估与实测：[`docs/接入-DeepSeek.md`](docs/接入-DeepSeek.md)
 - Qoder 接入设计与实测：[`docs/接入-Qoder.md`](docs/接入-Qoder.md)
 - Cline 接入实测：[`docs/接入-Cline.md`](docs/接入-Cline.md)
+- Claude Code 接入（适配器 / 沙箱 / 探针）：[`docs/接入-ClaudeCode.md`](docs/接入-ClaudeCode.md)
 - DeepSeek 后续待办（M3–M5）：[`docs/待办-DeepSeek-M3-M5.md`](docs/待办-DeepSeek-M3-M5.md)
 - 任务编号语义与记录体积（暂缓）：[`docs/待办-任务编号与记录体积.md`](docs/待办-任务编号与记录体积.md)
 - 机器可读索引：[`llms.txt`](llms.txt)

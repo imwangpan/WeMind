@@ -105,7 +105,7 @@ poller（长轮询，不被大脑阻塞）
 | **preset / `ACP_AGENT_PRESETS`** | **代码里的叫法**；用户面统一写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）。一条 = 二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
 | **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |
 | **WORKER_HOME** | worker 的沙箱目录 |
-| **configSubdir** | agent 配置目录相对沙箱根的子路径（kiro 空；opencode `opencode`） |
+| **configSubdir** | agent 配置目录相对沙箱根的子路径（kiro 空；opencode `opencode`；claude-code `claude`） |
 | **catalog** | 可选 MCP 的定义来源（按 agent 各自的配置文件读取） |
 | **激活集** | 当前 brain 实际加载的 MCP 名单，存 `brain-mcps.json`；默认空 |
 | **curated MCP** | 沙箱里由 WeMind 写入的 MCP 配置；`wechat` 永久禁止 |
@@ -195,7 +195,8 @@ poller（长轮询，不被大脑阻塞）
 | `qoder` agent 已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0–M3 全部已验：发图、动态 MCP、冷重启 `session/load`、worker 中断续跑、`memory/` junction 继承 |
 | `cline` agent 已内置 | ✅ 代码/实测（3.0.74） | `cline --acp --auto-approve true` + `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 沙箱（`configSubdir: "cline"`）；`providers.json` 同步；`models.json` 模型目录同步（缺它会回退 gpt-4o）；**自定义 provider 由 `credentialEnv`（`clineCredentialEnv()`）从 `providers.json` 自动派生 `CLINE_PROVIDER`+`CLINE_API_KEY`，父进程显式值优先**；`loadSession`/硬杀后 `session/load` 已验证；**图片 ❌**（广告 `image:true` 但 ACP `prompt` 只保留 text → `images:false`）；ACP `mcpServers` 不生效→文件式 MCP；`session/close` 无 |
 | `gemini` 预设存在但未实测 | 🟡 未实测（示例） | `gemini --acp --approval-mode yolo --skip-trust` + `GEMINI_CLI_HOME`；在 `AUTO_PROBE_ORDER` 第 3 位——装过 Gemini CLI 的机器可能被自动选中 |
-| `claude-code` / `codex` 预设存在但未实测 | 🟡 未实测（示例，需适配器） | claude-code：`npx -y @agentclientprotocol/claude-agent-acp`（Node ≥22）+ `session/set_mode bypassPermissions`；codex：`codex-acp` + `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`；适配器不读沙箱、动态挂 MCP 不适用；**不在** `AUTO_PROBE_ORDER`（`npx` 几乎总在 PATH 上），只能显式选用 |
+| `claude-code` 预设已内置（探针级实测） | ✅ 探针级实测（真机微信 E2E 未做） | 全局 `npm i -g @agentclientprotocol/claude-agent-acp`（Node ≥22；`binWin=claude-agent-acp.cmd` + `shell: true`）+ `CLAUDE_CONFIG_DIR` 沙箱（`~/.claude.json` 一并隔离）+ `mcpViaAcp`（目录 `~/.claude.json`；`initialize` 只声明 http/sse，**stdio 实测可用**）+ `sessionMode bypassPermissions`（适配器不解析 CLI flag）；`loadSession: true`、`sessionCapabilities.resume/close/delete/fork/list`；**不在** `AUTO_PROBE_ORDER`（独立安装、各有认证），只能显式选用。见 `docs/接入-ClaudeCode.md` |
+| `codex` 预设存在但未实测 | 🟡 未实测（示例，需适配器） | `codex-acp`（全局安装）+ `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`；**不在** `AUTO_PROBE_ORDER`，只能显式选用 |
 | Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |
 | Qoder 可免 `--bin` 绝对路径 | ✅ 代码 | `fallbackBinPaths` 兜底 `~/.qoder/bin/qodercli/qodercli.exe`；auto 探测仍只看 PATH |
 | Qoder 用户记忆落点 | ✅ 实测 | `~/.qoder/memory/`；已 junction 进沙箱（写入回流真实目录）。`skills/agents/commands`/`AGENTS.md` 在 1.1.78 不存在 |

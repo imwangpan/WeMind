@@ -35,6 +35,23 @@ $env:ACP_MODEL = '["deepseek-account","deepseek-flash"]'   # 桌面登录必须�
 node scripts/acp-probe.mjs
 ```
 
+Claude Code 的 L3 示例（需要先 `npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；用临时 `CLAUDE_CONFIG_DIR`，别碰真实 `~/.claude`）：
+
+```powershell
+$env:CLAUDE_CONFIG_DIR = "$env:TEMP\claude-acp-probe"
+$env:ACP_BIN = "claude-agent-acp"
+$env:ACP_ARGS = "[]"
+$env:ACP_SHELL = "1"
+$env:ACP_HOME_ENV = "CLAUDE_CONFIG_DIR"
+$env:ACP_HOME = "$env:TEMP\claude-acp-probe"
+$env:ACP_PROMPT = "Remember the secret word: PINEAPPLE. Reply with exactly: STORED"
+$env:ACP_SECOND = "What was the secret word? Reply with just the word."
+$env:ACP_HARD_KILL = "1"
+node scripts/acp-probe.mjs
+```
+
+> 没有登录态时先 `claude` 登录，或在当前进程设 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`（自定义网关再加 `ANTHROPIC_BASE_URL`）。适配器报 `Claude native binary not found` 时，重装不要 `--omit=optional`，或设 `CLAUDE_CODE_EXECUTABLE` 指向本机 `claude`。
+
 ---
 
 ## 1. 准备
@@ -283,6 +300,19 @@ send error: [sendMessage] errcode=-2 ... (prepare failed)
 复盘要点：这条坑**只有真机、只有真实失败**才会暴露——离线 e2e 的假 agent 从不回 provider 错误，单测也只覆盖到「失败后停在 waiting」。凡是「状态机决定消息去哪」的改动，验收都要带上「失败之后**下一条无关消息**的去向」这一问。
 
 实测（2026-10-29，本机真 daemon + DSH 余额不足）：重启 daemon（顺带把上一版留下的 waiting 任务 #12 读回成「已中断」）→ 本地派 #13 → 日志 `w1 ← session/prompt#4 ERROR … Insufficient Balance` → `task 13 turn failed: …` → `任务列表` 显示 `#13 [deepseek] 已中断 · 0 轮`，最近输出是「中断了（**额度/余额不足**）。这类错误重试也不会好——修好后回复「#13 继续」…」；`workers.pid.json` 为空、无残留 `dsh` 进程（失败时 `ask()` 已 `kill()` → `release()` 把死连接摘出池，不会留死壳被下一条任务复用）。
+
+### 7.6 Claude Code 探针结论（2026-10-30/31，claude-agent-acp 0.99.1 / Claude Code 2.1.314，Windows）
+
+| # | 结论 |
+|---|---|
+| 1 | **`initialize`**：`loadSession: true`；`sessionCapabilities.resume/close/delete/fork/list`；`promptCapabilities.image: true`、`embeddedContext: true`；`mcpCapabilities: { http: true, sse: true }`——**没声明 stdio，实测可用**。 |
+| 2 | **`session/new`**：`modes` = `default / acceptEdits / plan / auto / bypassPermissions`；`configOptions` = `mode / model / effort / ultracode`。 |
+| 3 | **`session/set_mode bypassPermissions`**：返回 `{}`（成功）；之后 MCP 工具调用**0 反向请求**。不设该模式时 MCP 工具会触发 `session/request_permission`，宿主默认拒绝即失败（WeMind 的默认 deny 正常表现）。 |
+| 4 | **MCP（stdio）**：假 MCP 的 `echo` 以 `mcp__probe__echo` 暴露并被真实调用（`ECHO:hello`）。 |
+| 5 | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。 |
+| 6 | **耗时**：`session/new` ~1.2s、`session/load` ~1.0s、首帧 2–246ms、**首段正文 7.9–11.9s**；一轮 prompt 8–12s。远小于 `REQ_TIMEOUT=30s`，暂不需要 `reqTimeoutMs`。 |
+| 7 | **图片**：能力声明 true；本机用网关时 1×1 PNG 被上游 `400 WorkBuddy: … replace the image` 拒绝——**不是适配器/WeMind 的问题**，换正常模型/网关再验。 |
+| 8 | **未做**：真机微信 L4–L6（消息/自愈/MCP/任务）、适配器升级后的回归。 |
 
 ## 8. 清理 / 回滚
 

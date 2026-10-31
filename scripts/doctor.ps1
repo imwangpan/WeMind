@@ -137,8 +137,9 @@ $agents = @(
   @{ Name = "deepseek-acp"; Preset = "社区 DeepSeek 适配器（评估中）" },
   @{ Name = "gemini"; Preset = "gemini（示例预设）" },
   @{ Name = "cline"; Preset = "cline（已内置预设）" },
-  @{ Name = "codex-acp"; Preset = "codex（示例预设）" },
-  @{ Name = "npx"; Preset = "适配器启动器（claude-code 等）" }
+  @{ Name = "claude-agent-acp"; Preset = "claude-code（需全局安装适配器，Node ≥22）" },
+  @{ Name = "claude-agent-acp.cmd"; Preset = "claude-code（Windows npm 全局 shim）" },
+  @{ Name = "codex-acp"; Preset = "codex（示例预设）" }
 )
 foreach ($a in $agents) {
   $c = Get-Command $a.Name -ErrorAction SilentlyContinue

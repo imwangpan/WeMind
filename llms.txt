@@ -27,6 +27,7 @@
 - [docs/接入-DeepSeek.md](docs/接入-DeepSeek.md): DeepSeek/DSH evaluation, 0.2.1-rc.2 measurements, plan.
 - [docs/接入-Qoder.md](docs/接入-Qoder.md): Qoder CLI integration — preset, sandbox `settingsBase`, `.auth` credential sync, M0–M3 measurements (images, dynamic MCP, worker interrupt/resume, memory inheritance).
 - [docs/接入-Cline.md](docs/接入-Cline.md): Cline CLI integration — native `cline --acp`, sandbox `CLINE_DIR`/`CLINE_MCP_SETTINGS_PATH`, providers.json sync, custom-provider auth (`CLINE_PROVIDER`+`CLINE_API_KEY`), 3.0.74 measurements.
+- [docs/接入-ClaudeCode.md](docs/接入-ClaudeCode.md): Claude Code via `@agentclientprotocol/claude-agent-acp` (global install, Node ≥22) — `CLAUDE_CONFIG_DIR` sandbox, `mcpViaAcp`, `bypassPermissions`, probe results; real WeChat E2E not done.
 - [docs/ai/recipes/add-acp-agent.md](docs/ai/recipes/add-acp-agent.md): add a preset + capability adaptations.
 - [docs/ai/recipes/add-mcp.md](docs/ai/recipes/add-mcp.md): MCP catalog/activation/transport.
 - [docs/ai/recipes/debug-daemon.md](docs/ai/recipes/debug-daemon.md): triage daemon/brain failures.
@@ -72,6 +73,7 @@
 - DSH 0.2.1-rc.2 advertises `promptCapabilities.image:false`; image prompts fail with `-32602`.
 - Qoder CLI 1.1.78 has load/resume/images/MCP and needs `.auth/user` + `.auth/machine_id` synced into the sandbox; its sandbox MCP lives in `settings.json.mcpServers`.
 - Cline CLI 3.0.74 has native ACP (`cline --acp`), `loadSession`/images, and persists context across a hard kill via `session/load`. Its ACP auth only restores `cline`/`cline-pass`/`openai-codex`; custom providers require `CLINE_PROVIDER`+`CLINE_API_KEY`. It ignores ACP `session/new.mcpServers` — MCP goes through `CLINE_MCP_SETTINGS_PATH` (`{mcpServers}`), and `session/close` is not implemented.
+- Claude Code needs the official adapter `@agentclientprotocol/claude-agent-acp` (global install, Node ≥22; Windows `claude-agent-acp.cmd`). Its sandbox uses `CLAUDE_CONFIG_DIR` (also isolates `~/.claude.json`), MCP goes via ACP `mcpServers`, and approvals are bypassed with `session/set_mode bypassPermissions`. Probe-verified only; real WeChat E2E not done.
 - Qoder's user memory lives in `~/.qoder/memory/` and is junctioned into the sandbox (brain writes land in the real dir); `skills/agents/commands/AGENTS.md` do not exist in 1.1.78. Qoder Desktop may register MCPs in `~/.qoder/mcp-router.json` instead of `settings.json`, so those are intentionally invisible to `列出 MCP`.
 - The repo has no `Brain` interface; `acp-brain.ts` exports `askBrain`/`newSession`/`restart`.
 - iLink consecutive send limit is ~10; progress messages consume it.
