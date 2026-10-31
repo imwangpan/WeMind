@@ -131,7 +131,7 @@ cline: {
   mcpFormat: "kiro",
   mcpConfigFile: "mcp.json",
   catalogFile: "data/settings/cline_mcp_settings.json",
-  credentialFiles: ["data/settings/providers.json"],
+  credentialFiles: ["data/settings/providers.json", "data/settings/models.json"],
   credentialEnv: clineCredentialEnv,   // 自定义 provider：从 providers.json 派生 CLINE_PROVIDER/KEY
 }
 ```
@@ -143,7 +143,7 @@ cline: {
 - **MCP 文件**：`CLINE_MCP_SETTINGS_PATH` 指到 `<沙箱>/cline/mcp.json`，WeMind 的 `applySandbox()` 写 `{ "mcpServers": {…} }`；目录来源读真实的 `~/.cline/data/settings/cline_mcp_settings.json`。**真实文件不被改动**。
   - 验证方式（不需要起 daemon）：`cline config mcp --json` 在设置 `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 后能列出沙箱里的 server。
   - `wechat` 永久禁止；brain 默认空、按需 `加载 <名>`；worker 继承全量但排除 `wechat` 与 `disabled:true`。
-- **登录态**：`data/settings/providers.json` 按「新者胜」同步（与 DSH `.credentials.yaml` 同策略）；自定义 provider 另由 `credentialEnv: clineCredentialEnv` 在 spawn 前从**真实** `~/.cline/data/settings/providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）。**注意**：沙箱里 OAuth token 刷新不会写回真实文件，长期两条登录态可能漂移；用 API-key provider 或定期在日常环境 `cline auth` 可以规避。
+- **登录态与模型目录**：`data/settings/providers.json`（登录态/自定义 provider）与 `data/settings/models.json`（provider 的模型目录缓存）都按「新者胜」同步（与 DSH `.credentials.yaml` 同策略）。**`models.json` 不能漏**：缺它时 Cline 的 `session/new` 会回退到 `gpt-4o`，自定义 provider 下第一条 prompt 就报 `magpie knows no model "gpt-4o"`（2026-10-31 真机踩到并修复）。自定义 provider 另由 `credentialEnv: clineCredentialEnv` 在 spawn 前从**真实** `~/.cline/data/settings/providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）。**注意**：沙箱里 OAuth token 刷新不会写回真实文件，长期两条登录态可能漂移；用 API-key provider 或定期在日常环境 `cline auth` 可以规避。
 - **记忆/技能**：`rules/`、`skills/`、`agents/` 以 junction（Windows）/ symlink 进沙箱，与日常 Cline 共用；`hooks/`、`plugins/` **不继承**（插件可自带 MCP，沙箱只允许 curated MCP）。
 - **免审批**：`--auto-approve true` 是 Cline 官方 ACP 文档给的启动开关（`auto_approve` config 的启动默认值）。这与其它预设一致——但宿主应答器仍默认拒绝边缘权限请求，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行。
 

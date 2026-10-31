@@ -219,7 +219,9 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     mcpFormat: "kiro",
     mcpConfigFile: "mcp.json",
     catalogFile: "data/settings/cline_mcp_settings.json",
-    credentialFiles: ["data/settings/providers.json"],
+    // providers.json：登录态（OAuth / API-key）；models.json：provider 的模型目录缓存——
+    // 缺它时 Cline 的 session/new 会回退到 gpt-4o（自定义 provider 下 prompt 直接报「magpie knows no model "gpt-4o"」）
+    credentialFiles: ["data/settings/providers.json", "data/settings/models.json"],
     // 自定义/API-key provider：Cline ACP 不读 providers.json 的 lastUsedProvider，按官方 ACP 逃生口补 env
     // （父进程显式设了 CLINE_PROVIDER/CLINE_API_KEY 时完全不接管；OAuth 条目没有 apiKey，返回空）
     credentialEnv: clineCredentialEnv,

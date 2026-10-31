@@ -41,6 +41,10 @@ beforeAll(() => {
     JSON.stringify(providers),
   );
   fs.writeFileSync(
+    path.join(realHome, "data", "settings", "models.json"),
+    JSON.stringify({ version: 1, providers: { "openai-compatible": { models: ["auto/model"] } } }),
+  );
+  fs.writeFileSync(
     path.join(realHome, "data", "settings", "cline_mcp_settings.json"),
     JSON.stringify(mcpSettings),
   );
@@ -65,11 +69,13 @@ afterAll(() => {
 const readJson = (f: string): Record<string, any> => JSON.parse(fs.readFileSync(f, "utf-8"));
 
 describe("brain 沙箱（Cline）", () => {
-  it("登录态 providers.json 进沙箱（data/settings 布局）", async () => {
+  it("登录态 providers.json + 模型缓存 models.json 进沙箱（data/settings 布局）", async () => {
     const { ensureBrainHome } = await import("./mcp-sandbox.js");
     ensureBrainHome();
     const copied = readJson(path.join(brainCfg, "data", "settings", "providers.json"));
     expect(copied.lastUsedProvider).toBe("openai-compatible");
+    const models = readJson(path.join(brainCfg, "data", "settings", "models.json"));
+    expect(models.version).toBe(1); // 缺它时 Cline 会回退到 gpt-4o
   });
 
   it("rules/skills/agents 以链接共享真实目录（大脑写入即落到真实目录）", async () => {
@@ -101,7 +107,7 @@ describe("brain 沙箱（Cline）", () => {
 });
 
 describe("worker 沙箱（Cline）", () => {
-  it("继承全量 MCP（除 wechat/disabled），并同步 providers.json", async () => {
+  it("继承全量 MCP（除 wechat/disabled），并同步 providers.json + models.json", async () => {
     const { ensureWorkerHome } = await import("./worker-sandbox.js");
     ensureWorkerHome();
 
@@ -110,6 +116,7 @@ describe("worker 沙箱（Cline）", () => {
     expect(
       readJson(path.join(workerCfg, "data", "settings", "providers.json")).lastUsedProvider,
     ).toBe("openai-compatible");
+    expect(readJson(path.join(workerCfg, "data", "settings", "models.json")).version).toBe(1);
     expect(fs.readFileSync(path.join(workerCfg, "rules", "sample.md"), "utf-8")).toBe("# rules\n");
   });
 });

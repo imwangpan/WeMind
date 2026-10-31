@@ -328,7 +328,10 @@ describe("resolveAgent agent", () => {
     expect(ag.mcpFormat).toBe("kiro"); // cline_mcp_settings.json 的键名同为 mcpServers
     expect(ag.mcpConfigFile).toBe("mcp.json");
     expect(ag.catalogFile).toBe("data/settings/cline_mcp_settings.json");
-    expect(ag.credentialFiles).toEqual(["data/settings/providers.json"]);
+    expect(ag.credentialFiles).toEqual([
+      "data/settings/providers.json",
+      "data/settings/models.json",
+    ]);
     expect(ag.inheritDirs).toEqual(["rules", "skills", "agents"]);
     expect(ag.mcpViaAcp).toBe(false); // ACP session/new 的 mcpServers 不被 Cline 使用
     expect(ag.restore).toBeUndefined(); // 有 session/load，用默认
