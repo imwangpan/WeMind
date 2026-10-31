@@ -244,7 +244,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   //   探针实测 stdio MCP 可用（尽管 initialize 的 mcpCapabilities 只声明 http/sse——能力字段不可信的又一例）。
   // - 2026-10-30 探针实测（claude-agent-acp 0.99.1 / Claude Code 2.1.314，Windows）：
   //   loadSession ✅、sessionCapabilities.resume/close/delete/fork/list ✅、image ✅、stdio MCP ✅、bypassPermissions 下 0 反向请求；
-  //   重启后 session/load 上下文保留；session/new ~1.2s、首帧 ~2ms、首段正文 ~8–12s。详见 docs/接入-ClaudeCode.md（真机微信 E2E 未做）。
+  //   重启后 session/load 上下文保留；session/new ~1.2s、首帧 ~2ms、首段正文 ~8–12s。真机微信单轮 E2E 已过（2026-10-31）；详见 docs/接入-ClaudeCode.md（重启续聊/MCP/任务待复测）。
   "claude-code": {
     name: "claude-code",
     bin: "claude-agent-acp",

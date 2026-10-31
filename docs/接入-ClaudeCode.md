@@ -1,6 +1,6 @@
 # 接入 Claude Code（ACP 适配器）
 
-> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-31 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / 强杀后 `session/load` / stdio MCP / `bypassPermissions`）；**真机微信 E2E 未做**。
+> **适用版本**：WeMind 1.2.0 ｜ **最后核对**：2026-10-31 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / 强杀后 `session/load` / stdio MCP / `bypassPermissions`）；**真机微信单轮 E2E 已通过**（2026-10-31）；重启续聊 / MCP 加载 / 任务派发待真机复测。
 >
 > 实测环境：Windows 11、Node 24.21.0、`@agentclientprotocol/claude-agent-acp` **0.99.1**、Claude Code **2.1.314**。适配器是 pre-1.0，升级后请按 §8 重新跑探针。
 
@@ -148,13 +148,16 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 大脑自检（claude-code，bin=claude-agent-acp.cmd）：ACP 握手成功（initialize + session/new，sessionId=…，mode=bypassPermissions）（1987ms）
 ```
 
-### 5.2 经过微信（尚未完成，待真机）
+### 5.2 经过微信（2026-10-31 单轮已通过）
 
-1. 发一条消息 → `daemon.log` 出现 `spawn claude-code acp` → `initialized` → `session/new`（或 `session/load`）→ `prompt ok`；
-2. 杀 daemon 再起，追问上一轮 → 上下文还在（`session/load`）；
-3. `加载 <MCP 名>` → 下条消息生效；`wechat` 仍被拒；
-4. 派一条任务（`任务 claude-code：…`）→ 跑通、结果送达；
-5. 长任务 >30s → 不因首帧误杀；进度不刷屏。
+已实测：真机微信发一条消息 → `daemon.log` 出现 `spawn claude-code acp`（`claude-agent-acp.cmd args=[]`）→ `initialized` → `session/new` → `set_mode`（`bypassPermissions`）→ `prompt ok 5381ms` → `replied`（回复真的送达）。旧进程留下的空会话（从未跑过回合）在重启后 `session/load`/`resume` 会回 `-32002 Resource not found`，daemon 按预期回退 `session/new`，不影响答复。
+
+仍待真机复测：
+
+1. 杀 daemon 再起，追问上一轮 → 上下文还在（`session/load`）；
+2. `加载 <MCP 名>` → 下条消息生效；`wechat` 仍被拒；
+3. 派一条任务（`任务 claude-code：…`）→ 跑通、结果送达；
+4. 长任务 >30s → 不因首帧误杀；进度不刷屏。
 
 ---
 
