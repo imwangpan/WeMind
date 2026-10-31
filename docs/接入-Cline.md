@@ -11,7 +11,7 @@
 
 - Cline CLI **原生支持 ACP**：`cline --acp`。社区适配器 [`cline-acp`](https://github.com/TonksThebear/cline-acp) 已在 2026-02 归档（作者原话：Cline now directly supports ACP），**不要再装适配器**。
 - WeMind 预设：`cline` → `cline --acp --auto-approve true`，配置目录走 `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH`，都指向沙箱的 `cline/` 子目录。
-- **认证是唯一硬前置**：ACP 只自动恢复 Cline 自己的 3 种登录（`cline` / `cline-pass` / `openai-codex`）；用**自定义/API-key provider**（如 `openai-compatible`）时，必须在启动 `wemind` 的环境里设 `CLINE_PROVIDER` + `CLINE_API_KEY`。否则 `session/new` 直接：
+- **认证是唯一硬前置**：ACP 只自动恢复 Cline 自己的 3 种登录（`cline` / `cline-pass` / `openai-codex`）；用**自定义/API-key provider**（如 `openai-compatible`）时，WeMind 会**自动从 `providers.json` 读取** `lastUsedProvider` + `settings.apiKey`，转成 Cline 官方 ACP 环境变量 `CLINE_PROVIDER` + `CLINE_API_KEY`（父进程显式设了这两个变量时完全不接管）。没有可用的 apiKey（如 OAuth 条目）时才需要手工设置，否则 `session/new` 直接：
 
   ```text
   -32000 Authentication required: Call authenticate before starting a session
@@ -44,21 +44,46 @@ Cline 的 ACP 在 `session/new` 前检查登录态（`isSessionReady`）：只�
 
 先在日常环境里跑 `cline auth` 完成登录；WeMind 会把 `providers.json` 同步进大脑/worker 沙箱。
 
-### 1.2 自定义 / API-key provider（本机实测场景）
+### 1.2 自定义 / API-key provider（自动复用，可显式覆盖）
 
-若你日常用的是 `openai-compatible`、OpenRouter、自建网关**等自定义 provider**：Cline 的 ACP **不会**读取 `providers.json` 里的 `lastUsedProvider`，必须显式给两个官方环境变量：
+若你日常用的是 `openai-compatible`、OpenRouter、自建网关**等自定义 provider**：Cline 的 ACP **不会**读取 `providers.json` 里的 `lastUsedProvider`（`tryRestoreAuth()` 只认三种 OAuth 登录）。Cline 官方给 ACP 的逃生口是：
+
+```text
+CLINE_PROVIDER  +  CLINE_API_KEY
+```
+
+WeMind 在 spawn 前会自动做一层**只读桥接**（`clineCredentialEnv()`）：
+
+1. 父进程**已经设了** `CLINE_PROVIDER` 或 `CLINE_API_KEY` → **完全不接管**（避免 provider 与 key 错配）；
+2. 否则读 `~/.cline/data/settings/providers.json`；
+3. 取 `lastUsedProvider` 对应条目的 `settings.apiKey`（非空字符串）；
+4. 有就把 `CLINE_PROVIDER=lastUsedProvider`、`CLINE_API_KEY=<apiKey>` 注入子进程环境；
+5. 没有 apiKey（OAuth 条目）、文件缺失/损坏 → 不注入，继续走 Cline 自己的认证逻辑。
+
+所以正常情况**不需要手动设环境变量**：
 
 ```powershell
-# 例：本机 magpie 网关
+wemind brain set cline
+wemind brain check        # 会读 ~/.cline/.../providers.json，自动带上自定义 provider 的 key
+```
+
+以下情况需要手工设置（显式值永远优先）：
+
+- `lastUsedProvider` 指向的条目没有 `apiKey`（只有 `auth` 的 OAuth 条目）；
+- `providers.json` 不存在、被改坏、或 `apiKey` 为空；
+- 你想临时换 provider（例如 `$env:CLINE_PROVIDER="openrouter"`）。
+
+```powershell
 $env:CLINE_PROVIDER = "openai-compatible"
 $env:CLINE_API_KEY  = "<你的 key>"
 wemind stop <账号>; wemind start <账号>
 ```
 
-- 变量要在**启动 daemon 的环境**里（`wemind start` 的父进程）；写进 `brain.json` 无效。
-- 改完变量要**重启 daemon**；运行中的 daemon 不会重新读环境。
-- `wemind brain check` 和微信里的失败回复都会给出这条提示（`authHint()`），不会再只说「重启一次 daemon」。
-- **不要把 key 写进源码或预设**（AGENTS §4.9）；由 daemon 进程环境提供。
+注意：
+
+- 自动读取发生在**每次 spawn**：改了 `cline auth` / `providers.json` 后，重启 daemon 或 `wemind brain switch cline` 会重新读取；正在运行的 ACP 子进程不会热更新。
+- 只读、不写、不打印 key；key 只进入子进程环境，不写进 `brain.json` 或源码（AGENTS §4.9）。
+- `wemind brain check` 和微信里的失败回复仍会给出可执行提示（`authHint()`），不会再只说「重启一次 daemon」。
 
 ---
 
@@ -107,6 +132,7 @@ cline: {
   mcpConfigFile: "mcp.json",
   catalogFile: "data/settings/cline_mcp_settings.json",
   credentialFiles: ["data/settings/providers.json"],
+  credentialEnv: clineCredentialEnv,   // 自定义 provider：从 providers.json 派生 CLINE_PROVIDER/KEY
 }
 ```
 
@@ -117,7 +143,7 @@ cline: {
 - **MCP 文件**：`CLINE_MCP_SETTINGS_PATH` 指到 `<沙箱>/cline/mcp.json`，WeMind 的 `applySandbox()` 写 `{ "mcpServers": {…} }`；目录来源读真实的 `~/.cline/data/settings/cline_mcp_settings.json`。**真实文件不被改动**。
   - 验证方式（不需要起 daemon）：`cline config mcp --json` 在设置 `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 后能列出沙箱里的 server。
   - `wechat` 永久禁止；brain 默认空、按需 `加载 <名>`；worker 继承全量但排除 `wechat` 与 `disabled:true`。
-- **登录态**：`data/settings/providers.json` 按「新者胜」同步（与 DSH `.credentials.yaml` 同策略）。**注意**：沙箱里 OAuth token 刷新不会写回真实文件，长期两条登录态可能漂移；用 API-key provider 或定期在日常环境 `cline auth` 可以规避。
+- **登录态**：`data/settings/providers.json` 按「新者胜」同步（与 DSH `.credentials.yaml` 同策略）；自定义 provider 另由 `credentialEnv: clineCredentialEnv` 在 spawn 前从**真实** `~/.cline/data/settings/providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）。**注意**：沙箱里 OAuth token 刷新不会写回真实文件，长期两条登录态可能漂移；用 API-key provider 或定期在日常环境 `cline auth` 可以规避。
 - **记忆/技能**：`rules/`、`skills/`、`agents/` 以 junction（Windows）/ symlink 进沙箱，与日常 Cline 共用；`hooks/`、`plugins/` **不继承**（插件可自带 MCP，沙箱只允许 curated MCP）。
 - **免审批**：`--auto-approve true` 是 Cline 官方 ACP 文档给的启动开关（`auto_approve` config 的启动默认值）。这与其它预设一致——但宿主应答器仍默认拒绝边缘权限请求，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行。
 
@@ -139,7 +165,7 @@ cline: {
 ```powershell
 wemind brain set cline
 wemind brain                 # 应显示 agent=cline、configSubdir=cline、model=…
-wemind brain check           # 真握手；自定义 provider 记得先设 §1.2 的两个变量
+wemind brain check           # 真握手；自定义 provider 会自动复用 providers.json 的 key
 ```
 
 微信里：
@@ -157,7 +183,7 @@ wemind brain check           # 真握手；自定义 provider 记得先设 §1.2
 
 ## 5. 已知限制 / 待实测
 
-1. **认证**：自定义 provider 必须 `CLINE_PROVIDER` + `CLINE_API_KEY`（见 §1.2）；这是 Cline ACP 的设计，不是 WeMind 的缺口。
+1. **认证**：Cline ACP 只自动恢复 3 种 OAuth 登录；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）；OAuth 条目或文件不可用时才需要手动设置（见 §1.2）。
 2. **`session/close` 不存在**（`-32601`）：WeMind 目前不调用它，杀进程即可；若未来加「优雅关闭」，要对 Cline 跳过。
 3. **MCP 走 ACP 不支持**：`mcpViaAcp` 必须保持 `false`；改用 `CLINE_MCP_SETTINGS_PATH`。
 4. **OAuth token 单向同步**：沙箱内刷新不会回写真实 `providers.json`（见 §3）。API-key provider 不受影响。

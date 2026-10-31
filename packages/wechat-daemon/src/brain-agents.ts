@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config.js";
+import { clineCredentialEnv } from "./cline-credentials.js";
 import { readProfileDefaultModel } from "./profile-model.js";
 
 /**
@@ -52,6 +53,10 @@ export type AcpAgentPreset = {
   catalogFile?: string; // 可选 MCP 目录来源文件相对 realHome 的路径（默认 settings/mcp.json）
   env?: Record<string, string>; // 额外注入的环境变量（强制；值里 %HOME% → 沙箱根目录）
   envDefaults?: Record<string, string>; // 默认值：父进程已设同名变量时不覆盖。审批类开关（DSH_PERMISSION_MODE / INITIAL_AGENT_MODE）用它，部署方可用环境变量收紧权限
+  credentialEnv?: (
+    realHome: string | undefined,
+    parentEnv: NodeJS.ProcessEnv,
+  ) => Record<string, string>; // 从 agent 自己的凭据文件派生环境变量（仅父进程未显式提供时；如 Cline 自定义 provider 的 CLINE_PROVIDER/CLINE_API_KEY）
   // —— 协议/能力差异（按 agent 覆盖；默认保持 kiro/opencode 旧行为）——
   restore?: "load" | "resume"; // 恢复会话的方式：load（默认）或 resume（如 DSH）
   firstFrameMs?: number; // 首帧超时覆盖（默认 25s；慢启动/committed-only agent 可放宽）
@@ -215,6 +220,9 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     mcpConfigFile: "mcp.json",
     catalogFile: "data/settings/cline_mcp_settings.json",
     credentialFiles: ["data/settings/providers.json"],
+    // 自定义/API-key provider：Cline ACP 不读 providers.json 的 lastUsedProvider，按官方 ACP 逃生口补 env
+    // （父进程显式设了 CLINE_PROVIDER/CLINE_API_KEY 时完全不接管；OAuth 条目没有 apiKey，返回空）
+    credentialEnv: clineCredentialEnv,
   },
 
   // —— 需适配器（CLI 不原生支持 ACP，经第三方适配器桥接；未实测）——
@@ -355,6 +363,11 @@ export type ResolvedAgent = {
   env: Record<string, string>;
   /** 预设给的「默认环境变量」：父进程已设同名变量时不覆盖（用于审批类开关，部署方可以收紧）。 */
   envDefaults: Record<string, string>;
+  /** 从 agent 自己的凭据文件派生环境变量（父进程未显式提供时；如 Cline 自定义 provider）。 */
+  credentialEnv?: (
+    realHome: string | undefined,
+    parentEnv: NodeJS.ProcessEnv,
+  ) => Record<string, string>;
   restore?: "load" | "resume";
   firstFrameMs?: number;
   heartbeatMs?: number;
@@ -381,7 +394,7 @@ export type ResolvedAgent = {
   binOverridden: boolean;
 };
 
-/** 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向沙箱 → 预设强制 `env` → 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。 */
+/** 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向沙箱 → 从凭据文件派生的 env（父进程未提供时）→ 预设强制 `env` → 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。 */
 export function agentEnv(
   ag: ResolvedAgent,
   home: string,
@@ -389,6 +402,10 @@ export function agentEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把沙箱目录传给 agent
+  // 从 agent 自己的凭据文件派生（如 Cline 的 CLINE_PROVIDER/CLINE_API_KEY）；helper 内部已保证父进程显式值优先
+  for (const [k, v] of Object.entries(ag.credentialEnv?.(ag.realHome, process.env) ?? {})) {
+    if (env[k] === undefined) env[k] = v;
+  }
   for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
   for (const [k, v] of Object.entries(ag.envDefaults ?? {})) {
     if (process.env[k] !== undefined) {
@@ -543,6 +560,7 @@ function resolveAgentCore(
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},
     envDefaults: preset.envDefaults ?? {},
+    credentialEnv: preset.credentialEnv,
     restore: preset.restore,
     firstFrameMs: preset.firstFrameMs,
     heartbeatMs: preset.heartbeatMs,

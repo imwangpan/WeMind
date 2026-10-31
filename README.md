@@ -452,7 +452,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 
 > **Qoder 已内置 agent（M0–M3 已完成）**：`wemind brain set qoder` 即用 `qodercli --acp --yolo` 当大脑；内置配置已处理 `QODER_CONFIG_DIR` 沙箱、`.auth/user` + `.auth/machine_id` 登录态同步、`settings.json` 基底（剥离 `providers`/`model`、关自动更新）、文件式 MCP、`memory/` 记忆继承。需先 `qoder login`。实测与限制见 **[docs/接入-Qoder.md](docs/接入-Qoder.md)**。
 >
-> **Cline 已内置 agent（原生 ACP，3.0.74 实测）**：装 `npm i -g cline` 后 `wemind brain set cline` 即用 `cline --acp --auto-approve true` 当大脑；`CLINE_DIR` 指向沙箱、`providers.json` 登录态同步、`mcp.json` 文件式 MCP。**认证有前置**：ACP 只自动恢复 `cline` / `cline-pass` / `openai-codex` 三种登录；用自定义 provider（如 `openai-compatible`）时必须先在启动 `wemind` 的环境里设 `CLINE_PROVIDER` + `CLINE_API_KEY`。实测与限制见 **[docs/接入-Cline.md](docs/接入-Cline.md)**。
+> **Cline 已内置 agent（原生 ACP，3.0.74 实测）**：装 `npm i -g cline` 后 `wemind brain set cline` 即用 `cline --acp --auto-approve true` 当大脑；`CLINE_DIR` 指向沙箱、`providers.json` 登录态同步、`mcp.json` 文件式 MCP。**认证**：ACP 只自动恢复 `cline` / `cline-pass` / `openai-codex`；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER` + `CLINE_API_KEY`（父进程显式设了就不接管），通常无需手工配置。实测与限制见 **[docs/接入-Cline.md](docs/接入-Cline.md)**。
 
 ### 收发图片
 

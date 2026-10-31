@@ -32,6 +32,8 @@ const VARS = [
   "WEMIND_BRAIN_INHERIT_DIRS",
   "WEMIND_ACP_SESSION_MODE",
   "KIRO_CLI_BIN",
+  "CLINE_PROVIDER",
+  "CLINE_API_KEY",
 ];
 
 const saved: Record<string, string | undefined> = {};
@@ -57,7 +59,18 @@ const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-test-"));
 const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-empty-"));
 // 伪造一份真实 dsh home：profiles/acp 的用户层带 agent-default-model（与桌面端写进去的形状一致）
 const profileHome = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-profile-"));
+const clineHome = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-cline-home-"));
 fs.mkdirSync(path.join(profileHome, "profiles", "acp"), { recursive: true });
+fs.mkdirSync(path.join(clineHome, "data", "settings"), { recursive: true });
+fs.writeFileSync(
+  path.join(clineHome, "data", "settings", "providers.json"),
+  JSON.stringify({
+    lastUsedProvider: "openai-compatible",
+    providers: {
+      "openai-compatible": { settings: { provider: "openai-compatible", apiKey: "sk-test" } },
+    },
+  }),
+);
 fs.writeFileSync(
   path.join(profileHome, "profiles", "acp", "cordis.patch.yml"),
   [
@@ -77,6 +90,7 @@ afterAll(() => {
   fs.rmSync(emptyBin, { recursive: true, force: true });
   fs.rmSync(emptyRealHome, { recursive: true, force: true });
   fs.rmSync(profileHome, { recursive: true, force: true });
+  fs.rmSync(clineHome, { recursive: true, force: true });
   if (saved.WEMIND_BRAIN_REAL_HOME === undefined) delete process.env.WEMIND_BRAIN_REAL_HOME;
 });
 
@@ -319,6 +333,24 @@ describe("resolveAgent agent", () => {
     expect(ag.mcpViaAcp).toBe(false); // ACP session/new 的 mcpServers 不被 Cline 使用
     expect(ag.restore).toBeUndefined(); // 有 session/load，用默认
     expect(ag.images).toBe(true);
+  });
+
+  it("cline：父进程没给认证变量时，从真实 providers.json 派生 CLINE_PROVIDER/KEY；显式 env 优先", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "cline";
+    process.env.WEMIND_BRAIN_REAL_HOME = clineHome;
+    const ag = resolveAgent();
+    const home = path.join(os.tmpdir(), "wemind-cline-home");
+
+    const env = agentEnv(ag, home);
+    expect(env.CLINE_PROVIDER).toBe("openai-compatible");
+    expect(env.CLINE_API_KEY).toBe("sk-test");
+
+    process.env.CLINE_PROVIDER = "custom-provider";
+    process.env.CLINE_API_KEY = "explicit-key";
+    const env2 = agentEnv(ag, home);
+    expect(env2.CLINE_PROVIDER).toBe("custom-provider");
+    expect(env2.CLINE_API_KEY).toBe("explicit-key");
   });
 
   it("cline 找不到二进制时给安装命令（而不是泛泛的「安装它」）", () => {
