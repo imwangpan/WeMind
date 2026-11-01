@@ -2,7 +2,7 @@
 
 > 上一页：[5. daemon](05-daemon.md) ｜ 下一页：[7. 远程任务 Worker](07-远程任务-Worker.md)
 >
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-01 ｜ 代码以当前 `main` 为准。
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ 代码以当前 `main` 为准。
 
 daemon 的「大脑」是一个常驻的 AI agent 子进程，通过 ACP 协议驱动。本章讲清大脑的进程生命周期、会话管理、MCP 沙箱与记忆继承，以及如何换成别的 agent。
 
@@ -181,7 +181,7 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 | `deepseek` | DeepSeek Harness `dsh` | 原生 ACP | ✅ 已内置/已实测（prompt/resume/MCP；`load` ❌、`image` ❌） | `dsh --profile acp`，`DSH_HOME`（见 [接入-DeepSeek](../接入-DeepSeek.md)） |
 | `qoder` | Qoder CLI `qodercli` | 原生 ACP | ✅ 已内置/已实测（load/resume/图片/MCP） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`（见 [接入-Qoder](../接入-Qoder.md)） |
 | `cline` | Cline CLI `cline` | 原生 ACP | ✅ 已内置/已实测（loadSession/图片；自定义 provider 需 `CLINE_PROVIDER`+`CLINE_API_KEY`） | `cline --acp --auto-approve true`，`CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH`（见 [接入-Cline](../接入-Cline.md)） |
-| `gemini` | Gemini CLI | 原生 ACP | ✅ 已内置/已实测（0.66.0 探针：load/图片/MCP/yolo；load 后异步回放历史 → `replayOnLoad`；`set_config_option` ❌，模型走 `--model`） | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME` 指向沙箱根、配置目录 `<它>/.gemini`；MCP 在配置目录 `settings.json` 的 `mcpServers`；`settingsBase` 只剥 `mcpServers`、`.env` 凭据同步、`skills/`+`GEMINI.md` 继承（见 [接入-Gemini](../接入-Gemini.md)） |
+| `gemini` | Gemini CLI | 原生 ACP | ✅ 已内置/已实测（0.66.0 探针 + 真机 E2E 2026-11-01：load/图片/MCP/yolo；load 后异步回放历史 → `replayOnLoad`；`set_config_option` ❌，模型走 `--model`） | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME` 指向沙箱根、配置目录 `<它>/.gemini`；MCP 在配置目录 `settings.json` 的 `mcpServers`；`settingsBase` 只剥 `mcpServers`、`.env` 凭据同步、`skills/`+`GEMINI.md` 继承（见 [接入-Gemini](../接入-Gemini.md)） |
 | `claude-code` | Claude Code | 需适配器 | ✅ 探针级实测 + 真机微信单轮 E2E（2026-10-31；重启续聊/MCP/任务待复测） | 全局 `claude-agent-acp`（`npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；免审批走 `session/set_mode bypassPermissions`，适配器不解析 CLI flag；Windows `claude-agent-acp.cmd`） |
 | `codex` | OpenAI Codex | 需适配器（官方维护） | ✅ 已内置/已实测（探针级 + 真机 E2E：worker 与 brain 通道均通；load/图片/set_mode/set_config_option ✅、stdio MCP ❌） | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**全局安装**；Windows 上是 `codex-acp.cmd`；免审批 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`，见 [接入-Codex](../接入-Codex.md)） |
 | `pi` | pi coding agent | 需适配器（社区 `pi-acp`） | ✅ 已内置/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务）；load/图片/工具调用 ✅、0 反向请求 | `pi-acp`（`npm i -g pi-acp`）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent` 并先登录）；`PI_CODING_AGENT_DIR` 沙箱、MCP 走 `<沙箱根>/mcp.json`、免审批无需开关；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动横幅（用户显式设过则保留），见 [接入-pi](../接入-pi.md) |

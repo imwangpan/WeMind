@@ -1,6 +1,6 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-> **适用版本**：WeMind 1.3.0（`@wemind/cli` 1.3.0 已发布）｜ **最后核对**：2026-11-01 ｜ **状态**：内置 9 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测（0.66.0）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**。
+> **适用版本**：WeMind 1.3.0（`@wemind/cli` 1.3.0 已发布）｜ **最后核对**：2026-11-02 ｜ **状态**：内置 9 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**。
 >
 > 本文说明如何把 WeMind daemon 的「大脑」从默认的 `auto`（优先 kiro）换成另一个 ACP agent。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 
@@ -231,7 +231,7 @@ ACP agent 分两类，接入方式不同：
 
 > **内置预设默认免审批**（2026-10-30 起）：每个 agent 用**自己官方**的机制——kiro `--trust-all-tools`、gemini `--approval-mode yolo (+ --skip-trust)`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`，官方 issue #52216）、DSH `DSH_PERMISSION_MODE=danger-full-access`（`envDefaults`：daemon 进程已设同名变量时以你的为准）、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`（`INITIAL_AGENT_MODE` 兜底 + `set_mode`）、pi 无需任何开关（官方默认不逐次审批，也没有要切的 `session/set_mode`）。**这不是统一开关**：写进 `--args` 的 CLI flag 只在 agent 真的解析它时才有效（claude-code / codex / pi 适配器都不解析）。想收紧：审批类环境变量（`DSH_PERMISSION_MODE`、`INITIAL_AGENT_MODE`）在 daemon 环境里设了就不被预设覆盖；`WEMIND_ACP_SESSION_MODE=0/false/off` 关掉 `session/set_mode`。边缘情况（各 agent 的 ask 规则、MCP 工具审批）仍可能发 `session/request_permission`：WeMind 默认**拒绝**，要全放行设 `WEMIND_ACP_AUTO_ALLOW=1`——它只是「每次自动点允许」，不放宽沙箱。**「免审批」≠「最高权限」**：DSH/codex 还有沙箱层，默认预设已把两层都放开。
 
-> ⚠️ 9 个内置预设**都至少过了探针级实测**，但包名/参数/ACP 能力会随上游版本变化：**升级 agent 后按 §8 复验**，不要拿旧结论当当前事实。逐项：`kiro`/`opencode`/`deepseek`/`qoder`/`cline` 已真机长期使用；`gemini` 已探针实测（0.66.0：load/图片/MCP/yolo，见 [接入-Gemini.md](接入-Gemini.md)）；`claude-code` 已过**探针级实测 + 真机微信单轮 E2E**（2026-10-31；重启续聊 / MCP / 任务待复测）；`codex` 已过**探针级实测 + 真机 E2E**（2026-11-01：worker 与 brain 通道均通；发图 / 冷重启 / 切脑回切待复测）；`pi` 已过**探针级实测 + 真机 E2E**（2026-11-01：brain 单轮、热切换、微信「任务 pi：…」派发）。
+> ⚠️ 9 个内置预设**都至少过了探针级实测**，但包名/参数/ACP 能力会随上游版本变化：**升级 agent 后按 §8 复验**，不要拿旧结论当当前事实。逐项：`kiro`/`opencode`/`deepseek`/`qoder`/`cline` 已真机长期使用；`gemini` 已过**探针级实测 + 真机 E2E**（0.66.0，2026-11-01：load/图片/MCP/yolo；brain 单轮、重启 `session/load`、热切换、worker；见 [接入-Gemini.md](接入-Gemini.md)）；`claude-code` 已过**探针级实测 + 真机微信单轮 E2E**（2026-10-31；重启续聊 / MCP / 任务待复测）；`codex` 已过**探针级实测 + 真机 E2E**（2026-11-01：worker 与 brain 通道均通；发图 / 冷重启 / 切脑回切待复测）；`pi` 已过**探针级实测 + 真机 E2E**（2026-11-01：brain 单轮、热切换、微信「任务 pi：…」派发）。
 >
 > `auto` 只探测 6 个原生预设（`kiro → opencode → gemini → deepseek → qoder → cline`）；三个适配器（`claude-code` / `codex` / `pi`）**不参与**（独立安装、各有认证，误选中会让「装了但没登录」的机器静默换脑），要显式指定：`wemind brain set|switch <agent 名>`、一次性的 `WEMIND_BRAIN=<agent 名>`，或微信「切换大脑 <agent 名>」。
 
@@ -381,7 +381,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 > ACP 通用介绍见知识库笔记《ACP（Agent Client Protocol）详解》。
 
 **原生支持 ACP（可直接配 agent/环境变量接入，理论可当 WeMind 大脑/工作机）**：
-- 已内置：Kiro CLI（✅ 已实测）、OpenCode（✅ 已实测）、DeepSeek Harness（✅ 已实测）、Qoder CLI（✅ 已实测）、Cline CLI（✅ 已实测）、Gemini CLI（✅ 探针级实测，0.66.0）。
+- 已内置：Kiro CLI（✅ 已实测）、OpenCode（✅ 已实测）、DeepSeek Harness（✅ 已实测）、Qoder CLI（✅ 已实测）、Cline CLI（✅ 已实测）、Gemini CLI（✅ 探针级实测 + 真机 E2E，0.66.0）。
 - 未内置（示例/评估）：Goose、OpenHands、Cursor、GitHub Copilot（公开预览）、Junie（JetBrains）、Kimi CLI、Hermes Agent、Docker cagent、fast-agent、Augment Code、Factory Droid、AgentPool、AutoDev、Blackbox AI、Code Assistant、crow-cli、Minion Code、Mistral Vibe、fount、OpenClaw…
 
 **需经适配器（CLI 本身不原生实现 ACP，需先起桥接进程）**：

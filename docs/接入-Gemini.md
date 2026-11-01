@@ -1,8 +1,8 @@
-# 接入 Gemini CLI（原生 ACP，探针实测）
+# 接入 Gemini CLI（原生 ACP，探针 + 真机实测）
 
-> **适用版本**：WeMind 1.3.0（分支 `feat/gemini-brain`）｜ **最后核对**：2026-11-01 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
 >
-> **状态**：✅ 内置预设、ACP 探针全部通过（`initialize` / `session/new` / prompt / 图片 / 工具调用 0 反向请求 / 强杀后 `session/load`）；MCP 与沙箱已实测；`wemind brain check` 握手通过（约 3.0s）。**微信真机 E2E 待做**。
+> **状态**：✅ 内置预设、ACP 探针全部通过（`initialize` / `session/new` / prompt / 图片 / 工具调用 0 反向请求 / 强杀后 `session/load`）；MCP 与沙箱已实测；`wemind brain check` 握手通过（约 3.0s）；**微信真机 E2E 已通过（2026-11-01：单轮、杀 daemon 后 `session/load`、热切换、worker 任务）**。
 >
 > Gemini CLI 原生实现 ACP，不需要适配器。WeMind 内置预设名：**`gemini`**。
 
@@ -83,4 +83,4 @@ WeMind 把 `.env` 作为**凭据文件**同步进沙箱，并把真实 `settings
 - 回放专项（临时脚本，2026-11-01）：`session/load` 返回 t+627ms，回放帧在 t+638ms / t+640ms 到达；等 3s 后再 prompt，答复只有 `PINEAPPLE`（不带历史）；不等时探针答复为 `STOREDPINEAPPLE`。
 - `wemind brain check`（从源码构建的 CLI，`WEMIND_BRAIN=gemini`）：`ACP 握手成功（initialize + session/new，3036ms）`。
 - 单测：`brain-agents.test.ts` 覆盖 gemini 预设字段、`--model` 追加到启动参数、默认 `settingsStrip`；`sandbox-gemini.test.ts` 覆盖设置基底（保留 model/security/general、剥 `mcpServers`、关自动更新）、`.env`/`skills`/`GEMINI.md` 继承、大脑 curated MCP 与 `wechat` 拒绝、worker 全量 MCP 除 `wechat`；`acp-quiet.test.ts` 覆盖回放等待的静默/持续/上限三种路径。
-- **微信真机 E2E：待做**（单轮 → 杀 daemon → `session/load` 追问且无历史回放；`加载 <MCP>` 生效；热切换）。
+- **微信真机 E2E（2026-11-01，已通过）**：新会话单轮 → `prompt ok 4757ms` → 微信收到「4」；杀 daemon 重启后追问 → `session/load` + `drained 20 replay frame(s)` → `prompt ok 3682ms` → 回复「4」（旧历史未混入）；热切换 gemini ↔ pi 两个方向都成功，切回 gemini 时 `session/load` + 再排空 34 帧，下一轮 `prompt ok 3540ms` → 回复「9」；worker 任务 #28 / #29 均由 gemini 执行（`prompt ok 4313ms` / `3215ms`）；之后又一次重启 + `session/load`（排空 40 帧）→ `prompt ok 3296ms` → 回复「7」。微信侧 `加载 <MCP>` 尚未单独复测（配置文件方式加载 MCP 已在探针验证）。
