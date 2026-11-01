@@ -158,11 +158,11 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 
 `settings/` 里**除 `mcp.json` 外**的文件（尤其 `cli.json`，含 `chat.defaultModel` —— 决定大脑用哪个模型！）会同步进沙箱。**只有 `mcp.json` 隔离 curated**（防 `wechat` 回环），`sessions`（brain 自有会话）保持沙箱本地。
 
-agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的该文件作基底，删除 `mcpServers` / `enabledPlugins` / `providers` / `model`，并强制 `general.enableAutoUpdate=false`，再写入沙箱配置目录；MCP 仍由 `applySandbox()` 权威覆盖。
+agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实目录的该文件作基底，按 `settingsStrip` 删除键（默认 `mcpServers` / `enabledPlugins` / `providers` / `model`；gemini 只删 `mcpServers`，保留用户自己的 `model` / `security`），并强制 `general.enableAutoUpdate=false`，再写入沙箱配置目录；MCP 仍由 `applySandbox()` 权威覆盖（同一文件里的 `mcpServers`）。
 
 > 一个被修复的坑：早期 brain 沙箱缺 `chat.defaultModel`，大脑用 kiro 默认模型而非用户配置的模型，导致「同样任务比直接用 kiro 问题多」。修复后继承真实 settings。**注意：换模型后旧 ACP 会话可能仍绑旧模型，需在微信发「新会话」重建。**
 
-`ensureBrainHome()` 启动时按顺序执行：`syncSettings`（含 `syncProfilePatch`——配了 `realProfile` 的 agent 把真实 `profiles/<名>/cordis.patch.yml` **原样复制**进沙箱（WeMind 不追加/合成条目；这份文件是用户自己的配置，DSH 的 `- id: acp` 这类覆盖由用户自己维护，缺时 `wemind brain` 只提示怎么补）；**唯独剔除用户自己挂的微信 MCP 条目**（`stripWechatMcpEntries`：跑 `wemind-mcp` 的、或 `serverName: wechat` 的 mcp-client——否则沙箱里的 agent 会抢同一个 bot token；真实文件不动、只记日志）；以及 `settingsBase` 基底生成）→ `applySandbox`（写 curated mcp.json；配了 `mcpViaAcp` 的 agent 如 DSH / Claude Code 跳过文件，改由 `activeMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发）→ `mirrorRealKiro` → `syncCredentials`（`credentialFiles` 新者胜 + `identityFiles` 内容不同即覆盖）。
+`ensureBrainHome()` 启动时按顺序执行：`syncSettings`（含 `syncProfilePatch`——配了 `realProfile` 的 agent 把真实 `profiles/<名>/cordis.patch.yml` **原样复制**进沙箱（WeMind 不追加/合成条目；这份文件是用户自己的配置，DSH 的 `- id: acp` 这类覆盖由用户自己维护，缺时 `wemind brain` 只提示怎么补）；**唯独剔除用户自己挂的微信 MCP 条目**（`stripWechatMcpEntries`：跑 `wemind-mcp` 的、或 `serverName: wechat` 的 mcp-client——否则沙箱里的 agent 会抢同一个 bot token；真实文件不动、只记日志）；以及 `settingsBase` 基底生成）→ `applySandbox`（写 curated mcp.json；配了 `mcpViaAcp` 的 agent 如 DSH / Claude Code 跳过文件，改由 `activeMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发）→ `mirrorRealKiro` → `syncCredentials`（`credentialFiles` 新者胜 + `identityFiles` 内容不同即覆盖）→ `applySettingsDefaults`（预设默认设置项，如 pi 的 `quietStartup`）。
 
 ## 6.4 可配置的 agent（brain-agents.ts）
 
@@ -181,7 +181,7 @@ agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的�
 | `deepseek` | DeepSeek Harness `dsh` | 原生 ACP | ✅ 已内置/已实测（prompt/resume/MCP；`load` ❌、`image` ❌） | `dsh --profile acp`，`DSH_HOME`（见 [接入-DeepSeek](../接入-DeepSeek.md)） |
 | `qoder` | Qoder CLI `qodercli` | 原生 ACP | ✅ 已内置/已实测（load/resume/图片/MCP） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`（见 [接入-Qoder](../接入-Qoder.md)） |
 | `cline` | Cline CLI `cline` | 原生 ACP | ✅ 已内置/已实测（loadSession/图片；自定义 provider 需 `CLINE_PROVIDER`+`CLINE_API_KEY`） | `cline --acp --auto-approve true`，`CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH`（见 [接入-Cline](../接入-Cline.md)） |
-| `gemini` | Gemini CLI | 原生 ACP | ⚠️ 未实测 | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME`（`--acp` 取代弃用的 `--experimental-acp`） |
+| `gemini` | Gemini CLI | 原生 ACP | ✅ 已内置/已实测（0.66.0 探针：load/图片/MCP/yolo；load 后异步回放历史 → `replayOnLoad`；`set_config_option` ❌，模型走 `--model`） | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME` 指向沙箱根、配置目录 `<它>/.gemini`；MCP 在配置目录 `settings.json` 的 `mcpServers`；`settingsBase` 只剥 `mcpServers`、`.env` 凭据同步、`skills/`+`GEMINI.md` 继承（见 [接入-Gemini](../接入-Gemini.md)） |
 | `claude-code` | Claude Code | 需适配器 | ✅ 探针级实测 + 真机微信单轮 E2E（2026-10-31；重启续聊/MCP/任务待复测） | 全局 `claude-agent-acp`（`npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；免审批走 `session/set_mode bypassPermissions`，适配器不解析 CLI flag；Windows `claude-agent-acp.cmd`） |
 | `codex` | OpenAI Codex | 需适配器（官方维护） | ✅ 已内置/已实测（探针级 + 真机 E2E：worker 与 brain 通道均通；load/图片/set_mode/set_config_option ✅、stdio MCP ❌） | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**全局安装**；Windows 上是 `codex-acp.cmd`；免审批 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`，见 [接入-Codex](../接入-Codex.md)） |
 | `pi` | pi coding agent | 需适配器（社区 `pi-acp`） | ✅ 已内置/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务）；load/图片/工具调用 ✅、0 反向请求 | `pi-acp`（`npm i -g pi-acp`）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent` 并先登录）；`PI_CODING_AGENT_DIR` 沙箱、MCP 走 `<沙箱根>/mcp.json`、免审批无需开关；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动横幅（用户显式设过则保留），见 [接入-pi](../接入-pi.md) |
@@ -234,7 +234,7 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 ### 跨 agent 的限制
 
 - **对话/工具是通用的**，但**能力不是统一的**：`load`/`resume`、image、MCP 传输、反向请求都要按 agent 确认；
-- **动态挂 MCP依赖该 agent 的配置约定**：kiro/opencode/qoder 写各自配置文件；DSH 与 Claude Code 走 ACP `mcpServers`；`catalog` 也按 agent 各自读取，**不要跨 agent 借文件**；
+- **动态挂 MCP依赖该 agent 的配置约定**：kiro/opencode/qoder/pi/gemini 写各自配置文件（gemini 是配置目录 `settings.json` 的 `mcpServers`）；DSH 与 Claude Code 走 ACP `mcpServers`；`catalog` 也按 agent 各自读取，**不要跨 agent 借文件**；
 - **记忆继承**按 agent 实际布局配置：目录式用 `inheritDirs`，单文件（如 `CLAUDE.md`/`GEMINI.md`）用 `inheritFiles`；完全不适用时留空；只继承记忆/技能/规则，不连带继承可能自带 MCP 的插件目录（如 Claude Code 的 `plugins/`）；
 - 不支持 ACP 的对象（直接调 OpenAI/Anthropic HTTP API）走不了这条路，需要另写「API 适配器」；**仓库当前没有 `Brain` 接口抽象**，得先抽接口（尚未实现）。
 

@@ -8,6 +8,7 @@ import { WORKER_HOME, workerMcpServers } from "./worker-sandbox.js";
 import { spawnAgent } from "./spawn-agent.js";
 import { normalizeSessionMap, sessionKey } from "./session-map.js";
 import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
+import { waitForFrameQuiet } from "./acp-quiet.js";
 
 /**
  * worker ACP 连接：**一条连接＝一个 ACP agent 进程**，约 70% 复制自 acp-brain.ts，差异：
@@ -423,7 +424,7 @@ export class WorkerConn {
   }
 
   private async applyModel(sid: string): Promise<void> {
-    if (!this.agent.model) return;
+    if (!this.agent.model || this.agent.modelArg) return; // modelArg：模型已随启动参数传给 agent（gemini 不支持 set_config_option）
     try {
       await this.request(
         "session/set_config_option",
@@ -466,6 +467,17 @@ export class WorkerConn {
     }
   }
 
+  /** 恢复会话后 agent 可能还在异步回放历史（gemini 的 loadSession 里 streamHistory 不 await）：
+   *  等帧流安静下来再提问，别让回放的历史混进本轮答复。 */
+  private async drainLoadReplay(): Promise<void> {
+    if (!this.agent.replayOnLoad) return;
+    const before = this.frameSeq;
+    const r = await waitForFrameQuiet({ seq: () => this.frameSeq });
+    const drained = this.frameSeq - before;
+    if (drained > 0)
+      dlog(`${this.id} drained ${drained} replay frame(s)${r.timedOut ? " (cap)" : ""}`);
+  }
+
   /** 取会话：内存 → 磁盘（load/resume 恢复） → 新建。key 由调用方给（每任务一个）。
    *  `strictResume`：有旧会话但恢复失败 → 抛「接不上」，绝不静默新建空会话。 */
   private async ensureSession(key: string, strictResume = false): Promise<string> {
@@ -486,6 +498,7 @@ export class WorkerConn {
             { sessionId: saved, cwd: this.effectiveCwd(), mcpServers },
             REQ_TIMEOUT,
           );
+          await this.drainLoadReplay();
           await this.applyModel(saved);
           await this.applySessionMode(saved, WorkerConn.availableModeIds(restored));
           this.sessions.set(key, saved);

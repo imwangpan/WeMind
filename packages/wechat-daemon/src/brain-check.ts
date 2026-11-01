@@ -33,6 +33,24 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
     }
   }
 
+  // 设置基底（settingsBase：Qoder / gemini 这类「设置与 MCP 同文件」的 agent）：与 daemon 沙箱一致地带模型/认证等非 MCP 设置。
+  // 必须剥掉 mcpServers——自检会在临时目录里真起 agent，带上真实 MCP 等于启动第二个 wechat 消费者（回环）。
+  if (ag.settingsBase && ag.realHome) {
+    try {
+      const parsed: unknown = JSON.parse(
+        fs.readFileSync(path.join(ag.realHome, ag.settingsBase), "utf-8"),
+      );
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const base = parsed as Record<string, unknown>;
+        for (const k of ag.settingsStrip) delete base[k];
+        fs.mkdirSync(cfgDir, { recursive: true });
+        fs.writeFileSync(path.join(cfgDir, ag.settingsBase), JSON.stringify(base, null, 2), "utf-8");
+      }
+    } catch {
+      /* best-effort（与 daemon 的 settingsBase 一致：缺失/损坏 → 交给 agent 的默认值） */
+    }
+  }
+
   // 与 daemon 的大脑沙箱对齐：配了 realProfile 的 agent（DSH）启动时就解析 profiles/<名>/cordis.patch.yml，
   // 语法错误会直接 exit 1（initialize 都不会发生）。不复制的话，坏 profile 上自检仍报 ✅，而 daemon 每条消息都起不来。
   if (ag.inherit && ag.realProfile && ag.realHome) {

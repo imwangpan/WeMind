@@ -205,7 +205,7 @@ function syncOpencodeBase(ag: ResolvedAgent): void {
   fs.writeFileSync(file, JSON.stringify(parsed, null, 2), "utf-8");
 }
 
-/** Qoder 这类「设置与 MCP 同文件」的 agent：与 brain 相同的基底疗法（剥离 MCP/插件/自定义供应商 + 关自动更新）。 */
+/** 「设置与 MCP 同文件」的 agent：与 brain 相同的基底疗法（按 `ag.settingsStrip` 剥离 + 关自动更新）。 */
 function settingsBase(ag: ResolvedAgent): Record<string, unknown> {
   let parsed: unknown = null;
   try {
@@ -217,10 +217,7 @@ function settingsBase(ag: ResolvedAgent): Record<string, unknown> {
     parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? { ...(parsed as Record<string, unknown>) }
       : {};
-  delete base.mcpServers;
-  delete base.enabledPlugins;
-  delete base.providers;
-  delete base.model;
+  for (const k of ag.settingsStrip) delete base[k];
   const general = base.general;
   base.general = {
     ...(general && typeof general === "object" && !Array.isArray(general)

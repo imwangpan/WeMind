@@ -60,18 +60,24 @@ export type AcpAgentPreset = {
   ) => Record<string, string>; // 从 agent 自己的凭据文件派生环境变量（仅父进程未显式提供时；如 Cline 自定义 provider 的 CLINE_PROVIDER/CLINE_API_KEY）
   // —— 协议/能力差异（按 agent 覆盖；默认保持 kiro/opencode 旧行为）——
   restore?: "load" | "resume"; // 恢复会话的方式：load（默认）或 resume（如 DSH）
+  replayOnLoad?: boolean; // session/load|resume 返回后仍会异步回放历史帧（gemini 的 loadSession 里 streamHistory 不 await）：恢复后先等回放帧安静下来再提问，否则历史会被拼进本轮答复
   firstFrameMs?: number; // 首帧超时覆盖（默认 25s；慢启动/committed-only agent 可放宽）
   heartbeatMs?: number; // 静默期心跳间隔覆盖（默认 15s；有 thought/tool/usage 帧的 agent 通常不需要）
   images?: boolean; // 是否接受图片输入（默认 true；DSH 官方 0.2.1-rc.2 为 false）
   credentialFiles?: string[]; // 需要从 realHome 同步进沙箱的凭据文件（相对配置目录；新者胜）
   identityFiles?: string[]; // 必须与 realHome 保持一致的标识文件（相对配置目录；内容不同即覆盖）
   settingsBase?: string; // 以 realHome 下该文件为基底生成沙箱设置（剥离 MCP/插件/自定义供应商并关自动更新）
+  settingsStrip?: string[]; // settingsBase 基底里要删掉的键（默认见 DEFAULT_SETTINGS_STRIP；gemini 只删 mcpServers，保留 model/security）
   settingsDefaults?: Record<string, unknown>; // 沙箱 settings.json 的默认键：真实配置里没有该键时补上（用户显式设过则保留用户的值；只改沙箱副本）
   model?: string; // 默认模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）：经 session/set_config_option（agent 自己的 ACP 接口）在会话建立后下发一次；可用 brain.json / `brain set --model` 覆盖，`auto` = 跟随默认；配了 realProfile 时默认值优先从真实 profile 读
+  modelArg?: string; // 不支持 session/set_config_option 的 agent：模型改为追加到启动参数（如 gemini 的 "--model"），不再走 ACP 下发
   realProfile?: string; // 真实 home 里该 agent 的 profile 名（`profiles/<名>/cordis.patch.yml` 是用户/桌面端维护的用户层：沙箱**原样复制**、不追加条目，默认模型从它读——优先 `- id: acp`，否则 `agent-default-model`）；如 DSH 的 "acp"
   mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
   sessionMode?: string; // 会话建立/恢复后经 `session/set_mode` 切到的模式 id（agent 自己的 ACP 接口）；用于「免审批」模式：claude-code 的 bypassPermissions、codex 的 agent-full-access。留空=不调用
 };
+
+/** settingsBase 的默认剥离清单：MCP 必须由沙箱权威决定（防 wechat 回环）；插件/自定义供应商可能自带 MCP 或明文密钥；model 可能指向已剥离的供应商。 */
+export const DEFAULT_SETTINGS_STRIP = ["mcpServers", "enabledPlugins", "providers", "model"];
 
 /**
  * 已知 ACP agent。
@@ -90,13 +96,31 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     realHome: path.join(os.homedir(), ".kiro"),
     inheritDirs: ["steering", "memories", "skills", "agents", "powers", "tasks", "extensions"],
   },
-  // Gemini CLI（原生 ACP，0.66+）。`--acp` 取代已弃用的 `--experimental-acp`；`--approval-mode yolo` 自动批准所有工具调用（与 `--yolo` 互斥，二选一）；`--skip-trust` 信任当前工作区——**未信任的目录会把 yolo 静默降回 default**，所以必须带上（或用 GEMINI_CLI_TRUST_WORKSPACE=true）。注：Gemini 的「记忆」是 ~/.gemini/GEMINI.md 等文件而非目录，与 kiro 的目录式不同，故未预置 inheritDirs；需要时按其布局用 WEMIND_BRAIN_REAL_HOME/_INHERIT_DIRS 配置或填此处。
+  // Gemini CLI（原生 ACP，0.66.0 已实测）。`--acp` 取代已弃用的 `--experimental-acp`；`--approval-mode yolo` 自动批准所有工具调用（与 `--yolo` 互斥，二选一）；`--skip-trust` 信任当前工作区——**未信任的目录会把 yolo 静默降回 default，并且连 MCP 都不加载**（用户级 server 也被抑制），所以必须带上（或用 GEMINI_CLI_TRUST_WORKSPACE=true）。
+  // - 沙箱：`GEMINI_CLI_HOME` 指向沙箱根，但 Gemini 的配置目录是 `<它>/.gemini`（实测），故 configSubdir=".gemini"；`~/.gemini` 的 skills/ 与 GEMINI.md 是它的全局技能与记忆。
+  // - MCP：读配置目录 settings.json 的 `mcpServers`（kiro 格式）。ACP `session/new` 的 mcpServers 实测也能用，但 `initialize` 只声明 http/sse、不声明 acp——走它自己的配置文件更稳。
+  // - 设置：以真实 settings.json 为基底（保留 model / security / ui），只剥 `mcpServers`（MCP 必须来自沙箱 curated，防 wechat 回环），并关自动更新。认证走 `security.auth.selectedType` + `.env`（GEMINI_API_KEY / GOOGLE_GEMINI_BASE_URL），`.env` 作为凭据同步。
+  // - 模型：不支持 `session/set_config_option`（-32601），`--model` 走启动参数（modelArg）；默认不传，跟随 settings.json 的 model.name。
+  // - 恢复：loadSession=true、强杀后 session/load 能接回上下文；但 load 返回后它还会**异步回放历史**（streamHistory 不 await），replayOnLoad 让恢复后先等回放结束。
+  // - `session/close` 未实现（-32601，WeMind 不调用）；图片实测可收；工具调用 0 反向请求。
   gemini: {
     name: "gemini",
     bin: "gemini",
     binWin: "gemini.cmd",
     args: ["--acp", "--approval-mode", "yolo", "--skip-trust"],
     homeEnvVar: "GEMINI_CLI_HOME",
+    realHome: path.join(os.homedir(), ".gemini"),
+    configSubdir: ".gemini", // GEMINI_CLI_HOME 是「家目录」，Gemini 在它下面建 .gemini/
+    inheritDirs: ["skills"],
+    inheritFiles: ["GEMINI.md"],
+    mcpFormat: "kiro",
+    mcpConfigFile: "settings.json",
+    catalogFile: "settings.json",
+    settingsBase: "settings.json",
+    settingsStrip: ["mcpServers"],
+    credentialFiles: [".env"],
+    modelArg: "--model",
+    replayOnLoad: true,
     shell: true,
   },
   // OpenCode：原生 ACP（`opencode acp`）。
@@ -443,15 +467,21 @@ export type ResolvedAgent = {
     parentEnv: NodeJS.ProcessEnv,
   ) => Record<string, string>;
   restore?: "load" | "resume";
+  /** session/load|resume 返回后还会异步回放历史帧：恢复后先等帧流安静，再开始本轮提问。 */
+  replayOnLoad: boolean;
   firstFrameMs?: number;
   heartbeatMs?: number;
   images: boolean;
   credentialFiles: string[];
   identityFiles: string[];
   settingsBase?: string;
+  /** settingsBase 基底里要删掉的键（默认 DEFAULT_SETTINGS_STRIP）。 */
+  settingsStrip: string[];
   /** 沙箱 settings.json 的预设默认键（只补缺失键；用户显式设过则保留用户的值）。 */
   settingsDefaults: Record<string, unknown>;
   model?: string;
+  /** 模型改为追加到启动参数（agent 不支持 session/set_config_option 时；如 gemini 的 "--model"）。 */
+  modelArg?: string;
   realProfile?: string;
   mcpViaAcp: boolean;
   /** 会话建立/恢复后切到的模式 id（`session/set_mode`）；「免审批」用，留空=不调用。 */
@@ -611,6 +641,8 @@ function resolveAgentCore(
       : null;
   const model =
     explicitModel || derivedModel || (isDefaultModel(rawModel) ? undefined : preset.model);
+  // 不支持 session/set_config_option 的 agent（gemini）：模型用它自己的 CLI 参数传，进程启动时生效。
+  if (preset.modelArg && model) args.push(preset.modelArg, model);
   const dirsEnv = process.env.WEMIND_BRAIN_INHERIT_DIRS?.trim();
   const inheritDirs = dirsEnv
     ? dirsEnv.split(/[,\s]+/).filter(Boolean)
@@ -640,14 +672,17 @@ function resolveAgentCore(
     envDefaults: preset.envDefaults ?? {},
     credentialEnv: preset.credentialEnv,
     restore: preset.restore,
+    replayOnLoad: preset.replayOnLoad ?? false,
     firstFrameMs: preset.firstFrameMs,
     heartbeatMs: preset.heartbeatMs,
     images: preset.images ?? true,
     credentialFiles: preset.credentialFiles ?? [],
     identityFiles: preset.identityFiles ?? [],
     settingsBase: preset.settingsBase,
+    settingsStrip: preset.settingsStrip ?? DEFAULT_SETTINGS_STRIP,
     settingsDefaults: preset.settingsDefaults ?? {},
     model,
+    modelArg: preset.modelArg,
     realProfile: preset.realProfile,
     mcpViaAcp: preset.mcpViaAcp ?? false,
     sessionMode,
