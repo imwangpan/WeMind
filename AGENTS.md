@@ -54,6 +54,7 @@ docs/
   发布-wemind-npm.md     wemind 独立发布方案（命名/打包/CI/版本同步/验收）
  接入-*.md              各 agent 的接入设计/实测
 scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-guard / check-version）
+.worktrees/             git worktree 检出目录（每分支一个子目录；不入库；约定见 §4.16）
 ```
 
 关键文件：
@@ -141,6 +142,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
       - AI 上下文：本文件 `AGENTS.md`、`docs/ai/README.md`、`docs/ai/recipes/*`——**命令 / 参数 / 环境变量 / 数据文件 / 目录结构 / 新增模块的变化，AGENTS.md 与 `docs/ai/README.md` 是硬性同步项**（它们标注的「适用版本 / 最后核对」也要跟着改）。
     - **自检**：`npm run typecheck` + `npm test` + `npm run lint` + `pwsh -NoProfile -File scripts/check-docs.ps1`（相对链接不许断）。
     - 反例（都按缺陷处理）：改了命令参数没更新 `--help`/README；新增环境变量只写在代码注释里；改了优先级规则但 `docs/接入其它-ACP-Agent.md` 的表还是旧的；改了行为却没有一条能覆盖它的测试。
+16. **worktree 一律放仓库根 `.worktrees/`**：每个分支一个子目录（如 `.worktrees/gemini`），不要建在 `.agents/worktrees/` 或其它位置（`.gitignore` 已忽略 `.worktrees/`）。分支合并或放弃后及时 `git worktree remove <路径>` + `git branch -d <分支>`，别留残留目录。历史遗留的 `.agents/worktrees/feat/pi-brain` 保留到该分支合并/清理为止，之后不要再往那里建。
 
 ---
 
