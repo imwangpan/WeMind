@@ -262,10 +262,20 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     mcpViaAcp: true,
     sessionMode: "bypassPermissions",
   },
-  // Codex：社区适配器 codex-acp（agentclientprotocol/codex-acp，npm 包 `@agentclientprotocol/codex-acp`，需自行安装）。
-  // codex-acp **不解析** CLI 参数（codex 的 --yolo/--full-auto 都不适用）；免审批走 ACP `session/set_mode {modeId:"agent-full-access"}`
-  // （= approval never + sandbox danger-full-access），并同时用 README 记录的环境变量 INITIAL_AGENT_MODE 兜底（旧版本无 set_mode 时仍生效）。
-  // npm 全局安装在 Windows 产出 codex-acp.cmd（无 .exe），故 binWin 写 .cmd + shell（与 npx 适配器同理）；standalone 二进制用 --bin 指定。
+  // Codex：需适配器（Codex CLI 本身不说 ACP）。适配器是 npm 包 `@agentclientprotocol/codex-acp`（bin: codex-acp；官方维护）。
+  // - **全局安装，不用 npx**（口径同 claude-code）：daemon 常驻、worker 每条任务起进程，npx 每次冷启动都要问 registry/现下包，离线不可用且版本漂移；
+  //   `npm i -g @agentclientprotocol/codex-acp`。适配器自带 @openai/codex 依赖（含平台原生二进制，约 100MB）；
+  //   想复用本机已装的 Codex 可装适配器时加 --omit=optional 并设 CODEX_PATH=<codex.exe 绝对路径>（适配器官方支持的环境变量）。
+  // - Windows 上 npm 全局安装产出的是 codex-acp.cmd（**无 .exe**），故 binWin 写 .cmd + shell（.cmd 必须经 shell，§4.6）；standalone 二进制用 --bin 指定。
+  // - codex-acp **不解析** CLI 参数（codex 的 --yolo/--full-auto 都不适用）；免审批走 ACP `session/set_mode {modeId:"agent-full-access"}`
+  //   （= approval never + sandbox danger-full-access），并同时用 README 记录的环境变量 INITIAL_AGENT_MODE 兜底（旧版本无 set_mode 时仍生效）。
+  // - 认证走 Codex 自己（ChatGPT 登录或 OPENAI_API_KEY）；已有 ~/.codex/config.toml 直接沿用——适配器不读 WeMind 沙箱，故无 homeEnvVar。
+  // - MCP：**不支持客户端提供的 stdio MCP server**（探针实测 mcpCapabilities.acp=false，session/new 带 stdio mcpServers 不报错但模型看不到工具）→ 不开 mcpViaAcp；
+  //   微信侧「加载/卸载 MCP」对 codex 无效（与 claude-code 的 stdio MCP 可用相反——能力字段也不完全可信，以实测为准）。
+  // - 2026-10-30 探针实测（codex-acp 2.5.0 / Codex CLI 0.165，Windows）：
+  //   loadSession ✅、promptCapabilities.image ✅、session/set_mode ✅、session/set_config_option(model) ✅、session/load 后上下文保留、
+  //   工具调用 0 反向请求（只收到无 id 的 _auth/status_update 通知）；首帧 ~20ms、首字 3–4s、带图整轮 ~24s。
+  //   详见 docs/接入-Codex.md（真机微信 E2E 未做）。
   codex: {
     name: "codex",
     bin: "codex-acp",
@@ -274,6 +284,8 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     shell: true,
     envDefaults: { INITIAL_AGENT_MODE: "agent-full-access" },
     sessionMode: "agent-full-access",
+    // 回合可能跑几十秒（实测带图的回合 ~24s），且适配器会发 thought / tool_call / usage 帧；心跳放长，少占微信连发额度（约 10 条/用户）。
+    heartbeatMs: 60_000,
   },
 };
 
@@ -661,6 +673,8 @@ export function resolvePresetByName(
 const ADAPTER_INSTALL_HINT: Record<string, string> = {
   "claude-code":
     "`npm i -g @agentclientprotocol/claude-agent-acp`（装完得到 claude-agent-acp；Windows 上是 claude-agent-acp.cmd；**需 Node ≥22**）",
+  codex:
+    "`npm i -g @agentclientprotocol/codex-acp`（装完得到 codex-acp；Windows 上是 codex-acp.cmd）",
 };
 
 /**

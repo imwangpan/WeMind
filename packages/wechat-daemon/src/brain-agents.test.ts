@@ -222,6 +222,12 @@ describe("resolveAgent agent", () => {
     const cx = resolveAgent({ agent: "codex" });
     expect(cx.envDefaults).toEqual({ INITIAL_AGENT_MODE: "agent-full-access" });
     expect(cx.sessionMode).toBe("agent-full-access");
+    // codex（2026-10-30 探针实测 codex-acp 2.5.0）：npm 全局安装产出的是 .cmd shim（无 .exe）→ 必须经 shell
+    expect(cx.bin).toBe(process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
+    expect(cx.shell).toBe(true);
+    expect(cx.heartbeatMs).toBe(60_000);
+    // 适配器不支持客户端提供的 stdio MCP server（探针实测 mcpCapabilities.acp=false）→ 不开 mcpViaAcp
+    expect(cx.mcpViaAcp).toBe(false);
     // 没用会话模式的 agent 不乱调 set_mode
     expect(resolveAgent({ agent: "kiro" }).sessionMode).toBeUndefined();
     expect(resolveAgent({ agent: "deepseek" }).sessionMode).toBeUndefined();
@@ -513,6 +519,17 @@ describe("resolveAgent auto 探测", () => {
     expect(ag.available).toBe(false);
     const problem = agentProblem(ag) ?? "";
     expect(problem).toMatch(/npm i -g @agentclientprotocol\/claude-agent-acp/);
+    expect(problem).toMatch(/--bin/); // 装完仍找不到 → 给绝对路径的兜底
+  });
+
+  it("codex 适配器没装 → 给出可粘贴的全局安装命令（而不是干巴巴一句「找不到」）", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "codex";
+    process.env.PATH = emptyBin;
+    const ag = resolveAgent();
+    expect(ag.available).toBe(false);
+    const problem = agentProblem(ag) ?? "";
+    expect(problem).toMatch(/npm i -g @agentclientprotocol\/codex-acp/);
     expect(problem).toMatch(/--bin/); // 装完仍找不到 → 给绝对路径的兜底
   });
 

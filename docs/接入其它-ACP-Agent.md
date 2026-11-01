@@ -1,6 +1,6 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-> **适用版本**：WeMind 1.3.0（`@wemind/cli` 1.3.0 已发布）｜ **最后核对**：2026-11-01 ｜ **状态**：内置 8 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**claude-code 已实测（探针级 + 真机微信单轮 E2E）**；gemini/codex 未实测（示例，接入前按 §8 验证）。
+> **适用版本**：WeMind 1.3.0（`@wemind/cli` 1.3.0 已发布）｜ **最后核对**：2026-11-01 ｜ **状态**：内置 8 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已探针级实测**；gemini 未实测（示例，接入前按 §8 验证）。
 >
 > 本文说明如何把 WeMind daemon 的「大脑」从默认的 `auto`（优先 kiro）换成另一个 ACP agent。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 
@@ -219,18 +219,18 @@ ACP agent 分两类，接入方式不同：
 | `cline` | Cline CLI `cline` | 原生（`--acp`） | ✅ **已内置/已实测（3.0.74）**：`loadSession`、硬杀后 `session/load` 上下文保留、0 反向请求；**图片 ❌**（广告 `image:true` 但 ACP `prompt` 只保留 text → `images:false`）；`session/close` ❌（WeMind 不调用）。**认证注意**：ACP 只自动恢复 `cline`/`cline-pass`/`openai-codex`；自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`+`CLINE_API_KEY`（显式 env 优先；详见 [接入-Cline.md](接入-Cline.md)） | `cline --acp --auto-approve true`；`CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 指向沙箱；`providers.json`/`models.json` 同步（缺 models.json 会回退 `gpt-4o`）；MCP 走 `cline/mcp.json`（ACP `mcpServers` 不生效） |
 | `gemini` | Gemini CLI | 原生 | ⚠️ 未实测 | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME`（0.66+；`--acp` 已取代弃用的 `--experimental-acp`；目录未信任会把 yolo 静默降回 default，故带 `--skip-trust`） |
 | `claude-code` | Claude Code | 需适配器（官方维护） | ✅ **已内置/已实测（探针级 + 真机微信单轮 E2E）**：`load`/`resume` ✅、图片 ✅、stdio MCP ✅、`bypassPermissions` ✅、该模式下 0 反向请求；2026-10-31 真机微信单轮通过（`prompt ok 5381ms`、回复送达）；重启续聊 / MCP / 任务待复测 | `claude-agent-acp`（npm 包 `@agentclientprotocol/claude-agent-acp`，**先 `npm i -g` 全局安装**；**Node ≥22**；Windows 上是 `claude-agent-acp.cmd`，故预设 `binWin: "claude-agent-acp.cmd"` + `shell: true`）。`CLAUDE_CONFIG_DIR` 指到沙箱；MCP 走 ACP `mcpServers`（`mcpViaAcp`，目录取真实 `~/.claude.json`）。适配器不解析 CLI 权限 flag，免审批走 `session/set_mode {modeId:"bypassPermissions"}`（**以 root 跑且未设 `IS_SANDBOX=1` 时该模式不可用**，会话回包的 `availableModes` 里没有它，WeMind 会跳过并记日志）。详见 [接入-ClaudeCode.md](接入-ClaudeCode.md) |
-| `codex` | OpenAI Codex | 需适配器 | ⚠️ 未实测 | `codex-acp`（社区适配器 [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)，npm 包 `@agentclientprotocol/codex-acp`；Windows 上装出来的是 **`codex-acp.cmd`**，故预设 `binWin: "codex-acp.cmd"` + `shell: true`）。免审批：env `INITIAL_AGENT_MODE=agent-full-access`（预设 `envDefaults`）+ `session/set_mode {modeId:"agent-full-access"}`；codex 的 `--yolo` 不被适配器转发 |
+| `codex` | OpenAI Codex | 需适配器（官方维护） | ✅ **已内置/已实测（探针级）**：`load` ✅、图片 ✅、`set_mode` ✅、`set_config_option(model)` ✅、工具调用 0 反向请求；**stdio MCP ❌**（适配器 `mcpCapabilities.acp=false`，实测传进去的工具模型也看不到 → 不开 `mcpViaAcp`，微信侧「加载/卸载 MCP」对它无效）。真机微信 E2E 未做 | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**先 `npm i -g` 全局安装**；Windows 上装出来的是 **`codex-acp.cmd`**，故预设 `binWin: "codex-acp.cmd"` + `shell: true`）。免审批：env `INITIAL_AGENT_MODE=agent-full-access`（预设 `envDefaults`）+ `session/set_mode {modeId:"agent-full-access"}`；codex 的 `--yolo` 不被适配器转发。详见 [接入-Codex.md](接入-Codex.md) |
 
 > **内置预设默认免审批**（2026-10-30 起）：每个 agent 用**自己官方**的机制——kiro `--trust-all-tools`、gemini `--approval-mode yolo (+ --skip-trust)`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`，官方 issue #52216）、DSH `DSH_PERMISSION_MODE=danger-full-access`（`envDefaults`：daemon 进程已设同名变量时以你的为准）、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`（`INITIAL_AGENT_MODE` 兜底 + `set_mode`）。**这不是统一开关**：写进 `--args` 的 CLI flag 只在 agent 真的解析它时才有效（claude-code / codex 适配器都不解析）。想收紧：审批类环境变量（`DSH_PERMISSION_MODE`、`INITIAL_AGENT_MODE`）在 daemon 环境里设了就不被预设覆盖；`WEMIND_ACP_SESSION_MODE=0/false/off` 关掉 `session/set_mode`。边缘情况（各 agent 的 ask 规则、MCP 工具审批）仍可能发 `session/request_permission`：WeMind 默认**拒绝**，要全放行设 `WEMIND_ACP_AUTO_ALLOW=1`——它只是「每次自动点允许」，不放宽沙箱。**「免审批」≠「最高权限」**：DSH/codex 还有沙箱层，默认预设已把两层都放开。
 
-> ⚠️ 除 `kiro`、`opencode`、`deepseek`、`qoder`、`cline` 外均为**示例/评估**：包名、参数、二进制、ACP 能力可能随上游变化，**接入前务必对照各自官方/仓库核对**，并跑 §8 的验证；`claude-code` 已过**探针级实测 + 真机微信单轮 E2E**（2026-10-31；重启续聊 / MCP / 任务待复测）。
+> ⚠️ 除 `kiro`、`opencode`、`deepseek`、`qoder`、`cline` 外均为**示例/评估**：包名、参数、二进制、ACP 能力可能随上游变化，**接入前务必对照各自官方/仓库核对**，并跑 §8 的验证；`claude-code` 已过**探针级实测 + 真机微信单轮 E2E**（2026-10-31；重启续聊 / MCP / 任务待复测）；`codex` 已过**探针级实测**（2026-10-30；真机微信 E2E 未做）。
 >
 > `auto` 只探测 6 个原生预设（`kiro → opencode → gemini → deepseek → qoder → cline`）；两个适配器**不参与**（独立安装、各有认证，误选中会让「装了但没登录」的机器静默换脑），要显式指定：`wemind brain set|switch <agent 名>`、一次性的 `WEMIND_BRAIN=<agent 名>`，或微信「切换大脑 <agent 名>」。
 
 **适配器类的准备工作**：
 
 - **Claude Code**：**先全局安装适配器** `npm i -g @agentclientprotocol/claude-agent-acp`（得到 `claude-agent-acp`；Windows 上是 `claude-agent-acp.cmd`；**Node ≥22**）。需完成 Claude Code 认证（`claude` 登录，或 daemon 环境设 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`，自定义网关再加 `ANTHROPIC_BASE_URL`）。该适配器把 Claude Code 暴露成 ACP server over stdio；**CLI 权限 flag 不会被解析**，WeMind 在会话建立后调用 `session/set_mode {modeId:"bypassPermissions"}`。预设 `CLAUDE_CONFIG_DIR` 指到 `<BRAIN_HOME>/claude`（实测连 `~/.claude.json` 一起隔离），`CLAUDE.md`/`skills`/`agents`/`commands` 与日常共享，MCP 走 ACP `mcpServers`（`mcpViaAcp`，目录取真实 `~/.claude.json`，`wechat` 永久禁止）。注意：Claude Code 以 **root** 运行时 `bypassPermissions` 不可用，除非设 `IS_SANDBOX=1`——此时会话回包的 `availableModes` 里没有它，WeMind 记录「跳过」日志，审批请求回到应答器（默认拒绝）。2026-10-30 探针实测（0.99.1）：`loadSession` ✅、图片 ✅、stdio MCP ✅、`bypassPermissions` 下 0 反向请求、强杀后 `session/load` 上下文保留；详见 [接入-ClaudeCode.md](接入-ClaudeCode.md)。
-- **Codex**：需先安装社区适配器 `codex-acp`：`npm i -g @agentclientprotocol/codex-acp`（Windows 产出 `codex-acp.cmd`，预设已按 `.cmd` 记录并通过 shell 启动），或用它仓库提供的 standalone 二进制并把 `--bin` 指向绝对路径。免审批由预设注入的 `INITIAL_AGENT_MODE=agent-full-access` 与会话建立后的 `session/set_mode` 完成；`codex` 自己的 `--yolo`/`--full-auto` 都不经适配器转发（`--full-auto` 在官方 CLI 里也不存在）。
+- **Codex**：**先全局安装适配器**：`npm i -g @agentclientprotocol/codex-acp`（Windows 产出 `codex-acp.cmd`，预设已按 `.cmd` 记录并通过 shell 启动），或用它仓库提供的 standalone 二进制并把 `--bin` 指向绝对路径。认证走 Codex 自己（`codex login` 或 `OPENAI_API_KEY`）；已有 `~/.codex/config.toml` 直接沿用。免审批由预设注入的 `INITIAL_AGENT_MODE=agent-full-access` 与会话建立后的 `session/set_mode` 完成；`codex` 自己的 `--yolo`/`--full-auto` 都不经适配器转发（`--full-auto` 在官方 CLI 里也不存在）。**MCP 不支持客户端提供的 stdio server**（探针实测）→ 微信侧「加载/卸载 MCP」对 codex 无效。详见 [接入-Codex.md](接入-Codex.md)。
 
 > **适配器的安装口径（统一）**：**优先全局安装**（`npm i -g <适配器包>`），**不把 `npx -y` 当默认路径**——daemon 常驻、worker 每条任务起进程，npx 每次都要问 registry/现下包（离线不可用）、版本还会随 latest 漂移。`npx` 只作为「不想装、且能接受每次联网」的兜底：`wemind brain set <agent 名> --bin npx --args "-y <包名>" --shell`。
 > WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直接给出可粘贴的 `npm i -g …` 命令**（`brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`）。原生 ACP 的 agent（如 Cline）不需要适配器——`cline-acp` 已归档，直接用 `cline --acp`。
@@ -376,9 +376,9 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 - 未内置（示例/评估）：Goose、OpenHands、Cursor、GitHub Copilot（公开预览）、Junie（JetBrains）、Kimi CLI、Hermes Agent、Docker cagent、fast-agent、Augment Code、Factory Droid、AgentPool、AutoDev、Blackbox AI、Code Assistant、crow-cli、Minion Code、Mistral Vibe、fount、OpenClaw…
 
 **需经适配器（CLI 本身不原生实现 ACP，需先起桥接进程）**：
-- 已内置（**claude-code 探针级 + 真机微信单轮 E2E**）：Claude Code → `@agentclientprotocol/claude-agent-acp`（**全局安装**，旧包 `@zed-industries/claude-code-acp` 已弃用）；Codex CLI → `codex-acp`（社区适配器，未实测）。
+- 已内置（**claude-code 探针级 + 真机微信单轮 E2E**）：Claude Code → `@agentclientprotocol/claude-agent-acp`（**全局安装**，旧包 `@zed-industries/claude-code-acp` 已弃用）；Codex CLI → `@agentclientprotocol/codex-acp`（官方维护，**全局安装**，探针级实测）。
 - 未内置：Bub → `bub-acp-server`；Pi → `pi-acp`…
 
-> 接入任一 agent 的通用步骤见本文 §2–§5；带「适配器」的先 `npm i -g <适配器包>`（npx 只作兜底），再把 `WEMIND_BRAIN_BIN/ARGS` 指向适配器启动命令。除 §5 里 6 个已实测的内置预设（kiro / opencode / deepseek / qoder / cline，加上 claude-code：探针级 + 真机微信单轮 E2E）外，均建议先实测。
+> 接入任一 agent 的通用步骤见本文 §2–§5；带「适配器」的先 `npm i -g <适配器包>`（npx 只作兜底），再把 `WEMIND_BRAIN_BIN/ARGS` 指向适配器启动命令。除 §5 里 6 个已实测的内置预设（kiro / opencode / deepseek / qoder / cline，加上 claude-code：探针级 + 真机微信单轮 E2E、codex：探针级）外，均建议先实测。
 >
 > 远程 ACP（HTTP/WebSocket）官方仍在完善——成熟后可把工作机部署到独立/更强机器（见《方案C-受控ACP工作机设计》）。
