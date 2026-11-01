@@ -1,7 +1,7 @@
 # 接入 Cline CLI（原生 ACP 实测）
 
 > **状态**：M0 能力探针 **已完成 ✅** ｜ M1 agent + 沙箱 **已完成 ✅** ｜ M2 协议层 **无改动** ｜ M3 真机 E2E **部分完成**（ACP 侧已验；微信收发待真机）。
-> **实测环境**：Windows 11 / Node 24 / **Cline CLI 3.0.74（npm 全局安装）** / WeMind 1.2.0。
+> **实测环境**：Windows 11 / Node 24 / **Cline CLI 3.0.74（npm 全局安装）** / WeMind 1.3.0。
 > **最后核对**：2026-10-30 ｜ **分支**：`feat/cline-acp` ｜ 结论**仅适用于 cline 3.0.74**。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](ai/recipes/add-acp-agent.md) · [接入-Qoder.md](接入-Qoder.md)（同款「配置目录指到子目录」样板） · [接入-OpenCode.md](接入-OpenCode.md)（文件式 MCP 样板）
 

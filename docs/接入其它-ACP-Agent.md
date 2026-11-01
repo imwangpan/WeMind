@@ -1,6 +1,6 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-> **适用版本**：WeMind 1.2.0（`@wemind/cli` 1.2.0 已发布）｜ **最后核对**：2026-10-31 ｜ **状态**：内置 8 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**claude-code 已实测（探针级 + 真机微信单轮 E2E）**；gemini/codex 未实测（示例，接入前按 §8 验证）。
+> **适用版本**：WeMind 1.3.0（`@wemind/cli` 1.3.0 待发布）｜ **最后核对**：2026-11-01 ｜ **状态**：内置 8 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**claude-code 已实测（探针级 + 真机微信单轮 E2E）**；gemini/codex 未实测（示例，接入前按 §8 验证）。
 >
 > 本文说明如何把 WeMind daemon 的「大脑」从默认的 `auto`（优先 kiro）换成另一个 ACP agent。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 

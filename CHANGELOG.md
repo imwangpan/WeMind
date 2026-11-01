@@ -2,7 +2,7 @@
 
 本文件记录本 Fork 相对上游 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server) 的改动。
 
-## [Unreleased]
+## [1.3.0] 新增 Cline / Claude Code 预设 · 默认免审批（2026-11-01）
 
 ### Added
 

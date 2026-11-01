@@ -10,7 +10,7 @@
 
 ```bash
 npm i -g @wemind/cli     # 安装后得到 wemind 命令
-wemind version           # → wemind 1.2.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
+wemind version           # → wemind 1.3.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
 
 # 不安装、一次性运行（注意是包名 @wemind/cli，不是 wemind）
 npx -y @wemind/cli list
@@ -124,7 +124,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 
 ```powershell
 npm run release:patch    # 1.1.0 → 1.1.1（Bug 修复）
-npm run release:minor    # 1.1.0 → 1.2.0（向后兼容的新功能）
+npm run release:minor    # 1.2.0 → 1.3.0（向后兼容的新功能）
 npm run release:major    # 1.1.0 → 2.0.0（不兼容改动）
 ```
 
@@ -159,7 +159,7 @@ npm pack --dry-run --workspace @wemind/cli    # 应看到 5 个文件：LICENSE 
 ```powershell
 git add packages/wechat-daemon/package.json package-lock.json
 git add packages/wechat-daemon/src packages/wechat-ilink-core/src   # 有源码改动时
-git commit -m "chore: release @wemind/cli 1.2.0"   # 换成当前要发的版本
+git commit -m "chore: release @wemind/cli 1.3.0"   # 换成当前要发的版本
 git push origin main
 ```
 
