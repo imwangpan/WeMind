@@ -102,7 +102,7 @@ import {
   hasActiveTask,
   awaitingTasks,
   interruptedTasks,
-  looksLikeResume,
+  shouldResumeTask,
   renderTaskList,
   initTasks,
   setTaskPush,
@@ -1101,25 +1101,20 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
     }
     // 2) 明确「问大脑」逃逸前缀 → 去前缀后强制走 brain（即使 worker 在等你）
     const brainEscape = item.text ? parseBrainEscape(item.text) : null;
-    // 3) 无前缀 + worker 正等你回 + 非图片 → 默认发给 worker（唯一一条 waiting 直接喂；多条 waiting 回编号提示）；
-    //    其余（running / 无任务 / 逃逸 / 图片）→ brain
-    if (!brainEscape && item.imageItems.length === 0 && awaitingTasks(from).length > 0) {
-      const r = injectTask(from, item.text);
-      log("task: inject(awaiting):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
-      if (r) await sendNotice(account, from, token, r, latestToken());
-      continue;
-    }
-    // 已中断的任务（daemon 重启留下的）：没有活跃任务时**只有「继续」这类短句**才放行进任务表续跑。
-    // 为什么还要关键字这层闸：一条陈旧的中断任务会一直躺在表里，若见了消息就放行，「帮我查一下 X」这类日常提问会被它吞掉。
+    // 3) 无前缀消息**默认给大脑**；只有「继续」类短句 + 有可续跑任务（waiting 任意；interrupted 需没有活跃任务）才交给任务。
+    //    2026-11-02 前是「只要有一条 waiting 就接管任意无编号消息」——任务出完结果还躺在 waiting，会把用户找大脑的日常消息吞掉（真机踩到两次：#26、#28）。
+    //    任务侧的追问走显式寻址：`#<编号> 正文` / `> 正文` / `任务 …`（解析层已分流，不会到这里）。
     if (
       !brainEscape &&
       item.imageItems.length === 0 &&
-      !hasActiveTask(from) &&
-      interruptedTasks(from).length > 0 &&
-      looksLikeResume(item.text)
+      shouldResumeTask(item.text, {
+        awaiting: awaitingTasks(from).length,
+        active: hasActiveTask(from),
+        interrupted: interruptedTasks(from).length,
+      })
     ) {
       const r = injectTask(from, item.text);
-      log("task: resume(interrupted):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
+      log("task: resume(unnumbered):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
       if (r) await sendNotice(account, from, token, r, latestToken());
       continue;
     }

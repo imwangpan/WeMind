@@ -223,6 +223,20 @@ export function looksLikeResume(text: string | undefined): boolean {
     (text ?? "").trim(),
   );
 }
+
+/**
+ * 无编号消息是否该交给任务续跑：只有「继续」类短句 + 存在可续跑的任务（有 waiting；或没有活跃任务时只有 interrupted）。
+ * 2026-11-02 起 waiting **不再**接管任意无编号消息——任务出完结果后还躺在 waiting，会把用户找大脑的日常消息吞掉（真机踩到两次：陈旧任务 #26、#28）。
+ * 其余消息一律走大脑；任务侧的追问用 `#<编号> 正文` / `> 正文` / `任务 …` 显式寻址。
+ */
+export function shouldResumeTask(
+  text: string | undefined,
+  state: { awaiting: number; active: boolean; interrupted: number },
+): boolean {
+  if (!looksLikeResume(text)) return false;
+  return state.awaiting > 0 || (!state.active && state.interrupted > 0);
+}
+
 /** 是否存在活跃任务（可选限定某用户）。 */
 export function hasActiveTask(to?: string): boolean {
   return to === undefined ? [...tasks.values()].some(isLive) : liveTasks(to).length > 0;
@@ -249,6 +263,18 @@ function labelOf(task: Task): string {
   return listTasks(task.userId).length > 1 || liveTasks(task.userId).length > 1
     ? `任务${task.id}`
     : "任务";
+}
+
+/**
+ * 任务回合结束时附带的「怎么回这条任务」提示。
+ * 2026-11-02 起不带前缀的消息一律交给大脑，任务必须显式寻址，所以每条需要用户接话的推送都要把当前编号的写法带上；
+ * 只拼在发送文本上，不写进 `lastOutput`（任务列表里不需要重复这段）。
+ */
+function replyFooter(task: Task, kind: "result" | "interrupted"): string {
+  const id = `#${task.id}`;
+  return kind === "interrupted"
+    ? `\n↩ 续跑用「${id} 继续」，补充用「${id} 正文」，结束用「结束任务 ${task.id}」；不带前缀的消息会交给大脑。`
+    : `\n↩ 回这条任务用「${id} 正文」；不带前缀的消息会交给大脑。`;
 }
 
 /** `任务列表`：编号 / agent / 状态 / 轮次 / 已运行 / 最近输出摘要。 */
@@ -376,7 +402,7 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
       task.lastOutput = msg;
       persist();
       emitState();
-      push(task.userId, `${msg}（任务记录还在，处理好后再回「继续」）`);
+      push(task.userId, `${msg}（任务记录还在，处理好后按下面方式续跑）` + replyFooter(task, "interrupted"));
       ackIf(task.ackId, msg);
       return;
     }
@@ -413,10 +439,10 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
       const out = await conn.ask(instruction, task.key, onProgress, { strictResume: wasResume });
       if (tasks.get(task.id) !== task) break; // 期间被 stop
       const label = labelOf(task);
-      const body = out || "（本轮无输出，可回复「继续」推进或「结束任务」终止）";
+      const body = out || "（本轮无输出）";
       task.turns += 1;
       task.lastOutput = `🤖【${label}】${body}`;
-      push(task.userId, task.lastOutput);
+      push(task.userId, task.lastOutput + replyFooter(task, "result"));
     } catch (e) {
       if (tasks.get(task.id) !== task) break; // 被 stop 导致的 reject，不算中断
       const why = String(e instanceof Error ? e.message : e);
@@ -428,26 +454,24 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
         persist();
         emitState();
         log(`task ${task.id} resume failed（接不上，已转「已中断」）:`, why);
-        push(task.userId, task.lastOutput);
+        push(task.userId, task.lastOutput + replyFooter(task, "interrupted"));
         break;
       }
       const label = labelOf(task);
-      const resumeHint = label === "任务" ? "回复「继续」" : `回复「#${task.id} 继续」`;
-      const stopHint = `或「结束任务${label === "任务" ? "" : ` ${task.id}`}」终止。`;
       log(`task ${task.id} turn failed:`, why);
       const prov = providerIssue(e);
       if (prov) {
-        // 模型/账号侧的问题（余额、密钥、计费、模型不存在）：重试也不会好，而且这类任务若停在「等你回复」，用户下一条无编号消息会被它吞掉、只是又白失败一轮（真机踩过：一条余额不足的任务把「在吗」吃掉了）。转「已中断」——不在 liveTasks 里，就不再抢消息；用户修好账号后回「继续」/`#n 继续` 才续跑。
+        // 模型/账号侧的问题（余额、密钥、计费、模型不存在）：重试也不会好，停在「等你回复」只会让用户以为还能接着干。转「已中断」——状态如实反映这轮没跑完，续跑要用户显式回「继续」/`#n 继续`。
         task.status = "interrupted";
-        task.lastOutput = `⚠️【${label}】中断了（${prov}）。这类错误重试也不会好——修好后${resumeHint}我从中断处恢复，${stopHint}`;
+        task.lastOutput = `⚠️【${label}】中断了（${prov}）。这类错误重试也不会好——把账号/模型处理好后再续跑。`;
         persist();
         emitState();
-        log(`task ${task.id} provider issue（${prov}）→ 已转「已中断」，不再接管无编号消息`);
-        push(task.userId, task.lastOutput);
+        log(`task ${task.id} provider issue（${prov}）→ 已转「已中断」`);
+        push(task.userId, task.lastOutput + replyFooter(task, "interrupted"));
         break;
       }
-      task.lastOutput = `⚠️【${label}】中断了（${reason(e)}）。${resumeHint}我从中断处恢复，${stopHint}`;
-      push(task.userId, task.lastOutput);
+      task.lastOutput = `⚠️【${label}】中断了（${reason(e)}）。`;
+      push(task.userId, task.lastOutput + replyFooter(task, "interrupted"));
     } finally {
       clearInterval(ti); // 本轮结束停 typing
     }

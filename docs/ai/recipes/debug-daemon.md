@@ -240,12 +240,12 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 
 | 症状 | 看 | 说明 |
 |---|---|---|
-| 派不出去 | 答复 | 超出 `WEMIND_MAX_WORKERS`（默认 3）会被**派发时**拒绝；无编号消息在**多条任务**并存时回一份编号清单（`#编号` 指定） |
+| 派不出去 | 答复 | 超出 `WEMIND_MAX_WORKERS`（默认 3）会被**派发时**拒绝；`injectTask` 不指定编号且多条任务并存时回一份编号清单（`#编号` 指定） |
 | 任务「跑」但一直没结果 | `.../worker` 日志 | 找 `exited code=` / `prompt FAIL`；worker 单轮硬上限 30min（`WEMIND_WORKER_CAP_MS`）、无帧 3min（`WEMIND_WORKER_IDLE_MS`） |
 | 任务列表为空但进程还在 | `workers.pid.json` | 进程**留着复用**是预期：任务结束不杀进程，空闲 5min（`WEMIND_WORKER_REAP_MS`）或超出 `WEMIND_IDLE_MAX`（默认 2）才回收 |
 | 池占资源多 | `wemind list` | 调小 `WEMIND_MAX_WORKERS` / `WEMIND_IDLE_MAX`；`wemind stop <key>` 一次杀光整池 |
 | 重启后状态「已中断」 | 日志 `restored tasks: interrupted=[…]` | **预期**：不自动拉起，回「继续」/`#n 继续` 才续跑 |
-| 日常消息被任务吞掉（每次都白失败一轮） | `任务列表` 找 waiting 的任务 | 「谁在等就喂谁」是设计：有一条 waiting 就会接管无编号消息。**余额/密钥/计费/模型不存在**这类 provider 错误（`providerIssue()`）现在会让任务直接转「已中断」、不再接管；**限流 429 与超时仍会停在 waiting**（等一会儿重试就会好）——那时要么回它、要么 `结束任务`。日志见 `task <n> turn failed:` |
+| 日常消息被任务吞掉 | `任务列表` + daemon 版本 | **2026-11-02 起不会再发生**：无前缀消息默认走大脑，`waiting` 不再接管（只有「继续」类短句 + 可续跑任务才进任务表）。若仍被吞，先确认 daemon 是新版（`wemind version` + 重启）：旧版「有一条 waiting 就接管无编号消息」正是本次改掉的规则。日志见 `task: resume(unnumbered):` |
 | 续跑接不上 | 答复 | agent 不支持 load/resume 或会话已被它自己清理 → 会给「这次接不上」（重试还是同一结果，要重来就结束这条任务后重新派一条），**不**改当前会话记录、不假装成功 |
 | 同 agent 并发时行为怪 | 池信息 | 同一 agent 的两个 worker **共用它的配置目录**（等价"两个终端在同一个目录里跑"）——已知形态；不同 agent 各自子目录天然隔离 |
 | CLI 说「没等到 daemon 答复」 | `task-out/` | 命令照常执行（这一行只是答复丢了）：**老版 daemon 不认回结果通道**（重启一次即可），或 daemon 正在退出。查实际状态用 `task-list`/`task-status`——别把这一行当「没派上」 |

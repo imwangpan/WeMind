@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-01（`@wemind/cli@1.3.0` 已发布；`@wemind/wechat-mcp@1.0.5` 已发布）
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02（`@wemind/cli@1.3.0` 已发布；`@wemind/wechat-mcp@1.0.5` 已发布）
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -58,7 +58,7 @@ poller（长轮询，不被大脑阻塞）
   → 收到消息 / 逐条入队（**不合并**：一条消息 = 一次 prompt）
   → 指令拦截（帮助 / 切脑 / 交接 / 会话四件套 / 任务 / MCP / 问大脑 …；
      账号级指令（切脑/交接）由非登录者发 → 短提示拒绝，不进大脑；兜底校验，平台限制下正常不触发）
-  → 选择 brain 或 worker（多任务时按编号寻址；无编号按 waiting > running > 唯一已中断。**模型/账号侧报错的任务直接转「已中断」，不进 waiting、不接管无编号消息**）
+  → 选择 brain 或 worker（**无前缀消息默认走 brain**；只有「继续」类短句 + 可续跑任务才进任务表，见 `shouldResumeTask()`；回任务要显式寻址 `#编号 正文` / `> 正文` / `任务 …`。**模型/账号侧报错的任务直接转「已中断」**）
   → askBrain(userId, text, onProgress, images)
        ├─ 等切换门（切换大脑进行中时有界等待）
        ├─ ensureProcess(ag)：懒启动 ACP agent，initialize
@@ -97,7 +97,7 @@ poller（长轮询，不被大脑阻塞）
 | **会话登记表** | `session-registry.json`：名字/标题/轮次/最近使用（派生元数据，坏了只导致列表空） |
 | **严格恢复** | `恢复会话` 的语义：`load`/`resume` 都失败就如实报错，**不回退 `new`、不改当前会话记录** |
 | **交接 / handoff** | `handoff.ts`：摘要写入磁盘（TTL 24h），切走后**下一条消息作为前缀带上**、**答成才消费**、切回来源不带上 |
-| **任务编号** | 按用户单调递增、**不复用**、跨重启不归零；多任务并存时无编号消息必须报出编号清单 |
+| **任务编号 / 寻址** | 按用户单调递增、**不复用**、跨重启不归零；回任务用 `#<编号> 正文`（`>` 为明确发给任务的短前缀），无前缀消息一律走 brain（只有「继续」类短句可续跑任务） |
 | **默认任务大脑** | `worker.agent ?? agent`；`切换任务大脑`/`--worker` 可在**进程内**覆盖它（**不写入磁盘**，重启回到配置值）；`任务 <agent 名>：`/`--agent` **只对那一条任务生效**，不改它 |
 | **进程池 / worker-pool** | `worker-pool.ts`：同 agent 空闲复用 → 回收最旧腾位 → spawn；并发 `WEMIND_MAX_WORKERS`、空闲 `WEMIND_IDLE_MAX`、回收 `WEMIND_WORKER_REAP_MS` |
 | **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收 agent 名与纯数据**（无 `bin`/`args`/`shell`） |

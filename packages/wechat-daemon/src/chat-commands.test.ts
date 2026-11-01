@@ -158,7 +158,7 @@ describe("任务指令", () => {
     });
   });
 
-  it("编号寻址：只认纯数字的 # / /reply（半角全角都收）", () => {
+  it("编号寻址：只认纯数字的 # / /reply（半角全角、空格或全角冒号都收）", () => {
     expect(parseTaskCommand("#2 改成用 vitest")).toEqual({
       kind: "reply",
       id: 2,
@@ -170,6 +170,14 @@ describe("任务指令", () => {
       text: "改成用 vitest",
     });
     expect(parseTaskCommand("/reply 3 继续")).toEqual({ kind: "reply", id: 3, text: "继续" });
+    // 编号与正文之间允许全角冒号（手机中文键盘顺手），半角冒号留给时间（#1:30 开会）
+    expect(parseTaskCommand("#2：改成用 vitest")).toEqual({
+      kind: "reply",
+      id: 2,
+      text: "改成用 vitest",
+    });
+    expect(parseTaskCommand("＃2：继续")).toEqual({ kind: "reply", id: 2, text: "继续" });
+    expect(parseTaskCommand("#1:30 开会")).toBeNull();
     expect(parseTaskCommand("#abc 你好")).toBeNull();
     expect(parseTaskCommand("# 你好")).toBeNull();
     // 「1 号文件」不是给 1 号任务回话

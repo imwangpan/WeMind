@@ -1,6 +1,6 @@
 # AGENTS.md — WeMind 的 AI 协作者入口
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-01（`@wemind/cli@1.3.0` 已发布 / `1.2.0` 上一版） ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02（`@wemind/cli@1.3.0` 已发布 / `1.2.0` 上一版） ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
 >
 > 这份文件写给 AI agent，也写给人。**先读这里，再按链接深入**；不要一上来通读整个 `docs/repowiki/`。
 
@@ -68,7 +68,7 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 | `packages/wechat-daemon/src/brain-switch.ts` | 热切换：预检 → 等在途回合结束 → 启动新大脑 → 成功才写入磁盘；失败退回 |
 | `packages/wechat-daemon/src/worker-acp.ts` | 任务 worker 的 ACP 客户端（`class WorkerConn`，一条任务一条连接） |
 | `packages/wechat-daemon/src/worker-pool.ts` | worker 进程池（复用/回收/上限；`workers.pid.json` 记录数组） |
-| `packages/wechat-daemon/src/task-manager.ts` | 任务表（编号、编号寻址、停止；默认任务大脑 + 进程内覆盖） |
+| `packages/wechat-daemon/src/task-manager.ts` | 任务表（编号、编号寻址、停止；默认任务大脑 + 进程内覆盖；`shouldResumeTask()` 决定无编号消息是否只按「继续」类短句进任务） |
 | `packages/wechat-daemon/src/task-store.ts` | 任务表写入磁盘 `tasks.json`（损坏降级、中断标记、编号跨重启连续） |
 | `packages/wechat-daemon/src/session-manager.ts` | 会话五条指令的实现层（`create`/`resume` 依赖注入） |
 | `packages/wechat-daemon/src/session-registry.ts` | 会话登记表（派生元数据：名字/标题/轮次）——**不是**「当前是哪个」的权威 |
@@ -169,7 +169,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 
 ---
 
-## 6. 已知坑 / 文档与代码不一致（2026-10-31 已核对）
+## 6. 已知坑 / 文档与代码不一致（2026-11-02 已核对）
 
 - **默认大脑不是 kiro**：未配置时是 `auto`，按 `kiro → opencode → gemini → deepseek → qoder → cline` 探测；写入磁盘配置在 `<数据目录>/brain.json`。
 - **`wemind list` 的 `agent=` 是「实际生效」而不是「配置文件」**（2026-10-31 修）：daemon 在跑时优先读 `<数据目录>/brain-runtime.json`（启动成功/热切换成功后写入，含 `source`），与 `brain.json` 不同时显示 `X（运行，来源 env；配置 Y）`；daemon 没跑时仍只显示配置/自动探测。**不能拿 `brain.pid` 判断刚启动时用哪个大脑**——ACP 是懒启动，第一条消息之前根本没有 `brain.pid`；这正是 `WEMIND_BRAIN=cline` 启动却显示 deepseek 的原因。`stop` 会删 `brain-runtime.json`。
@@ -196,7 +196,8 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 - **切脑与 `wemind stop` 的窄窗口（2026-10-28，已知项）**：切换的 `restart()` 与新进程写 pid 记录之间约 1s，此刻执行 `wemind stop` 可能漏杀新起的 ACP 子进程（与既有的 `/加载` 触发 `restart()` 同类形态，不是本次新引入）。
 - **多任务共享同一份微信额度（2026-10-28）**：连发上限（约 10 条）是**按用户**计的，N 条任务的进度 + 对话大脑的回复都算同一份额度。worker 进度默认安静、结果推送走既有 ret=-2 退避；扛不住就调小 `WEMIND_MAX_WORKERS`。
 - **同 agent 并发 = 两个终端在同一个配置目录里跑（2026-10-28，2026-10-29 一轮复测）**：不同 agent 各有 `configSubdir` 天然隔离；同一 agent 的两个 worker 进程共用其配置目录——opencode 两条并发一轮样本内**未见互踩**，长期风险仍在。
-- **provider 报错的任务不抢消息（2026-10-29）**：任务是「waiting 就接管下一条无编号消息」（谁在等就喂谁），所以一条**余额不足**的任务会一直吞掉用户的日常消息、每次白失败一轮（真机踩过：它把「在吗」吃掉了）。现在 `task-manager.ts` 的 `providerIssue()` 认出模型/账号侧错误（额度/余额、密钥鉴权、计费、模型不存在）→ 该任务**直接转「已中断」**（`interrupted` 不在 `liveTasks` 里，路由自然放行）→ 账号修好后回「继续」/`#n 继续` 续跑。判据是关键字表（错误措辞来自各 agent 的 provider、不统一），**限流优先不归类**（先查 429/rate limit/overloaded 再查账号关键字：Google 的按分钟 429 原文就写着「Quota exceeded … requests per minute」，顺序反了会把限流误判成额度问题）；**认不出的一律按老规矩停在「等你回复」**——宁可多抢一次，也不把偶发失败误判成账号问题。改这里的判据别顺手放宽。
+- **provider 报错的任务转「已中断」（2026-10-29；2026-11-02 路由改版后仍保留）**：`task-manager.ts` 的 `providerIssue()` 认出模型/账号侧错误（额度/余额、密钥鉴权、计费、模型不存在）→ 该任务**直接转「已中断」**（状态如实反映这轮没跑完，也别停在「等你回复」误导用户）→ 账号修好后回 `#n 继续` 续跑（只有一条可续跑任务时裸「继续」也行）。判据是关键字表（错误措辞来自各 agent 的 provider、不统一），**限流优先不归类**（先查 429/rate limit/overloaded 再查账号关键字：Google 的按分钟 429 原文就写着「Quota exceeded … requests per minute」，顺序反了会把限流误判成额度问题）；**认不出的一律按老规矩停在「等你回复」**——宁可多误判一次，也不把偶发失败误判成账号问题。改这里的判据别顺手放宽。
+- **无编号消息默认归大脑（2026-11-02 改）**：此前是「只要有一条 waiting 任务，任何无前缀消息都喂给它」——真机两次被陈旧任务吞掉（#26、#28：任务早已出完结果，用户想找大脑聊天，消息却进了任务）。现在 `task-manager.shouldResumeTask()` 只放行「继续 / 接着跑 / continue」这类短句，且必须存在可续跑任务（有 waiting；或没有活跃任务时恰有一条 interrupted）；其余一律走大脑。任务追问一律显式寻址：`#<编号> 正文`（全角 `＃`、全角冒号 `：` 均可；半角冒号留给时间 `#1:30`）、`> 正文`（明确发给任务的短前缀；没有任务时会新开一条）、`任务 …`。每条任务结果/中断推送末尾都会带一行 `↩ 回这条任务用「#28 正文」；不带前缀的消息会交给大脑。`——改路由时这行必须跟着改，用户就是靠它学写法的。
 - **大脑侧的 provider 报错也只试一次（2026-10-29）**：agent 会把 provider 的一切回合失败都包成 `-32603 … turn failed: …`，所以余额不足这类**永久**错误按协议错误码看就是「后端瞬时错误」——老口径重试 3 次（每次都要冷启动一个 agent 进程），最后丢给用户一句「稍后把消息再发一次」。现在 `index.ts` 的 `brainFailurePlan()` 先过与任务侧**同一张** `providerIssue()` 关键字表：认出额度/余额、密钥鉴权、计费、模型不存在 → **只试 1 次**，并直接把原因回复给用户（「（这次没答上来：额度/余额不足。这类问题重试不会好——把账号/模型处理好后把消息再发一次就行）」）；「密钥/鉴权」「模型不可用」两类再加一句**要重启一次 daemon** 才会读到新登录态/模型（运行中的 daemon 不重读 brain.json、不重新同步凭据）；**限流优先仍按 backend 重试 3 次**（判据顺序别改）。日志行 `brain error (try 1, provider：额度/余额不足)`。
 - **VS Code 集成终端里 `wemind start` 会「假启动」（2026-10-29 修）**：VS Code 的「智能自动附加」给终端里每个 node 注入 `NODE_OPTIONS=--require <…>/ms-vscode.js-debug/bootloader.js` + `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true`），被注入的进程要**等调试器接上才执行主脚本**；终端里的前台命令会被接上（`stop`/`list` 看着一切正常），但 `start` **脱离出去的后台守护进程不会被接** → 进程活着、一行 JS 不跑：答复说「已启动」，实际 `daemon.log` / `wrapper.pid` 不更新、daemon 没起（`wemind list` 显示未运行，进程表里只有一个没有子进程的 `cli.js _watchdog`）。现在 `watchdog-runner.ts` 的两次脱离式 spawn 都过 `debug-env.ts` 的 `stripVscodeDebugEnv()`：只摘 VS Code 自己那段 `--require`，用户其它 `NODE_OPTIONS` 原样保留。同一注入也是「本机跑测试偶发超时」的原因——测试用 `NODE_OPTIONS=` 前缀跑。
 - **权限口径（2026-10-29 统一，平台事实已确认）**：**必须扫码登录该 bot 才能给它发消息**（微信平台限制），所以每个 bot 只有它的**登录者**（扫码登录它的那个微信号）能发。文档一律用「**登录者**」与「**登录者白名单**（`allowFrom`，**默认拒绝**；它是**兜底校验**，正常只含登录者一个 userId，防发送范围变化/别的入口）」，作用范围写成「**整个账号（仅登录者）**」/「**登录者的会话**」/「**登录者的任务**」；**禁用**「账号本人 / 授权用户 / **主号 / 主账号**」——「主号」会被读成「多个微信账号之间有一个有权限的主号」，`label` 只是别名（示例统一用 `工作号`）。**一个微信账号 = 一个真人、一个 daemon**：微信侧换大脑只能由该账号的登录者切**它自己**那个（`OWNER_ONLY_KINDS`），本机 CLI 才能用 `key|label` 指定任意账号（范围/限制/两入口区别见 README「多账号管理」与 `docs/repowiki/06`「多账号下的范围、两个入口」）。
@@ -222,9 +223,9 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 | MCP | `加载 <名>` → 下条消息生效；`wechat` 仍被禁止 |
 | worker | 派发任务 → 中断 → 回「继续」→ 能续上 |
 | **热切换大脑** | 真机 kiro↔opencode；启动新大脑期间发消息**只 spawn 一次**（看 log）；未知/不可用的 agent 被拒；故意坏 bin → 回滚 + 旧大脑继续答 + `brain.json` 未变 |
-| **多任务并行** | `任务 kiro：…` + `任务 opencode：…` 同时跑且都出结果；第三条超上限被拒；结束「等你回复」的任务后进程留着复用、空闲 5 分钟后消失（`wemind list`/进程管理器验；结束「正在跑」的那条只能力杀）；`wemind stop` 一次杀光所有 worker |
+| **多任务并行 / 寻址** | `任务 kiro：…` + `任务 opencode：…` 同时跑且都出结果；第三条超上限被拒；结束「等你回复」的任务后进程留着复用、空闲 5 分钟后消失（`wemind list`/进程管理器验；结束「正在跑」的那条只能力杀）；`wemind stop` 一次杀光所有 worker；**任务出结果后发无编号普通消息 → 走大脑**，发 `#n 正文` 才进任务（推送末尾有这行提示） |
 | **任务中断续跑** | 跑到一半 `taskkill` daemon → 重启后 `任务列表` 显示「已中断」→ 回「继续」上下文确实接上；agent 不支持恢复时给诚实文案且编号连续 |
-| **provider 报错不抢消息** | 派一条注定失败的任务（如 DSH 余额不足）→ 推送说「中断了（额度/余额不足）」且 `任务列表` 显示「已中断」→ 之后发一条**无编号**的普通消息要**走大脑**（不能再白喂给那条任务）→ **账号修好后**回「继续」能续跑（没修好时续跑只是又失败一轮、退回「已中断」，这是预期） |
+| **provider 报错转「已中断」** | 派一条注定失败的任务（如 DSH 余额不足）→ 推送说「中断了（额度/余额不足）」且 `任务列表` 显示「已中断」→ 之后发一条**无编号**的普通消息要**走大脑**（不能白喂给那条任务）→ **账号修好后**回 `#n 继续` 能续跑（没修好时续跑只是又失败一轮、退回「已中断」，这是预期） |
 | **pi 接入** | `npm i -g @earendil-works/pi-coding-agent` + 终端 `pi` 登录 + `npm i -g pi-acp`；`wemind brain set pi` → `wemind brain`（bin=`pi-acp(.cmd)`、args=[]、MCP=`mcp.json`）→ `wemind brain check`；`ACP_TEST_TOOL=1` 跑探针；真机微信一轮 + 杀 daemon 后 `session/load` 追问上下文仍在 + `加载 <MCP>` 后 `pi mcp list` 能看到 server 且下条消息生效、`wechat` 仍被拒 |
 | **Claude Code 接入** | `npm i -g @agentclientprotocol/claude-agent-acp`；`wemind brain set claude-code --restart` → `wemind brain`（bin=`claude-agent-acp(.cmd)`、args=[]、`session_mode=bypassPermissions`）→ `wemind brain check`（结论带 `mode=bypassPermissions`）；真机微信一轮消息 + 杀 daemon 后追问上下文仍在（`session/load`）+ `加载 <MCP>` 生效且 `wechat` 仍被拒 |
 | **重启后补发** | 重启 daemon → **不在微信发消息**、本地派一条任务 → 日志见「`send -2（旧 token）→ 挂起`」→ 微信发任意一条消息 → 日志「`新 token 已到 → 补发挂起消息 N 条`」且结果真的收到（旧 token 的 `-2` 不再静默丢） |
