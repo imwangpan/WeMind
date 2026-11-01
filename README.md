@@ -23,7 +23,7 @@ wemind list                          # 查看运行状态
 
 ### AI 大脑：能接什么 agent
 
-常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **9 个 agent 预设**：原生 ACP 的 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder` / `cline`（**未配置时按此顺序自动探测**；其中 kiro / opencode / deepseek / qoder / cline 已实测，`gemini` 未实测），以及三个需适配器的 `claude-code` / `codex` / `pi`（`claude-code` 已探针级实测并跑通真机微信单轮、`codex` 已探针级实测 + 真机 E2E、`pi` 已探针级实测 + 真机 worker/brain 单轮（2026-11-01）；只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
+常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **9 个 agent 预设**：原生 ACP 的 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder` / `cline`（**未配置时按此顺序自动探测**；其中 kiro / opencode / deepseek / qoder / cline 已实测，`gemini` 未实测），以及三个需适配器的 `claude-code` / `codex` / `pi`（`claude-code` 已探针级实测并跑通真机微信单轮、`codex` 已探针级实测 + 真机 E2E、`pi` 已探针级实测 + 真机 E2E（2026-11-01：brain、热切换、worker/微信任务）；只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
 
 | 必要条件 | 说明 | 不满足怎么办 |
 | --- | --- | --- |
@@ -457,7 +457,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 >
 > **Cline 已内置 agent（原生 ACP，3.0.74 实测）**：装 `npm i -g cline` 后 `wemind brain set cline` 即用 `cline --acp --auto-approve true` 当大脑；`providers.json` 登录态同步、`models.json` 模型目录同步（缺它会回退 `gpt-4o`）、`mcp.json` 文件式 MCP。**认证**：ACP 只自动恢复 `cline` / `cline-pass` / `openai-codex`；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER` + `CLINE_API_KEY`（父进程显式设了就不接管），通常无需手工配置。实测与限制见 **[docs/接入-Cline.md](docs/接入-Cline.md)**。
 >
-> **pi 已内置（探针级实测 + 真机 worker/brain 单轮，2026-11-01；热切换待验收）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，Node ≥22）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 隔离沙箱（`settings.json` / `auth.json` / `models*.json` 原样同步，`skills/` junction、`AGENTS.md` 复制）；MCP 走 pi 自己的 `<沙箱根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动横幅用 pi 自己的 `quietStartup` 在沙箱里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入-pi.md](docs/接入-pi.md)**。
+> **pi 已内置（探针级实测 + 真机 E2E，2026-11-01）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，Node ≥22）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 隔离沙箱（`settings.json` / `auth.json` / `models*.json` 原样同步，`skills/` junction、`AGENTS.md` 复制）；MCP 走 pi 自己的 `<沙箱根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动横幅用 pi 自己的 `quietStartup` 在沙箱里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入-pi.md](docs/接入-pi.md)**。
 
 ### 收发图片
 
