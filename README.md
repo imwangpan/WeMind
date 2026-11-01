@@ -23,12 +23,12 @@ wemind list                          # 查看运行状态
 
 ### AI 大脑：能接什么 agent
 
-常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **8 个 agent 预设**：原生 ACP 的 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder` / `cline`（**未配置时按此顺序自动探测**；其中 kiro / opencode / deepseek / qoder / cline 已实测，`gemini` 未实测），以及两个需适配器的 `claude-code` / `codex`（`claude-code` 已探针级实测并跑通真机微信单轮、`codex` 未实测；只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
+常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **8 个 agent 预设**：原生 ACP 的 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder` / `cline`（**未配置时按此顺序自动探测**；其中 kiro / opencode / deepseek / qoder / cline 已实测，`gemini` 未实测），以及两个需适配器的 `claude-code` / `codex`（`claude-code` 已探针级实测并跑通真机微信单轮、`codex` 已探针级实测；只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
 
 | 必要条件 | 说明 | 不满足怎么办 |
 | --- | --- | --- |
 | 有**可执行入口** | 终端里能直接跑起来，daemon 才能把它启动为子进程 | 纯 HTTP API（OpenAI / Anthropic / Ollama）没有进程可启动，**目前接不了** |
-| **实现 ACP**，或有 **ACP 适配器** | 原生：kiro / opencode / gemini / DSH / Qoder / Cline；需适配器：Claude Code（`@agentclientprotocol/claude-agent-acp`，已探针级实测 + 真机微信单轮 E2E）、Codex（`codex-acp`） | 先**全局安装**适配器（`npm i -g <包>`，npx 只作兜底），无需改 WeMind |
+| **实现 ACP**，或有 **ACP 适配器** | 原生：kiro / opencode / gemini / DSH / Qoder / Cline；需适配器：Claude Code（`@agentclientprotocol/claude-agent-acp`，已探针级实测 + 真机微信单轮 E2E）、Codex（`@agentclientprotocol/codex-acp`，已探针级实测） | 先**全局安装**适配器（`npm i -g <包>`，npx 只作兜底），无需改 WeMind |
 | 覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt` | 跑 `wemind brain check` 实测；缺失即不可用 |
 | 能**完成认证** | 模型/登录态就绪，二进制在 PATH 上或用 `--bin` 指定 | 配 `wemind brain set <agent 名> --bin "<绝对路径>"` |
 
@@ -425,7 +425,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | # | 条件 | 说明 |
 | --- | --- | --- |
 | 1 | 有**可执行入口** | daemon 要把它**启动为子进程**；纯 HTTP API（OpenAI / Anthropic / Ollama）没有进程可启动，目前接不了 |
-| 2 | **实现 ACP**，或有 **ACP 适配器** | 原生实现：kiro / opencode / gemini / DSH / Qoder / Cline；需适配器：Claude Code（`@agentclientprotocol/claude-agent-acp`，已探针级实测 + 真机微信单轮 E2E）、Codex（`codex-acp`） |
+| 2 | **实现 ACP**，或有 **ACP 适配器** | 原生实现：kiro / opencode / gemini / DSH / Qoder / Cline；需适配器：Claude Code（`@agentclientprotocol/claude-agent-acp`，已探针级实测 + 真机微信单轮 E2E）、Codex（`@agentclientprotocol/codex-acp`，已探针级实测） |
 | 3 | ACP 实现覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt`；先用 `wemind brain check` 真握手 |
 | 4 | 能**完成认证**且二进制可解析 | PATH 上能找到，或用 `--bin` 给绝对路径；`.cmd`/`.bat` 需经 shell |
 
