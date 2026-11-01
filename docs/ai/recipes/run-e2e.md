@@ -52,6 +52,23 @@ node scripts/acp-probe.mjs
 
 > 没有登录态时先 `claude` 登录，或在当前进程设 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`（自定义网关再加 `ANTHROPIC_BASE_URL`）。适配器报 `Claude native binary not found` 时，重装不要 `--omit=optional`，或设 `CLAUDE_CODE_EXECUTABLE` 指向本机 `claude`。
 
+pi 的 L3 示例（先 `npm i -g @earendil-works/pi-coding-agent` + 终端 `pi` 登录 + `npm i -g pi-acp`；`ACP_TEST_TOOL=1` 连「默认不逐次审批」一起验）：
+
+```powershell
+$env:PI_CODING_AGENT_DIR = "$env:TEMP\pi-acp-probe"
+$env:ACP_BIN = "pi-acp"
+$env:ACP_ARGS = "[]"
+$env:ACP_SHELL = "1"
+$env:ACP_HOME_ENV = "PI_CODING_AGENT_DIR"
+$env:ACP_HOME = "$env:TEMP\pi-acp-probe"
+$env:ACP_TEST_IMAGE = "1"
+$env:ACP_TEST_TOOL = "1"      # 写 drift-check.txt；断言 0 个 request_permission + 文件真的落盘
+$env:ACP_HARD_KILL = "1"
+node scripts/acp-probe.mjs
+```
+
+> 启动前把真实 `~/.pi/agent/settings.json` / `auth.json` / `models*.json` 复制进探针 home（`settings.json` 里有默认 provider/model，缺了 `session/new` 的 `model` 可能为空）。pi-acp 还会从真实 `homedir()` 读 `~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills`——探针隔离不了这部分。
+
 ---
 
 ## 1. 准备
@@ -313,6 +330,19 @@ send error: [sendMessage] errcode=-2 ... (prepare failed)
 | 6 | **耗时**：`session/new` ~1.2s、`session/load` ~1.0s、首帧 2–246ms、**首段正文 7.9–11.9s**；一轮 prompt 8–12s。远小于 `REQ_TIMEOUT=30s`，暂不需要 `reqTimeoutMs`。 |
 | 7 | **图片**：能力声明 true；本机用网关时 1×1 PNG 被上游 `400 WorkBuddy: … replace the image` 拒绝——**不是适配器/WeMind 的问题**，换正常模型/网关再验。 |
 | 8 | **未做**：真机微信 L4–L6（消息/自愈/MCP/任务）、适配器升级后的回归。 |
+
+### 7.7 pi 探针结论（2026-10-30，pi-acp 0.0.34 / pi 1.4.0，Windows）
+
+| # | 结论 |
+|---|---|
+| 1 | **`initialize`**：`protocolVersion: 1`、`loadSession: true`、`promptCapabilities.image: true`；`mcpCapabilities` http/sse 均否。 |
+| 2 | **`session/new`**：成功；`configOptions` 有 `model`（select，currentValue = 用户 pi 默认）与 `thought_level`（low/high）。 |
+| 3 | **prompt**：首帧 0–3ms、简单问答 4–7s；update 类型 `agent_message_chunk` / `agent_thought_chunk` / `session_info_update` / `usage_update` / `available_commands_update`，工具轮还有 `tool_call` / `tool_call_update`（有 activity 帧，心跳无忧）。 |
+| 4 | **图片**：接受（`end_turn`）。 |
+| 5 | **反向请求**：0（不问权限、不用 fs/terminal 委托）。`ACP_TEST_TOOL=1`：3 次工具调用全部执行、`drift-check.txt` 落盘、0 个 `session/request_permission`。 |
+| 6 | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。 |
+| 7 | **MCP**：pi 读 `<PI_CODING_AGENT_DIR>/mcp.json`（kiro 格式 `{mcpServers}`；`pi mcp list` 可识别）；`session/new` 的 `mcpServers` 被 pi-acp 只存不用 → 预设 `mcpViaAcp: false`。 |
+| 8 | **未做**：真机微信 L4–L6（消息/热切换/MCP/任务）、适配器升级后的回归。 |
 
 ## 8. 清理 / 回滚
 

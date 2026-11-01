@@ -15,7 +15,9 @@
 //
 // Optional:
 //   ACP_TEST_IMAGE=1     send a 1x1 PNG prompt and record accept/reject
-//   ACP_TEST_MCP='[{"name":"fake","command":"...","args":[]}]'  pass mcpServers to session/new
+//   ACP_TEST_TOOL=1      send a tool-forcing prompt (writes a marker file) and record whether the agent asked for permission first — drift check for "no per-tool approval" assumptions
+//   ACP_TOOL_PROMPT="…"  override the tool-forcing prompt (default writes drift-check.txt in CWD)
+//   ACP_TEST_MCP='[{"name":"fake","command":"...","args":[],"env":[]}]'  pass mcpServers to session/new（stdio 的 env 是 ACP schema 必填；省略时探针补 []）
 //   ACP_KEEP=1           keep ACP_HOME (contains sessions) after the run
 //   ACP_HARD_KILL=1      skip session/close; kill the process (simulates WeMind self-heal)
 //   ACP_TIMEOUT_MS=180000
@@ -37,7 +39,17 @@ const FIRST_PROMPT =
 const SECOND_PROMPT =
   process.env.ACP_SECOND || "What was the secret word? Reply with just the word.";
 const TEST_IMAGE = process.env.ACP_TEST_IMAGE === "1";
-const TEST_MCP = process.env.ACP_TEST_MCP ? JSON.parse(process.env.ACP_TEST_MCP) : [];
+const TEST_TOOL = process.env.ACP_TEST_TOOL === "1";
+// 漂移检测用：预设里「免审批」这类实测结论要靠它变成可失效的断言。让 agent 写一个标记文件——既强制走工具调用，
+// 又能用文件系统验证「真的执行到了最后一步」（只看 stopReason 分不出「拒绝了」和「没执行」）。
+const TOOL_PROMPT =
+  process.env.ACP_TOOL_PROMPT ||
+  "Create a file named drift-check.txt in the current directory containing exactly the text OK. Use your file/shell tools, do not ask me first. When done reply with exactly: WROTE";
+const TOOL_MARKER = "drift-check.txt";
+// ACP SDK 的 stdio server 要求 env 是数组；探针顺手补空数组，避免因示例缺字段被参数校验拒绝（不是 agent 不支持 stdio）。
+const TEST_MCP = (process.env.ACP_TEST_MCP ? JSON.parse(process.env.ACP_TEST_MCP) : []).map((s) =>
+  s.command && !Array.isArray(s.env) ? { ...s, env: [] } : s,
+);
 const MODEL = process.env.ACP_MODEL || "";
 const REASONING = process.env.ACP_REASONING || "";
 const KEEP = process.env.ACP_KEEP === "1";
@@ -308,6 +320,37 @@ const png1x1 =
       log("image prompt:", short(summary.image, 600));
     }
 
+    if (TEST_TOOL) {
+      // 漂移检测：强制走一次真实工具调用，记录期间是否出现 session/request_permission。
+      // 「免审批」类预设的预期：文件写到磁盘、反向请求为 0；agent 若开始先问，permission>0 / fileWritten=false，探针红。
+      const reverseMark = first.reverse.length;
+      const marker = path.join(CWD, TOOL_MARKER);
+      try {
+        fs.rmSync(marker, { force: true }); // 清掉上次探针留下的旧标记，再开跑
+      } catch {}
+      const started = Date.now();
+      const res = await first.prompt(TOOL_PROMPT);
+      const permission = first.reverse
+        .slice(reverseMark)
+        .map((r) => r.method)
+        .filter((m) => m === "session/request_permission").length;
+      const fileWritten = fs.existsSync(marker);
+      summary.toolTest = {
+        ok: res.ok && fileWritten && permission === 0,
+        elapsedMs: Date.now() - started,
+        requestPermission: permission,
+        reverseDuringTool: first.reverse.slice(reverseMark).map((r) => r.method),
+        fileWritten,
+        toolCalls: res.toolCalls,
+        stopReason: res.stopReason,
+        answer: res.answer.slice(0, 120),
+      };
+      log(
+        "tool test:",
+        `ok=${summary.toolTest.ok} permission=${permission} fileWritten=${fileWritten} toolCalls=${res.toolCalls}`,
+      );
+    }
+
     summary.close = HARD_KILL ? { skipped: "ACP_HARD_KILL=1" } : await first.close();
     first.kill();
     await sleep(800);
@@ -356,7 +399,9 @@ const png1x1 =
       .concat(second.reverse)
       .map((r) => r.method);
     summary.resumeOk = !!second.sid && !summary.resume?.error;
-    summary.ok = !!summary.prompt1?.ok && !!summary.contextKept;
+    // 开了漂移检测时，工具测试失败也算整体失败（这正是它存在的意义：升级后跑一次就知道预案该不该启用）
+    summary.ok =
+      !!summary.prompt1?.ok && !!summary.contextKept && (!TEST_TOOL || summary.toolTest?.ok === true);
   } catch (e) {
     summary.fatal = e instanceof Error ? e.message : String(e);
     summary.ok = false;

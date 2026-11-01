@@ -39,6 +39,7 @@ export type AcpAgentPreset = {
   bin: string; // PATH 上的二进制名（非 Windows）
   binWin?: string; // Windows 下可执行名（默认在 bin 后加 .exe）
   fallbackBinPaths?: string[]; // PATH 上找不到时的已知安装位置（如官方安装器的固定目录）
+  requiresBins?: string[]; // 除 bin 外还必须在 PATH 上解析到的运行时（如 pi-acp 内部 spawn `pi`；只装适配器不够）
   args: string[]; // 进入 ACP 模式的启动参数
   homeEnvVar?: string; // agent 读取其配置/数据目录的环境变量名；指向 brain 沙箱。留空=不设置
   shell?: boolean; // 是否经 shell 启动（npx/.cmd/.bat 类适配器在 Windows 需要 true）
@@ -231,6 +232,31 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   },
 
   // —— 需适配器（CLI 不原生支持 ACP，经官方/第三方适配器桥接）——
+  // pi coding agent（@earendil-works/pi-coding-agent）经社区适配器 pi-acp 接入：适配器 spawn `pi --mode rpc`，在 ACP 与 pi RPC 之间桥接。
+  // 2026-10-30 探针 + 2026-11-01 复跑（pi-acp 0.0.34 + pi 1.4.0，见 docs/接入-pi.md）：
+  // - session/load 原生支持（强杀后上下文接上）；image:true；首帧 0–3ms；有 thought/tool 帧；无反向请求——pi 默认不做逐次工具审批（官方 security.md 明说），无需 yolo flag / sessionMode；
+  // - 模型跟随用户 pi 配置（settings.json 的 defaultProvider/defaultModel 随凭据原样同步进沙箱）；覆盖用 `wemind brain set pi --model "<provider>/<model>"`（session/set_config_option 的 configId 就叫 model）；
+  // - MCP：pi 读 <PI_CODING_AGENT_DIR>/mcp.json（`pi mcp list` 实测；不是 settings/mcp.json），格式与 kiro 相同 {mcpServers:{名:{command,args,env}}}；不设 mcpViaAcp（pi-acp 只把 mcpServers 存进会话、从不读取）；
+  // - 适配器只是桥：真正进程是 PATH 上的 pi 本体（requiresBins 会在缺 pi 时提前报错，而不是等 session/new 才炸）。
+  // - 适配器的会话映射表固定写在真实 home 的 ~/.pi/pi-acp/session-map.json（不随沙箱走）：跨账号共享的只是 id→会话文件的映射，会话本体仍在各自沙箱的 sessions/ 下。
+  // - 适配器类不参与 auto 探测（装好适配器 ≠ 已登录/配好模型），用 `wemind brain set|switch pi` 显式选用。
+  pi: {
+    name: "pi",
+    bin: "pi-acp",
+    binWin: "pi-acp.cmd", // npm 全局 shim 只有 .cmd，onPath 按精确文件名判定
+    requiresBins: ["pi"], // pi-acp 内部 spawn `pi --mode rpc`；只装适配器不够
+    args: [],
+    shell: true,
+    homeEnvVar: "PI_CODING_AGENT_DIR", // pi 的配置目录 env（默认 ~/.pi/agent）→ 指向沙箱根
+    realHome: path.join(os.homedir(), ".pi", "agent"),
+    inheritDirs: ["skills"],
+    inheritFiles: ["AGENTS.md"], // pi 读 <agent-dir>/AGENTS.md 作跨目录全局指令
+    // 原样同步：默认模型/供应商（settings.json）、登录态（auth.json）、自定义供应商与模型目录（models*.json，可能含网关地址/密钥）
+    credentialFiles: ["settings.json", "auth.json", "models.json", "models-store.json"],
+    // pi 的 MCP 是 <agent-dir>/mcp.json（不是 settings/mcp.json）；kiro 格式与 pi 兼容
+    mcpConfigFile: "mcp.json",
+    catalogFile: "mcp.json",
+  },
   // Claude Code：官方 ACP 适配器 @agentclientprotocol/claude-agent-acp（bin: claude-agent-acp；**Node ≥22**）。
   // - **全局安装，不用 npx**（口径同 codex）：daemon 常驻、worker 每条任务起进程，npx 每次冷启动都要问 registry/现下包，离线不可用且版本漂移；
   //   `npm i -g @agentclientprotocol/claude-agent-acp`。适配器自带 @anthropic-ai/claude-agent-sdk（含平台原生二进制）；
@@ -296,9 +322,16 @@ function onPath(exe: string): string | null {
   return null;
 }
 
+/** 同 onPath，但按平台补齐扩展名：适配器依赖的运行时（如 pi）在 Windows 上通常是 .cmd。 */
+function onPathAny(exe: string): string | null {
+  if (process.platform === "win32")
+    return onPath(`${exe}.cmd`) ?? onPath(`${exe}.exe`) ?? onPath(exe);
+  return onPath(exe);
+}
+
 /**
  * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的 agent。
- * 只收纳**原生 ACP 且二进制可直接判定**的 agent——适配器类（`claude-code` 走 `claude-agent-acp`、`codex` 走 `codex-acp`）不参与自动探测：
+ * 只收纳**原生 ACP 且二进制可直接判定**的 agent——适配器类（`claude-code` 走 `claude-agent-acp`、`codex` 走 `codex-acp`、`pi` 走 `pi-acp`）不参与自动探测：
  * 它们是独立安装的桥接进程、各有自己的认证，误选中会让「装了但没登录」的机器静默换脑；显式选用（`wemind brain set|switch <名>`）更安全。
  * 新 agent 一律追加在末尾：老机器上已装的前几个仍按原顺序被选中，不改变既有用户的默认大脑。
  */
@@ -427,6 +460,8 @@ export type ResolvedAgent = {
   available: boolean;
   /** 解析到的二进制绝对路径（`available` 时才有）。 */
   binPath: string | null;
+  /** 除 bin 外还必须能在 PATH 上解析到的运行时（如 pi-acp 需要 pi 本体）。 */
+  requiresBins: string[];
   /** bin 是否来自覆盖（env / brain.json），而不是预设——静态 ACP 标记检查据此跳过（自定义入口可能自带 ACP 模式）。 */
   binOverridden: boolean;
 };
@@ -614,6 +649,7 @@ function resolveAgentCore(
     known,
     available,
     binPath,
+    requiresBins: preset.requiresBins ?? [],
     binOverridden: !!explicitBin,
   };
 }
@@ -675,6 +711,7 @@ const ADAPTER_INSTALL_HINT: Record<string, string> = {
     "`npm i -g @agentclientprotocol/claude-agent-acp`（装完得到 claude-agent-acp；Windows 上是 claude-agent-acp.cmd；**需 Node ≥22**）",
   codex:
     "`npm i -g @agentclientprotocol/codex-acp`（装完得到 codex-acp；Windows 上是 codex-acp.cmd）",
+  pi: "`npm i -g pi-acp`（装完得到 pi-acp；Windows 上是 pi-acp.cmd）；另需 `npm i -g @earendil-works/pi-coding-agent` 提供 pi 本体，并在终端里先登录/配好模型",
 };
 
 /**
@@ -697,6 +734,13 @@ export function agentProblem(ag: ResolvedAgent): string | null {
         : ag.name === "cline"
           ? `找不到 Cline CLI 的「${ag.bin}」。安装：\`npm i -g cline\`（Node 20+），装完后重开终端；或用 \`wemind brain set cline --bin "<...>\\cline.cmd"\``
           : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <agent 名>\` 切换`;
+  }
+  // 适配器已装、但它依赖的运行时没装（如 pi-acp 找到了、pi 本体不在 PATH）：
+  // 提前说清楚，别等 session/new 才抛一句适配器的内部错误。
+  const missingRuntime = ag.requiresBins.filter((b) => !onPathAny(b));
+  if (missingRuntime.length) {
+    const hint = ADAPTER_INSTALL_HINT[ag.name];
+    return `找不到「${ag.name}」需要的运行时「${missingRuntime.join("、")}」。${hint ? `安装：${hint}` : "先安装它，再试。"}`;
   }
   return null;
 }

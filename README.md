@@ -23,12 +23,12 @@ wemind list                          # 查看运行状态
 
 ### AI 大脑：能接什么 agent
 
-常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **8 个 agent 预设**：原生 ACP 的 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder` / `cline`（**未配置时按此顺序自动探测**；其中 kiro / opencode / deepseek / qoder / cline 已实测，`gemini` 未实测），以及两个需适配器的 `claude-code` / `codex`（`claude-code` 已探针级实测并跑通真机微信单轮、`codex` 已探针级实测；只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
+常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **9 个 agent 预设**：原生 ACP 的 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder` / `cline`（**未配置时按此顺序自动探测**；其中 kiro / opencode / deepseek / qoder / cline 已实测，`gemini` 未实测），以及三个需适配器的 `claude-code` / `codex` / `pi`（`claude-code` 已探针级实测并跑通真机微信单轮、`codex` 已探针级实测 + 真机 E2E、`pi` 已探针级实测（微信 E2E 待验收）；只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
 
 | 必要条件 | 说明 | 不满足怎么办 |
 | --- | --- | --- |
 | 有**可执行入口** | 终端里能直接跑起来，daemon 才能把它启动为子进程 | 纯 HTTP API（OpenAI / Anthropic / Ollama）没有进程可启动，**目前接不了** |
-| **实现 ACP**，或有 **ACP 适配器** | 原生：kiro / opencode / gemini / DSH / Qoder / Cline；需适配器：Claude Code（`@agentclientprotocol/claude-agent-acp`，已探针级实测 + 真机微信单轮 E2E）、Codex（`@agentclientprotocol/codex-acp`，已探针级实测） | 先**全局安装**适配器（`npm i -g <包>`，npx 只作兜底），无需改 WeMind |
+| **实现 ACP**，或有 **ACP 适配器** | 原生：kiro / opencode / gemini / DSH / Qoder / Cline；需适配器：Claude Code（`@agentclientprotocol/claude-agent-acp`，已探针级实测 + 真机微信单轮 E2E）、Codex（`@agentclientprotocol/codex-acp`，已探针级实测 + 真机 E2E）、pi（`pi-acp` + pi 本体，已探针级实测） | 先**全局安装**适配器（`npm i -g <包>`，npx 只作兜底），无需改 WeMind |
 | 覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt` | 跑 `wemind brain check` 实测；缺失即不可用 |
 | 能**完成认证** | 模型/登录态就绪，二进制在 PATH 上或用 `--bin` 指定 | 配 `wemind brain set <agent 名> --bin "<绝对路径>"` |
 
@@ -283,7 +283,7 @@ npm run build
 npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 ```
 
-> ⚠️ **安全（务必读）**：**内置的 8 个 agent 预设默认都免审批**（kiro `--trust-all-tools`、gemini `--approval-mode yolo`、qoder `--yolo`、opencode 沙箱配置 `permission: allow`、DSH `DSH_PERMISSION_MODE=danger-full-access`、cline `--auto-approve true`、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`），意味着**消息一旦被 daemon 接受，就能让 AI 在运行 daemon 的电脑上执行任意工具（含 shell / 写文件）**。这是「微信里发一句话就能远程干活」的前提，代价是该 AI 在本机近乎全权。
+> ⚠️ **安全（务必读）**：**内置的 9 个 agent 预设默认都免审批**（kiro `--trust-all-tools`、gemini `--approval-mode yolo`、qoder `--yolo`、opencode 沙箱配置 `permission: allow`、DSH `DSH_PERMISSION_MODE=danger-full-access`、cline `--auto-approve true`、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`、pi 默认就不逐次审批），意味着**消息一旦被 daemon 接受，就能让 AI 在运行 daemon 的电脑上执行任意工具（含 shell / 写文件）**。这是「微信里发一句话就能远程干活」的前提，代价是该 AI 在本机近乎全权。
 > **微信平台只把发给这个 bot 的消息发送给登录者本人**（= 扫码登录它的那个微信号，也就是你），所以实际上只有你能驱动它。代码里另有一道**登录者白名单**（`allowFrom`，**默认拒绝**、登录时自动写入登录者）作为**兜底**：万一发送范围变化、或 daemon 被接到别的入口，清单外的发件人一律忽略（`daemon.log` 记 `ignore unauthorized sender`）。**不要关掉它。**
 >
 > **配对授权**：登录者白名单存于每账号的 `~/.wemind/<account>/allowFrom.json`（`finalize`/`adopt` 时自动写入扫码者；daemon 启动也会把登录者种入，老账号自动迁移），通常**无需任何手动配置**。管理命令（兜底用）：`allowlist <key|label>` 查看、`allow <key|label> <userId>` 加入、`revoke <key|label> <userId>` 移除（增删即时生效，无需重启 daemon）。鉴权 = 登录者（`WECHAT_OWNER_ID` 可覆盖）或 在白名单中。
@@ -425,7 +425,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | # | 条件 | 说明 |
 | --- | --- | --- |
 | 1 | 有**可执行入口** | daemon 要把它**启动为子进程**；纯 HTTP API（OpenAI / Anthropic / Ollama）没有进程可启动，目前接不了 |
-| 2 | **实现 ACP**，或有 **ACP 适配器** | 原生实现：kiro / opencode / gemini / DSH / Qoder / Cline；需适配器：Claude Code（`@agentclientprotocol/claude-agent-acp`，已探针级实测 + 真机微信单轮 E2E）、Codex（`@agentclientprotocol/codex-acp`，已探针级实测） |
+| 2 | **实现 ACP**，或有 **ACP 适配器** | 原生实现：kiro / opencode / gemini / DSH / Qoder / Cline；需适配器：Claude Code（`@agentclientprotocol/claude-agent-acp`，已探针级实测 + 真机微信单轮 E2E）、Codex（`@agentclientprotocol/codex-acp`，已探针级实测 + 真机 E2E）、pi（`pi-acp` + pi 本体，已探针级实测） |
 | 3 | ACP 实现覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt`；先用 `wemind brain check` 真握手 |
 | 4 | 能**完成认证**且二进制可解析 | PATH 上能找到，或用 `--bin` 给绝对路径；`.cmd`/`.bat` 需经 shell |
 
@@ -443,7 +443,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 
 `kiro`（内置）= `kiro-cli acp --trust-all-tools` + `KIRO_HOME` 指向沙箱。要接入新 agent，在 `ACP_AGENT_PRESETS` 里加一条、或直接用上面四个变量。持久化选择用 `wemind brain set <agent 名> [--bin ...] [--args "…"] [--extra-args "…"] [--model ...]`（写入 `<数据目录>/brain.json`，任何入口重启都复现；`--args` 是**整段替换**、`--extra-args` 追加在末尾——只加开关（如免确认）用后者，漏掉 `acp` 这类模式参数会握手超时，`wemind brain` 会给出警告；只给 agent 名且 daemon 在跑并认控制桥时会**立刻当场应用（不用重启）**，带 `--bin/--args/--extra-args/--shell/--model` 则只写盘——其中 `--bin`/`--args`/`--extra-args`/`--model` 的改动可由随后的 `wemind brain switch <同名 agent>` 当场应用（「是不是同一个」按 name/bin/args/model 判），`--shell` 要重启）。**模型**同样可配：`--model '["provider 路由","模型名"]'` 指定；**`--model auto` = 跟随你日常那个 agent 的默认**——DSH 读真实 `~/.dsh/profiles/acp/cordis.patch.yml`（优先你自己写的 `- id: acp`，否则 `agent-default-model`；典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端 DeepSeek Harness 在运行；读不到就不下发）。**运行时切换**用 `wemind brain switch <agent 名>` 或微信里发 `切换大脑 <agent 名>`——进程内换、失败自动退回原来那个，见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](docs/repowiki/06-ACP-大脑与沙箱.md)。
 
-**内置预设默认免审批**（每个 agent 用自己官方的机制，不是统一开关）：kiro `--trust-all-tools`、gemini `--acp --approval-mode yolo --skip-trust`、qoder `--acp --yolo`、cline `--acp --auto-approve true`、opencode 写进沙箱 `opencode.json` 的 `"permission": "allow"`（它没有 ACP 可用的 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code 会话建立后 `session/set_mode bypassPermissions`、codex `agent-full-access`。想收紧时**不用改预设**：`--args` 整段替换启动参数，`DSH_PERMISSION_MODE` / `INITIAL_AGENT_MODE` 这类审批开关属于「默认值」（`envDefaults`：daemon 进程环境里同名变量优先），`WEMIND_ACP_SESSION_MODE=0` 可关掉 claude-code / codex 的会话模式切换（其它非空值 = 换成该 modeId）。边缘情况下 agent 仍可能发权限请求（如 claude-code 的 ask 规则），WeMind 默认拒绝，要全部放行设 `WEMIND_ACP_AUTO_ALLOW=1`。各 agent 的准确参数与出处见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §5。
+**内置预设默认免审批**（每个 agent 用自己官方的机制，不是统一开关）：kiro `--trust-all-tools`、gemini `--acp --approval-mode yolo --skip-trust`、qoder `--acp --yolo`、cline `--acp --auto-approve true`、opencode 写进沙箱 `opencode.json` 的 `"permission": "allow"`（它没有 ACP 可用的 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code 会话建立后 `session/set_mode bypassPermissions`、codex `agent-full-access`、pi 默认不逐次审批（无开关）。想收紧时**不用改预设**：`--args` 整段替换启动参数，`DSH_PERMISSION_MODE` / `INITIAL_AGENT_MODE` 这类审批开关属于「默认值」（`envDefaults`：daemon 进程环境里同名变量优先），`WEMIND_ACP_SESSION_MODE=0` 可关掉 claude-code / codex 的会话模式切换（其它非空值 = 换成该 modeId）。边缘情况下 agent 仍可能发权限请求（如 claude-code 的 ask 规则），WeMind 默认拒绝，要全部放行设 `WEMIND_ACP_AUTO_ALLOW=1`。各 agent 的准确参数与出处见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §5。
 
 > 详细步骤、各 agent 需确认的 4 件事、MCP 沙箱差异、验证方法见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)。
 >
@@ -456,6 +456,8 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 > **Qoder 已内置 agent（M0–M3 已完成）**：`wemind brain set qoder` 即用 `qodercli --acp --yolo` 当大脑；内置配置已处理 `QODER_CONFIG_DIR` 沙箱、`.auth/user` + `.auth/machine_id` 登录态同步、`settings.json` 基底（剥离 `providers`/`model`、关自动更新）、文件式 MCP、`memory/` 记忆继承。需先 `qoder login`。实测与限制见 **[docs/接入-Qoder.md](docs/接入-Qoder.md)**。
 >
 > **Cline 已内置 agent（原生 ACP，3.0.74 实测）**：装 `npm i -g cline` 后 `wemind brain set cline` 即用 `cline --acp --auto-approve true` 当大脑；`providers.json` 登录态同步、`models.json` 模型目录同步（缺它会回退 `gpt-4o`）、`mcp.json` 文件式 MCP。**认证**：ACP 只自动恢复 `cline` / `cline-pass` / `openai-codex`；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER` + `CLINE_API_KEY`（父进程显式设了就不接管），通常无需手工配置。实测与限制见 **[docs/接入-Cline.md](docs/接入-Cline.md)**。
+>
+> **pi 已内置（探针级实测，微信 E2E 待验收）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，Node ≥22）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 隔离沙箱（`settings.json` / `auth.json` / `models*.json` 原样同步，`skills/` junction、`AGENTS.md` 复制）；MCP 走 pi 自己的 `<沙箱根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入-pi.md](docs/接入-pi.md)**。
 
 ### 收发图片
 

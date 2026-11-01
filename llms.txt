@@ -67,13 +67,14 @@
 - Package name ≠ command name: `@wemind/cli` installs the `wemind` binary. `npx` must use the package name.
 - Process identity markers are `wemind` + `cli.js` (NOT the source dir name `wechat-daemon`); `npm i -g` runs `.../node_modules/@wemind/cli/dist/cli.js`.
 
-- Default brain selection is `auto`: `kiro → opencode → gemini → deepseek → qoder → cline`; persisted in `<data>/brain.json`.
+- Default brain selection is `auto`: `kiro → opencode → gemini → deepseek → qoder → cline`; persisted in `<data>/brain.json`. Adapter presets (`claude-code`, `codex`, `pi`) are never auto-probed — select them explicitly.
 - `session/load` is not universal. DSH 0.2.1-rc.2 returns `-32601`; it has `session/resume` instead.
 - Session maps are namespaced per brain: `brain-sessions.json` keyed `<agent>:<userId>`, `worker-sessions.json` keyed `<agent>:task`; legacy bare keys migrate to the current brain on first read (`session-map.ts`).
 - DSH 0.2.1-rc.2 advertises `promptCapabilities.image:false`; image prompts fail with `-32602`.
 - Qoder CLI 1.1.78 has load/resume/images/MCP and needs `.auth/user` + `.auth/machine_id` synced into the sandbox; its sandbox MCP lives in `settings.json.mcpServers`.
 - Cline CLI 3.0.74 has native ACP (`cline --acp`), `loadSession`/images, and persists context across a hard kill via `session/load`. Its ACP auth only restores `cline`/`cline-pass`/`openai-codex`; custom providers require `CLINE_PROVIDER`+`CLINE_API_KEY`. It ignores ACP `session/new.mcpServers` — MCP goes through `CLINE_MCP_SETTINGS_PATH` (`{mcpServers}`), and `session/close` is not implemented.
 - Claude Code needs the official adapter `@agentclientprotocol/claude-agent-acp` (global install, Node ≥22; Windows `claude-agent-acp.cmd`). Its sandbox uses `CLAUDE_CONFIG_DIR` (also isolates `~/.claude.json`), MCP goes via ACP `mcpServers`, and approvals are bypassed with `session/set_mode bypassPermissions`. Probe-verified plus a real WeChat single-turn E2E; restart-continuity/MCP/task re-checks pending.
+- pi needs both `npm i -g pi-acp` and `npm i -g @earendil-works/pi-coding-agent` (the preset's `requiresBins: ["pi"]` reports a missing runtime early). Sandbox is `PI_CODING_AGENT_DIR` at the sandbox root; MCP is pi's own `<sandbox>/mcp.json` (kiro shape, `mcpViaAcp: false`); no approval switch needed. Probe-verified (`load`, images, 1ms first frame, 0 reverse requests, hard-kill `session/load`); WeChat E2E pending. `pi-acp` still reads `~/.pi/pi-acp/session-map.json`, `~/.pi/agent/prompts`, `~/.agents/skills` from the real home.
 - Qoder's user memory lives in `~/.qoder/memory/` and is junctioned into the sandbox (brain writes land in the real dir); `skills/agents/commands/AGENTS.md` do not exist in 1.1.78. Qoder Desktop may register MCPs in `~/.qoder/mcp-router.json` instead of `settings.json`, so those are intentionally invisible to `列出 MCP`.
 - The repo has no `Brain` interface; `acp-brain.ts` exports `askBrain`/`newSession`/`restart`.
 - iLink consecutive send limit is ~10; progress messages consume it.

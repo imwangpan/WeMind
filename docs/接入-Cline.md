@@ -196,7 +196,7 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 ## 6. 为什么不用 npx / 适配器？
 
 - Cline **原生 ACP**，没有适配器需求；`cline-acp` 已归档，装它反而多一层 gRPC 桥。
-- 对**必须用适配器**的 agent（claude-code / codex），WeMind 目前的 claude-code 预设用 `npx -y …` 图省事；但 daemon 是长期驻留进程，npx 的代价是：
+- 对**必须用适配器**的 agent（claude-code / codex / pi），预设现在统一用**全局安装**的适配器二进制（`claude-agent-acp` / `codex-acp` / `pi-acp`），不再默认 `npx -y …`；但 daemon 是长期驻留进程，npx 的代价仍然是：
   - 每次 spawn 都可能访问 registry（离线/代理环境直接失败）；
   - 版本随上游漂移（同一个 `brain.json` 今天和明天跑的可能不是同一版）；
   - Windows 多一层 `npx.cmd` 包装，退出/信号传播更脆；
