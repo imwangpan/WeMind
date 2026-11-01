@@ -2,7 +2,7 @@
 
 > **适用版本**：WeMind 1.3.0（分支 `feat/pi-brain-v2`）｜ **最后核对**：2026-11-01 ｜ **实测环境**：Windows 11 + Node 24 + `pi-acp@0.0.34` + pi `1.4.0`
 >
-> **状态**：✅ 内置预设、ACP 探针全绿（`initialize` / `session/new` / prompt / 图片 / 强杀后 `session/load` / 工具调用 0 反向请求）；**微信真机 E2E 待验收**（brain 单轮、热切换、`任务 pi：…`）。
+> **状态**：✅ 内置预设、ACP 探针全绿（`initialize` / `session/new` / prompt / 图片 / 强杀后 `session/load` / 工具调用 0 反向请求）；**微信真机 E2E 单轮已通过（2026-11-01，brain 通道）**，worker 经 CLI 派发也已通过；热切换与微信「任务 pi：…」待验收。
 >
 > [pi](https://github.com/earendil-works/pi)（`@earendil-works/pi-coding-agent`）本身**不带 ACP server**，经社区适配器 [pi-acp](https://www.npmjs.com/package/pi-acp)（bin `pi-acp`，内部 spawn `pi --mode rpc` 并在 ACP 与 pi RPC 之间桥接）接入。WeMind 内置预设名：**`pi`**。
 
@@ -55,7 +55,7 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 - **有 thought 与 tool 帧**（2026-11-01 复跑 `pi-acp@0.0.34` + pi 1.4.0）：除 `agent_message_chunk` 外还会发 `agent_thought_chunk`、`tool_call` / `tool_call_update`——早期探针曾记为「只有 message chunk」，以本机复跑为准；这些帧也给 15s 心跳提供了 activity。
 - **沙箱隔离不完整（已核对适配器源码）**：`~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills` 由 pi-acp 从真实 `homedir()` 读取，不随 `PI_CODING_AGENT_DIR` 走；`settings.json` 是原样复制，里面的 `packages`/`extensions` 键也会带进沙箱。跨账号共享的只是映射/提示词等元数据，**会话本体与凭据副本仍在各账号沙箱内**；但如果你要求「沙箱里看不到日常 pi 的扩展」，目前需要上游支持或额外剥离（WeMind 不替 agent 改配置，§4.14）。
 - **适配器定位是 MVP**（开发以 Zed 为主），上游小版本可能快速变化——升级 pi-acp 后建议重跑 `wemind brain check` 和 `ACP_TEST_TOOL=1` 的探针。
-- **微信 E2E 待验收**：真机一条消息 → `daemon.log` `prompt ok` → 收到回复；`wemind brain switch pi` 热切换；`任务 pi：…` 当 worker。
+- **微信 E2E**：brain 单轮已通过（2026-11-01：微信消息 → `session/load` 成功 → `prompt ok 9705ms` → 回复送达，启动横幅未混入）；`wemind brain switch pi` 热切换与微信「任务 pi：…」待验收。
 
 ## 5. 审批机制与漂移预案（假如 pi 改了默认）
 
@@ -66,7 +66,7 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
   1. **宿主兜底（零改动，立即生效）**：`WEMIND_ACP_AUTO_ALLOW=1` 逐次自动放行 `session/request_permission`——局限：只覆盖 ACP 权限请求通道，本质是「每次自动点允许」。
   2. **审批若内建成 settings 键**：写进 pi 的 settings.json 即可——沙箱把真实配置**原样同步**，日常 pi 与微信大脑保持一致；只想微信大脑放开、日常保守 → 预设加 `settingsBase: "settings.json"`（qoder 同款机制，以真实文件为基底生成沙箱版）。
   3. **审批若走环境变量**：预设 `envDefaults` 注入（默认值语义：部署方可用同名变量收紧，父进程已设时不覆盖）。
-  4. **若是 trust 询问卡住**（沙箱 cwd 是新目录 → 默认 ask）：往沙箱 settings.json 写 `"defaultProjectTrust": "always"`。
+  4. **若是 trust 询问卡住**（沙箱 cwd 是新目录 → 默认 ask）：预设加 `settingsDefaults: { defaultProjectTrust: "always" }`（只补沙箱副本，用户显式设过则保留）。
   5. **需要启动参数透传**：只能给 pi-acp 上游提 issue（MVP 项目迭代快）或等 pi 官方原生 ACP。
 - **漂移检测（已实现）**：`ACP_TEST_TOOL=1` 跑探针——强制走一次真实工具调用（写标记文件），记录期间 `session/request_permission` 次数并用文件系统验证「真的执行到了最后一步」（只看 stopReason 分不出「拒绝了」和「没执行」）。开启时探针整体 ok 包含此断言：`permission=0 && fileWritten=true`。「免审批」类预设升级 agent 后重跑一次，agent 若开始先问，探针先红而不是微信第一条消息卡 30s 超时。
 
@@ -74,5 +74,5 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 
 - 探针：§3 全绿（含强杀恢复、图片与漂移检测工具调用）。2026-11-01 本机复跑（`pi-acp@0.0.34` + pi 1.4.0）：`ok=true`、`contextKept=true`、图片无报错、`toolTest.ok=true`（3 次工具调用 / 0 权限请求 / 标记文件落盘）、反向请求为空。
 - `wemind brain` / `wemind brain check`：2026-11-01 本机实测——`生效：name=pi bin=pi-acp.cmd args=[] shell=true home_env=PI_CODING_AGENT_DIR model=(agent 默认) session_mode=(无)`，`可选 agent` 含 pi，自动探测顺序仍不含 pi；`brain check` 握手成功（initialize + session/new，~2.1s）。
-- 单测：`brain-agents.test.ts` 覆盖预设字段、`requiresBins`（pi-acp 已装但 pi 缺失）、安装提示、`AUTO_PROBE_ORDER` 不含 pi。
-- 待真机验收（按 `docs/ai/recipes/run-e2e.md`）：微信一条消息 → `daemon.log` `prompt ok` → 收到回复；热切换 `wemind brain switch pi`；`任务 pi：…` 当 worker。
+- 单测：`brain-agents.test.ts` 覆盖预设字段、`requiresBins`（pi-acp 已装但 pi 缺失）、安装提示、`AUTO_PROBE_ORDER` 不含 pi；`sandbox-pi.test.ts` 覆盖 settings/auth/models 同步、`quietStartup` 默认值与用户值保留、MCP 排除 `wechat`/disabled；`pool-spawn.test.ts` 覆盖「按这条任务的 agent 备 worker 沙箱」。
+- 真机（2026-11-01）：worker 通道 `wemind task "只回复数字 2" --agent pi` → `prompt ok 7857ms` → 回复「2」；删掉 worker-home 里 pi 的 `settings.json`/`models.json` 后再次派发，`acquire` 按任务 agent 自动重建（`quietStartup: true`）。brain 通道：微信消息 → `session/load` → `prompt ok 9705ms` → 回复送达（启动横幅未混入回复）。热切换 / 微信「任务 pi：…」待验收。
