@@ -71,9 +71,8 @@ describe("brain 沙箱（Claude Code）", () => {
   });
 
   it("mcpViaAcp：不写 settings.json / mcp.json；catalog 来自真实 ~/.claude.json，wechat 被拒", async () => {
-    const { ensureBrainHome, addMcp, catalogNames, activeMcpServers } = await import(
-      "./mcp-sandbox.js"
-    );
+    const { ensureBrainHome, addMcp, catalogNames, activeMcpServers } =
+      await import("./mcp-sandbox.js");
     ensureBrainHome();
 
     expect(fs.existsSync(path.join(brainCfg, "settings.json"))).toBe(false);
@@ -103,7 +102,9 @@ describe("worker 沙箱（Claude Code）", () => {
     ensureWorkerHome();
 
     expect(workerMcpServers().map((s: any) => s.name)).toEqual(["demo"]);
-    expect(fs.readFileSync(path.join(workerCfg, "skills", "sample.md"), "utf-8")).toBe("# skills\n");
+    expect(fs.readFileSync(path.join(workerCfg, "skills", "sample.md"), "utf-8")).toBe(
+      "# skills\n",
+    );
     expect(fs.existsSync(path.join(workerCfg, "settings.json"))).toBe(false);
     expect(fs.existsSync(path.join(workerCfg, "settings", "mcp.json"))).toBe(false);
   });

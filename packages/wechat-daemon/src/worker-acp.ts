@@ -413,7 +413,9 @@ export class WorkerConn {
     try {
       await this.request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
     } catch (e) {
-      dlog(`${this.id}(${this.agent.name}) initialize failed: ${String(e)}${acpArgsHint(this.agent)}`);
+      dlog(
+        `${this.id}(${this.agent.name}) initialize failed: ${String(e)}${acpArgsHint(this.agent)}`,
+      );
       throw e;
     }
     this.initialized = true;

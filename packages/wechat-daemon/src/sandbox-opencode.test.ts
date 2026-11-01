@@ -20,7 +20,11 @@ beforeAll(() => {
   // 真实全局配置：没有 permission 键 → 沙箱应补 "allow"
   fs.writeFileSync(
     path.join(realHome, "opencode.json"),
-    JSON.stringify({ model: "demo/model", mcp: { servers: { wechat: { command: "x" } } } }, null, 2),
+    JSON.stringify(
+      { model: "demo/model", mcp: { servers: { wechat: { command: "x" } } } },
+      null,
+      2,
+    ),
   );
   process.env.WEMIND_BRAIN = "opencode";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
