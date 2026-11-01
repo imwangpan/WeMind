@@ -9,3 +9,4 @@ _daemon.*
 .agents/
 .claude/
 .vscode/
+.worktrees/

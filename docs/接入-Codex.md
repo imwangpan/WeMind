@@ -1,6 +1,6 @@
 # 接入 OpenAI Codex（设计文档）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-01 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / `session/load` 恢复 / 图片 / `set_mode` / `set_config_option(model)`）；**真机微信 E2E 未做**。
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-01 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / `session/load` 恢复 / 图片 / `set_mode` / `set_config_option(model)`）；**真机 E2E 已通过**（2026-11-01：worker 通道任务 #21 + brain 通道微信单轮，回复均送达）。
 >
 > 实测环境：Windows 11、Node 24.21.0、`@agentclientprotocol/codex-acp` **2.5.0**（官方维护）、Codex CLI 0.165–0.166。适配器还在 2.x，升级后请按 §2 重新跑探针。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](ai/recipes/add-acp-agent.md) · [接入-Qoder.md](接入-Qoder.md)（原生 ACP 样板）
@@ -101,8 +101,9 @@ codex: {
 1. **无 stdio MCP**（C7）：微信里「加载/卸载 MCP」对 codex 不生效。
 2. **不走 WeMind 的凭据沙箱**：Codex 的登录态在 `~/.codex`，适配器直接用；WeMind 不同步、不改写（§4.14）。
 3. **模型/推理档位由 Codex 决定**：WeMind 默认不下发；需要固定时 `wemind brain set codex --model "<modelId>"`（`session/set_config_option`，幂等）。
-4. **未做真机 E2E**：微信端发消息 / 发图 / 切脑 / worker 派发尚未在 codex 上跑通（本文件只到探针级）。
-5. **版本敏感**：`codex-acp` 的 capabilities 与 mode id 随版本变化；升级后重跑 §2 的探针。
+4. **真机 E2E 已过一轮**（2026-11-01）：**worker 通道**——`wemind brain switch codex --worker` 后 `wemind task "…"` 由 codex 执行，`prompt ok 4436ms`，回话「2」正常产出（`set_mode agent-full-access` 生效，0 反向请求）；**brain 通道**——微信发「你好，自我介绍一句」，`turn start` → `session/prompt` → `prompt ok 2962ms` → `final send`（3 段），回复送达。**发图 / 冷重启 `session/load` / 切脑回切待复测**。
+5. **没有沙箱配置目录**：codex 适配器不认 `KIRO_HOME`/`CLAUDE_CONFIG_DIR` 之类，WeMind 只能把 **cwd** 指到 `BRAIN_HOME`——所以微信里 codex 看到的「当前目录」是沙箱根（实测它据此说「可以分析这个 brain-home 目录」），**不在你真实项目里**。要在真实目录干活请在消息里点明路径（worker 侧由 `wemind task --cwd` 指定）。
+6. **版本敏感**：`codex-acp` 的 capabilities 与 mode id 随版本变化；升级后重跑 §2 的探针。
 
 ---
 
