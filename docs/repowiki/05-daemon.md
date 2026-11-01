@@ -101,12 +101,12 @@ graph TD
     C2 -->|任务：/ &gt;/ 任务 &lt;agent&gt;：| H3["有任务→发给它<br/>无任务或指定了 agent→dispatchTask"]
     C2 -->|否| C3{"parseBrainEscape?<br/>问大脑 xxx"}
     C3 -->|是| H4["强制走 brain"]
-    C3 -->|否| C4{"无前缀 + 非图片<br/>+ worker 在 waiting?"}
-    C4 -->|是| H5["发给 worker"]
-    C4 -->|否| H6["handleMessage → brain"]
+    C3 -->|否| C4{"无前缀 + 非图片<br/>+ 「继续」类短句<br/>+ 有可续跑任务?"}
+    C4 -->|是| H5["当作续跑发给任务（injectTask）"]
+    C4 -->|否| H6["handleMessage → brain（默认）"]
 ```
 
-三种「明确性」：`任务：`/`>` 强制发 worker、`问大脑` 强制发 brain、无前缀按 worker 状态分流。worker 只在 **waiting**（刚停下问你）时才默认接管无前缀消息；它埋头跑（running）时大脑照常可用。图片消息始终走 brain。
+三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时恰有一条 interrupted）才进任务表（`shouldResumeTask()`，2026-11-02 起）。任务出完结果后不会再接管日常消息；图片消息始终走 brain。
 
 **命令层（1.2.0 起）**：解析与帮助**同表驱动**（`chat-commands.ts` 的 `COMMAND_SPECS`），中文与斜杠双轨、`/ai` 是统一入口前缀（`/ai` 列可选、`/ai brain X`、`/ai task X`），中文（`切换大脑`、`切换任务大脑`）与旧斜杠（`/brain`、`/worker`）是等价别名。`帮助`/`/help` 按角色裁剪（非登录者看不到「仅登录者」命令）。
 

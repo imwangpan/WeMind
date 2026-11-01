@@ -12,7 +12,8 @@ import { ACP_AGENT_PRESETS } from "./brain-agents.js";
  *  - `任务 <agent 名>：正文` 里的「冒号前」必须**恰好是一个已知 agent 名**才算指定 agent，
  *    所以 `任务 明天：去买菜`、`> nav: 去某地` 仍是普通内容（不会因为带冒号就被误当成指定 agent）；
  *  - `#<数字> 正文` 只在 `#`/`＃` 后跟纯数字时才寻址（`#abc 你好` 是普通消息；`#1 号文件在哪` 说的是「1 号文件」，
- *    数字后紧跟「号」也按普通消息，见 task.reply 的 match）；
+ *    数字后紧跟「号」也按普通消息，见 task.reply 的 match）；编号与正文之间允许空格或全角冒号（`#2：继续`），
+ *    但**不允许半角冒号**（`#1:30 开会` 是时间，不是给 1 号任务回话）；
  *  - 中文写法与斜杠写法**等价**；`/ai` 家族是统一入口（`/ai`、`/ai brain X`、`/ai task X`）。
  */
 
@@ -255,7 +256,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     zh: "任务 [<agent 名>：]正文",
     slash: "/task [<agent 名>] 正文",
     cli: 'wemind task "正文" [--agent <名字>]',
-    brief: "派发新任务；带 agent 名就由它执行（只影响这一条）",
+    brief: "派发新任务（有活跃任务时发给它）；带 agent 名就由它执行（只影响这一条）",
     match: (t) => {
       // ① `任务：正文` / `task: 正文`（沿用旧写法，不带 agent 名）
       let m = t.match(/^(?:任务|task)[:：]\s*([\s\S]+)$/i);
@@ -285,9 +286,9 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     zh: "#<编号> 正文",
     slash: "/reply <编号> 正文",
     cli: 'wemind task-reply <编号> "正文"',
-    brief: "给指定编号的任务回话（多任务时必须）",
+    brief: "给指定编号的任务回话（回任务都用它；无前缀消息走大脑）",
     match: (t) => {
-      const m = t.match(/^(?:[#＃](\d+)|\/reply\s+(\d+))\s+([\s\S]+)$/i);
+      const m = t.match(/^(?:[#＃](\d+)[\s：]+|\/reply\s+(\d+)\s+)([\s\S]+)$/i);
       if (!m) return null;
       // `#1 号文件在哪` 说的是「1 号文件」，不是给 1 号任务回话 —— 数字后面紧跟「号」时按普通消息处理。
       if (m[1] !== undefined && m[3].startsWith("号")) return null;

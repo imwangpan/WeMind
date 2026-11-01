@@ -49,6 +49,7 @@ const {
   awaitingTasks,
   interruptedTasks,
   looksLikeResume,
+  shouldResumeTask,
   listTasks,
   renderTaskList,
   initTasks,
@@ -145,6 +146,9 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     r1.resolve("方案 A 还是 B？");
     await vi.waitFor(() => expect(has(pushed, "方案 A 还是 B？")).toBe(true));
     expect(has(pushed, "🤖【任务】")).toBe(true); // 来源标记
+    // 每条结果都带「怎么回这条任务」的提示（无前缀的消息已改为走大脑）
+    expect(has(pushed, "#1 正文")).toBe(true);
+    expect(has(pushed, "不带前缀的消息会交给大脑")).toBe(true);
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1)); // 推送后进入 waiting
 
     injectTask("u1", "选 A"); // waiting 态回话 → 第二轮
@@ -175,12 +179,13 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     await vi.waitFor(() => expect(has(pushed, "继续")).toBe(true));
     expect(has(pushed, "中断")).toBe(true);
     expect(has(pushed, "超时/卡住")).toBe(true);
-    // 超时这类「等一下重试就好」的失败仍停在「等你回复」：无编号消息照样喂给它（老规矩，别顺手改掉）
+    expect(has(pushed, "#1 继续")).toBe(true); // 续跑写法直接给到编号（无前缀的普通消息不再自动喂任务）
+    // 超时这类「等一下重试就好」的失败仍停在「等你回复」，等用户显式回「继续」/`#1 继续`
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
     expect(interruptedTasks("u1").length).toBe(0);
   });
 
-  it("provider 报错（余额不足）→ 转「已中断」，不再抢下一条无编号消息；回「继续」能续跑", async () => {
+  it("provider 报错（余额不足）→ 转「已中断」；回「继续」能续跑", async () => {
     const r1 = deferred();
     const r2 = deferred();
     acquire.mockImplementationOnce(async () => {
@@ -198,7 +203,8 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     );
     await vi.waitFor(() => expect(has(pushed, "额度/余额不足")).toBe(true));
     expect(has(pushed, "重试也不会好")).toBe(true);
-    // 关键：不留在 waiting（否则下一条无编号消息会被它吞掉），而是「已中断」
+    expect(has(pushed, "#1 继续")).toBe(true); // 续跑提示带编号
+    // 关键：不留在 waiting（这轮没跑完，别显示成还能接着干），而是「已中断」
     await vi.waitFor(() => expect(interruptedTasks("u1").map((t) => t.id)).toEqual([1]));
     expect(awaitingTasks("u1").length).toBe(0);
     // 任务列表的「最近输出」也要是这条中断说明（别留着上一轮的旧输出，让人以为它跑完了）
@@ -347,7 +353,7 @@ describe("多任务与编号", () => {
     expect(conns[0].ask).toHaveBeenCalledTimes(1); // 甲没被动过
   });
 
-  it("一条 running + 一条 waiting：无编号消息喂给在等的那条（谁在等就喂谁）", async () => {
+  it("injectTask 不指定编号：一条 running + 一条 waiting → 喂在等的那条（谁在等就喂谁）", async () => {
     const a1 = deferred();
     const a2 = deferred();
     acquire
@@ -570,6 +576,14 @@ describe("任务表写入磁盘与重启续跑", () => {
     expect(looksLikeResume("帮我看看这个报错")).toBe(false);
     expect(looksLikeResume("继续写个脚本")).toBe(false);
     expect(looksLikeResume(undefined)).toBe(false);
+
+    // 2026-11-02 路由闸：普通消息一律走大脑；「继续」只在有可续跑任务时放行
+    expect(shouldResumeTask("继续", { awaiting: 0, active: false, interrupted: 1 })).toBe(true);
+    expect(shouldResumeTask("继续", { awaiting: 1, active: true, interrupted: 0 })).toBe(true);
+    expect(shouldResumeTask("继续", { awaiting: 2, active: true, interrupted: 0 })).toBe(true); // 多条 → injectTask 回编号清单
+    expect(shouldResumeTask("在吗", { awaiting: 1, active: true, interrupted: 0 })).toBe(false);
+    expect(shouldResumeTask("继续", { awaiting: 0, active: true, interrupted: 1 })).toBe(false); // 只有 running 在跑：不抢
+    expect(shouldResumeTask("继续", { awaiting: 0, active: false, interrupted: 0 })).toBe(false);
 
     // 放行 → 无编号也能续跑：injectTask 内部按「0 条在跑 + 1 条已中断」选中它
     const resumed = deferred();
