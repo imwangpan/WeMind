@@ -91,6 +91,27 @@ function syncCredentials(ag: ResolvedAgent): void {
   for (const f of ag.identityFiles) syncCredentialFile(ag, f, "always");
 }
 
+/** 把预设的默认设置项补进沙箱 settings.json：只补缺失键（用户显式设过就保留用户的值），真实配置不动。 */
+function applySettingsDefaults(ag: ResolvedAgent): void {
+  if (Object.keys(ag.settingsDefaults).length === 0) return;
+  const file = path.join(workerConfigDir(ag), "settings.json");
+  const cur = readJson(file) ?? {};
+  let changed = false;
+  for (const [k, v] of Object.entries(ag.settingsDefaults)) {
+    if (cur[k] === undefined) {
+      cur[k] = v;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(cur, null, 2), "utf-8");
+  } catch {
+    /* best-effort */
+  }
+}
+
 function loadCatalog(ag: ResolvedAgent): Record<string, unknown> {
   return readMcpServers(readJson(catalogPath(ag)), ag.mcpFormat);
 }
@@ -312,8 +333,10 @@ function mirrorRealKiro(ag: ResolvedAgent): void {
 }
 
 /**
- * 启动时确保 worker 沙箱就绪：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 链入记忆/技能 → 凭据。
- * `forAgent` 可显式指定 agent（多任务 / 进程池提前起进程时为**那个** agent 备沙箱，此刻槽位可能指着别的默认）。
+ * 确保 worker 沙箱就绪：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 链入记忆/技能 → 凭据 → 预设默认设置项。
+ * daemon 启动时按默认任务大脑调用一次；**每次派发新 worker 前**（`worker-pool.ts` 的 `acquire`）再按**这条任务的 agent** 调一次——
+ * 否则派到非默认 agent（如 `--agent pi`）时，它自己的 settings/凭据/MCP 还没进沙箱，agent 会拿空配置跑。
+ * `forAgent` 可显式指定 agent（此刻槽位可能指着别的默认）。
  */
 export function ensureWorkerHome(forAgent?: ResolvedAgent): void {
   const ag = forAgent ?? getAgent("worker");
@@ -321,4 +344,5 @@ export function ensureWorkerHome(forAgent?: ResolvedAgent): void {
   applyWorkerSandbox(ag); // 再写全量 MCP（除 wechat 等排除集）
   mirrorRealKiro(ag); // 链入记忆/steering/skills（sessions 仍隔离）
   syncCredentials(ag); // 凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
+  applySettingsDefaults(ag); // 预设默认设置项（如 pi 的 quietStartup：关掉 pi-acp 当消息发出来的启动横幅）
 }

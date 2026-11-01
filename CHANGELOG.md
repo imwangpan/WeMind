@@ -9,6 +9,11 @@
 - **pi coding agent 内置预设（经社区适配器 `pi-acp`）**：`pi` → `pi-acp`（全局安装；Windows `pi-acp.cmd` + `shell: true`）。新增预设字段 **`requiresBins`**：除 `bin` 外还必须在 PATH 上解析到的运行时——pi-acp 内部 spawn `pi --mode rpc`，**只装适配器不够**；`agentProblem()` 会在 `wemind brain` / `brain check` 里直接报「运行时 pi 缺失」并给两条安装命令（`npm i -g pi-acp` + `npm i -g @earendil-works/pi-coding-agent`），不等 `session/new` 才抛适配器内部错误。沙箱：`PI_CODING_AGENT_DIR` 指向沙箱根（同 kiro 布局），`settings.json` / `auth.json` / `models.json` / `models-store.json` 原样同步，`skills/` junction、`AGENTS.md` 复制。**MCP 走 pi 自己的 `<沙箱根>/mcp.json`**（kiro 格式；`pi mcp list` 实测可识别），`mcpViaAcp: false`——pi-acp 只把 `session/new` 的 `mcpServers` 存进会话、从不读取；`wechat` 仍永久排除。免审批无需任何开关（pi 官方默认不逐次审批，适配器也不解析 CLI 参数）。**不在 `AUTO_PROBE_ORDER`**（适配器类，装好 ≠ 登录；显式 `wemind brain set|switch pi` 或 `WEMIND_BRAIN=pi`）。探针实测（`pi-acp@0.0.34` + pi 1.4.0，2026-10-30）：`loadSession: true`、图片 ✅、首帧 0–3ms、有 thought/tool 帧、工具调用 0 反向请求、强杀后 `session/load` 上下文保留、`ACP_TEST_TOOL=1` 漂移检测通过（标记文件落盘、0 个权限请求）。**已知限制**：pi-acp 从真实 `homedir()` 读 `~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills`，沙箱隔离不完整；适配器定位是 MVP，升级后建议重跑探针。**微信真机 E2E 待验收**（brain 单轮 / 热切换 / `任务 pi：…`）。
 - **`scripts/acp-probe.mjs` 增加工具漂移检测**：`ACP_TEST_TOOL=1` 强制一次真实工具调用（写 `drift-check.txt`），记录期间 `session/request_permission` 次数并用文件系统验证工具真的执行到落盘——「免审批」类预设升级 agent 后跑一次即可发现上游是否开始逐次审批。同时给 `ACP_TEST_MCP` 的 stdio server 补 `env: []`（ACP schema 必填），避免示例缺字段被误判成「不支持 stdio」。
 
+### Fixed
+
+- **pi 的启动横幅不再混进回复（2026-11-01 真机）**：pi-acp 把 pi 的启动信息（`## Context` / `## Skills` …）当作 `agent_message_chunk` 发给客户端（给 Zed 之类看的启动面板），微信里就成了每条新会话首答的前缀。预设新增 `settingsDefaults` 字段（只补沙箱 `settings.json` 里缺失的键，用户显式设过就保留用户的值，真实配置不动）；pi 用 `settingsDefaults: { quietStartup: true }`（pi 官方 settings.md 的开关）关掉。
+- **worker 沙箱按任务 agent 准备（2026-11-01 真机）**：daemon 启动时只按默认任务大脑备一次 `worker-home`；派发到别的 agent（`wemind task --agent pi` / 微信「任务 pi：…」）时它自己的 `settings.json` / `models.json` / 凭据还没进沙箱，pi 会拿空配置跑（任务输出异常）。现在 `worker-pool.ts` 的 `acquire` 在复用/起进程前按**这条任务的 agent** 调 `ensureWorkerHome(ag)`。
+
 ### Docs
 
 - 新增 `docs/接入-pi.md`（安装三步、预设逐项、探针结论、已知限制、审批漂移预案、验证记录）；同步 `README.md`、`docs/新手教程.md`、`packages/wechat-daemon/README.md`、`docs/接入其它-ACP-Agent.md`、`docs/接入-Cline.md`、`docs/使用指南-远程任务（worker）.md`、`docs/速查-数据目录与环境变量.md`、`docs/repowiki/{06,09,README}`、`docs/ai/README.md`、`docs/ai/recipes/{add-acp-agent,run-e2e}.md`、`AGENTS.md`、`scripts/doctor.ps1`、`llms.txt`。

@@ -139,7 +139,9 @@ stateDiagram-v2
 
 ### worker 沙箱
 
-`WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain 沙箱**策略相反**：worker 是无人值守的任务执行机，继承 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）—— 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。写入磁盘方式按 agent：kiro/opencode 由 `applyWorkerSandbox` 写沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。记忆/技能（`mirrorRealKiro`）与 settings（`syncSettings`，含模型/信任）继承与 brain 一致。
+`WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain 沙箱**策略相反**：worker 是无人值守的任务执行机，继承 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）—— 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。写入磁盘方式按 agent：kiro/opencode 由 `applyWorkerSandbox` 写沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。记忆/技能（`mirrorRealKiro`）与 settings（`syncSettings`，含模型/信任）继承与 brain 一致；预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`，关掉 pi-acp 当消息发出来的启动横幅）也只补缺失键、用户显式设过就保留。
+
+沙箱按**这条任务的 agent** 准备：daemon 启动时只按默认任务大脑备一次；`worker-pool.ts` 的 `acquire` 在复用/起进程前会再调 `ensureWorkerHome(ag)`，否则派到别的 agent（如 `--agent pi`）时它自己的 settings/凭据/MCP 还没进沙箱，agent 会拿空配置跑。
 
 > **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个配置目录（2026-10-29 一轮样本未见互踩，长期风险仍在）。
 >

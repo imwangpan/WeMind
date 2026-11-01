@@ -74,6 +74,23 @@ const agent = (name: string): ResolvedAgent =>
     available: true,
     binPath: process.execPath,
     args_placeholder: undefined,
+    // acquire 每次都会按这条任务的 agent 备 worker 沙箱：字段给全（空集合=不继承），别让它抛
+    inherit: false,
+    inheritDirs: [],
+    inheritFiles: [],
+    configSubdir: "",
+    mcpFormat: "kiro",
+    mcpConfigFile: "settings/mcp.json",
+    catalogFile: "settings/mcp.json",
+    env: {},
+    envDefaults: {},
+    images: true,
+    credentialFiles: [],
+    identityFiles: [],
+    settingsDefaults: {},
+    mcpViaAcp: false,
+    requiresBins: [],
+    binOverridden: false,
   }) as unknown as ResolvedAgent;
 
 let logFile = "";
@@ -131,6 +148,28 @@ describe("worker 进程池（真进程）", () => {
     expect(g2.conn.id).toBe(c1!.id); // 同一条连接
     expect(spawnCount()).toBe(1); // 没有第二次 spawn
     expect(await g2.conn.ask("第二轮", "task-2@u1")).toContain("收到:第二轮");
+  });
+
+  it("按这条任务的 agent 备沙箱：派到非默认 agent 时它自己的 settings 也进 worker 沙箱", async () => {
+    const realHome = path.join(root, "real-pi");
+    fs.mkdirSync(realHome, { recursive: true });
+    fs.writeFileSync(
+      path.join(realHome, "settings.json"),
+      JSON.stringify({ defaultProvider: "magpie" }),
+    );
+    const a = {
+      ...agent("pi-like"),
+      realHome,
+      credentialFiles: ["settings.json"],
+      settingsDefaults: { quietStartup: true },
+    } as ResolvedAgent;
+    const g = await acquire(a, 1);
+    expect(g.ok).toBe(true);
+    const cfg = JSON.parse(
+      fs.readFileSync(path.join(dataDir, "worker-home", "settings.json"), "utf-8"),
+    );
+    expect(cfg.defaultProvider).toBe("magpie"); // 从这条任务 agent 的 realHome 同步进来
+    expect(cfg.quietStartup).toBe(true); // 预设默认项也补上
   });
 
   it("两个 agent 并行：两条连接、两个进程，各答各的", async () => {

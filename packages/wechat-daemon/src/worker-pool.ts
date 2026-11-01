@@ -4,6 +4,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { createConn, type WorkerConn } from "./worker-acp.js";
 import { pidRecordOf, writePidRecords, type PidRecord, type PidState } from "./pid-record.js";
 import type { ResolvedAgent } from "./brain-agents.js";
+import { ensureWorkerHome } from "./worker-sandbox.js";
 
 /**
  * worker 进程池：**一条任务一条 ACP 连接**，按 agent 复用常驻进程。
@@ -184,6 +185,15 @@ export async function acquire(
   const key = agentKey(ag);
   const plan = planAcquire(poolInfo(), key, poolLimits(), Date.now());
   if (plan.kind === "reject") return { ok: false, problem: plan.problem };
+  // 为**这条任务的 agent** 备沙箱：daemon 启动时只按默认任务大脑备过一次，派到别的 agent（如 `--agent pi`）时
+  // 它自己的 settings/凭据/MCP 还没进沙箱，agent 会拿空配置跑。复用空闲连接前也补一次，让运行中改过的配置跟得上。
+  try {
+    ensureWorkerHome(ag);
+  } catch (e) {
+    console.error(
+      `[wemind/wechat-daemon/worker] 准备沙箱失败（${ag.name}）：${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
   reapByIds(plan.reap);
 
   if (plan.kind === "reuse") {
