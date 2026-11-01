@@ -144,7 +144,7 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 | `加载 <名>` / `load <名>` | 加入激活集（`wechat` 永久禁止） |
 | `卸载 <名>` / `unload <名>` | 移除 |
 
-加载/卸载后 daemon 重启 ACP 进程以按新沙箱配置重载，下一条消息生效。激活集持久化在 `brain-mcps.json`；**catalog 按 agent 各自约定读取**：kiro 是 `settings/mcp.json`，opencode 是 `opencode.json` 的 `mcp.servers`，qoder 是 `settings.json` 的 `mcpServers`，DSH 与 Claude Code 走 ACP `mcpServers`（Claude Code 的 catalog 是真实 `~/.claude.json` 的 `mcpServers`；无文件式 catalog 时用 `WEMIND_MCP_CATALOG`）。**不要跨 agent 借配置文件。**
+加载/卸载后 daemon 重启 ACP 进程以按新沙箱配置重载，下一条消息生效。激活集持久化在 `brain-mcps.json`；**catalog 按 agent 各自约定读取**：kiro 是 `settings/mcp.json`，opencode 是 `opencode.json` 的 `mcp.servers`，qoder 是 `settings.json` 的 `mcpServers`，pi 是沙箱根 `<BRAIN_HOME>/mcp.json`（kiro 格式 `{mcpServers}`），DSH 与 Claude Code 走 ACP `mcpServers`（Claude Code 的 catalog 是真实 `~/.claude.json` 的 `mcpServers`；无文件式 catalog 时用 `WEMIND_MCP_CATALOG`）。**不要跨 agent 借配置文件。**
 
 ### 记忆/规则/技能继承（mirrorRealKiro）
 
@@ -170,7 +170,7 @@ agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的�
 
 ### AcpAgentPreset 与解析
 
-`AcpAgentPreset` 描述一个 agent：`bin`/`binWin`（二进制名）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名）、`shell`（是否经 shell 启动）、`env`（**强制**注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批/沙箱开关）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——沙箱**原样复制**真实的 `profiles/<名>/cordis.patch.yml`，并从它读默认模型（DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`），目前只有 DSH 用：`"acp"`）、`realHome`/`inheritDirs`/`inheritFiles`（记忆继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`settingsBase`（以真实设置为基底并剥离 MCP/插件/providers）、`credentialFiles`/`identityFiles`（登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`）。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量。
+`AcpAgentPreset` 描述一个 agent：`bin`/`binWin`（二进制名）、`requiresBins`（除 bin 外还必须在 PATH 上解析到的运行时，如 `pi-acp` 需要 `pi` 本体；缺失时 `agentProblem()` 直接报安装提示，不等 `session/new` 才炸）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名）、`shell`（是否经 shell 启动）、`env`（**强制**注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批/沙箱开关）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——沙箱**原样复制**真实的 `profiles/<名>/cordis.patch.yml`，并从它读默认模型（DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`），目前只有 DSH 用：`"acp"`）、`realHome`/`inheritDirs`/`inheritFiles`（记忆继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`settingsBase`（以真实设置为基底并剥离 MCP/插件/providers）、`credentialFiles`/`identityFiles`（登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`）。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量。
 
 内置 agent：
 
@@ -184,10 +184,11 @@ agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的�
 | `gemini` | Gemini CLI | 原生 ACP | ⚠️ 未实测 | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME`（`--acp` 取代弃用的 `--experimental-acp`） |
 | `claude-code` | Claude Code | 需适配器 | ✅ 探针级实测 + 真机微信单轮 E2E（2026-10-31；重启续聊/MCP/任务待复测） | 全局 `claude-agent-acp`（`npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；免审批走 `session/set_mode bypassPermissions`，适配器不解析 CLI flag；Windows `claude-agent-acp.cmd`） |
 | `codex` | OpenAI Codex | 需适配器（官方维护） | ✅ 已内置/已实测（探针级 + 真机 E2E：worker 与 brain 通道均通；load/图片/set_mode/set_config_option ✅、stdio MCP ❌） | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**全局安装**；Windows 上是 `codex-acp.cmd`；免审批 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`，见 [接入-Codex](../接入-Codex.md)） |
+| `pi` | pi coding agent | 需适配器（社区 `pi-acp`） | ✅ 已内置/探针级实测（load/图片/工具调用 ✅、0 反向请求；微信 E2E 待验收） | `pi-acp`（`npm i -g pi-acp`）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent` 并先登录）；`PI_CODING_AGENT_DIR` 沙箱、MCP 走 `<沙箱根>/mcp.json`、免审批无需开关，见 [接入-pi](../接入-pi.md) |
 
-两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不说 ACP，要起一个桥接进程）。`auto` 只在 6 个原生预设中探测（`kiro → opencode → gemini → deepseek → qoder → cline`）；两个适配器不参与（各自独立安装、各有认证，装在机器上不代表登录过，误选会让「装了但没登录」的机器静默换脑），只能显式选用。
+两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不说 ACP，要起一个桥接进程）。`auto` 只在 6 个原生预设中探测（`kiro → opencode → gemini → deepseek → qoder → cline`）；三个适配器（`claude-code` / `codex` / `pi`）不参与（各自独立安装、各有认证，装在机器上不代表登录过，误选会让「装了但没登录」的机器静默换脑），只能显式选用。
 
-**内置预设默认免审批**（2026-10-30 起，各用自己官方的机制）：kiro `--trust-all-tools`、gemini `--approval-mode yolo --skip-trust`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`（`envDefaults`：daemon 进程同名变量优先，可收紧）、claude-code / codex 会话建立后 `session/set_mode`（`bypassPermissions` / `agent-full-access`；`WEMIND_ACP_SESSION_MODE=0` 关闭，会话回包的 `availableModes` 不含目标值时会跳过）。宿主应答器仍默认**拒绝** `session/request_permission`（边缘 ask 规则才会触发；`WEMIND_ACP_AUTO_ALLOW=1` 逐次放行）。
+**内置预设默认免审批**（2026-10-30 起，各用自己官方的机制）：kiro `--trust-all-tools`、gemini `--approval-mode yolo --skip-trust`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`（`envDefaults`：daemon 进程同名变量优先，可收紧）、claude-code / codex 会话建立后 `session/set_mode`（`bypassPermissions` / `agent-full-access`；`WEMIND_ACP_SESSION_MODE=0` 关闭，会话回包的 `availableModes` 不含目标值时会跳过）、pi 无需任何开关（官方默认不逐次审批，没有要切的 `session/set_mode`）。宿主应答器仍默认**拒绝** `session/request_permission`（边缘 ask 规则才会触发；`WEMIND_ACP_AUTO_ALLOW=1` 逐次放行）。
 
 ### 选择与覆盖
 

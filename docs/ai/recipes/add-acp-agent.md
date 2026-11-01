@@ -59,7 +59,7 @@ node scripts/acp-probe.mjs
 
 > 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
 >
-> **适配器类 agent（CLI 本身不说 ACP）**：第 1 项填适配器的**全局安装**产物（`npm i -g <适配器包>`，如 `claude-agent-acp` / `codex-acp`），**不要**把 `npx -y <包>` 写进预设——daemon 常驻、每条 worker 任务都起进程，npx 每次要问 registry/冷缓存现下（离线不可用）、版本随 latest 漂移。同时把安装命令加进 `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`，让「找不到适配器」的报错直接给出可粘贴的命令。样板见 [`docs/接入-ClaudeCode.md`](../../接入-ClaudeCode.md)。
+> **适配器类 agent（CLI 本身不说 ACP）**：第 1 项填适配器的**全局安装**产物（`npm i -g <适配器包>`，如 `claude-agent-acp` / `codex-acp` / `pi-acp`），**不要**把 `npx -y <包>` 写进预设——daemon 常驻、每条 worker 任务都起进程，npx 每次要问 registry/冷缓存现下（离线不可用）、版本随 latest 漂移。同时把安装命令加进 `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`，让「找不到适配器」的报错直接给出可粘贴的命令。**适配器还依赖其它运行时**（如 `pi-acp` 内部 spawn `pi`）时，给预设加 `requiresBins: ["pi"]`——`agentProblem()` 会提前报「运行时缺失」，不要等 `session/new` 抛适配器内部错误。样板见 [`docs/接入-ClaudeCode.md`](../../接入-ClaudeCode.md) 与 [`docs/接入-pi.md`](../../接入-pi.md)。
 
 ---
 
@@ -72,6 +72,7 @@ acme: {
   binWin: "acme-agent.cmd",      // Windows 实际文件名；只有 .cmd 时必须写全
   args: ["serve", "--acp"],
   shell: true,                   // .cmd/.bat/npx 必须；.exe 可 false
+  // requiresBins: ["acme"],     // 适配器内部还要 spawn 的运行时（只装适配器不够）；缺失时 agentProblem() 提前报错
   homeEnvVar: "ACME_HOME",       // 指向 BRAIN_HOME；没有就删掉
   realHome: path.join(os.homedir(), ".acme"),
   inheritDirs: ["skills"],       // 目录式记忆/技能
@@ -91,7 +92,7 @@ acme: {
 
 同时：
 
-- `AUTO_PROBE_ORDER` 末尾追加该 agent（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；
+- **原生 ACP** 才把该 agent 追加到 `AUTO_PROBE_ORDER` 末尾（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；**适配器类不要加**（各自独立安装、各有认证，装好不等于登录过，参与探测会让「装了但没登录」的机器静默换脑）——`claude-code` / `codex` / `pi` 都不在探测顺序里；
 - `AcpAgentPreset` / `ResolvedAgent` 透传新字段；
 - `brain-agents.test.ts` 加断言；
 - `docs/接入其它-ACP-Agent.md` §5 agent 表加一行。
@@ -172,7 +173,8 @@ wemind brain check
 - **密钥不要写进 agent**：daemon 进程环境提供。
 - **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-agents.ts`。
 - **冷启动耗时（2026-10-29 已量）**：DSH `initialize` **5.8s** / `session/new` 50ms；opencode ~650ms / ~800ms；qoder 1.7s / 1.5s——均远小于 `REQ_TIMEOUT=30s`，**暂不需要** `reqTimeoutMs`（见 `run-e2e.md` §7.3）。新接入的 agent 仍要先量；若超过 30s，再在 agent 里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
-- **适配器不要用 npx 当默认**：全局安装后 `bin` 写 `claude-agent-acp`（Windows `claude-agent-acp.cmd`）+ `shell: true`；npx 只做兜底。没装时用 `ADAPTER_INSTALL_HINT` 给提示，别只回一句「找不到」。
+- **适配器不要用 npx 当默认**：全局安装后 `bin` 写 `claude-agent-acp`（Windows `claude-agent-acp.cmd`）+ `shell: true`；npx 只做兜底。没装时用 `ADAPTER_INSTALL_HINT` 给提示，别只回一句「找不到」。适配器另有运行时依赖（`pi-acp` → `pi`）时用 `requiresBins`；`onPathAny()` 会补试 `.cmd`/`.exe`。
+- **「免审批」要用漂移检测兜住**：`ACP_TEST_TOOL=1` 跑探针——强制一次工具调用（写标记文件），断言「0 个 `session/request_permission` + 文件真的落盘」。只看 stopReason 分不出「被拒绝」和「没执行」；上游改成逐次审批时探针会先红，而不是微信第一条消息卡 30s 超时。
 - **同 agent 并发 = 两个进程共用其配置目录**：多任务并行时会真实发生（不同 agent 各自 `configSubdir` 天然隔离）；新 agent 若把会话/缓存写在配置目录里，这条要实测。Claude Code 的 `CLAUDE_CONFIG_DIR` 会连 `~/.claude.json` 一起隔离。
 
 ---
@@ -182,6 +184,7 @@ wemind brain check
 - [`docs/接入-OpenCode.md`](../../接入-OpenCode.md) — 原生 ACP 的实测样板
 - [`docs/接入-DeepSeek.md`](../../接入-DeepSeek.md) — 缺 load、`image:false`、committed-only 的反例
 - [`docs/接入-ClaudeCode.md`](../../接入-ClaudeCode.md) — 需适配器的样板（全局安装、`CLAUDE_CONFIG_DIR` 沙箱、`mcpViaAcp`、`sessionMode`）
+- [`docs/接入-pi.md`](../../接入-pi.md) — 适配器 + 运行时依赖（`requiresBins`）、文件式 MCP（`mcp.json`）、无审批开关的样板
 - [`docs/接入其它-ACP-Agent.md`](../../接入其它-ACP-Agent.md) — 通用 ACP 指南
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md) — worker 侧（进程池、任务表）对新 agent 的要求
 - [`docs/ai/recipes/run-e2e.md`](run-e2e.md) — 验收分层与待实测清单

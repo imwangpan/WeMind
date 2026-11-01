@@ -410,6 +410,46 @@ describe("resolveAgent agent", () => {
     expect(ag.sessionMode).toBe("bypassPermissions");
   });
 
+  it("pi：pi-acp + PI_CODING_AGENT_DIR 沙箱 + mcp.json（kiro 格式）+ 凭据原样同步", () => {
+    clearVars();
+    delete process.env.WEMIND_BRAIN_REAL_HOME; // 本用例要断言预设的 realHome（clearVars 统一指到空目录）
+    process.env.WEMIND_BRAIN = "pi";
+    const ag = resolveAgent();
+    expect(ag.name).toBe("pi");
+    // 适配器全局安装（不是 npx）：Windows 上是 .cmd shim → shell:true
+    expect(ag.bin).toBe(process.platform === "win32" ? "pi-acp.cmd" : "pi-acp");
+    expect(ag.args).toEqual([]); // 适配器本体就是 ACP server，没有模式参数
+    expect(ag.shell).toBe(true);
+    // pi-acp 内部 spawn pi 本体：只装适配器不够，agentProblem 会提前报错
+    expect(ag.requiresBins).toEqual(["pi"]);
+    // 沙箱：PI_CODING_AGENT_DIR 指向沙箱根，配置目录就是沙箱根
+    expect(ag.homeEnvVar).toBe("PI_CODING_AGENT_DIR");
+    expect(agentEnv(ag, path.join("/tmp", "wemind-home")).PI_CODING_AGENT_DIR).toBe(
+      path.join("/tmp", "wemind-home"),
+    );
+    expect(ag.configSubdir).toBe("");
+    // 记忆/技能继承；凭据同步（默认模型/供应商、登录态、自定义供应商与模型目录）
+    expect(ag.realHome).toBe(path.join(os.homedir(), ".pi", "agent"));
+    expect(ag.inheritDirs).toEqual(["skills"]);
+    expect(ag.inheritFiles).toEqual(["AGENTS.md"]);
+    expect(ag.credentialFiles).toEqual([
+      "settings.json",
+      "auth.json",
+      "models.json",
+      "models-store.json",
+    ]);
+    // MCP：pi 读 <PI_CODING_AGENT_DIR>/mcp.json（与 kiro 同格式），不走 ACP mcpServers
+    expect(ag.mcpFormat).toBe("kiro");
+    expect(ag.mcpConfigFile).toBe("mcp.json");
+    expect(ag.catalogFile).toBe("mcp.json");
+    expect(ag.mcpViaAcp).toBe(false);
+    // 能力默认：load 恢复、支持图片、不覆盖模型、无会话模式
+    expect(ag.restore).toBeUndefined();
+    expect(ag.images).toBe(true);
+    expect(ag.model).toBeUndefined();
+    expect(ag.sessionMode).toBeUndefined();
+  });
+
   it("kiro/opencode：mcpViaAcp 默认 false（仍走沙箱配置文件）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
@@ -533,10 +573,43 @@ describe("resolveAgent auto 探测", () => {
     expect(problem).toMatch(/--bin/); // 装完仍找不到 → 给绝对路径的兜底
   });
 
+  it("pi 适配器没装 → 给出适配器 + pi 本体的安装命令", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "pi";
+    process.env.PATH = emptyBin;
+    const ag = resolveAgent();
+    expect(ag.available).toBe(false);
+    const problem = agentProblem(ag) ?? "";
+    expect(problem).toMatch(/npm i -g pi-acp/);
+    expect(problem).toMatch(/@earendil-works\/pi-coding-agent/);
+  });
+
+  it("pi-acp 已装但 pi 本体缺失 → 提前报运行时缺失（不等 session/new）", () => {
+    clearVars();
+    const onlyAdapter = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-pi-acp-"));
+    try {
+      fs.writeFileSync(path.join(onlyAdapter, "pi-acp"), "");
+      fs.writeFileSync(path.join(onlyAdapter, "pi-acp.cmd"), "");
+      process.env.PATH = onlyAdapter;
+      process.env.WEMIND_BRAIN = "pi";
+      const ag = resolveAgent();
+      expect(ag.available).toBe(true);
+      const problem = agentProblem(ag) ?? "";
+      expect(problem).toMatch(/运行时「pi」/);
+      expect(problem).toMatch(/@earendil-works\/pi-coding-agent/);
+    } finally {
+      fs.rmSync(onlyAdapter, { recursive: true, force: true });
+    }
+  });
+
   it("auto 探测把新 agent 追加在末尾（当前 cline 最后），不影响老用户", () => {
     expect(AUTO_PROBE_ORDER[AUTO_PROBE_ORDER.length - 1]).toBe("cline");
     expect(AUTO_PROBE_ORDER.indexOf("cline")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("qoder"));
     expect(AUTO_PROBE_ORDER.indexOf("qoder")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("deepseek"));
+  });
+
+  it("pi 是适配器，不参与 auto 探测（装好适配器 ≠ 已登录）", () => {
+    expect(AUTO_PROBE_ORDER).not.toContain("pi");
   });
 
   it("auto 只有一个 cline 时也能选中它", () => {

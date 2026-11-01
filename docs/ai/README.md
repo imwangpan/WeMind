@@ -105,7 +105,7 @@ poller（长轮询，不被大脑阻塞）
 | **preset / `ACP_AGENT_PRESETS`** | **代码里的叫法**；用户面统一写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）。一条 = 二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
 | **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |
 | **WORKER_HOME** | worker 的沙箱目录 |
-| **configSubdir** | agent 配置目录相对沙箱根的子路径（kiro 空；opencode `opencode`；claude-code `claude`） |
+| **configSubdir** | agent 配置目录相对沙箱根的子路径（kiro 与 pi 空——配置目录就是沙箱根；opencode `opencode`；claude-code `claude`） |
 | **catalog** | 可选 MCP 的定义来源（按 agent 各自的配置文件读取） |
 | **激活集** | 当前 brain 实际加载的 MCP 名单，存 `brain-mcps.json`；默认空 |
 | **curated MCP** | 沙箱里由 WeMind 写入的 MCP 配置；`wechat` 永久禁止 |
@@ -197,6 +197,7 @@ poller（长轮询，不被大脑阻塞）
 | `gemini` 预设存在但未实测 | 🟡 未实测（示例） | `gemini --acp --approval-mode yolo --skip-trust` + `GEMINI_CLI_HOME`；在 `AUTO_PROBE_ORDER` 第 3 位——装过 Gemini CLI 的机器可能被自动选中 |
 | `claude-code` 预设已内置（探针级实测 + 真机微信单轮 E2E） | ✅ 探针级实测 + 真机微信单轮 E2E 已通过（2026-10-31；重启续聊 / MCP / 任务待复测） | 全局 `npm i -g @agentclientprotocol/claude-agent-acp`（Node ≥22；`binWin=claude-agent-acp.cmd` + `shell: true`）+ `CLAUDE_CONFIG_DIR` 沙箱（`~/.claude.json` 一并隔离）+ `mcpViaAcp`（目录 `~/.claude.json`；`initialize` 只声明 http/sse，**stdio 实测可用**）+ `sessionMode bypassPermissions`（适配器不解析 CLI flag）；`loadSession: true`、`sessionCapabilities.resume/close/delete/fork/list`；**不在** `AUTO_PROBE_ORDER`（独立安装、各有认证），只能显式选用。见 `docs/接入-ClaudeCode.md` |
 | `codex` 预设存在且已实测 | ✅ 代码/实测（探针 + 真机 E2E） | 适配器 `@agentclientprotocol/codex-acp` 2.5.0（**全局安装**，口径同 claude-code）：`load`/图片/`set_mode`/`set_config_option(model)` ✅、工具调用 0 反向请求；**stdio MCP ❌**（`mcpCapabilities.acp=false`）→ 不开 `mcpViaAcp`；心跳 60s；**没有沙箱配置目录**（只有 cwd 指向沙箱根）；**不在** `AUTO_PROBE_ORDER`，只能显式选用；真机 E2E：worker 与 brain 通道均通过（见 [接入-Codex.md](../接入-Codex.md)） |
+| `pi` 预设已内置 | ✅ 代码/探针级实测（微信 E2E 待验收） | 社区适配器 `pi-acp`（**全局安装**）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent`，先登录/配好模型；只装适配器会被 `agentProblem()` 提前拒绝）；`PI_CODING_AGENT_DIR` 沙箱根、`settings.json`/`auth.json`/`models*.json` 同步、`skills/` junction + `AGENTS.md` 复制；MCP 走 `<沙箱根>/mcp.json`（kiro 格式，`pi mcp list` 实测）、`mcpViaAcp: false`（pi-acp 只存不读）；免审批无需开关；`loadSession: true`/图片 ✅/0 反向请求；**不在** `AUTO_PROBE_ORDER`；沙箱隔离不完整（pi-acp 从真实 `homedir()` 读 session-map/prompts/skills）。见 [接入-pi.md](../接入-pi.md) |
 | Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |
 | Qoder 可免 `--bin` 绝对路径 | ✅ 代码 | `fallbackBinPaths` 兜底 `~/.qoder/bin/qodercli/qodercli.exe`；auto 探测仍只看 PATH |
 | Qoder 用户记忆落点 | ✅ 实测 | `~/.qoder/memory/`；已 junction 进沙箱（写入回流真实目录）。`skills/agents/commands`/`AGENTS.md` 在 1.1.78 不存在 |

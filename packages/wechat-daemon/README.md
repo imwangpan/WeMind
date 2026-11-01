@@ -16,7 +16,7 @@ wemind version           # → wemind 1.3.0 (@wemind/cli, node …, win32-x64)  
 npx -y @wemind/cli list
 ```
 
-要求：**Node.js >= 20**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / 桌面端 `dsh` / `qodercli` / `cline` 等；未配置时自动探测 `kiro → opencode → gemini → deepseek → qoder → cline`）。
+要求：**Node.js >= 20**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / 桌面端 `dsh` / `qodercli` / `cline` 等；未配置时自动探测 `kiro → opencode → gemini → deepseek → qoder → cline`；适配器类 `claude-code` / `codex` / `pi` 不参与探测，要显式 `wemind brain set|switch`）。
 
 ## 升级
 
@@ -62,8 +62,8 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 ## 数据与安全
 
 - 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标（读到哪条消息了）、`allowFrom.json` 授权清单、`brain-home/` 大脑沙箱、`daemon.log` 日志。
-- **适配器类大脑要单独装**（`claude-code` / `codex`）：先 `npm i -g <适配器包>`（npx 只作兜底，常驻 daemon / 每条 worker 任务起进程时它要每次联网且版本会漂）。Claude Code：`npm i -g @agentclientprotocol/claude-agent-acp`（**Node ≥22**；Windows 产出 `claude-agent-acp.cmd`）→ `wemind brain set claude-code`；沙箱用 `CLAUDE_CONFIG_DIR=<brain-home>/claude`（实测连 `~/.claude.json` 一起隔离），MCP 走 ACP `mcpServers`（目录取真实 `~/.claude.json`，`wechat` 永远排除），免审批走 `session/set_mode bypassPermissions`。Codex：`npm i -g @agentclientprotocol/codex-acp`（Windows 产出 `codex-acp.cmd`）→ `wemind brain set codex`；认证走 Codex 自己（`codex login` 或 `OPENAI_API_KEY`），免审批走 `session/set_mode agent-full-access`；**stdio MCP 不支持**（探针实测）→ 微信侧「加载/卸载 MCP」对 codex 无效；**没有沙箱配置目录**（只有 cwd 指向 `brain-home`，要在真实项目里干活请在消息里点明路径）。
-- ⚠️ **daemon 会让大脑免确认执行工具**（**8 个内置预设默认都免审批**：kiro `--trust-all-tools`、gemini `--approval-mode yolo`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `permission: allow`、DSH `danger-full-access`、claude-code `bypassPermissions`、codex `agent-full-access`）：能给这个 bot 发消息的人，即可让大脑在本机执行任意工具（shell / 写文件）。唯一安全闸是**发件人授权（allowFrom）**：扫码登录者自动授权，**勿清空**。边缘权限请求默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行。
+- **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：先 `npm i -g <适配器包>`（npx 只作兜底，常驻 daemon / 每条 worker 任务起进程时它要每次联网且版本会漂）。Claude Code：`npm i -g @agentclientprotocol/claude-agent-acp`（**Node ≥22**；Windows 产出 `claude-agent-acp.cmd`）→ `wemind brain set claude-code`；沙箱用 `CLAUDE_CONFIG_DIR=<brain-home>/claude`（实测连 `~/.claude.json` 一起隔离），MCP 走 ACP `mcpServers`（目录取真实 `~/.claude.json`，`wechat` 永远排除），免审批走 `session/set_mode bypassPermissions`。Codex：`npm i -g @agentclientprotocol/codex-acp`（Windows 产出 `codex-acp.cmd`）→ `wemind brain set codex`；认证走 Codex 自己（`codex login` 或 `OPENAI_API_KEY`），免审批走 `session/set_mode agent-full-access`；**stdio MCP 不支持**（探针实测）→ 微信侧「加载/卸载 MCP」对 codex 无效；**没有沙箱配置目录**（只有 cwd 指向 `brain-home`，要在真实项目里干活请在消息里点明路径）。pi：`npm i -g @earendil-works/pi-coding-agent` + 终端 `pi` 登录 + `npm i -g pi-acp` → `wemind brain set pi`；沙箱用 `PI_CODING_AGENT_DIR=<brain-home>`（`settings.json` / `auth.json` / `models*.json` 同步），MCP 走 pi 自己的 `mcp.json`（kiro 格式），免审批无需开关；**只装适配器不够**（`requiresBins` 会报 pi 本体缺失）。
+- ⚠️ **daemon 会让大脑免确认执行工具**（**9 个内置预设默认都免审批**：kiro `--trust-all-tools`、gemini `--approval-mode yolo`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `permission: allow`、DSH `danger-full-access`、claude-code `bypassPermissions`、codex `agent-full-access`、pi 默认不逐次审批）：能给这个 bot 发消息的人，即可让大脑在本机执行任意工具（shell / 写文件）。唯一安全闸是**发件人授权（allowFrom）**：扫码登录者自动授权，**勿清空**。边缘权限请求默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行。
 - `account.json` 里 bot token 是明文（POSIX 上 chmod 600；Windows 请用目录权限或磁盘加密）。
 - 同一个 bot token **只能有一个消费者**：`wemind` daemon 与 `@wemind/wechat-mcp` 二选一，否则互相抢消息。
 

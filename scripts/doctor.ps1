@@ -139,7 +139,9 @@ $agents = @(
   @{ Name = "cline"; Preset = "cline（已内置预设）" },
   @{ Name = "claude-agent-acp"; Preset = "claude-code（需全局安装适配器，Node ≥22）" },
   @{ Name = "claude-agent-acp.cmd"; Preset = "claude-code（Windows npm 全局 shim）" },
-  @{ Name = "codex-acp"; Preset = "codex（示例预设）" }
+  @{ Name = "codex-acp"; Preset = "codex（需全局安装适配器）" },
+  @{ Name = "pi-acp"; Preset = "pi（需全局安装适配器）" },
+  @{ Name = "pi"; Preset = "pi（本体；pi-acp 通过它运行，需先登录）" }
 )
 foreach ($a in $agents) {
   $c = Get-Command $a.Name -ErrorAction SilentlyContinue
