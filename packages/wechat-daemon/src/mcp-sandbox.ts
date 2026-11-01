@@ -285,11 +285,12 @@ function syncOpencodeBase(ag: ResolvedAgent): void {
   fs.writeFileSync(file, JSON.stringify(parsed, null, 2), "utf-8");
 }
 
-/** Qoder 这类「设置与 MCP 同文件」的 agent：以真实 settings.json 为基底生成沙箱设置。
- *  剥离必须由沙箱权威决定的键：
+/** 「设置与 MCP 同文件」的 agent：以真实 settings.json 为基底生成沙箱设置。
+ *  剥离必须由沙箱权威决定的键（`ag.settingsStrip`，默认 DEFAULT_SETTINGS_STRIP）：
  *  - `mcpServers`：MCP 只能来自沙箱 curated（防 wechat 回环）；
  *  - `enabledPlugins`：插件可自带 MCP，且沙箱不继承 `plugins/`；
  *  - `providers` / `model`：自定义供应商（BYOK）含明文密钥，`model` 又可能指向已剥离的供应商。
+ *  gemini 只剥 `mcpServers`——它的 model/security 是用户自己的选择，必须原样保留。
  *  并强制 `general.enableAutoUpdate=false`：否则每个沙箱都会各下一份约 210 MB 的 CLI。 */
 function settingsBase(ag: ResolvedAgent): Record<string, unknown> {
   let parsed: unknown = null;
@@ -302,10 +303,7 @@ function settingsBase(ag: ResolvedAgent): Record<string, unknown> {
     parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? { ...(parsed as Record<string, unknown>) }
       : {};
-  delete base.mcpServers;
-  delete base.enabledPlugins;
-  delete base.providers;
-  delete base.model;
+  for (const k of ag.settingsStrip) delete base[k];
   const general = base.general;
   base.general = {
     ...(general && typeof general === "object" && !Array.isArray(general)

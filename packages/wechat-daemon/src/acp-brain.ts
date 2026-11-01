@@ -16,6 +16,7 @@ import {
 } from "./session-map.js";
 import { ensureEntry, markUsed, titleOf, touchEntry } from "./session-registry.js";
 import { stripHandoffPrefix } from "./handoff.js";
+import { waitForFrameQuiet } from "./acp-quiet.js";
 
 /**
  * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。
@@ -379,7 +380,7 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
 
 /** 按配置选模型路由（如 DSH 的 deepseek-account）；没有 model 的 agent 跳过。 */
 async function applyModel(ag: ResolvedAgent, sid: string): Promise<void> {
-  if (!ag.model) return;
+  if (!ag.model || ag.modelArg) return; // modelArg：模型已随启动参数传给 agent（gemini 不支持 set_config_option）
   try {
     await request(
       "session/set_config_option",
@@ -424,6 +425,16 @@ async function applySessionMode(
   }
 }
 
+/** 恢复会话后，agent 可能还在异步回放历史（gemini 的 loadSession 里 streamHistory 不 await）：
+ *  先等帧流安静下来再开始本轮提问，否则回放的历史会被拼进答复。 */
+async function drainLoadReplay(ag: ResolvedAgent): Promise<void> {
+  if (!ag.replayOnLoad) return;
+  const before = frameSeq;
+  const r = await waitForFrameQuiet({ seq: () => frameSeq });
+  const drained = frameSeq - before;
+  if (drained > 0) dlog(`drained ${drained} replay frame(s)${r.timedOut ? " (cap)" : ""}`);
+}
+
 async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string> {
   const existing = userSessions.get(userId);
   if (existing) return existing;
@@ -442,6 +453,7 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
           { sessionId: saved, cwd: BRAIN_HOME, mcpServers },
           REQ_TIMEOUT,
         );
+        await drainLoadReplay(ag);
         await applyModel(ag, saved);
         await applySessionMode(ag, saved, availableModeIds(restored));
         userSessions.set(userId, saved);
@@ -587,6 +599,7 @@ export async function resumeSession(
           { sessionId, cwd: BRAIN_HOME, mcpServers },
           REQ_TIMEOUT,
         );
+        await drainLoadReplay(ag);
         await applyModel(ag, sessionId);
         await applySessionMode(ag, sessionId, availableModeIds(restored));
         userSessions.set(userId, sessionId);

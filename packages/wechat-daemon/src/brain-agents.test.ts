@@ -450,6 +450,72 @@ describe("resolveAgent agent", () => {
     expect(ag.sessionMode).toBeUndefined();
   });
 
+  it("gemini：GEMINI_CLI_HOME 沙箱 + <沙箱>/.gemini + settings.json 里的 MCP + --model 走启动参数", () => {
+    clearVars();
+    delete process.env.WEMIND_BRAIN_REAL_HOME; // 本用例要断言预设的 realHome（clearVars 统一指到空目录）
+    process.env.WEMIND_BRAIN = "gemini";
+    const ag = resolveAgent();
+    expect(ag.name).toBe("gemini");
+    expect(ag.bin).toBe(process.platform === "win32" ? "gemini.cmd" : "gemini");
+    expect(ag.args).toEqual(["--acp", "--approval-mode", "yolo", "--skip-trust"]);
+    expect(ag.shell).toBe(true);
+    // 沙箱：GEMINI_CLI_HOME 指向沙箱根，Gemini 的配置目录是 <它>/.gemini（实测）
+    expect(ag.homeEnvVar).toBe("GEMINI_CLI_HOME");
+    expect(agentEnv(ag, path.join("/tmp", "wemind-home")).GEMINI_CLI_HOME).toBe(
+      path.join("/tmp", "wemind-home"),
+    );
+    expect(ag.configSubdir).toBe(".gemini");
+    // 记忆/技能继承；凭据同步（API key / gateway base URL 写在 .env）
+    expect(ag.realHome).toBe(path.join(os.homedir(), ".gemini"));
+    expect(ag.inheritDirs).toEqual(["skills"]);
+    expect(ag.inheritFiles).toEqual(["GEMINI.md"]);
+    expect(ag.credentialFiles).toEqual([".env"]);
+    // MCP：读 <配置目录>/settings.json 的 mcpServers（kiro 格式），不走 ACP mcpServers
+    expect(ag.mcpFormat).toBe("kiro");
+    expect(ag.mcpConfigFile).toBe("settings.json");
+    expect(ag.catalogFile).toBe("settings.json");
+    expect(ag.mcpViaAcp).toBe(false);
+    // 设置基底只剥 mcpServers：model/security 是用户自己的选择，必须保留
+    expect(ag.settingsBase).toBe("settings.json");
+    expect(ag.settingsStrip).toEqual(["mcpServers"]);
+    expect(ag.settingsDefaults).toEqual({});
+    // 能力：load 恢复但会异步回放历史；图片可收；模型走 --model；无 set_config_option
+    expect(ag.restore).toBeUndefined();
+    expect(ag.replayOnLoad).toBe(true);
+    expect(ag.images).toBe(true);
+    expect(ag.model).toBeUndefined();
+    expect(ag.modelArg).toBe("--model");
+    expect(ag.sessionMode).toBeUndefined();
+  });
+
+  it("gemini：--model 追加到启动参数（它不支持 session/set_config_option）；auto = 不下发", () => {
+    clearVars();
+    const ag = resolveAgent({ agent: "gemini", model: "auto/hy3" });
+    expect(ag.model).toBe("auto/hy3");
+    expect(ag.args).toEqual([
+      "--acp",
+      "--approval-mode",
+      "yolo",
+      "--skip-trust",
+      "--model",
+      "auto/hy3",
+    ]);
+    const follow = resolveAgent({ agent: "gemini", model: "auto" });
+    expect(follow.model).toBeUndefined();
+    expect(follow.args).toEqual(["--acp", "--approval-mode", "yolo", "--skip-trust"]);
+  });
+
+  it("默认 settingsStrip 覆盖 Qoder 的剥离清单（MCP/插件/供应商/模型）", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "qoder";
+    expect(resolveAgent().settingsStrip).toEqual([
+      "mcpServers",
+      "enabledPlugins",
+      "providers",
+      "model",
+    ]);
+  });
+
   it("kiro/opencode：mcpViaAcp 默认 false（仍走沙箱配置文件）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
