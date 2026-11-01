@@ -469,7 +469,7 @@ describe("resolveAgent agent", () => {
     expect(ag.realHome).toBe(path.join(os.homedir(), ".gemini"));
     expect(ag.inheritDirs).toEqual(["skills"]);
     expect(ag.inheritFiles).toEqual(["GEMINI.md"]);
-    expect(ag.credentialFiles).toEqual([".env"]);
+    expect(ag.credentialFiles).toEqual([".env", "oauth_creds.json", "google_accounts.json"]);
     // MCP：读 <配置目录>/settings.json 的 mcpServers（kiro 格式），不走 ACP mcpServers
     expect(ag.mcpFormat).toBe("kiro");
     expect(ag.mcpConfigFile).toBe("settings.json");

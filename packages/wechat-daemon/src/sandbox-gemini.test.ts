@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { parseJsonc } from "./agent-mcp.js";
+
 /**
  * gemini 沙箱：GEMINI_CLI_HOME 指向沙箱根，而 Gemini 的配置目录是 `<沙箱>/.gemini`（实测），
  * MCP 与设置同在 `<配置目录>/settings.json`。
@@ -17,24 +19,31 @@ const dataDir = path.join(root, "data");
 const brainCfg = path.join(dataDir, "brain-home", ".gemini");
 const workerCfg = path.join(dataDir, "worker-home", ".gemini");
 
-const realSettings = {
-  model: { name: "auto/hy3" },
-  security: { auth: { selectedType: "gemini-api-key" } },
-  ui: { theme: "Default Light" },
-  general: { vimMode: true },
-  mcpServers: {
-    wechat: { command: "wemind-mcp" },
-    demo: { command: "node", args: ["demo-server.js"] },
-  },
-};
+// Gemini CLI 自己用 strip-json-comments 读 settings.json，注释是它支持的合法写法；这里刻意带注释，确保沙箱镜像与 MCP 目录也能解析。
+const realSettingsText = `{
+  // 用户自己的默认模型
+  "model": { "name": "auto/hy3" },
+  "security": { "auth": { "selectedType": "gemini-api-key" } },
+  "ui": { "theme": "Default Light" },
+  "general": { "vimMode": true },
+  /* MCP 必须由沙箱 curated 接管 */
+  "mcpServers": {
+    "wechat": { "command": "wemind-mcp" },
+    "demo": { "command": "node", "args": ["demo-server.js"] }
+  }
+}`;
 const envFile = "GEMINI_API_KEY=sk-test\nGOOGLE_GEMINI_BASE_URL=http://127.0.0.1:3425\n";
+const oauthCreds = '{"access_token":"oauth-test"}\n';
+const googleAccounts = '[{"email":"test@example.com"}]\n';
 
 beforeAll(() => {
   fs.mkdirSync(path.join(realHome, "skills"), { recursive: true });
   fs.writeFileSync(path.join(realHome, "skills", "sample.md"), "# gemskills\n");
   fs.writeFileSync(path.join(realHome, "GEMINI.md"), "# global memory\n");
-  fs.writeFileSync(path.join(realHome, "settings.json"), JSON.stringify(realSettings, null, 2));
+  fs.writeFileSync(path.join(realHome, "settings.json"), realSettingsText);
   fs.writeFileSync(path.join(realHome, ".env"), envFile);
+  fs.writeFileSync(path.join(realHome, "oauth_creds.json"), oauthCreds);
+  fs.writeFileSync(path.join(realHome, "google_accounts.json"), googleAccounts);
 
   process.env.WEMIND_BRAIN = "gemini";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
@@ -49,7 +58,9 @@ afterAll(() => {
   delete process.env.WECHAT_DATA_DIR;
 });
 
-const readJson = (f: string): Record<string, any> => JSON.parse(fs.readFileSync(f, "utf-8"));
+// 真实 settings.json 带注释（JSONC），沙箱写出的仍是严格 JSON；两者都用宽松解析读取。
+const readJson = (f: string): Record<string, any> =>
+  parseJsonc(fs.readFileSync(f, "utf-8")) as Record<string, any>;
 
 describe("brain 沙箱（gemini）", () => {
   it("settings.json 镜像 model/security/ui/general，剥掉 mcpServers 并关自动更新", async () => {
@@ -70,11 +81,15 @@ describe("brain 沙箱（gemini）", () => {
     ]);
   });
 
-  it(".env 凭据、skills/ 与 GEMINI.md 都继承进沙箱", async () => {
+  it(".env 与 OAuth 凭据、skills/ 与 GEMINI.md 都继承进沙箱", async () => {
     const { ensureBrainHome } = await import("./mcp-sandbox.js");
     ensureBrainHome();
 
     expect(fs.readFileSync(path.join(brainCfg, ".env"), "utf-8")).toBe(envFile);
+    expect(fs.readFileSync(path.join(brainCfg, "oauth_creds.json"), "utf-8")).toBe(oauthCreds);
+    expect(fs.readFileSync(path.join(brainCfg, "google_accounts.json"), "utf-8")).toBe(
+      googleAccounts,
+    );
     expect(fs.readFileSync(path.join(brainCfg, "skills", "sample.md"), "utf-8")).toBe(
       "# gemskills\n",
     );
@@ -102,6 +117,10 @@ describe("worker 沙箱（gemini）", () => {
     expect(cfg.general.enableAutoUpdate).toBe(false);
     expect(Object.keys(cfg.mcpServers)).toEqual(["demo"]);
     expect(fs.readFileSync(path.join(workerCfg, ".env"), "utf-8")).toBe(envFile);
+    expect(fs.readFileSync(path.join(workerCfg, "oauth_creds.json"), "utf-8")).toBe(oauthCreds);
+    expect(fs.readFileSync(path.join(workerCfg, "google_accounts.json"), "utf-8")).toBe(
+      googleAccounts,
+    );
     expect(fs.readFileSync(path.join(workerCfg, "skills", "sample.md"), "utf-8")).toBe(
       "# gemskills\n",
     );

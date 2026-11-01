@@ -41,7 +41,7 @@ export function withMcpServers(
 }
 
 /**
- * 宽松解析 JSONC（去 // 与块注释、去尾随逗号）。仅用于把用户可能带注释的 opencode.jsonc 读成对象；失败返回 null（调用方按「无配置」处理，不抛）。
+ * 宽松解析 JSONC（去 // 与块注释、去尾随逗号）。用于用户可能带注释的配置：opencode.jsonc、Gemini 的 settings.json（它自己用 strip-json-comments）；失败返回 null（调用方按「无配置」处理，不抛）。
  */
 export function parseJsonc(text: string): Record<string, unknown> | null {
   try {

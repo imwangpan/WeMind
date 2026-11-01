@@ -123,9 +123,10 @@ function mirrorRealKiro(ag: ResolvedAgent): void {
   }
 }
 
+/** 宽松读取（JSONC）：Gemini 的 settings.json 允许注释，严格 JSON.parse 会把合法配置当损坏。 */
 function readJson(file: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
+    return parseJsonc(fs.readFileSync(file, "utf-8"));
   } catch {
     return null;
   }
@@ -295,7 +296,7 @@ function syncOpencodeBase(ag: ResolvedAgent): void {
 function settingsBase(ag: ResolvedAgent): Record<string, unknown> {
   let parsed: unknown = null;
   try {
-    parsed = JSON.parse(fs.readFileSync(path.join(ag.realHome!, ag.settingsBase!), "utf-8"));
+    parsed = parseJsonc(fs.readFileSync(path.join(ag.realHome!, ag.settingsBase!), "utf-8"));
   } catch {
     /* 缺失/损坏 → 空基底 */
   }

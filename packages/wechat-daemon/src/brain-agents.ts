@@ -99,7 +99,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // Gemini CLI（原生 ACP，0.66.0 已实测）。`--acp` 取代已弃用的 `--experimental-acp`；`--approval-mode yolo` 自动批准所有工具调用（与 `--yolo` 互斥，二选一）；`--skip-trust` 信任当前工作区——**未信任的目录会把 yolo 静默降回 default，并且连 MCP 都不加载**（用户级 server 也被抑制），所以必须带上（或用 GEMINI_CLI_TRUST_WORKSPACE=true）。
   // - 沙箱：`GEMINI_CLI_HOME` 指向沙箱根，但 Gemini 的配置目录是 `<它>/.gemini`（实测），故 configSubdir=".gemini"；`~/.gemini` 的 skills/ 与 GEMINI.md 是它的全局技能与记忆。
   // - MCP：读配置目录 settings.json 的 `mcpServers`（kiro 格式）。ACP `session/new` 的 mcpServers 实测也能用，但 `initialize` 只声明 http/sse、不声明 acp——走它自己的配置文件更稳。
-  // - 设置：以真实 settings.json 为基底（保留 model / security / ui），只剥 `mcpServers`（MCP 必须来自沙箱 curated，防 wechat 回环），并关自动更新。认证走 `security.auth.selectedType` + `.env`（GEMINI_API_KEY / GOOGLE_GEMINI_BASE_URL），`.env` 作为凭据同步。
+  // - 设置：以真实 settings.json 为基底（保留 model / security / ui），只剥 `mcpServers`（MCP 必须来自沙箱 curated，防 wechat 回环），并关自动更新。认证走 `security.auth.selectedType`；API key 用户同步 `.env`（GEMINI_API_KEY / GOOGLE_GEMINI_BASE_URL），Google 登录用户同步 `oauth_creds.json` + `google_accounts.json`——settings 镜像了 `oauth-personal` 却缺 token 时，它会卡在登录流程、连 ACP initialize 都不回。
   // - 模型：不支持 `session/set_config_option`（-32601），`--model` 走启动参数（modelArg）；默认不传，跟随 settings.json 的 model.name。
   // - 恢复：loadSession=true、强杀后 session/load 能接回上下文；但 load 返回后它还会**异步回放历史**（streamHistory 不 await），replayOnLoad 让恢复后先等回放结束。
   // - `session/close` 未实现（-32601，WeMind 不调用）；图片实测可收；工具调用 0 反向请求。
@@ -118,7 +118,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     catalogFile: "settings.json",
     settingsBase: "settings.json",
     settingsStrip: ["mcpServers"],
-    credentialFiles: [".env"],
+    credentialFiles: [".env", "oauth_creds.json", "google_accounts.json"],
     modelArg: "--model",
     replayOnLoad: true,
     shell: true,

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { parseJsonc } from "./agent-mcp.js";
 import { agentEnv, authHint, type ResolvedAgent } from "./brain-agents.js";
 import { copyProfilePatch } from "./profile-model.js";
 import { spawnAgent } from "./spawn-agent.js";
@@ -37,11 +38,9 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
   // 必须剥掉 mcpServers——自检会在临时目录里真起 agent，带上真实 MCP 等于启动第二个 wechat 消费者（回环）。
   if (ag.settingsBase && ag.realHome) {
     try {
-      const parsed: unknown = JSON.parse(
-        fs.readFileSync(path.join(ag.realHome, ag.settingsBase), "utf-8"),
-      );
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const base = parsed as Record<string, unknown>;
+      const parsed = parseJsonc(fs.readFileSync(path.join(ag.realHome, ag.settingsBase), "utf-8"));
+      if (parsed) {
+        const base = parsed;
         for (const k of ag.settingsStrip) delete base[k];
         fs.mkdirSync(cfgDir, { recursive: true });
         fs.writeFileSync(path.join(cfgDir, ag.settingsBase), JSON.stringify(base, null, 2), "utf-8");
