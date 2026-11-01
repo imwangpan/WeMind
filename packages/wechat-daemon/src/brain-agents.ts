@@ -66,6 +66,7 @@ export type AcpAgentPreset = {
   credentialFiles?: string[]; // 需要从 realHome 同步进沙箱的凭据文件（相对配置目录；新者胜）
   identityFiles?: string[]; // 必须与 realHome 保持一致的标识文件（相对配置目录；内容不同即覆盖）
   settingsBase?: string; // 以 realHome 下该文件为基底生成沙箱设置（剥离 MCP/插件/自定义供应商并关自动更新）
+  settingsDefaults?: Record<string, unknown>; // 沙箱 settings.json 的默认键：真实配置里没有该键时补上（用户显式设过则保留用户的值；只改沙箱副本）
   model?: string; // 默认模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）：经 session/set_config_option（agent 自己的 ACP 接口）在会话建立后下发一次；可用 brain.json / `brain set --model` 覆盖，`auto` = 跟随默认；配了 realProfile 时默认值优先从真实 profile 读
   realProfile?: string; // 真实 home 里该 agent 的 profile 名（`profiles/<名>/cordis.patch.yml` 是用户/桌面端维护的用户层：沙箱**原样复制**、不追加条目，默认模型从它读——优先 `- id: acp`，否则 `agent-default-model`）；如 DSH 的 "acp"
   mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
@@ -253,6 +254,9 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     inheritFiles: ["AGENTS.md"], // pi 读 <agent-dir>/AGENTS.md 作跨目录全局指令
     // 原样同步：默认模型/供应商（settings.json）、登录态（auth.json）、自定义供应商与模型目录（models*.json，可能含网关地址/密钥）
     credentialFiles: ["settings.json", "auth.json", "models.json", "models-store.json"],
+    // pi-acp 把 pi 的启动横幅（## Context / ## Skills …）当作 agent_message_chunk 发出来，那是给人看的启动信息，进微信回复就是噪声。
+    // pi 自己的 `quietStartup: true` 关掉它（docs/settings.md）；写进沙箱副本，用户显式设过就保留用户的值。
+    settingsDefaults: { quietStartup: true },
     // pi 的 MCP 是 <agent-dir>/mcp.json（不是 settings/mcp.json）；kiro 格式与 pi 兼容
     mcpConfigFile: "mcp.json",
     catalogFile: "mcp.json",
@@ -445,6 +449,8 @@ export type ResolvedAgent = {
   credentialFiles: string[];
   identityFiles: string[];
   settingsBase?: string;
+  /** 沙箱 settings.json 的预设默认键（只补缺失键；用户显式设过则保留用户的值）。 */
+  settingsDefaults: Record<string, unknown>;
   model?: string;
   realProfile?: string;
   mcpViaAcp: boolean;
@@ -640,6 +646,7 @@ function resolveAgentCore(
     credentialFiles: preset.credentialFiles ?? [],
     identityFiles: preset.identityFiles ?? [],
     settingsBase: preset.settingsBase,
+    settingsDefaults: preset.settingsDefaults ?? {},
     model,
     realProfile: preset.realProfile,
     mcpViaAcp: preset.mcpViaAcp ?? false,

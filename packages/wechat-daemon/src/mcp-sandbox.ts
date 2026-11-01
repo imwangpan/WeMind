@@ -162,6 +162,27 @@ function syncCredentials(ag: ResolvedAgent): void {
   for (const f of ag.identityFiles) syncCredentialFile(ag, f, "always");
 }
 
+/** 把预设的默认设置项补进沙箱 settings.json：只补缺失键（用户显式设过就保留用户的值），真实配置不动。 */
+function applySettingsDefaults(ag: ResolvedAgent): void {
+  if (Object.keys(ag.settingsDefaults).length === 0) return;
+  const file = path.join(brainConfigDir(ag), "settings.json");
+  const cur = readJson(file) ?? {};
+  let changed = false;
+  for (const [k, v] of Object.entries(ag.settingsDefaults)) {
+    if (cur[k] === undefined) {
+      cur[k] = v;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(cur, null, 2), "utf-8");
+  } catch {
+    /* best-effort */
+  }
+}
+
 function loadCatalog(ag: ResolvedAgent): Record<string, unknown> {
   return readMcpServers(readJson(catalogPath(ag)), ag.mcpFormat);
 }
@@ -347,6 +368,7 @@ export function ensureBrainHome(forAgent?: ResolvedAgent): void {
   applySandbox(ag); // 再写 curated mcp（权威，保持 MCP 隔离——防它把消息发回自己）
   mirrorRealKiro(ag); // 继承真实配置目录的记忆/steering/skills（sessions 仍隔离）
   syncCredentials(ag); // 登录态/凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
+  applySettingsDefaults(ag); // 预设默认设置项（如 pi 的 quietStartup：关掉 pi-acp 当消息发出来的启动横幅）
 }
 
 export function addMcp(name: string): string {

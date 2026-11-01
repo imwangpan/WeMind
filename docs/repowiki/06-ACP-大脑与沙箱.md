@@ -184,7 +184,7 @@ agent 带 `settingsBase` 时（qoder）走另一条分支：读真实目录的�
 | `gemini` | Gemini CLI | 原生 ACP | ⚠️ 未实测 | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME`（`--acp` 取代弃用的 `--experimental-acp`） |
 | `claude-code` | Claude Code | 需适配器 | ✅ 探针级实测 + 真机微信单轮 E2E（2026-10-31；重启续聊/MCP/任务待复测） | 全局 `claude-agent-acp`（`npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；免审批走 `session/set_mode bypassPermissions`，适配器不解析 CLI flag；Windows `claude-agent-acp.cmd`） |
 | `codex` | OpenAI Codex | 需适配器（官方维护） | ✅ 已内置/已实测（探针级 + 真机 E2E：worker 与 brain 通道均通；load/图片/set_mode/set_config_option ✅、stdio MCP ❌） | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**全局安装**；Windows 上是 `codex-acp.cmd`；免审批 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`，见 [接入-Codex](../接入-Codex.md)） |
-| `pi` | pi coding agent | 需适配器（社区 `pi-acp`） | ✅ 已内置/探针级实测（load/图片/工具调用 ✅、0 反向请求；微信 E2E 待验收） | `pi-acp`（`npm i -g pi-acp`）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent` 并先登录）；`PI_CODING_AGENT_DIR` 沙箱、MCP 走 `<沙箱根>/mcp.json`、免审批无需开关，见 [接入-pi](../接入-pi.md) |
+| `pi` | pi coding agent | 需适配器（社区 `pi-acp`） | ✅ 已内置/探针级实测（load/图片/工具调用 ✅、0 反向请求；微信 E2E 待验收） | `pi-acp`（`npm i -g pi-acp`）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent` 并先登录）；`PI_CODING_AGENT_DIR` 沙箱、MCP 走 `<沙箱根>/mcp.json`、免审批无需开关；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动横幅（用户显式设过则保留），见 [接入-pi](../接入-pi.md) |
 
 两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不说 ACP，要起一个桥接进程）。`auto` 只在 6 个原生预设中探测（`kiro → opencode → gemini → deepseek → qoder → cline`）；三个适配器（`claude-code` / `codex` / `pi`）不参与（各自独立安装、各有认证，装在机器上不代表登录过，误选会让「装了但没登录」的机器静默换脑），只能显式选用。
 
