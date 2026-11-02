@@ -311,12 +311,16 @@ export interface SendTypingReq {
 /** SendTyping 响应。 */
 export interface SendTypingResp {
   ret?: number;
+  /** 服务端也可能用 errcode 表示失败（如 -14 会话过期）；与 ret 分别判断，不能只看 ret。 */
+  errcode?: number;
   errmsg?: string;
 }
 
 /** GetConfig 响应：含 sendTyping 所需的 typing_ticket。 */
 export interface GetConfigResp {
   ret?: number;
+  /** 服务端也可能用 errcode 表示失败（如 -14 会话过期）；与 ret 分别判断，不能只看 ret。 */
+  errcode?: number;
   errmsg?: string;
   /** base64 编码的 typing ticket（sendTyping 必需）。[实测] 缺失即视为获取失败，不应带空 ticket 继续发（见 mcp typing 校验）。 */
   typing_ticket?: string;

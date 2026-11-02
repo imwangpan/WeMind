@@ -10,6 +10,7 @@ import {
   MessageState,
   MessageType,
   isSessionPaused,
+  ILinkError,
 } from "@wemind/wechat-ilink-core";
 import type { SendMessageReq } from "@wemind/wechat-ilink-core";
 
@@ -54,11 +55,28 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
     },
   };
 
-  await sendMessage({
-    baseUrl: account.baseUrl,
-    token: account.botToken,
-    body: req,
-  });
+  const send = () =>
+    sendMessage({
+      baseUrl: account.baseUrl,
+      token: account.botToken,
+      body: req,
+    });
+  try {
+    await send();
+  } catch (e) {
+    // ret=-2 既可能是限流（等一会儿就好），也可能是 context_token 失效（等多久都没用）：
+    // 与 daemon 一样先退避重试一次；仍失败就把两种可能都告诉 agent，别让它以为已经发出去了。
+    if (!(e instanceof ILinkError) || e.kind !== "param_error") throw e;
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      await send();
+    } catch (e2) {
+      throw new ProtocolError(
+        ProtocolErrorCode.InternalError,
+        `发送被服务端拒绝（ret=-2，可能是限流或 context_token 失效）。已自动重试一次仍失败：${e2 instanceof Error ? e2.message : String(e2)}。稍后再试；若持续失败，让用户先给你发一条消息刷新 token。`,
+      );
+    }
+  }
 
   return jsonResult({
     status: "sent",

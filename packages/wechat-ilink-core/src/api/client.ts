@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { ILINK_APP_ID } from "../config.js";
 import { ILinkError } from "./error-codes.js";
+import { HttpStatusError } from "./transport-errors.js";
 import type {
   BaseInfo,
   GetUpdatesResp,
@@ -91,7 +92,7 @@ async function apiFetch(params: {
     // 读完响应体后才算这次请求结束：只清定时器会漏掉「头已到、体卡住」的慢响应，长轮询尤甚——所以清理放在 finally，成功/失败/超时都只写一次。
     const rawText = await res.text();
     if (!res.ok) {
-      throw new Error(`${params.label} ${res.status}: ${rawText.slice(0, 500)}`);
+      throw new HttpStatusError(params.label, res.status, rawText);
     }
     return rawText;
   } finally {
@@ -127,10 +128,11 @@ function throwIfErrorCode(
   op: string,
   resp: { ret?: number; errcode?: number; errmsg?: string } | null,
 ): void {
-  const code = resp?.ret ?? resp?.errcode;
-  if (code !== undefined && code !== 0) {
-    throw new ILinkError(op, code, resp?.errmsg);
-  }
+  if (!resp) return;
+  // 两个字段分别判断：`ret ?? errcode` 在 ret=0、errcode=-14 时会取到 0，把会话过期掩盖成成功。
+  if (resp.ret !== undefined && resp.ret !== 0) throw new ILinkError(op, resp.ret, resp.errmsg);
+  if (resp.errcode !== undefined && resp.errcode !== 0)
+    throw new ILinkError(op, resp.errcode, resp.errmsg);
 }
 
 export function buildBaseInfo(): BaseInfo {
@@ -156,7 +158,13 @@ export async function getUpdates(params: {
       timeoutMs: timeout,
       label: "getUpdates",
     });
-    return parseJsonResp<GetUpdatesResp>(rawText, "getUpdates");
+    const resp = parseJsonResp<GetUpdatesResp>(rawText, "getUpdates");
+    // ret 非 0 且没有 errcode 时，调用方（daemon/MCP）只看 errcode 会把它当成「这轮没有新消息」而静默空转。
+    // errcode 留给调用方处理（-14 要触发冷却，不能在这里抛成普通失败）。
+    if (resp.ret !== undefined && resp.ret !== 0 && !resp.errcode) {
+      throw new ILinkError("getUpdates", resp.ret, resp.errmsg);
+    }
+    return resp;
   } catch (err) {
     // 长轮询超时是常态：返回空结果（保留游标），让调用方直接进入下一轮。
     if (err instanceof Error && err.name === "AbortError") {

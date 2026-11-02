@@ -61,7 +61,7 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 1. **超时与慢响应**：用 `AbortController` 控制超时，但要在**读完响应体后**才 `clearTimeout` —— 否则慢 body 不受超时保护，长轮询尤其可能无限阻塞。`getUpdates` / `pollQRStatus` 命中 `AbortError` 时不抛错，而是返回「空结果」让调用方继续轮询。
 
-2. **HTTP 200 不等于成功**：iLink 即使 HTTP 200，响应体里也可能带非 0 的 `ret`/`errcode` 表示失败。所有「有语义响应体」的接口（`sendMessage` / `sendTyping` / `getConfig` / `getUploadUrl`）都走同一个 `throwIfErrorCode`，拿到非 0 错误码时抛 `ILinkError`（携带原始码 + 分类），避免「假成功」（消息其实没送达）；调用方不再需要自己重复校验。例外：`notifyStart` / `notifyStop` 是 best-effort，刻意只记日志不抛。防御性 JSON 解析失败时抛带 label 与响应片段的清晰错误，而非裸 `SyntaxError`；空/非 JSON 的成功响应（服务端部分接口无响应体）不会误报失败。
+2. **HTTP 200 不等于成功**：iLink 即使 HTTP 200，响应体里也可能带非 0 的 `ret`/`errcode` 表示失败。所有「有语义响应体」的接口（`sendMessage` / `sendTyping` / `getConfig` / `getUploadUrl`）都走同一个 `throwIfErrorCode`，拿到非 0 错误码时抛 `ILinkError`（携带原始码 + 分类），避免「假成功」（消息其实没送达）；调用方不再需要自己重复校验。`throwIfErrorCode` **分别判断 `ret` 与 `errcode`**：`ret ?? errcode` 在 `ret=0`、`errcode=-14` 时会取到 0，把会话过期掩盖成成功。`getUpdates` 的 `errcode` 留给调用方处理（`-14` 要触发冷却），但 `ret≠0` 且无 `errcode` 时直接抛 `ILinkError`，否则会被当成「这轮没有新消息」静默空转。例外：`notifyStart` / `notifyStop` 是 best-effort，刻意只记日志不抛。防御性 JSON 解析失败时抛带 label 与响应片段的清晰错误，而非裸 `SyntaxError`；空/非 JSON 的成功响应（服务端部分接口无响应体）不会误报失败。HTTP 非 2xx 抛 `HttpStatusError`（带状态码），由 `classifyTransportError` 判可重试性。
 
 ## 3.3 协议类型（api/types.ts）
 
@@ -126,6 +126,7 @@ iLink 有两个语义不同的错误字段：
 | `dns` | 是 | ENOTFOUND |
 | `connection` | 是 | ECONNRESET / socket hang up |
 | `network` | 是 | ECONNREFUSED / fetch failed 等 |
+| `http` | 429 / 5xx 是，其它 4xx 否 | `HttpStatusError`（HTTP 非 2xx） |
 | `tls` | **否** | cert / tls / ssl 错误 |
 | `unknown` | 否 | 其它 |
 

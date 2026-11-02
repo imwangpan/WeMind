@@ -4,7 +4,24 @@
  * 借鉴 wxclawbot-cli（MIT）client.ts 的 classifyTransportError 思路。
  */
 
-export type TransportErrorKind = "timeout" | "dns" | "tls" | "connection" | "network" | "unknown";
+export type TransportErrorKind =
+  | "timeout"
+  | "dns"
+  | "tls"
+  | "connection"
+  | "network"
+  | "http"
+  | "unknown";
+
+/** HTTP 非 2xx：带上状态码，供调用方区分「限流/服务端故障可重试」与「4xx 请求问题」。 */
+export class HttpStatusError extends Error {
+  readonly status: number;
+  constructor(label: string, status: number, body: string) {
+    super(`${label} ${status}: ${body.slice(0, 500)}`);
+    this.name = "HttpStatusError";
+    this.status = status;
+  }
+}
 
 export interface TransportErrorInfo {
   kind: TransportErrorKind;
@@ -18,6 +35,14 @@ export interface TransportErrorInfo {
 export function classifyTransportError(err: unknown): TransportErrorInfo {
   if (err instanceof Error && err.name === "AbortError") {
     return { kind: "timeout", retryable: true, message: err.message || "request timeout" };
+  }
+  if (err instanceof HttpStatusError) {
+    // 429（限流）与 5xx（服务端故障/网关）值得退避重试；其它 4xx 是请求本身的问题，重试不会好。
+    return {
+      kind: "http",
+      retryable: err.status === 429 || err.status >= 500,
+      message: err.message,
+    };
   }
   const message = err instanceof Error ? err.message : String(err);
   const code =

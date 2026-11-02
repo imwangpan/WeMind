@@ -130,6 +130,14 @@ describe("apiFetch（经 sendMessage 间接验证）", () => {
     handler = (_req, res) => res.end(JSON.stringify({ ret: 0 }));
     await expect(sendMessage({ baseUrl, token: "t", body: { msg: {} } })).resolves.toBeUndefined();
   });
+
+  it("ret=0 但 errcode=-14 → 仍抛 ILinkError（不能被 ret 掩盖）", async () => {
+    handler = (_req, res) => res.end(JSON.stringify({ ret: 0, errcode: -14 }));
+    const err = await sendMessage({ baseUrl, token: "t", body: { msg: {} } }).catch((e) => e);
+    expect(err).toBeInstanceOf(ILinkError);
+    expect(err.code).toBe(-14);
+    expect(err.kind).toBe("session_expired");
+  });
 });
 
 describe("sendTyping", () => {
@@ -209,6 +217,19 @@ describe("getUpdates（长轮询超时语义）", () => {
     const resp = await getUpdates({ baseUrl, token: "t", updatesBuf: "c1", timeoutMs: 5000 });
     expect(resp.msgs).toHaveLength(1);
     expect(resp.get_updates_buf).toBe("c2");
+  });
+
+  it("ret≠0 且无 errcode → 抛 ILinkError（不再静默当成空轮询）", async () => {
+    handler = (_req, res) => res.end(JSON.stringify({ ret: -1, errmsg: "server busy" }));
+    const err = await getUpdates({ baseUrl, token: "t", timeoutMs: 5000 }).catch((e) => e);
+    expect(err).toBeInstanceOf(ILinkError);
+    expect(err.code).toBe(-1);
+  });
+
+  it("errcode=-14 时照常返回给调用方（由上层触发冷却，不在这里抛成普通失败）", async () => {
+    handler = (_req, res) => res.end(JSON.stringify({ ret: 0, errcode: -14 }));
+    const resp = await getUpdates({ baseUrl, token: "t", timeoutMs: 5000 });
+    expect(resp.errcode).toBe(-14);
   });
 
   it("非 JSON 响应 → 抛带 label 的清晰错误（而非裸 SyntaxError）", async () => {

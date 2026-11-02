@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { classifyTransportError } from "./transport-errors.js";
+import { classifyTransportError, HttpStatusError } from "./transport-errors.js";
 
 describe("classifyTransportError", () => {
   it("AbortError → timeout, 可重试", () => {
@@ -50,6 +50,18 @@ describe("classifyTransportError", () => {
     const r = classifyTransportError(e);
     expect(r.kind).toBe("network");
     expect(r.retryable).toBe(true);
+  });
+
+  it("HTTP 429 / 5xx → http, 可重试；其它 4xx 不可重试", () => {
+    expect(
+      classifyTransportError(new HttpStatusError("sendMessage", 429, "too many")),
+    ).toMatchObject({ kind: "http", retryable: true });
+    expect(
+      classifyTransportError(new HttpStatusError("sendMessage", 502, "bad gateway")),
+    ).toMatchObject({ kind: "http", retryable: true });
+    expect(
+      classifyTransportError(new HttpStatusError("sendMessage", 400, "bad request")),
+    ).toMatchObject({ kind: "http", retryable: false });
   });
 
   it("未知错误 → unknown, 不可重试", () => {
