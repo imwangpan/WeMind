@@ -21,7 +21,7 @@
   - 未观察到反向请求；stdio `mcpServers` 被 `session/new` 接受；stdout 会混入一行非 JSON 日志（当前客户端会忽略）。
 - **微信 E2E 已通（2026-10-24）**：`spawn deepseek` → 旧 opencode session 不可 resume（`-32602 session is not resumable`）→ 回退 `session/new` → `model set` → `prompt ok` → 用户收到「你好！很高兴见到你 😊」。**后续微信侧 `session/resume ok ... mcp=[test-echo]` 亦已实证**（M3 微信链路测试中）。
 - **Worker E2E 已通（2026-10-24）**：`task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok`（2.3s，含 tool_call）→ `hello.txt`；`task-reply` 第二轮读文件输出 `hello`；`task-stop` 后 idle。
-- **微信侧动态 MCP + 图片拒绝已实测（2026-10-24）**：`MCP`/`加载 test-echo`/调用（答 `MCP-OK`，调用记录写入磁盘）/`卸载` 全链路通过；发图收到友好拒绝（`image unsupported by current brain; rejected gracefully`）。
+- **微信侧动态 MCP + 图片拒绝已实测（2026-10-24）**：`MCP`/`加载 test-echo`/调用（答 `MCP-OK`，调用记录写入磁盘）/`卸载` 全链路通过；发图收到友好拒绝（`image unusable and no text; rejected gracefully`；带文字时按文字回答并注明图片被忽略）。
 - 工作量：**M0 冒烟 0.5 人日；MVP 2–3 人日；含 MCP/worker/记忆继承的完整对齐 5–7 人日**。
 - 最大未决项从「凭据隔离」变成「**模型路由 + 凭据来源**」：桌面登录可用，但需把 `DSH_HOME` 的 `.credentials.yaml` 带进沙箱（或改用 `DEEPSEEK_API_KEY`），并显式选模型路由（跟随用户 profile 的 `magpie`，或 `deepseek-account`；§8 R1/R18）。
 
@@ -310,7 +310,7 @@ deepseek: {
 - MCP 走 `mcpViaAcp: true`：**不写任何 MCP 配置文件**，激活集由 `toAcpMcpServers()` 转成 `session/new|resume` 的 `mcpServers` 下发（见 M3）。每个 agent 只读自己的 MCP 配置；DSH 的 catalog 用 `WEMIND_MCP_CATALOG` 指向中立文件。
 - `AUTO_PROBE_ORDER` 末尾追加 `"deepseek"`（不要插到 kiro/opencode 前面，避免老用户装了就悄悄换大脑）；`auto` 仍优先 kiro/opencode。
 - 文档标注 **Node ≥22**；`agentProblem` 对 deepseek 找不到二进制时提示 `--bin`。
-- **图片**：`image:false`，`index.ts` 在 `askBrain` 前拦截微信图片，回一句「当前大脑暂不支持看图……」，不会以 `-32602` 失败重试。
+- **图片**：`image:false`，`index.ts` 在 `askBrain` 前拦截微信图片，不会以 `-32602` 失败重试。纯图片消息回一句「当前大脑暂不支持看图……」；**带文字的消息只按文字回答**，答复前注明图片被忽略（不会连文字一起丢）。
 
 #### M2 · ACP 客户端能力适配（1–2 人日，brain + worker 同步）✅ 已实现
 
@@ -509,7 +509,7 @@ wemind brain check           # 真起进程跑 initialize + session/new（60s �
 3. 发一个 >30s 的任务 → 不因首帧超时被杀；微信能看到「步骤」进度，且静默期**不会**每 15s 刷一条「还在思考」。
 4. 发「新会话」→ 走 `session/new`，旧上下文清空。
 5. 越界写与权限请求：预设默认 `DSH_PERMISSION_MODE=danger-full-access`，越界写**不再被拒、也不会发 permission 请求**（2026-10-30 起）。想验证应答器，先在 daemon 环境设 `DSH_PERMISSION_MODE=workspace-write`，再让它在 `BRAIN_HOME` 外写文件 → 观察 permission 请求被应答（拒绝或按 `WEMIND_ACP_AUTO_ALLOW` 放行），**不能卡死**。
-6. ✅ 发一张图片 → 友好拒绝（「当前大脑暂不支持看图…」；日志 `image unsupported by current brain; rejected gracefully`，无 `-32602` 重试；已实测 2026-10-24）。
+6. ✅ 发一张图片 → 友好拒绝（「当前大脑暂不支持看图…」；日志 `image unusable and no text; rejected gracefully`，无 `-32602` 重试；已实测 2026-10-24）。带文字时按文字回答并注明图片被忽略。
 7. 两个账号同时跑 → 各自 `brain-home` / `worker-home` 隔离，互不抢会话。
 8. ✅ `加载 <MCP>` → 下一条消息生效（`session/new|resume` 带 `mcpServers`）；`wechat` 仍被禁止；DSH 不读 kiro 的 MCP 文件（M3 已实现，真机验证见附录）。
 9. worker：`task "create hello.txt..." --cwd <临时目录>` → 文件 `hello.txt` 内容 `hello` + 输出 `DONE`；`task-reply "read hello.txt..."` → 输出 `hello`；`task-stop` → idle。日志见 `[wemind/wechat-daemon/worker] spawn deepseek ... → model set → prompt ok`。
@@ -602,7 +602,7 @@ DSH 的会话都在 `brain-home/sessions`，删除该目录 + `brain-sessions.js
 | **M4：记忆/技能** | 真实 `~/.dsh` 放测试 skill（KIWANO）+ `AGENTS.md` 规则（MANGO-42）→ brain/worker 沙箱均可读，回答均 `CODEWORD=MANGO-42 SECRET=KIWANO`；现场已还原 | — | **M4 通过** |
 | **M5：多账号机制** | 双数据目录各跑一轮：brain-home/worker-home 凭据各自独立，session id 不同，均答 `OK` | — | **机制通过**（双真机微信待需要时验） |
 | **M5：model 失败路径** | 非法 model → `-32602 unknown model option`，随后默认路由明确报 no API key | — | 失败不静默 |
-| **M5：图片友好拒绝（微信侧）** | 用户发图 → 收到「当前大脑暂不支持看图…」；日志 `image unsupported by current brain; rejected gracefully` | — | **通过**（无 `-32602` 重试） |
+| **M5：图片友好拒绝（微信侧）** | 纯图片 → 收到「当前大脑暂不支持看图…」；日志 `image unusable and no text; rejected gracefully`；带文字 → 按文字回答并注明图片被忽略 | — | **通过**（无 `-32602` 重试） |
 | **M5：微信派发 worker + 权限请求** | `任务：…` → worker spawn（`mcp=[test-echo]` 全量继承）→ 越界写被沙箱拒 → 2 次 `session/request_permission` 均被应答器拒绝（**不卡死**）→ agent 汇报阻塞 waiting | — | **机制通过**（越界拒绝属沙箱按设计；顺带修复重启后幽灵任务状态） |
 
 > 结论：官方路线可行且 M1–M5 已落地（图片除外，上游 `image:false`）；关键增量是 **model 选择**、`resume` 兜底、图片拦截/心跳兜底、**MCP via ACP**。社区适配器按当前选择暂不采用，仅保留备查。

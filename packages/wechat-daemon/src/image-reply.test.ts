@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { canSendImage, extractImages, imageFailureNote } from "./image-reply.js";
+import { canSendImage, extractImages, imageFailureNote, planImageTurn } from "./image-reply.js";
 
 describe("extractImages", () => {
   it("提取 Markdown 图片并从正文移除", () => {
@@ -62,6 +62,30 @@ describe("canSendImage（给最终文字留最后一条额度）", () => {
   it("已发 9 条时不再发图（否则最终文字没有额度）", () => {
     expect(canSendImage(9, 10)).toBe(false);
     expect(canSendImage(10, 10)).toBe(false);
+  });
+});
+
+describe("planImageTurn（图片用不了时别丢文字、也别拿空 prompt 浪费回合）", () => {
+  it("没有图片 / 图片可用：正常带图提问", () => {
+    expect(planImageTurn(0, 0, false, false)).toEqual({ kind: "ok" });
+    expect(planImageTurn(1, 1, true, false)).toEqual({ kind: "ok" });
+  });
+
+  it("全部下载失败但有文字：只按文字回答，并说明图片被忽略", () => {
+    const plan = planImageTurn(2, 0, true, true);
+    expect(plan.kind).toBe("text-only");
+    expect(plan.kind === "text-only" && plan.note).toContain("图片没能下载下来");
+  });
+
+  it("大脑不支持看图但有文字：只按文字回答，并说明图片被忽略", () => {
+    const plan = planImageTurn(1, 1, false, true);
+    expect(plan.kind).toBe("text-only");
+    expect(plan.kind === "text-only" && plan.note).toContain("不支持看图");
+  });
+
+  it("图片用不了且没有文字：直接拒绝（不问大脑）", () => {
+    expect(planImageTurn(1, 0, true, false)).toMatchObject({ kind: "reject" });
+    expect(planImageTurn(1, 1, false, false)).toMatchObject({ kind: "reject" });
   });
 });
 

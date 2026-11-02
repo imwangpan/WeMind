@@ -187,7 +187,7 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 2. **`session/close` 不存在**（`-32601`）：WeMind 目前不调用它，杀进程即可；若未来加「优雅关闭」，要对 Cline 跳过。
 3. **MCP 走 ACP 不支持**：`mcpViaAcp` 必须保持 `false`；改用 `CLINE_MCP_SETTINGS_PATH`。
 4. **OAuth token 单向同步**：沙箱内刷新不会回写真实 `providers.json`（见 §3）。API-key provider 不受影响。
-5. **图片不支持（实测）**：`initialize` 广告 `image:true`，但 3.0.74 ACP `prompt` 的 `de()` 只保留 `text` 块，image 被丢弃；预设显式 `images:false`，daemon 收到图片会直接回「当前大脑暂不支持看图」，不再让模型猜。
+5. **图片不支持（实测）**：`initialize` 广告 `image:true`，但 3.0.74 ACP `prompt` 的 `de()` 只保留 `text` 块，image 被丢弃；预设显式 `images:false`，daemon 收到纯图片消息会直接回「当前大脑暂不支持看图」，不再让模型猜；带文字的消息只按文字回答并注明图片被忽略。
 6. **微信真机 E2E 已完成（2026-10-31）**：文本消息/回复、多轮上下文、重启后 `session/load`（PINEAPPLE）、worker 任务均通过。
 7. **同 agent 并发**：两个 worker 共用 `<worker-home>/cline`（与其它 agent 相同）；Cline 的会话库是 SQLite，长期并发风险要观察。
 

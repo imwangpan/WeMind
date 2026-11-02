@@ -99,6 +99,7 @@ import {
   canSendImage,
   extractImages,
   imageFailureNote,
+  planImageTurn,
   resolveImageBytes,
   type ImageFailure,
 } from "./image-reply.js";
@@ -835,26 +836,28 @@ async function handleMessage(
     }
   }
 
-  // 当前大脑不接受图片（如 DSH 0.2.1-rc.2 image:false）：不要让它以 -32602 失败重试
-  if (images.length > 0 && !supportsImages()) {
+  // 收图后怎么走：全部下载失败/大脑不支持时，有文字就只按文字答，没文字就直接拒绝（别拿空 prompt 浪费一回合）
+  const plan = planImageTurn(imageItems.length, images.length, supportsImages(), !!text.trim());
+  if (plan.kind === "reject") {
     clearInterval(keepAlive);
     clearInterval(heartbeat);
     await setTyping(account, to, cx(), 2);
     budgetOf(to).count += 1;
-    const rejectText = "🖼️ 当前大脑暂不支持看图，请改用文字描述，或切换到支持图片的大脑。";
     let sendFailed = false;
     try {
-      await sendOrdered(account, to, cx(), rejectText, MessageState.FINISH, undefined, (e) => {
+      await sendOrdered(account, to, cx(), plan.text, MessageState.FINISH, undefined, (e) => {
         sendFailed = true;
-        holdUndelivered(to, rejectText, e);
+        holdUndelivered(to, plan.text, e);
       });
-      log("image unsupported by current brain; rejected gracefully");
+      log("image unusable and no text; rejected gracefully");
     } finally {
       flushDeferredTaskPushes(account, to, latestToken ? latestToken() : cx(), sendFailed);
       activeTurn = null;
     }
     return false; // 没有答成：交接摘要不能被消费掉
   }
+  const imageNote = plan.kind === "text-only" ? plan.note : "";
+  if (imageNote) log(`image ignored (${images.length}/${imageItems.length} usable): ${imageNote}`);
 
   // 一次尝试：带进度（步骤编号每次尝试重置）。进度消息节流：避免一回合刷十几条触发 iLink 发送限流（疑似 ret=-2 主因）
   const attempt = (promptText: string, imgs: typeof images): Promise<string> => {
@@ -912,10 +915,11 @@ async function handleMessage(
     }
   };
 
+  const imagesForBrain = plan.kind === "text-only" ? [] : images; // 大脑不支持看图时别再塞图片（会 -32602）
   let answer: string;
   let ok = true;
   try {
-    answer = await runWithRetry(text, images);
+    answer = await runWithRetry(text, imagesForBrain);
   } catch (e2) {
     ok = false; // 重试也失败 → 只是把错误提示当回复发出去，不算「答成」（交接摘要据此决定留不留）
     answer = brainErrorMessage(e2, getAgent("brain").name);
@@ -950,6 +954,7 @@ async function handleMessage(
     }
   }
   let finalText = cleaned;
+  if (imageNote) finalText = finalText ? `${imageNote}\n${finalText}` : imageNote;
   const note = imageFailureNote(failedImgs);
   if (note) finalText = finalText ? `${finalText}\n\n${note}` : note;
   if (!finalText && !replyImages.length) finalText = "（没有内容）";

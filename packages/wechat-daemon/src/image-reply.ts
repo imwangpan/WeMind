@@ -28,6 +28,38 @@ export function canSendImage(sentCount: number, limit: number): boolean {
   return sentCount < limit - 1;
 }
 
+export type ImageTurnPlan =
+  | { kind: "ok" }
+  | { kind: "text-only"; note: string }
+  | { kind: "reject"; text: string };
+
+/**
+ * 收图后怎么走这一回合：
+ * - 图片能用 → 正常带图提问；
+ * - 图片用不了（全部下载失败 / 大脑不支持）但有文字 → 只按文字回答，并在答复前说明图片被忽略；
+ * - 图片用不了且没有文字 → 直接拒绝，不去问大脑（空 prompt 只会浪费一整个回合）。
+ */
+export function planImageTurn(
+  imageCount: number,
+  downloaded: number,
+  supportsImages: boolean,
+  hasText: boolean,
+): ImageTurnPlan {
+  if (imageCount === 0) return { kind: "ok" };
+  if (downloaded > 0) {
+    if (supportsImages) return { kind: "ok" };
+    return hasText
+      ? { kind: "text-only", note: "（当前大脑不支持看图，已忽略你发的图片，只按文字回答。）" }
+      : {
+          kind: "reject",
+          text: "🖼️ 当前大脑暂不支持看图，请改用文字描述，或切换到支持图片的大脑。",
+        };
+  }
+  return hasText
+    ? { kind: "text-only", note: "（你发的图片没能下载下来，只按文字回答。）" }
+    : { kind: "reject", text: "🖼️ 图片没能下载下来，请重新发一次。" };
+}
+
 /** 把发图失败按原因归类成给用户的附注（下载失败、发送失败、额度不足各说各的）；没有失败返回空串。 */
 export function imageFailureNote(failures: ImageFailure[]): string {
   if (failures.length === 0) return "";

@@ -192,7 +192,8 @@ prompt FAIL ... -32602 Invalid params: inline image prompts were not advertised
 ```
 
 - agent `initialize.promptCapabilities.image=false`；
-- DSH 官方 0.2.1-rc.2 属此类；换支持图片的 agent，或在 `askBrain` 前拦截并友好提示。
+- DSH 官方 0.2.1-rc.2 属此类；换支持图片的 agent，或在 `askBrain` 前拦截并友好提示（`planImageTurn()`：纯图片拒绝，带文字则只按文字回答并注明图片被忽略）。
+- 全部图片下载失败走同一条路径：日志 `image ignored (0/N usable)` / `image unusable and no text; rejected gracefully`。
 
 ### 3.7 桌面登录了但报 no API key（DSH）
 
