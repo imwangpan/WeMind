@@ -1,6 +1,6 @@
 # Daemon 后台常驻原理（详解）
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-27
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
 >
 > ⚠️ **两套常驻方案，默认不是本文的 PowerShell wrapper**：
 > - **发布版（`npm i -g @wemind/cli`）默认 builtin runner**：`wemind start` → detached `cli.js _watchdog`（Node 写的后台守护进程）→ 循环跑 `cli.js daemon`。零依赖、跨平台。见 §2'。
@@ -46,15 +46,15 @@
 | `wrapper.pid` | ① 后台守护进程 | `watchdog-runner.ts`（builtin）/ `run-daemon.ps1` | 管理命令据此停掉它（否则停了 daemon 会被立刻重拉）；兼作单实例守卫 |
 | `daemon.pid` | ② daemon | `index.ts` 启动时 | 精确定位本账号 node 进程 |
 | `brain.pid` | ③ 大脑 | `acp-brain.ts` spawn 后 | 区分「bot 的大脑」与用户自己日常用的 agent，便于清理 |
-| `worker.pid` | ③' worker | `worker-acp.ts` spawn 后 | 远程任务进程；`stop` 时一并清理（漏了它会留下孤儿进程占着会话） |
+| `workers.pid.json` | ③' worker（可能多条并存） | `worker-pool.ts` / `worker-acp.ts` spawn 后 | 远程任务进程的**记录数组**（每条含起进程时真实用的 bin/args，供逐条身份校验）；`stop` 时一并清理（漏了会留下孤儿进程占着会话）。旧账号只有裸整数 `worker.pid`，仍按「配置算特征串」的老办法兼容读取 |
 | `pm2.app.json` | ① 后台守护进程 | `pm2-runner.ts`（仅 `--runner pm2`） | pm2 的 app 声明（名字/重拉策略/日志/`WECHAT_ACCOUNT`）；由 `wemind start --runner pm2` 生成后 `pm2 start` |
 
-> **身份校验（防 pid 复用）**：pid 会被系统复用（尤其**重启后**）——只凭「pid 还活着」就杀进程或判定「运行中」，可能**误杀别人的进程**、或反而看不出「其实没起来」。所以所有基于 pid 文件的判断/停止都会先**核对该 pid 的命令行是否确属本程序**（`proc-identity.ts`）：daemon/wrapper 需含 **`wemind` + `cli.js`**（或 `run-daemon.ps1`）；大脑/worker 需含其启动命令（如 `opencode acp`，据此与用户自己的 `opencode serve` 区分）。查不到命令行时**一律判否、不杀**。
+> **身份校验（防 pid 复用）**：pid 会被系统复用（尤其**重启后**）——只凭「pid 还活着」就杀进程或判定「运行中」，可能**误杀别人的进程**、或反而看不出「其实没起来」。所以所有基于 pid 文件的判断/停止都会先**核对该 pid 的命令行是否确属本程序**（`proc-identity.ts`）：daemon/wrapper 需命中**三组**特征串之一——`wemind` + `cli.js`（npm 安装与仓库绝对路径）、`wechat-daemon` + `dist` + `cli.js`（在仓库根用**相对路径**手跑；命令行里既没有仓库名也没有包名）、`run-daemon.ps1`（源码开发期的 PowerShell wrapper）；大脑/worker 需含其启动命令（如 `opencode acp`，据此与用户自己的 `opencode serve` 区分）。查不到命令行时**一律判否、不杀**。
 >
-> ⚠️ 这里**不能**用源码目录名 `wechat-daemon` 做特征：发布到 npm 后包目录叫 `@wemind/cli`，用目录名匹配会让「装出来的 wemind」永远认不出自己（`list` 恒显示「已停止」、`stop` 杀不掉、后台守护进程单实例守卫失效）。详见 CHANGELOG 的 P2 条。
+> ⚠️ 这里**不能只用**源码目录名 `wechat-daemon` 做特征：发布到 npm 后包目录叫 `@wemind/cli`，只用它会让「装出来的 wemind」永远认不出自己（`list` 恒显示「已停止」、`stop` 杀不掉、后台守护进程单实例守卫失效）。所以它只作为**追加**的一组，并要求 `dist` 一起出现，专门补「相对路径启动」这一种形态；同理也不能反过来删掉 `wemind` + `cli.js` 那一组。
 
 > 停止时**必须把后台守护进程一起停掉**（断掉重拉）：只杀 daemon，它会在 5 秒后被后台守护进程重新拉起。
-> 实现上 `manage.ts` 的 `stopDaemon()` 一次做完全部：把 `wrapper`/`daemon`/`brain`/`worker` 四个 pid 文件一起读出来、逐个**校验身份**后交给 `killProcessTrees()` 统一终止（同一批里后台守护进程在它的 5 秒重拉延时结束前就已被杀掉，所以不必分先后）——Windows 走 `taskkill /T /F`，POSIX 先收集后代进程再 SIGTERM→SIGKILL（`process.kill` 单 pid 不会杀子树，这是 2026-10-27 修掉的跨平台缺陷）。
+> 实现上 `manage.ts` 的 `stopDaemon()` 一次做完全部：把 `wrapper`/`daemon`/`brain`/`workers` 四类 pid 记录一起读出来（worker 是数组，可能多条）、逐条**校验身份**后交给 `killProcessTrees()` 统一终止（同一批里后台守护进程在它的 5 秒重拉延时结束前就已被杀掉，所以不必分先后）——Windows 走 `taskkill /T /F`，POSIX 先收集后代进程再 SIGTERM→SIGKILL（`process.kill` 单 pid 不会杀子树，这是 2026-10-27 修掉的跨平台缺陷）。
 
 ---
 

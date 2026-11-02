@@ -268,9 +268,9 @@ MCP
 
 期望：**已知窗口**，可能漏杀新起的 ACP 子进程——记录现象即可，不要当成新缺陷；下次 `start` 前手工确认没有孤儿。
 
-### 7.2 待实测（先量再写进文档，2026-10-28 清单）
+### 7.2 历史待实测清单（2026-10-28；结论见 7.3）
 
-下列问题**没有**静态答案，测完把结论落到对应文档：
+下列问题当时**没有**静态答案。绝大部分已在 §7.3 实测并写进对应文档；本表保留作为复验清单，不要再把「表里还列着」当成「尚未测」——只剩 §7.3 中标明的少数未单独测项（如 `session/load` 途中强杀、qoder 任务续跑）仍开放。
 
 | # | 问题 | 怎么测 | 结论影响 |
 |---|---|---|---|
@@ -331,7 +331,7 @@ send error: [sendMessage] errcode=-2 ... (prepare failed)
 | 5 | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。 |
 | 6 | **耗时**：`session/new` ~1.2s、`session/load` ~1.0s、首帧 2–246ms、**首段正文 7.9–11.9s**；一轮 prompt 8–12s。远小于 `REQ_TIMEOUT=30s`，暂不需要 `reqTimeoutMs`。 |
 | 7 | **图片**：能力声明 true；本机用网关时 1×1 PNG 被上游 `400 WorkBuddy: … replace the image` 拒绝——**不是适配器/WeMind 的问题**，换正常模型/网关再验。 |
-| 8 | **未做**：真机微信 L4–L6（消息/自愈/MCP/任务）、适配器升级后的回归。 |
+| 8 | **真机微信单轮已过（2026-10-31）**：`wemind brain set claude-code` → 微信发一条 → `prompt ok 5381ms` → 回复送达。**仍未单独复测**：重启续聊（`session/load` 真机链路）、`加载 <MCP>`、任务派发；适配器升级后的回归按 §8 重跑探针。 |
 
 ### 7.7 pi 探针结论（2026-10-30，pi-acp 0.0.34 / pi 1.4.0，Windows）
 
@@ -344,7 +344,7 @@ send error: [sendMessage] errcode=-2 ... (prepare failed)
 | 5 | **反向请求**：0（不问权限、不用 fs/terminal 委托）。`ACP_TEST_TOOL=1`：3 次工具调用全部执行、`drift-check.txt` 落盘、0 个 `session/request_permission`。 |
 | 6 | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。 |
 | 7 | **MCP**：pi 读 `<PI_CODING_AGENT_DIR>/mcp.json`（kiro 格式 `{mcpServers}`；`pi mcp list` 可识别）；`session/new` 的 `mcpServers` 被 pi-acp 只存不用 → 预设 `mcpViaAcp: false`。 |
-| 8 | **未做**：真机微信 L4–L6（消息/热切换/MCP/任务）、适配器升级后的回归。 |
+| 8 | **真机 E2E 已过（2026-11-01）**：worker 通道 `wemind task --agent pi` → 回复「2」（删掉 worker-home 里的 settings/models 后由 `acquire` 自动重建）；brain 通道微信单轮 → `session/load` → `prompt ok 9705ms` → 回复送达（启动横幅未混入）；热切换 pi↔codex 双向成功；微信「任务 pi：…」→ 任务 #27 → 回复「3」。**仍未单独复测**：微信侧 `加载 <MCP>`；适配器升级后的回归按 §8 重跑探针。 |
 
 ## 8. 清理 / 回滚
 

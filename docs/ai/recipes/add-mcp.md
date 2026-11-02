@@ -1,6 +1,6 @@
 # 配方：新增 / 调试 MCP 挂载
 
-> **适用版本**：WeMind 1.0.1 ｜ **最后核对**：2026-10-24
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
 >
 > 目标：让 brain 能在微信里通过「加载/卸载 MCP」动态获得工具，同时不破坏隔离、不引入 `wechat` 回环。
 
@@ -10,10 +10,15 @@
 
 ```text
 catalog（定义从哪来）
-  └─ 按 agent 各自约定读取：
-       kiro     ~/.kiro/settings/mcp.json          { "mcpServers": { ... } }
-       opencode ~/.config/opencode/opencode.json   { "mcp": { "servers": { ... } } }
-       DSH      ACP session/new 的 mcpServers      （无文件式 catalog 时用 WEMIND_MCP_CATALOG）
+  └─ 按 agent 各自约定读取（不要跨 agent 借文件）：
+       kiro     ~/.kiro/settings/mcp.json                 { "mcpServers": { ... } }
+       opencode ~/.config/opencode/opencode.json          { "mcp": { "servers": { ... } } }
+       qoder    ~/.qoder/settings.json                    { "mcpServers": { ... } }
+       cline    ~/.cline/data/settings/cline_mcp_settings.json / CLINE_MCP_SETTINGS_PATH
+       gemini   <沙箱>/.gemini/settings.json              { "mcpServers": { ... } }（JSONC）
+       pi       <沙箱根>/mcp.json                         { "mcpServers": { ... } }
+       DSH、claude-code  ACP session/new 的 mcpServers   （无文件式 catalog 时用 WEMIND_MCP_CATALOG）
+       codex    ❌ 适配器 mcpCapabilities.acp=false，stdio MCP 不可用
   └─ 可用 WEMIND_MCP_CATALOG / WECHAT_MCP_CATALOG 覆盖
 
 激活集（哪些允许给 brain）
@@ -21,7 +26,7 @@ catalog（定义从哪来）
   └─ 微信指令「加载 <名>」/「卸载 <名>」修改；wechat 永久禁止
 
 transport（怎么让 agent 看到）
-  └─ brain：applySandbox() 写沙箱配置文件（kiro/opencode），或 mcpViaAcp 传 session/new|resume（deepseek，已实现）
+  └─ brain：applySandbox() 写沙箱配置文件（文件式 MCP 的 agent），或 mcpViaAcp 传 session/new|resume（DSH / claude-code，已实现）
   └─ worker：applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）
 ```
 
@@ -31,7 +36,7 @@ transport（怎么让 agent 看到）
 |---|---|
 | `packages/wechat-daemon/src/mcp-sandbox.ts` | brain 沙箱、catalog、激活集、`加载/卸载` |
 | `packages/wechat-daemon/src/worker-sandbox.ts` | worker 全量继承、排除集 |
-| `packages/wechat-daemon/src/agent-mcp.ts` | kiro/opencode 格式的读/写/转换 |
+| `packages/wechat-daemon/src/agent-mcp.ts` | 文件式 MCP 格式（kiro / opencode / HTTP）的读/写/转换 |
 | `packages/wechat-daemon/src/index.ts` | 指令拦截；加载/卸载后 `restart()` |
 | `packages/wechat-daemon/src/acp-brain.ts` | 重启 ACP，重建后恢复 session |
 
@@ -73,7 +78,7 @@ transport（怎么让 agent 看到）
 
 ### DSH
 
-> **状态：M3 已实现（2026-10-24）。** `deepseek` 配置里的 `mcpViaAcp: true`——不写 MCP 配置文件，激活集经 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发；worker 同理继承全量（除排除集）。`addMcp` 会预校验定义（无 command/url 拒绝加载）。HTTP MCP 未真机实测。
+> **状态：已实现并实测（2026-10-29 复核）。** `deepseek` 配置里的 `mcpViaAcp: true`——不写 MCP 配置文件，激活集经 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发；worker 同理继承全量（除排除集）。`addMcp` 会预校验定义（无 command/url 拒绝加载；结构不认识/残缺的条目跳过并记日志，不拖挂整个会话）。**stdio 已真机实测可用；HTTP 由 agent 声明可用（`mcpCapabilities.http:true`）但未单独真机实测；SSE 不被 ACP 支持**（`toAcpMcpServers` 只输出 stdio / `type:"http"`）。claude-code 同样走 `mcpViaAcp`；codex 的适配器声明 `mcpCapabilities.acp=false`，保持 `mcpViaAcp: false`。
 
 DSH 的 ACP 走 `session/new` 的 `mcpServers`，没有 kiro 式文件。用中立 catalog：
 
@@ -135,19 +140,20 @@ MCP                 # 列出可选与已激活
 ## 4. 安全
 
 - brain 默认免审批（内置预设各用自己 agent 的机制，见 `brain-agents.ts` 与 `docs/接入其它-ACP-Agent.md` §5）；**加载一个 MCP = 对登录者（唯一能发消息的人）开放该工具的全部能力**。
-- `allowFrom` 是唯一的发件人闸门（默认只放行登录者），不要为了省事关掉。
+- `allowFrom` 是**兜底**发件人闸门（默认拒绝，正常只含登录者一个 userId），不要为了省事关掉；平台本身只投递登录者的消息，这个白名单防的是发送范围变化/别的入口。
 - worker 继承全量 MCP，风险更高；不要把 worker 的 cwd 指到敏感目录。
 - `wechat` 永久禁止：同一 token 长轮询会与 daemon 抢消息/回环。
 - MCP 定义里不要写明文密钥到仓库；用环境变量或本机配置。
 
 ---
 
-## 5. 未来工作（DSH）
+## 5. DSH 的 `mcpViaAcp`（已实现，2026-11-02 核对）
 
-- `mcpViaAcp`：把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入；
+- `mcpViaAcp`：把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入（`deepseek`、`claude-code` 预设为 `true`）；
 - `toAcpMcpServers()`：kiro/opencode 格式 → `{ name, command, args, env }` / `{ name, type:"http", url, headers }`；
-- 官方不支持 SSE；HTTP 已广告；stdio 待实测；
-- 坏条目预校验：官方 `session/new` 失败会回滚整个会话。
+- 官方不支持 SSE；HTTP 已广告（未单独真机实测）；stdio 已真机实测；
+- 坏条目预校验：无 command/url 的条目拒绝加载，结构残缺的条目跳过并记日志——官方 `session/new` 失败会回滚整个会话，所以不能让一条坏定义拖挂全部；
+- 能力字段不自动适配：`initialize` 回包目前不被解析，`mcpViaAcp` 是**人工写进预设**的结论；接新 agent 时用探针实测 stdio/HTTP，别照抄声明。
 
 ---
 
