@@ -6,6 +6,20 @@ on:
   pull_request:
 
 jobs:
+  # 最低运行版本：只验证运行时（不跑 tsdown——它的 engines 要求 Node >=22.18，属于开发工具链）。
+  # 发布包声明 Node >=20.19；这里用 Node 20 的最新小版本真跑一遍测试，避免「声明的最低版本从未验证」。
+  min-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build -w @wemind/wechat-ilink-core
+      - run: npm test
+
   build-test:
     strategy:
       fail-fast: false

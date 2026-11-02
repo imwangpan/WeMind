@@ -16,7 +16,7 @@ wemind version           # → wemind 1.3.0 (@wemind/cli, node …, win32-x64)  
 npx -y @wemind/cli list
 ```
 
-要求：**Node.js >= 20**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / `gemini` / 桌面端 `dsh` / `qodercli` / `cline` 等；未配置时自动探测 `kiro → opencode → gemini → deepseek → qoder → cline`；适配器类 `claude-code` / `codex` / `pi` 不参与探测，要显式 `wemind brain set|switch`）。Gemini CLI 用 `GEMINI_CLI_HOME` 指向沙箱根（它的配置目录是 `<沙箱>/.gemini`），MCP 与设置同在 `settings.json`，凭据会随沙箱同步（API key 用户的 `.env`，Google 登录用户的 `oauth_creds.json` / `google_accounts.json`）。
+要求：**Node.js >= 20.19**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / `gemini` / 桌面端 `dsh` / `qodercli` / `cline` 等；未配置时自动探测 `kiro → opencode → gemini → deepseek → qoder → cline`；适配器类 `claude-code` / `codex` / `pi` 不参与探测，要显式 `wemind brain set|switch`）。Gemini CLI 用 `GEMINI_CLI_HOME` 指向沙箱根（它的配置目录是 `<沙箱>/.gemini`），MCP 与设置同在 `settings.json`，凭据会随沙箱同步（API key 用户的 `.env`，Google 登录用户的 `oauth_creds.json` / `google_accounts.json`）。
 
 ## 升级
 
