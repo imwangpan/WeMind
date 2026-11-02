@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 
-import { buildShellLine, quoteCmdArg, quoteShArg, shellEnv, spawnAgent } from "./spawn-agent.js";
+import {
+  buildShellLine,
+  quoteCmdArg,
+  quoteShArg,
+  shellEnv,
+  spawnAgent,
+  spawnEnv,
+} from "./spawn-agent.js";
 
 // 下面两个 spawnAgent 用例会真起一个 node 子进程（Windows 上单跑 0.5–0.7s）。全量跑时多个测试文件并发、各自都在起进程，实测会超过 vitest 默认的 5s 而偶发失败。这里是「等确定会退出的子进程」，放宽超时不是掩盖问题；纯字符串拼接的用例仍走默认超时。
 const SPAWN_TEST_TIMEOUT_MS = 20_000;
@@ -80,6 +87,25 @@ describe("shellEnv", () => {
     const env = { FOO: "bar" };
     expect(shellEnv("linux", env)).toBe(env);
     expect(shellEnv("darwin", undefined)).toBeUndefined();
+  });
+});
+
+describe("spawnEnv（ACP 子进程不继承 VS Code 调试引导）", () => {
+  it("摘掉 VS Code 的 --require 与 VSCODE_INSPECTOR_OPTIONS，保留其它 NODE_OPTIONS", () => {
+    const env = spawnEnv({
+      FOO: "bar",
+      NODE_OPTIONS:
+        "--max-old-space-size=4096 --require /x/ms-vscode.js-debug/src/bootloader.js --trace-warnings",
+      VSCODE_INSPECTOR_OPTIONS: '{"deferredMode":true}',
+    });
+    expect(env.FOO).toBe("bar");
+    expect(env.NODE_OPTIONS).toBe("--max-old-space-size=4096 --trace-warnings");
+    expect(env.VSCODE_INSPECTOR_OPTIONS).toBeUndefined();
+  });
+
+  it("没有注入时原样保留用户环境", () => {
+    const env = spawnEnv({ NODE_OPTIONS: "--max-old-space-size=4096" });
+    expect(env.NODE_OPTIONS).toBe("--max-old-space-size=4096");
   });
 });
 

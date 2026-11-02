@@ -267,7 +267,7 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 
 原因：VS Code 集成终端的「智能自动附加」给终端里每个 node 进程注入 `NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` 和 `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true` 等）——被注入的进程**要等调试器接上才执行主脚本**。终端里的前台命令（`stop`/`list`/`start` 本体）会被接上，所以输出都正常；但 `start` **脱离出去的后台守护进程不会被接**，于是卡在「等调试器」里，既不写 `wrapper.pid` 也不拉 daemon。
 
-处置：1.2.0 起 `watchdog-runner.ts` 的两次脱离式 spawn（拉起后台守护进程、它再拉起 daemon）都先过 `debug-env.ts` 的 `stripVscodeDebugEnv()`，已修。旧版本撞上时：换一个**非 VS Code 集成终端**（Windows Terminal / 普通 PowerShell）执行 `wemind start <key>`，或先清变量再跑：
+处置：1.2.0 起 `watchdog-runner.ts` 的两次脱离式 spawn（拉起后台守护进程、它再拉起 daemon）都先过 `debug-env.ts` 的 `stripVscodeDebugEnv()`；1.3.0 起 `spawn-agent.ts` 的 `spawnEnv()` 对 ACP 子进程也做同样净化（前台 daemon 在 VS Code 里跑时，agent 不会卡在等调试器），已修。旧版本撞上时：换一个**非 VS Code 集成终端**（Windows Terminal / 普通 PowerShell）执行 `wemind start <key>`，或先清变量再跑：
 
 ```powershell
 Remove-Item Env:VSCODE_INSPECTOR_OPTIONS -ErrorAction SilentlyContinue

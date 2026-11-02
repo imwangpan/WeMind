@@ -4,6 +4,8 @@ import {
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
 
+import { stripVscodeDebugEnv } from "./debug-env.js";
+
 /*
  * 启动 ACP agent 进程的**统一入口**。
  *
@@ -71,6 +73,18 @@ export function shellEnv(
 }
 
 /**
+ * 交给 ACP 子进程的环境：摘掉 VS Code 注入的调试引导（见 `debug-env.ts`）。
+ *
+ * 为什么子进程也要摘：前台 `wemind daemon` 在 VS Code 集成终端里启动时，daemon 自身被接上、跑得好好的，
+ * 但它 spawn 的 agent（多为 node 脚本）会继承 `NODE_OPTIONS=--require …/bootloader.js`，等一个永远不会来的调试器，
+ * 表现为 `initialize` 迟迟不回。与 watchdog 的脱离式 spawn 是同一个注入，处理方式相同。
+ * 导出仅供单测。
+ */
+export function spawnEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
+  return stripVscodeDebugEnv(env ?? process.env);
+}
+
+/**
  * 启动 agent：`shell=true` 的走「整串命令行 + shell」（见文件头注释），其余直接 spawn。
  * 默认 `windowsHide: true`（不闪控制台窗口），其余选项透传。
  */
@@ -78,7 +92,11 @@ export function spawnAgent(
   agent: SpawnableAgent,
   opts: SpawnOptionsWithoutStdio = {},
 ): ChildProcessWithoutNullStreams {
-  const base: SpawnOptionsWithoutStdio = { windowsHide: true, ...opts };
+  const base: SpawnOptionsWithoutStdio = {
+    windowsHide: true,
+    ...opts,
+    env: spawnEnv(opts.env),
+  };
   if (!agent.shell) return spawn(agent.bin, agent.args, base);
   const shellOpts: SpawnOptionsWithoutStdio = { ...base, shell: true };
   const env = shellEnv(process.platform, base.env);
