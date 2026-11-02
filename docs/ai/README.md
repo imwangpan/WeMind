@@ -80,7 +80,7 @@ poller（长轮询，不被大脑阻塞）
 - **控制桥与微信回合串行**：`askBrain` / `newSession` / `resumeSession` 共用 `acp-brain.ts` 的操作队列；控制桥请求带 `expiresAt`，过期请求 daemon 不执行（排队中的会话操作拿到执行权后再查一次）；
 - **自愈**：prompt 超时/失败 → `reset()` 杀进程树 → 下条消息重建并尝试恢复会话；
 - **进度**：`tool_call` → 「步骤 N」；`agent_message_chunk` → 「正在整理回复」；任意 `session/update` → 刷新心跳基线；
-- **连发上限**：iLink 约 10 条；`index.ts` 预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」；图片也计一条并走同一条串行链，额度不够时改附原链接；大脑回合接近上限时任务推送先让位、回合结束后再发。**多任务与对话大脑共享同一份额度**（按用户计）。
+- **连发上限**：iLink 约 10 条；外发管线（串行链、按用户预算、挂起补发、任务推送让位）在 `send-pipeline.ts` 的 `SendPipeline`，`index.ts` 只接真实发送函数和回合编排。预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」；图片也计一条并走同一条串行链，额度不够时改附原链接；大脑回合接近上限时任务推送先让位、回合结束后再发。**多任务与对话大脑共享同一份额度**（按用户计）。
 
 ---
 
@@ -245,7 +245,7 @@ poller（长轮询，不被大脑阻塞）
 | 改 ACP 自愈/超时 | `acp-brain.ts` | `worker-acp.ts`（同步）、`brain-check.ts` |
 | 改反向请求应答（权限 / fs / terminal） | `acp-reverse.ts` | `acp-reverse.test.ts`；brain、worker、`brain check` 三处共用 |
 | 改 MCP 挂载 | `mcp-sandbox.ts` | `agent-mcp.ts`、`worker-sandbox.ts`、`sandbox-inherit.ts`（记忆/技能继承与换 agent 清理）、`docs/ai/recipes/add-mcp.md` |
-| 改微信消息/回复 | `index.ts` | `md-reply.ts`、`image-reply.ts` |
+| 改微信消息/回复 | `index.ts`、`send-pipeline.ts` | `md-reply.ts`、`image-reply.ts` |
 | 改 CLI | `cli.ts`（分派 `cli-dispatch.ts`） | `manage.ts` |
 | 改数据/账号 | `wechat-ilink-core/src/store/*` | `brain-config.ts`、`docs/repowiki/08` |
 | 排查不回复 | `docs/ai/recipes/debug-daemon.md` | `daemon.log`、`brain.json`、`brain check` |

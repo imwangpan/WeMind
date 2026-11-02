@@ -228,7 +228,7 @@ graph TD
 
 ### 串行发送链
 
-`sendOrdered` / `sendMdOrdered` 用一个 `replyChain` Promise 串联所有发送，保证多条消息（进度/答案）按入队顺序送达、不并发乱序，并在每条前补足 `MIN_SEND_GAP_MS` 间隔。
+这些发送编排在 `send-pipeline.ts` 的 `SendPipeline` 里（`index.ts` 只注入真实发送函数与账号）：`sendOrdered` / `sendMdOrdered` 用一个 `replyChain` Promise 串联所有发送，保证多条消息（进度/答案）按入队顺序送达、不并发乱序，并在每条前补足 `minGapMs` 间隔。类可注入假的发送函数与可控时钟，`send-pipeline.test.ts` 覆盖串行、预算、挂起补发与让位。
 
 `reply` 内置错误恢复：遇 `ret=-2`（param_error）退避 1.5s 后换该用户最新缓存 token 重试一次（限流靠等待恢复，token 失效靠换 token）；遇可重试传输错误退避 1.5s 重试一次。
 

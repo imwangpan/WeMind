@@ -62,6 +62,7 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 | 文件 | 职责 |
 |---|---|
 | `packages/wechat-daemon/src/index.ts` | 消息路由、回合编排、进度节流、brain/worker 分流、快车道（`fastWorkerLoop`）、控制桥扫描（`scanControlInbox`） |
+| `packages/wechat-daemon/src/send-pipeline.ts` | 外发管线（`SendPipeline`）：串行链、最小间隔、按用户连发预算、旧 token 挂起/补发、任务推送让位；可注入假发送函数做单测 |
 | `packages/wechat-daemon/src/acp-brain.ts` | 常驻 ACP 客户端（对话大脑）；含 `resumeSession`（严格恢复）、`beginSwitch/drainTurn/warmup`、`drainLoadReplay`（gemini 的 load 后异步回放） |
 | `packages/wechat-daemon/src/acp-quiet.ts` | `waitForFrameQuiet`：恢复会话后等异步回放帧安静（200ms 静默窗口、最多 3s；brain 与 worker 共用） |
 | `packages/wechat-daemon/src/acp-reverse.ts` | 反向请求应答器（brain / worker / `brain check` 共用）：权限默认拒绝、`WEMIND_ACP_AUTO_ALLOW=1` 只选 `allow_once`/`allow_always`、未知 method 回 `-32601` |
@@ -164,7 +165,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 | 改**CLI 与微信的对等** | `control-bridge.ts`（协议）+ `index.ts` 的 `handleControlRequest` + `manage.ts`（CLI 侧） |
 | 改命令/帮助 | `chat-commands.ts`（**同表驱动解析与帮助**，改一处两处都变） |
 | 加/改 MCP 挂载 | `mcp-sandbox.ts` / `agent-mcp.ts` / `worker-sandbox.ts`；按 [`docs/ai/recipes/add-mcp.md`](docs/ai/recipes/add-mcp.md) |
-| 改微信消息处理/回复 | `index.ts`、`md-reply.ts`、`image-reply.ts` |
+| 改微信消息处理/回复 | `index.ts`、`send-pipeline.ts`、`md-reply.ts`、`image-reply.ts` |
 | 加 CLI 子命令 | `cli.ts`（注册）+ `manage.ts`（实现） |
 | 改数据目录/账号 | `wechat-ilink-core/src/store/*`、`brain-config.ts` |
 | 排查 daemon 不回复 | [`docs/ai/recipes/debug-daemon.md`](docs/ai/recipes/debug-daemon.md) |
