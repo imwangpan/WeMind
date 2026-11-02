@@ -49,6 +49,11 @@ const mode = process.argv[2] || "ok";
 const log = process.env.FAKE_ACP_LOG;
 const methods = process.env.FAKE_ACP_METHODS;
 if (log) fs.appendFileSync(log, process.pid + "\\n");
+// noisy 模式模仿「把日志混进 stdout」的 agent（DSH 实测）：非 JSON 行必须被 acp-brain 忽略
+if (mode === "noisy") {
+  process.stdout.write("startup banner: not json\\n");
+  process.stdout.write("{broken json}\\n");
+}
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 let buf = "";
 process.stdin.on("data", (d) => {
@@ -86,6 +91,7 @@ function handle(f) {
     // 只有 "modes" 模式的假 agent 认识 session/set_mode；其余回 -32601，模拟不支持该方法的 agent
     else if (f.method === "session/set_mode" && mode === "modes") out({ jsonrpc: "2.0", id: f.id, result: {} });
     else if (f.method === "session/prompt") {
+      if (mode === "noisy") process.stdout.write("log line during prompt\\n");
       out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: f.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "答:" + (f.params.prompt[0].text || "").slice(0, 20) } } } });
       out({ jsonrpc: "2.0", id: f.id, result: { stopReason: "end_turn" } });
     } else out({ jsonrpc: "2.0", id: f.id, error: { code: -32601, message: "method not supported" } });
@@ -202,6 +208,13 @@ describe("switchBrain", () => {
     const map = JSON.parse(fs.readFileSync(sessionsFile, "utf-8"));
     expect(map["kiro:u1"]).toBe("sess-new"); // 会话映射按新 agent 分开存
     expect(methods()).toContainEqual(expect.stringContaining("initialize"));
+  });
+
+  it("agent 往 stdout 混非 JSON 日志行：忽略噪音，握手与回合照常完成", async () => {
+    setup("ok", "noisy");
+    const out = await switchBrain("kiro", { userId: "u1", dir: dataDir });
+    expect(out.ok).toBe(true);
+    expect(await askBrain("u1", "噪音测试")).toContain("答:"); // 系统提示在前，假 agent 只回显前 20 字
   });
 
   it("切回旧大脑：该 agent 的旧会话用 session/load 恢复（不是新建）", async () => {

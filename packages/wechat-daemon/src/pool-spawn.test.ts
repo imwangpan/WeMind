@@ -40,6 +40,9 @@ fs.writeFileSync(
   `import fs from "node:fs";
 const log = process.env.FAKE_LOG;
 if (log) fs.appendFileSync(log, process.pid + "\\n");
+// 故意把非 JSON 日志混进 stdout（DSH 实测如此）：worker-acp 必须跳过它们，不能把回合卡死
+process.stdout.write("worker startup: plain log\\n");
+process.stdout.write("{not-json}\\n");
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 let buf = "";
 process.stdin.on("data", (d) => {
@@ -54,6 +57,7 @@ process.stdin.on("data", (d) => {
     else if (f.method === "session/new") out({ jsonrpc: "2.0", id: f.id, result: { sessionId: "s-" + process.pid } });
     else if (f.method === "session/load" || f.method === "session/resume") out({ jsonrpc: "2.0", id: f.id, result: {} });
     else if (f.method === "session/prompt") {
+      process.stdout.write("prompt log line\\n");
       out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: f.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "pid=" + process.pid + " 收到:" + f.params.prompt[0].text } } } });
       out({ jsonrpc: "2.0", id: f.id, result: { stopReason: "end_turn" } });
     } else out({ jsonrpc: "2.0", id: f.id, error: { code: -32601, message: "unsupported" } });
@@ -132,6 +136,17 @@ afterAll(() => {
 });
 
 describe("worker 进程池（真进程）", () => {
+  it("agent 往 stdout 混非 JSON 日志行：忽略噪音，回合照常完成", async () => {
+    const g = await acquire(agent("kiro"), 99);
+    expect(g.ok).toBe(true);
+    if (!g.ok) throw new Error(g.problem);
+    try {
+      expect(await g.conn.ask("噪音测试", "task-99@u1")).toContain("收到:噪音测试");
+    } finally {
+      release(g.conn);
+    }
+  });
+
   it("派发→用完→再派同 agent：复用同一进程（不重复冷启动）", async () => {
     const a = agent("kiro");
     const g1 = await acquire(a, 1);
