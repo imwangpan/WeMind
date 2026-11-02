@@ -1,6 +1,5 @@
 import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
-import fs from "node:fs";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME, activeMcpServers } from "./mcp-sandbox.js";
