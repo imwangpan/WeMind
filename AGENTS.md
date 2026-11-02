@@ -61,8 +61,9 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 
 | 文件 | 职责 |
 |---|---|
-| `packages/wechat-daemon/src/index.ts` | 消息路由、回合编排、进度节流、brain/worker 分流、快车道（`fastWorkerLoop`）；轮询/收件箱扫描委派给下面的 runner，纯路由判定在 `daemon-routing.ts` |
+| `packages/wechat-daemon/src/index.ts` | 消息路由、回合编排、进度节流、brain/worker 分流、快车道（`fastWorkerLoop`）；轮询/收件箱扫描委派给 runner，纯路由判定在 `daemon-routing.ts`，微信/控制桥指令分派在 `daemon-control.ts` |
 | `packages/wechat-daemon/src/daemon-routing.ts` | 纯路由判定（可单测）：快车道/「继续」归属、控制与任务指令解析、大脑错误分类与用户提示、文本/工具标题提取 |
+| `packages/wechat-daemon/src/daemon-control.ts` | 微信控制指令与控制桥请求的分派：MCP/会话/切脑/任务大脑/交接/`AI` 总览/帮助；两入口共用同一批实现 |
 | `packages/wechat-daemon/src/access.ts` | 发件人兜底鉴权：登录者始终放行，其余看登录者白名单 |
 | `packages/wechat-daemon/src/control-inbox-runner.ts` | 控制桥收件箱扫描（`ControlInboxRunner`）：单条串行、过期不执行、失败一定写应答 |
 | `packages/wechat-daemon/src/task-inbox-runner.ts` | 任务收件箱扫描（`scanTaskInbox`）：按时间序、先删后做、坏文件丢弃、出错回 ack |
@@ -171,7 +172,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 | 改**多任务/进程池/编号** | `worker-pool.ts`（策略纯函数 `planAcquire/planReap`；`acquire` 起进程/复用前按这条任务的 agent 调 `ensureWorkerHome(ag)` 备沙箱）+ `worker-acp.ts`（`WorkerConn`）+ `task-manager.ts` + `task-store.ts` |
 | 改**会话管理** | `session-manager.ts`（操作层）+ `session-registry.ts`（登记表）；`acp-brain.ts` 的 `resumeSession` 是严格恢复 |
 | 改**交接** | `handoff.ts`（写入磁盘/带上/消费）+ `index.ts` 的 workerLoop 前缀带上 |
-| 改**CLI 与微信的对等** | `control-bridge.ts`（协议）+ `index.ts` 的 `handleControlRequest` + `manage.ts`（分派）/ `cli-*.ts`（CLI 侧实现） |
+| 改**CLI 与微信的对等** | `control-bridge.ts`（协议）+ `daemon-control.ts` 的 `handleControlRequest` / `handleControl` + `manage.ts`（分派）/ `cli-*.ts`（CLI 侧实现） |
 | 改命令/帮助 | `chat-commands.ts`（**同表驱动解析与帮助**，改一处两处都变） |
 | 加/改 MCP 挂载 | `mcp-sandbox.ts` / `agent-mcp.ts` / `worker-sandbox.ts`；按 [`docs/ai/recipes/add-mcp.md`](docs/ai/recipes/add-mcp.md) |
 | 改微信消息处理/回复 | `index.ts`、`send-pipeline.ts`、`md-reply.ts`、`image-reply.ts` |

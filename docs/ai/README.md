@@ -109,6 +109,7 @@ poller（长轮询，不被大脑阻塞）
 | **发件人鉴权 / isAuthorizedSender** | `access.ts`：登录者始终放行，其余人看 `allowFrom`（兜底校验；平台正常只投登录者） |
 | **外发管线 / SendPipeline** | `send-pipeline.ts`：串行链、最小间隔、按用户连发预算、旧 token 挂起/补发、任务推送让位；注入假发送函数即可单测 |
 | **路由判定 / daemon-routing** | `daemon-routing.ts`：快车道与「继续」归属、控制/任务指令解析、大脑错误分类与提示；纯函数，`index.ts` 只调用 |
+| **控制指令分派 / daemon-control** | `daemon-control.ts`：微信控制指令（MCP/会话/切脑/任务大脑/交接/AI/帮助）与控制桥请求共用同一批实现；`index.ts` 只接入入口 |
 | **CLI 共享上下文 / cli-context** | `cli-context.ts`：账号选择（key/label）、daemon 与控制桥存活判断、`viaBridge`（控制桥请求/等待/过期） |
 | **CLI 任务命令 / cli-task** | `cli-task.ts`：`task*` 四条的收件箱写入、答复文案与退出码；`manage.ts` 只做分派 |
 | **CLI 会话命令 / cli-session** | `cli-session.ts`：`session list/new/resume/rename/delete` 与 `session-current`；读直接读登记表，写优先走控制桥，旧版 daemon 的降级说明也在这里 |
