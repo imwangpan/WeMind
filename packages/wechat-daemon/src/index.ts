@@ -1406,10 +1406,14 @@ async function handleControlRequest(req: ControlRequest, owner: string): Promise
     case "session.delete":
       if (!req.ref) return "❌ 用法：session delete <序号|名字|id前缀>";
       return deleteSessionCmd(sc(), req.ref);
-    case "session.unpause":
-      clearSessionPause(account.botId);
+    case "session.unpause": {
+      // 控制桥入口没有外层 `account` 变量（`runDaemon` 里那份是局部的）；这里按当前凭证重新取 botId。
+      const botId = loadAccount()?.botId;
+      if (!botId) return "❌ 没有登录凭证；先登录再解除冷却。";
+      clearSessionPause(botId);
       log("control(cli): 已解除 -14 冷却，继续轮询");
       return "✅ 已解除会话过期冷却，继续轮询。";
+    }
     case "task.list":
       return renderTaskList(owner);
     case "task.reply": {
