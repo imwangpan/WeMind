@@ -102,6 +102,7 @@ poller（长轮询，不被大脑阻塞）
 | **任务编号 / 寻址** | 按用户单调递增、**不复用**、跨重启不归零；回任务用 `#<编号> 正文`（`>` 为明确发给任务的短前缀），无前缀消息一律走 brain（只有「继续」类短句可续跑任务） |
 | **默认任务大脑** | `worker.agent ?? agent`；`切换任务大脑`/`--worker` 可在**进程内**覆盖它（**不写入磁盘**，重启回到配置值）；`任务 <agent 名>：`/`--agent` **只对那一条任务生效**，不改它 |
 | **进程池 / worker-pool** | `worker-pool.ts`：同 agent 空闲复用 → 回收最旧腾位 → spawn；并发 `WEMIND_MAX_WORKERS`、空闲 `WEMIND_IDLE_MAX`、回收 `WEMIND_WORKER_REAP_MS` |
+| **daemon.log 轮转** | `log-rotate.ts`：builtin watchdog 用管道 + 逐块追加在运行中轮转（`WEMIND_LOG_MAX_MB` 默认 10、`WEMIND_LOG_KEEP` 默认 3）；`run-daemon.ps1` 每次重拉前轮转；pm2 交给 `pm2-logrotate` |
 | **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收 agent 名与纯数据**（无 `bin`/`args`/`shell`） |
 | **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
 | **preset / `ACP_AGENT_PRESETS`** | **代码里的叫法**；用户面统一写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）。一条 = 二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |

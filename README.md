@@ -320,6 +320,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WEMIND_SWITCH_DRAIN_MS` / `WEMIND_SWITCH_TIMEOUT_MS`   | 换大脑：等在途回合结束的上限（默认 30000）/ 启动新大脑（`initialize` + 会话）硬上限（到点就放弃，默认 120000）                                 |
 | `WEMIND_CONTROL_TIMEOUT_MS`                             | CLI 等 daemon 回话的上限（默认 30000；`brain switch` 自动放大到「启动新大脑 + 等在途回合结束 + 15s」）                                                    |
 | `WEMIND_HANDOFF_TTL_MS`                                 | 交接摘要的有效期（默认 86400000，即 24h；过期不带上）                                                                               |
+| `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                 | `daemon.log` 单文件上限（默认 10MB）/ 轮转保留份数（默认 3；`0` = 不留历史）。内置 watchdog 运行中轮转，`run-daemon.ps1` 每次重拉前轮转；pm2 runner 交给 `pm2-logrotate` |
 | 大脑 agent 选择 / 记忆继承                              | 见下方「切换大脑 Agent」与 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
 
 限制：

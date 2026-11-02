@@ -73,8 +73,8 @@ wemind start <账号> --runner pm2   # 或 WEMIND_RUNNER=pm2 切到 pm2
 单实例守卫（wrapper.pid 存在且 isOurProcess → 直接退出）
 for (;;) {
   写 daemon.log：start daemon
-  spawn(node, [cliPath, "daemon"], { stdio: 全并入 daemon.log })
-  等子进程退出 → 拿到 code
+  spawn(node, [cliPath, "daemon"], { stdio: 管道 → RotatingLog 逐块追加 daemon.log })
+  等子进程退出（close，等 stdout/stderr 收完）→ 拿到 code
   code === 78（BRAIN_CONFIG_EXIT_CODE，大脑配置错误）? → 停止自动重启并提示人工修
   code === 75（DAEMON_ALREADY_RUNNING_EXIT_CODE，同账号已有实例）? → 停止自动重启（另一个实例已在服务）
   连续崩溃超过 WEMIND_MAX_RESTARTS（默认 50，跑满 10 分钟清零）? → 停止自动重启并提示看日志
@@ -88,7 +88,7 @@ for (;;) {
 - **退出码 78 特判**：大脑配置错误重拉无益，停在循环外，避免每 5 秒刷一条日志；**退出码 75**（同账号已有 daemon）同理——另一个实例已经在消费同一个 bot token，重拉只会每 5 秒撞一次。
 - **连续崩溃上限**：短暂运行就崩的连续次数超过 `WEMIND_MAX_RESTARTS`（默认 50，与 pm2 对齐）就停止重拉，避免崩溃循环无限刷日志/耗 CPU；daemon 跑满 10 分钟视为稳定、计数清零。PowerShell wrapper 同一套语义。
 - **跨平台**：不依赖 shell / Mutex / pm2，Windows 用 `windowsHide` 防闪窗；
-- **日志**：stdout/stderr 一并写 `<数据目录>/daemon.log`，与 PowerShell 路线一致。
+- **日志**：stdout/stderr 经管道由 `RotatingLog` 逐块追加进 `<数据目录>/daemon.log`，与 PowerShell 路线一致；运行中按 `WEMIND_LOG_MAX_MB`（默认 10MB）轮转、保留 `WEMIND_LOG_KEEP`（默认 3）份。
 
 > pm2 也是第①层的一种实现，与 builtin 后台守护进程**行为对齐**（`pm2-runner.ts`）：app 名 `wemind-<key>`、
 > `restart_delay: 5000`、`max_restarts: 50`、`stop_exit_codes: [78]`、日志合并到账号 `daemon.log`。

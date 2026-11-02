@@ -77,6 +77,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 | `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_EXTRA_ARGS` | 一次性覆盖大脑选择与启动参数（`ARGS` 整段替换、`EXTRA_ARGS` 追加；持久化请用 `wemind brain set`） |
 | `WEMIND_ACP_AUTO_ALLOW=1` | 放行 ACP agent 的一次性权限请求（默认为拒绝） |
 | `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off` 关闭，其它值 = 该 modeId |
+| `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP` | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate` |
 
 ## 与 MCP 形态的区别
 

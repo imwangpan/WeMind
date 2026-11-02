@@ -16,6 +16,36 @@ $dataDir = if ($env:WECHAT_DATA_DIR) { $env:WECHAT_DATA_DIR } else { Join-Path $
 New-Item -ItemType Directory -Force -Path $dataDir -ErrorAction SilentlyContinue | Out-Null
 $log = Join-Path $dataDir "daemon.log"
 
+# daemon.log 轮转（与内置 watchdog 的 log-rotate.ts 同一口径：daemon.log → .1 最新 … .<keep> 最旧）。
+# 内置 watchdog 在运行中逐块轮转；本脚本的 `*>> $log` 在子进程存活期间持有文件，只能在每次重拉前（已退出）轮转。
+$logMaxMb = 0.0
+if ($env:WEMIND_LOG_MAX_MB -and [double]::TryParse($env:WEMIND_LOG_MAX_MB, [ref]$logMaxMb) -and $logMaxMb -gt 0) {
+  $logMaxBytes = [long]($logMaxMb * 1MB)
+} else {
+  $logMaxBytes = 10MB
+}
+$logKeep = 3
+if ($env:WEMIND_LOG_KEEP) {
+  $parsedKeep = 0
+  if ([int]::TryParse($env:WEMIND_LOG_KEEP, [ref]$parsedKeep) -and $parsedKeep -ge 0) { $logKeep = $parsedKeep }
+}
+function Rotate-DaemonLog {
+  if (-not (Test-Path -LiteralPath $log)) { return }
+  if ((Get-Item -LiteralPath $log).Length -lt $logMaxBytes) { return }
+  if ($logKeep -le 0) {
+    Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+    return
+  }
+  Remove-Item -LiteralPath "$log.$logKeep" -Force -ErrorAction SilentlyContinue
+  for ($i = $logKeep - 1; $i -ge 1; $i--) {
+    $src = "$log.$i"
+    if (Test-Path -LiteralPath $src) {
+      Move-Item -LiteralPath $src -Destination "$log.$($i + 1)" -Force -ErrorAction SilentlyContinue
+    }
+  }
+  Move-Item -LiteralPath $log -Destination "$log.1" -Force -ErrorAction SilentlyContinue
+}
+
 # 单实例守卫：同一账号只允许一个 wrapper 在跑，防止多次启动累积出多个自重启循环（表现为反复重生的 wrapper / 多 daemon 抢同一 token，即坑①）。
 # 多账号用不同 WECHAT_ACCOUNT/WECHAT_DATA_DIR → 不同 mutex 名 → 各自独立、可共存。
 # 自定义 WEMIND_HOME 时必须把根目录算进 mutex：否则两个不同根目录下的同名账号会互相挡。
@@ -64,6 +94,7 @@ $crashes = 0
 
 while ($true) {
   $startedAt = Get-Date
+  Rotate-DaemonLog
   "[wemind/wechat-daemon/wrapper] start daemon $(Get-Date -Format o)" | Add-Content $log
   & $node "packages/wechat-daemon/dist/cli.js" daemon *>> $log
   $code = $LASTEXITCODE

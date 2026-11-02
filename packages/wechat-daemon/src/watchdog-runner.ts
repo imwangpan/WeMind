@@ -8,6 +8,7 @@ import path from "node:path";
 import { DATA_DIR, accountDir } from "@wemind/wechat-ilink-core";
 import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
 import { stripVscodeDebugEnv } from "./debug-env.js";
+import { logLimitsFromEnv, RotatingLog } from "./log-rotate.js";
 import { CLI_PID_MARKERS, otherOurProcessPid } from "./proc-identity.js";
 
 const RESTART_DELAY_MS = 5000;
@@ -68,6 +69,9 @@ export async function runWatchdog(): Promise<void> {
     );
     return;
   }
+  // 拿到单实例后才碰日志轮转：另一个实例可能正在写，不能去改名它的文件。
+  // 子进程 stdout/stderr 走管道、由 RotatingLog 逐块追加——Windows 上运行中也能轮转（文件没有常驻句柄）。
+  const rotator = new RotatingLog(log, logLimitsFromEnv());
   const cleanup = () => {
     try {
       if (readPidFile(wrapperPidFile) === process.pid) fs.unlinkSync(wrapperPidFile);
@@ -93,54 +97,48 @@ export async function runWatchdog(): Promise<void> {
   let crashes = 0;
   for (;;) {
     const startedAt = Date.now();
-    fs.appendFileSync(
-      log,
-      `[wemind/wechat-daemon/wrapper] start daemon ${new Date().toISOString()}\n`,
-    );
-    const logFd = fs.openSync(log, "a");
+    rotator.writeLine(`[wemind/wechat-daemon/wrapper] start daemon ${new Date().toISOString()}`);
     const child: ChildProcess = spawn(process.execPath, [cliPath, "daemon"], {
       // WECHAT_ACCOUNT 已在本进程环境中；同时摘掉 VS Code 终端注入的调试引导（后台守护进程若本身被注入过，daemon 不能再被带坏，见 debug-env.ts）
       env: stripVscodeDebugEnv(process.env),
-      stdio: ["ignore", logFd, logFd], // stdout/stderr 都并入 daemon.log（与 run-daemon.ps1 一致）
+      stdio: ["ignore", "pipe", "pipe"], // stdout/stderr 由 rotator 合并进 daemon.log（可轮转）
       windowsHide: true, // 不弹出控制台窗口（Windows）：日志已重定向到 daemon.log，无需可见窗口
     });
+    child.stdout?.on("data", (chunk: Buffer) => rotator.write(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => rotator.write(chunk));
     const code = await new Promise<number>((resolve) => {
-      child.on("exit", (c) => resolve(c ?? -1));
+      let exitCode = -1;
+      child.on("exit", (c) => {
+        exitCode = c ?? -1;
+      });
+      // close 在 stdio 全部关闭后触发：先收完最后一块输出，再写「daemon exited」，否则末尾日志可能丢。
+      child.on("close", () => resolve(exitCode));
       child.on("error", () => resolve(-1));
     });
-    try {
-      fs.closeSync(logFd);
-    } catch {
-      /* ignore */
-    }
     if (code === DAEMON_ALREADY_RUNNING_EXIT_CODE) {
       // 同账号已有另一个 daemon 在消费同一个 bot token：本后台守护进程再拉只会每 5s 撞一次，停在这里。
-      fs.appendFileSync(
-        log,
-        `[wimind/wechat-daemon/wrapper] 同账号已有 daemon 在跑（exit ${code}），本后台守护进程退出。${new Date().toISOString()}\n`,
+      rotator.writeLine(
+        `[wimind/wechat-daemon/wrapper] 同账号已有 daemon 在跑（exit ${code}），本后台守护进程退出。${new Date().toISOString()}`,
       );
       return;
     }
     if (code === BRAIN_CONFIG_EXIT_CODE) {
       // 大脑配置错误：重拉无益（需人工修），停在后台守护进程循环外，避免每 5s 刷一条。
-      fs.appendFileSync(
-        log,
-        `[wemind/wechat-daemon/wrapper] 大脑配置错误（exit ${code}），已停止自动重启。修好后执行：wemind start <账号>\n`,
+      rotator.writeLine(
+        `[wemind/wechat-daemon/wrapper] 大脑配置错误（exit ${code}），已停止自动重启。修好后执行：wemind start <账号>`,
       );
       return;
     }
     const plan = nextRestartBudget(crashes, Date.now() - startedAt, maxRestarts);
     crashes = plan.crashes;
     if (plan.stop) {
-      fs.appendFileSync(
-        log,
-        `[wemind/wechat-daemon/wrapper] 连续崩溃 ${crashes} 次（上限 ${maxRestarts}），已停止自动重启。看 daemon.log 排查；修好后执行：wemind start <账号>${new Date().toISOString()}\n`,
+      rotator.writeLine(
+        `[wemind/wechat-daemon/wrapper] 连续崩溃 ${crashes} 次（上限 ${maxRestarts}），已停止自动重启。看 daemon.log 排查；修好后执行：wemind start <账号>${new Date().toISOString()}`,
       );
       return;
     }
-    fs.appendFileSync(
-      log,
-      `[wemind/wechat-daemon/wrapper] daemon exited (code=${code}), restart in 5s ${new Date().toISOString()}\n`,
+    rotator.writeLine(
+      `[wemind/wechat-daemon/wrapper] daemon exited (code=${code}), restart in 5s ${new Date().toISOString()}`,
     );
     await sleep(RESTART_DELAY_MS);
   }
