@@ -7,7 +7,13 @@ on:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows 是主要运行平台（进程身份/spawn/.cmd/junction/停止链都是平台相关），
+        # 只在 Linux 跑会让这些路径的回归漏到用户机器上。
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,6 +22,7 @@ jobs:
           cache: "npm"
       - run: npm ci
       - name: Install Rolldown Linux binding
+        if: runner.os == 'Linux'
         run: |
           binding_version="$(node -p "require('./node_modules/rolldown/package.json').optionalDependencies['@rolldown/binding-linux-x64-gnu']")"
           npm install --no-save --ignore-scripts "@rolldown/binding-linux-x64-gnu@$binding_version"
