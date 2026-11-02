@@ -6,7 +6,12 @@ import fs from "node:fs";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { WORKER_HOME, workerMcpServers } from "./worker-sandbox.js";
 import { spawnAgent } from "./spawn-agent.js";
-import { normalizeSessionMap, sessionKey } from "./session-map.js";
+import {
+  backupCorruptSessionMap,
+  normalizeSessionMap,
+  readSessionMapStrict,
+  sessionKey,
+} from "./session-map.js";
 import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
 import { waitForFrameQuiet } from "./acp-quiet.js";
 
@@ -55,10 +60,14 @@ let connSeq = 0;
 
 // ---- 磁盘 session 映射（`<agent>:<sessionKey>` -> sessionId），与 brain 同样按 agent 分开存 ----
 function loadSessionMap(a: ResolvedAgent): Record<string, string> {
-  let raw: unknown;
+  let raw: Record<string, string>;
   try {
-    raw = JSON.parse(fs.readFileSync(SESSION_MAP_FILE, "utf-8"));
-  } catch {
+    raw = readSessionMapStrict(SESSION_MAP_FILE);
+  } catch (e) {
+    const backup = backupCorruptSessionMap(SESSION_MAP_FILE);
+    dlog(
+      `session map unreadable (${String(e)}) → ${backup ? `backed up to ${backup}` : "backup failed"}；按空表继续`,
+    );
     return {};
   }
   const { map, migrated } = normalizeSessionMap(raw, a.name);

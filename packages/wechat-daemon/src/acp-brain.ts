@@ -9,8 +9,10 @@ import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
 import { pidRecordOf, writePidRecords } from "./pid-record.js";
 import { spawnAgent } from "./spawn-agent.js";
 import {
+  backupCorruptSessionMap,
   brainSessionMapPath,
   normalizeSessionMap,
+  readSessionMapStrict,
   sessionKey,
   writeSessionMap,
 } from "./session-map.js";
@@ -157,10 +159,15 @@ function reset(): void {
 const keyOf = (ag: ResolvedAgent, userId: string): string => sessionKey(ag.name, userId);
 
 function loadSessionMap(ag: ResolvedAgent): Record<string, string> {
-  let raw: unknown;
+  const file = brainSessionMapPath(DATA_DIR);
+  let raw: Record<string, string>;
   try {
-    raw = JSON.parse(fs.readFileSync(brainSessionMapPath(DATA_DIR), "utf-8"));
-  } catch {
+    raw = readSessionMapStrict(file);
+  } catch (e) {
+    const backup = backupCorruptSessionMap(file);
+    dlog(
+      `session map unreadable (${String(e)}) → ${backup ? `backed up to ${backup}` : "backup failed"}；按空表继续`,
+    );
     return {};
   }
   const { map, migrated } = normalizeSessionMap(raw, ag.name);

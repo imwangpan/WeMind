@@ -76,7 +76,7 @@ wemind session list <key|label>
 |---|---|
 | `daemon.log` | daemon / acp / worker / task / watchdog / switch 日志 |
 | `brain.json` | 账号级大脑选择（`agent` + `worker.agent` + `presets` 各自启动覆盖） |
-| `brain-sessions.json` | `<agent>:userId → sessionId`（按大脑分开存）；**「当前是哪个会话」的唯一权威** |
+| `brain-sessions.json` | `<agent>:userId → sessionId`（按大脑分开存）；**「当前是哪个会话」的唯一权威**；读/解析失败会先备份为 `*.corrupt-<时间戳>` 再按空表继续 |
 | `session-registry.json` | 会话登记表（名字/标题/轮次；**派生**元数据，坏了只影响列表） |
 | `tasks.json` | 任务表（编号/agent/状态；重启后未完成的标「已中断」） |
 | `task-state.json` | 任务状态记录（顶层字段复制最近一条，供旧 CLI 读） |

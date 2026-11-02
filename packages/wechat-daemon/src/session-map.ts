@@ -21,20 +21,50 @@ export function workerSessionMapPath(dir: string = DATA_DIR): string {
   return path.join(dir, "worker-sessions.json");
 }
 
-/** 读当前会话表；缺失/损坏/非对象 → 空表（幂等、不抛）。只保留字符串值，**不做格式迁移**（迁移归 normalizeSessionMap）。 */
-export function readSessionMap(file: string): Record<string, string> {
-  let raw: unknown;
+/**
+ * 严格读当前会话表：缺失 → 空表；其它读/解析/格式错误一律抛出，由调用方决定备份或降级。
+ * 只保留字符串值，**不做格式迁移**（迁移归 normalizeSessionMap）。
+ */
+export function readSessionMapStrict(file: string): Record<string, string> {
+  let text: string;
   try {
-    raw = JSON.parse(fs.readFileSync(file, "utf-8"));
-  } catch {
-    return {};
+    text = fs.readFileSync(file, "utf-8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return {};
+    throw e;
   }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const raw: unknown = JSON.parse(text);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`会话表 ${file} 不是 JSON 对象`);
+  }
   const map: Record<string, string> = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof v === "string" && v) map[k] = v;
   }
   return map;
+}
+
+/** 读当前会话表（只读场景）；缺失/损坏/非对象 → 空表（幂等、不抛）。写入前的读取请用 readSessionMapStrict + backupCorruptSessionMap。 */
+export function readSessionMap(file: string): Record<string, string> {
+  try {
+    return readSessionMapStrict(file);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 会话表损坏时的兜底：把原文件改名备份为 `<file>.corrupt-<时间戳>`，返回备份路径；改名失败返回 undefined。
+ * 备份保证后续写入不会把可能还能人工恢复的内容整张覆盖。
+ */
+export function backupCorruptSessionMap(file: string): string | undefined {
+  const backup = `${file}.corrupt-${Date.now()}`;
+  try {
+    fs.renameSync(file, backup);
+    return backup;
+  } catch {
+    return undefined;
+  }
 }
 
 /** 原子写当前会话表（tmp + rename）：这个文件在关键路径上（ensureSession → session/load），半截 JSON 等于「所有会话丢失」。 */
