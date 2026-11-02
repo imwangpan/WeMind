@@ -522,11 +522,26 @@ export async function askBrain(
   images?: Array<{ data: string; mimeType: string }>,
   opts: { deadline?: number } = {},
 ): Promise<string> {
+  return (await askBrainTurn(userId, message, onProgress, images, opts)).text;
+}
+
+/**
+ * 同 `askBrain`，但把**实际答话的 agent** 一并返回。
+ * 交接摘要必须记实际大脑：请求排队期间可能刚好切换完成，只读入口时的槽位会记错来源。
+ */
+export async function askBrainTurn(
+  userId: string,
+  message: string,
+  onProgress?: (ev: ProgressEvent) => void,
+  images?: Array<{ data: string; mimeType: string }>,
+  opts: { deadline?: number } = {},
+): Promise<{ text: string; agent: string }> {
   await waitWhileSwitching(); // 切换进行中就先在门口等（有界）：绝不在启动新大脑时双起进程
   return withBrainOp(async () => {
     if (expired(opts.deadline)) throw new Error(EXPIRED_MSG);
     const ag = getAgent("brain"); // 排队期间可能刚切过脑——轮到本操作时才取槽位
-    return await runTurn(ag, userId, message, onProgress, images);
+    const text = await runTurn(ag, userId, message, onProgress, images);
+    return { text, agent: ag.name };
   });
 }
 

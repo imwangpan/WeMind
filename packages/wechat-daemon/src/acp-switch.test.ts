@@ -25,6 +25,7 @@ process.env.NODE_OPTIONS = ""; // 子进程会继承它；调试器注入会让�
 const { switchBrain, preflightSwitch, switchInFlightTarget } = await import("./brain-switch.js");
 const {
   askBrain,
+  askBrainTurn,
   beginSwitch,
   endSwitch,
   newSession,
@@ -449,6 +450,15 @@ describe("ACP 操作串行门（控制桥 vs 微信回合）", () => {
     await turn;
     const after = methods().filter((m) => m.startsWith("session/new")).length;
     expect(after).toBe(before); // 过期请求没有真的开新会话
+  });
+});
+
+describe("askBrainTurn", () => {
+  it("返回实际答话的 agent（交接摘要据此记来源，不用入口时的槽位）", async () => {
+    setup();
+    const r = await askBrainTurn("u1", "你好");
+    expect(r.agent).toBe("opencode");
+    expect(r.text).toContain("答:");
   });
 });
 

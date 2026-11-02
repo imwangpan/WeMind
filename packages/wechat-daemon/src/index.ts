@@ -37,6 +37,7 @@ import type {
 } from "@wemind/wechat-ilink-core";
 import {
   askBrain,
+  askBrainTurn,
   newSession,
   restartForMcpChange,
   resumeSession,
@@ -343,15 +344,18 @@ type ControlCtx = {
  * 先回一条「在做」的提示：写摘要要走一整个模型回合（可能一两分钟），没有进度提示会让人以为卡死。
  */
 async function runHandoff(userId: string, ctx: ControlCtx, deadline?: number): Promise<string> {
-  const from = getAgent("brain").name;
-  if (!currentSessionIdOf(from, userId, DATA_DIR))
+  const before = getAgent("brain").name;
+  if (!currentSessionIdOf(before, userId, DATA_DIR))
     return "ℹ️ 当前大脑还没有和你的对话记录，没什么可交接的。先聊几句再来交接。";
   await ctx
-    .notify(`⏳ 正在让「${from}」把当前上下文写成交接摘要…（可能要一两分钟）`)
+    .notify(`⏳ 正在让「${before}」把当前上下文写成交接摘要…（可能要一两分钟）`)
     .catch(() => {});
   let text: string;
+  let from: string;
   try {
-    text = (await askBrain(userId, HANDOFF_PROMPT, undefined, undefined, { deadline })).trim();
+    const r = await askBrainTurn(userId, HANDOFF_PROMPT, undefined, undefined, { deadline });
+    text = r.text.trim();
+    from = r.agent; // 排队期间可能刚好切完脑：记实际答话的那个
   } catch (e) {
     return `❌ 生成交接摘要失败：${String(e)}`;
   }
