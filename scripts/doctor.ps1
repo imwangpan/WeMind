@@ -26,7 +26,8 @@ function YesNo([bool]$ok) { if ($ok) { "OK" } else { "--" } }
 
 $repo = Split-Path -Parent $PSScriptRoot
 if (-not $DataRoot) {
-  $DataRoot = if ($env:WECHAT_DATA_DIR) { $env:WECHAT_DATA_DIR } else { Join-Path $env:USERPROFILE ".wemind" }
+  # 根目录与 core 一致：WEMIND_HOME > ~/.wemind。WECHAT_DATA_DIR 只是单账号覆盖，不是根目录。
+  $DataRoot = if ($env:WEMIND_HOME) { $env:WEMIND_HOME } else { Join-Path $env:USERPROFILE ".wemind" }
 }
 
 Section "WeMind doctor"
@@ -35,6 +36,7 @@ Item "系统" ("{0} {1}" -f $env:OS, [System.Environment]::OSVersion.VersionStri
 Item "PowerShell" $PSVersionTable.PSVersion.ToString()
 Item "仓库" $repo
 Item "数据根" $DataRoot
+if ($env:WECHAT_DATA_DIR) { Item "当前账号数据目录" $env:WECHAT_DATA_DIR }
 
 # ---------- Node / npm ----------
 Section "Node / npm"

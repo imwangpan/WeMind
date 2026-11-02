@@ -9,14 +9,17 @@ $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
 # 账号与数据目录（每账号独立）。日志写进各自数据目录，避免多账号共享 daemon.log 产生文件锁竞争（曾导致非默认账号的 wrapper 卡在写日志、起不来 daemon）。
+# 根目录解析顺序与 core 的 WEMIND_ROOT 一致：WEMIND_HOME > ~/.wemind；WECHAT_DATA_DIR 仍可单独覆盖「本账号」的数据目录。
+$root = if ($env:WEMIND_HOME) { $env:WEMIND_HOME } else { Join-Path $env:USERPROFILE ".wemind" }
 $accountKey = if ($env:WECHAT_ACCOUNT) { $env:WECHAT_ACCOUNT } else { 'default' }
-$dataDir = if ($env:WECHAT_DATA_DIR) { $env:WECHAT_DATA_DIR } else { Join-Path $env:USERPROFILE ".wemind\$accountKey" }
+$dataDir = if ($env:WECHAT_DATA_DIR) { $env:WECHAT_DATA_DIR } else { Join-Path $root $accountKey }
 New-Item -ItemType Directory -Force -Path $dataDir -ErrorAction SilentlyContinue | Out-Null
 $log = Join-Path $dataDir "daemon.log"
 
 # 单实例守卫：同一账号只允许一个 wrapper 在跑，防止多次启动累积出多个自重启循环（表现为反复重生的 wrapper / 多 daemon 抢同一 token，即坑①）。
 # 多账号用不同 WECHAT_ACCOUNT/WECHAT_DATA_DIR → 不同 mutex 名 → 各自独立、可共存。
-$dataKey = if ($env:WECHAT_DATA_DIR) { $env:WECHAT_DATA_DIR } elseif ($env:WECHAT_ACCOUNT) { "account:$($env:WECHAT_ACCOUNT)" } else { "account:default" }
+# 自定义 WEMIND_HOME 时必须把根目录算进 mutex：否则两个不同根目录下的同名账号会互相挡。
+$dataKey = if ($env:WECHAT_DATA_DIR) { $env:WECHAT_DATA_DIR } elseif ($env:WEMIND_HOME) { "home:$($env:WEMIND_HOME)|account:$accountKey" } elseif ($env:WECHAT_ACCOUNT) { "account:$($env:WECHAT_ACCOUNT)" } else { "account:default" }
 $sha = [System.Security.Cryptography.SHA1]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($dataKey.ToLower()))
 $mutexName = "wemind-daemon-" + ([System.BitConverter]::ToString($sha) -replace '-','').Substring(0, 16)
 $createdNew = $false

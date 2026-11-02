@@ -207,7 +207,7 @@ Register-ScheduledTask -TaskName "wemind-daemon" `
 
 ## 7. 多账号：每账号一条独立链
 
-`run-all-daemons.ps1` 读账号注册表 `~/.wemind/accounts.json`，为每个账号起一条独立的 wrapper 链：
+`run-all-daemons.ps1` 读账号注册表 `<WEMIND_HOME>/accounts.json`（默认 `~/.wemind/accounts.json`），为每个账号起一条独立的 wrapper 链：
 
 ```powershell
 foreach ($key in $accounts) {
