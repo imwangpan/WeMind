@@ -474,7 +474,14 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 
 ### Windows 登录自启
 
-优先用计划任务（PS7 全路径、登录触发、崩溃重拉由 `scripts/run-daemon.ps1` 的循环负责）：
+**安装版（`npm i -g @wemind/cli`）**：计划任务/启动文件夹只需执行一次 `wemind start <账号>`。`wemind start` 会拉起自带后台守护进程（`wemind _watchdog`）后立即返回，崩溃重拉由它负责；重复执行安全（会先停旧实例）。例如启动文件夹放一个 `.bat`：
+
+```bat
+@echo off
+wemind start 我的号
+```
+
+**源码开发者**：优先用计划任务（PS7 全路径、登录触发、崩溃重拉由 `scripts/run-daemon.ps1` 的循环负责）：
 
 ```powershell
 $pwsh = "C:\Program Files\PowerShell\7\pwsh.exe"
@@ -486,6 +493,8 @@ Register-ScheduledTask -TaskName "wemind-daemon" -Action $action -Trigger (New-S
 若环境禁止创建计划任务（提示「拒绝访问」），改用**启动文件夹**自启：在
 `shell:startup`（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`）放一个
 `.vbs`，用 `WScript.Shell.Run` 以隐藏窗口调用上面的 `pwsh ... -File scripts/run-daemon.ps1`。
+
+> **注意 · 安装版没有 `scripts/`**：上面的 `run-daemon.ps1` 只存在于源码仓库；用 npm 安装的 CLI 请直接用 `wemind start`（自带后台守护进程），不要去找仓库脚本。
 
 > **注意 · node 由版本管理器管理时**：若 `node` 由 **fnm / nvm / Volta** 这类「只往交互 shell 注入 PATH」的工具管理，登录任务/服务（`-NoProfile`、无 shell 注入）的持久 PATH 里通常**没有 node**：wrapper 会找不到它，且 daemon 拉起的大脑（如 `opencode acp`）也解析不到。`scripts/run-daemon.ps1` 已内置回退（fnm `%APPDATA%\fnm\aliases\default`、Volta、`C:\Program Files\nodejs`）并把命中目录**前置进 PATH**；若安装位置不在其中，请改脚本候选或直接用绝对路径的 node 启动。另：PS7 若只以 WindowsApps 别名存在（无 `C:\Program Files\PowerShell\7\pwsh.exe`），优先走上面的 VBS 退路。
 

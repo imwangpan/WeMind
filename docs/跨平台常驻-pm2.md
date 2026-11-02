@@ -150,13 +150,13 @@ WantedBy=default.target
 ```
 
 ```bash
-systemctl --user enable --now wemind@feead781eb44.service   # 每账号一个实例
+systemctl --user enable --now wemind@<账号key>        # 每账号一个实例（%i = 账号 key）
 loginctl enable-linger $USER                                # 允许未登录也常驻（服务器场景）
 ```
 
 ### macOS（launchd LaunchAgent）
 
-`~/Library/LaunchAgents/com.wemind.<key>.plist`：`ProgramArguments` = `node .../dist/index.js`，加 `EnvironmentVariables.WECHAT_ACCOUNT=<key>`、`KeepAlive=true`、`RunAtLoad=true`，然后 `launchctl load`。
+`~/Library/LaunchAgents/com.wemind.<key>.plist`：`ProgramArguments` = `[node, /abs/path/WeMind/packages/wechat-daemon/dist/cli.js, daemon]`（前台常驻本体；**不是** `dist/index.js`，也不是 `wemind start`），加 `EnvironmentVariables.WECHAT_ACCOUNT=<key>`、`KeepAlive=true`、`RunAtLoad=true`，然后 `launchctl load`。
 
 > systemd `Restart=always` / launchd `KeepAlive` 就是后台守护进程；`enable` / `RunAtLoad` 就是自启；服务单元天然单实例——和 pm2 等价，只是手写 unit。
 
