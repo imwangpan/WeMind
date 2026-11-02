@@ -314,6 +314,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WEMIND_WORKER_IDLE_MS` / `_CAP_MS` / `_FIRST_FRAME_MS` | worker 单轮空闲 / 硬上限（到点就放弃）/ 首帧超时（默认 180000 / 1800000 / 30000，比对话大脑宽松）                                                    |
 | `WEMIND_WORKER_BRAIN`                                   | 默认任务大脑（agent 名；未设则回落 `WEMIND_BRAIN`。两者都是**一次性覆盖**，会压过 brain.json 里的 `worker.agent`）                     |
 | `WEMIND_MAX_WORKERS` / `WEMIND_IDLE_MAX`                | 同时运行的任务数上限（默认 3）/ 池中保留的空闲进程数（默认 2）                                                                      |
+| `WEMIND_MAX_WORKERS_TOTAL`                              | 仅 `scripts/run-all-daemons.ps1` 读取：按账号数均分给每个 daemon 的全局 worker 预算（至少 1）；单独 `wemind start` 不读 |
 | `WEMIND_WORKER_REAP_MS`                                 | 空闲 worker 进程回收时间（默认 300000，即 5 分钟；**注意不是** `WEMIND_WORKER_IDLE_MS`——那是单轮 prompt 空闲超时）                   |
 | `WEMIND_WORKER_PROGRESS`                                | 是否推送 worker 全程文字进度（默认 `0` 安静；`1` 开启。「正在输入中」始终有）                                                       |
 | `WEMIND_TASK_SCAN_MS`                                   | daemon 扫描本地命令收件箱 `task-inbox/` 与控制桥 `control-inbox/` 的间隔毫秒（默认 1000）                                          |
@@ -554,7 +555,7 @@ wemind login --label 工作号 --start
 - **CLI 的可达范围 = 本机**：控制桥是本地文件桥，只接受**agent 名与纯数据**（不接受自定义 bin/args，所以 `brain switch` 带 `--bin` 会被拒，那是 `brain set` 的活），只有能访问 `~/.wemind/<key>/` 的本机用户能用——**没有远程/网络入口**。
 - **写入磁盘口径两个入口一致**：都是**新大脑启动成功才写 `brain.json`**，失败退回不改盘。
 - **`WEMIND_BRAIN` 环境变量会压过一切**：它存在时，重启后仍回到它指的大脑（切换答复里有警告）。
-- **环境变量是进程级的，不是账号级的**：`WEMIND_BRAIN`、API key、`WEMIND_MAX_WORKERS` 等由启动 daemon 的 shell 提供，同一 shell 启动的 N 个账号会一起继承——`WEMIND_BRAIN` 会同时压过每个账号的 `brain.json`（重启后都回到它指的大脑），`WEMIND_MAX_WORKERS` 是**每个 daemon 各自**的上限（N 个账号合计最多 N × 值，没有全局上限）。要按账号取不同值，就分开环境启动；持久的大脑选择用各账号的 `wemind brain set`。
+- **环境变量是进程级的，不是账号级的**：`WEMIND_BRAIN`、API key、`WEMIND_MAX_WORKERS` 等由启动 daemon 的 shell 提供，同一 shell 启动的 N 个账号会一起继承——`WEMIND_BRAIN` 会同时压过每个账号的 `brain.json`（重启后都回到它指的大脑），`WEMIND_MAX_WORKERS` 是**每个 daemon 各自**的上限（N 个账号合计最多 N × 值）。用 `scripts/run-all-daemons.ps1` 拉起多账号时可设 `WEMIND_MAX_WORKERS_TOTAL`，脚本会按账号数均分后注入每个子进程（只覆盖它拉起的 daemon，已在运行的需重启）；单独 `wemind start` 的账号仍各按自己的值。要按账号取不同值，就分开环境启动；持久的大脑选择用各账号的 `wemind brain set`。
 - **少数 agent 仍会读真实 home**：微信消息、会话表、任务表与沙箱本身都是按账号隔离的，但有个别 agent 不支持把配置目录指到沙箱——`codex` 的适配器没有沙箱配置目录（认证/配置取真实 `~/.codex`）；`pi` 经 `pi-acp` 读真实 `~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills`；`qoder` 的 `memory/` 是指向真实 `~/.qoder/memory` 的 junction。**同一台机器上多个账号由不同的人使用**时，要意识到这些数据是共享的；同一个人自用多账号不受影响。详见 [repowiki 06](docs/repowiki/06-ACP-大脑与沙箱.md#少数-agent-的真实-home-仍跨账号共享)。
 
 **自启全部账号**：`scripts/run-all-daemons.ps1` 读注册表为每个账号起一个 daemon（各账号单实例守卫，重复运行安全）。Windows 启动文件夹的 VBS 已指向它，开机自动拉起所有已登记账号。
