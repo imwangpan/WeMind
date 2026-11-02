@@ -59,7 +59,11 @@ if (-not (Get-Command kiro-cli -ErrorAction SilentlyContinue)) {
   if (Test-Path $kc) { $env:KIRO_CLI_BIN = $kc }
 }
 
+$maxRestarts = if ($env:WEMIND_MAX_RESTARTS -and [int]$env:WEMIND_MAX_RESTARTS -gt 0) { [int]$env:WEMIND_MAX_RESTARTS } else { 50 }
+$crashes = 0
+
 while ($true) {
+  $startedAt = Get-Date
   "[wemind/wechat-daemon/wrapper] start daemon $(Get-Date -Format o)" | Add-Content $log
   & $node "packages/wechat-daemon/dist/cli.js" daemon *>> $log
   $code = $LASTEXITCODE
@@ -73,6 +77,14 @@ while ($true) {
   # 另一个实例已经在消费同一个 bot token，重拉只会每 5s 撞一次 → 停在循环外。
   if ($code -eq 75) {
     "[wemind/wechat-daemon/wrapper] 同账号已有 daemon 在跑（exit 75），已停止自动重启。$(Get-Date -Format o)" | Add-Content $log
+    break
+  }
+  # 连续崩溃上限（与 pm2 / builtin watchdog 对齐）：跑满 10 分钟视为稳定、计数清零，
+  # 短暂活一下就崩才连续计数；超过上限停在循环外，避免崩溃循环无限刷日志。
+  if (((Get-Date) - $startedAt).TotalMilliseconds -ge 600000) { $crashes = 0 }
+  $crashes += 1
+  if ($crashes -gt $maxRestarts) {
+    "[wemind/wechat-daemon/wrapper] 连续崩溃 $crashes 次（上限 $maxRestarts），已停止自动重启。看 daemon.log 排查；修好后重新启动。$(Get-Date -Format o)" | Add-Content $log
     break
   }
   "[wemind/wechat-daemon/wrapper] daemon exited (code=$code), restart in 5s $(Get-Date -Format o)" | Add-Content $log

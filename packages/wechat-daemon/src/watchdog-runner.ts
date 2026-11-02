@@ -11,6 +11,24 @@ import { stripVscodeDebugEnv } from "./debug-env.js";
 import { CLI_PID_MARKERS, otherOurProcessPid } from "./proc-identity.js";
 
 const RESTART_DELAY_MS = 5000;
+/** 连续崩溃上限（与 pm2 的默认 max_restarts 对齐）：只统计「短暂运行就崩」的连续次数。 */
+const DEFAULT_MAX_RESTARTS = 50;
+/** daemon 跑满这么久视为稳定，连续崩溃计数清零（避免几个月里偶发崩溃累积到上限后不再重拉）。 */
+const RESTART_STABLE_MS = 10 * 60 * 1000;
+
+/**
+ * 连续崩溃计数：`prev` 是上一次的计数，`ranMs` 是这次 daemon 活了多久。
+ * 跑满稳定期就清零；超过上限返回 stop=true——后台守护进程应停止重拉，等人看日志，而不是无限刷。
+ */
+export function nextRestartBudget(
+  prev: number,
+  ranMs: number,
+  max: number = DEFAULT_MAX_RESTARTS,
+): { crashes: number; stop: boolean } {
+  const base = ranMs >= RESTART_STABLE_MS ? 0 : prev;
+  const crashes = base + 1;
+  return { crashes, stop: crashes > max };
+}
 /**
  * daemon 发现同账号已有另一个实例在跑时用它退出。
  * 这不是配置错误，重拉无益——另一个实例已经在消费同一个 bot token；后台守护进程/pm2 都应停止重拉。
@@ -68,7 +86,13 @@ export async function runWatchdog(): Promise<void> {
   });
 
   const cliPath = process.argv[1]; // 当前 cli.js（本进程即 `node cli.js _watchdog`）
+  const maxRestarts =
+    Number(process.env.WEMIND_MAX_RESTARTS) > 0
+      ? Number(process.env.WEMIND_MAX_RESTARTS)
+      : DEFAULT_MAX_RESTARTS;
+  let crashes = 0;
   for (;;) {
+    const startedAt = Date.now();
     fs.appendFileSync(
       log,
       `[wemind/wechat-daemon/wrapper] start daemon ${new Date().toISOString()}\n`,
@@ -102,6 +126,15 @@ export async function runWatchdog(): Promise<void> {
       fs.appendFileSync(
         log,
         `[wemind/wechat-daemon/wrapper] 大脑配置错误（exit ${code}），已停止自动重启。修好后执行：wemind start <账号>\n`,
+      );
+      return;
+    }
+    const plan = nextRestartBudget(crashes, Date.now() - startedAt, maxRestarts);
+    crashes = plan.crashes;
+    if (plan.stop) {
+      fs.appendFileSync(
+        log,
+        `[wemind/wechat-daemon/wrapper] 连续崩溃 ${crashes} 次（上限 ${maxRestarts}），已停止自动重启。看 daemon.log 排查；修好后执行：wemind start <账号>${new Date().toISOString()}\n`,
       );
       return;
     }
