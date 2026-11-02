@@ -127,6 +127,7 @@ beforeEach(() => {
   resetSlotsForTest();
   restart();
   fs.rmSync(path.join(dataDir, "brain.json"), { force: true });
+  fs.rmSync(path.join(dataDir, "brain.json.tmp"), { recursive: true, force: true });
   fs.rmSync(pidFile, { force: true });
   fs.rmSync(sessionsFile, { force: true });
   fs.rmSync(path.join(dataDir, "session-registry.json"), { force: true });
@@ -303,6 +304,17 @@ describe("switchBrain", () => {
     expect(out.ok).toBe(true);
     expect(getAgent("brain").name).toBe("kiro");
     expect(loadBrainConfig(dataDir)?.agent).toBe("opencode");
+  });
+
+  it("写盘失败：槽位仍是旧大脑，答复「已退回」不是撒谎", async () => {
+    setup();
+    fs.mkdirSync(path.join(dataDir, "brain.json.tmp")); // 逼 saveBrainConfig 的 writeFileSync 失败
+    const out = await switchBrain("kiro", { userId: "u1", dir: dataDir });
+    expect(out.ok).toBe(false);
+    expect(out.ok === false && out.problem).toContain("已退回原来那个「opencode」");
+    expect(getAgent("brain").name).toBe("opencode"); // 先落盘再换槽位：没写成功就不换
+    expect(loadBrainConfig(dataDir)?.agent).toBe("opencode");
+    expect(await askBrain("u1", "还在吗")).toContain("答:"); // 旧大脑照常答
   });
 });
 

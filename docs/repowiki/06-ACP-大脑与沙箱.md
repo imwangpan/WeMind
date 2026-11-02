@@ -88,11 +88,11 @@ graph TD
     C --> D["switchBlocking = true → drainTurn<br/>等在跑的回合结束（WEMIND_SWITCH_DRAIN_MS，默认 30s）<br/>超时 = 诚实失败（不砍回合）"]
     D --> E["ensureBrainHome(目标)：准备沙箱（只增不删）"]
     E --> F["reset() → spawn + initialize<br/>+ ensureSession(触发者)<br/>（硬上限 WEMIND_SWITCH_TIMEOUT_MS，默认 120s）"]
-    F -->|成功| G["setAgent（槽位）→ 写 brain.json（**持久化放最后**）"]
+    F -->|成功| G["写 brain.json（先落盘）→ setAgent（槽位）"]
     F -->|失败| H["回滚：清 pid 记录、槽位留旧大脑<br/>答复「已回滚到 X，下一条消息会自动重启它」"]
 ```
 
-- **持久化放最后**：成功才写 `brain.json`，所以失败退回**无需撤销**。
+- **先落盘、再换槽位**：成功才写 `brain.json`，所以失败退回**无需撤销**；顺序不能反——先 `setAgent` 再写盘的话，写盘失败会留下「槽位是新大脑、答复却说已退回」的撒谎状态。
 - **等在途回合结束，而不是丢弃**：切换请求到达时有回合在跑 → 等它跑完（默认 30s）再换；超时就如实报「切换失败」，绝不静默打断用户正在等的那条回复。
 - **切换期间到达的用户消息**在 `askBrain` 入口等切换门（有界），因此全程**只 spawn 一次**新进程（既没有「启动新大脑时先起一个、消息又起一个」的双起，也不会拿旧 agent 答新消息）。
 - **`WEMIND_BRAIN` 陷阱**：环境变量优先级高于 `brain.json`，所以命令式切换在进程内生效并写入磁盘，但**重启后若 env 还在，会回到 env 指的大脑**——答复里有警告，别把 env 写进 profile。

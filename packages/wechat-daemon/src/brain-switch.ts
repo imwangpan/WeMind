@@ -17,8 +17,9 @@ import { beginSwitch, drainTurn, endSwitch, restart, warmup } from "./acp-brain.
  *  1. 解析目标 agent：**绕开环境变量**（用户此刻的明确意图该压过一次性 env 覆盖），不可用直接答复失败，不 spawn。
  *  2. `beginSwitch()` → `drainTurn()`：等在跑的回合结束（默认 30s）。超时**诚实失败**，绝不半路砍回合丢答案。
  *  3. `ensureBrainHome(新 agent)` → `restart()`（杀旧进程）→ `warmup()`（initialize + session/load|new，硬上限 120s）。
- *  4. 成功才 `setAgent()` + 写 brain.json —— **持久化放最后**，于是「退回」不需要撤销任何东西：
+ *  4. 成功才写 brain.json + `setAgent()` —— **先落盘再换槽位**，于是「退回」不需要撤销任何东西：
  *     失败路径只做 `restart()`（清掉半截进程与 pid 记录），槽位仍指旧大脑，下一条消息懒重建它（上下文从磁盘 load 回来）。
+ *     顺序不能反：先换槽位再写盘，写盘失败会留下「槽位已是新大脑、答复却说已退回」的撒谎状态。
  *  5. 同一目标的并发请求复用同一次切换；不同目标直接拒绝（不排队，避免「连点两下切到 A」这类歧义）。
  *
  * 已知边界：`WEMIND_BRAIN` 环境变量优先级高于 brain.json，命令绕开了它（进程内真的切了），
@@ -161,9 +162,11 @@ async function runSwitch(
       ensureBrainHome(target); // 先备沙箱（只往新 agent 的配置目录里加东西，失败退回无需撤销）
       restart(); // 杀掉旧进程；旧会话在磁盘上，切回来时 session/load 恢复
       await withTimeout(warmup(target, opts.userId ?? ""), TIMEOUT_MS, warmupTimeoutMsg());
-      setAgent("brain", target); // 成功之后才更新槽位
-      if (opts.persist !== false) updateBrainConfig({ agent: key }, dir); // 持久化放最后：失败无需撤销
-      writeBrainState(dir, target); // 运行时身份：list 显示实际生效的大脑
+      // 先落盘再更新槽位：写盘失败时槽位仍是旧大脑，答复「已退回原来那个」才是真的。
+      // 反过来先 setAgent 再写盘，写失败会留下「槽位是新大脑、磁盘是旧大脑」且答复撒谎的状态。
+      if (opts.persist !== false) updateBrainConfig({ agent: key }, dir);
+      setAgent("brain", target);
+      writeBrainState(dir, target); // 运行时身份：list 显示实际生效的大脑（best-effort）
       const ms = Date.now() - t0;
       return {
         ok: true,
