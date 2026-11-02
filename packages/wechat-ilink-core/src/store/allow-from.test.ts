@@ -52,6 +52,17 @@ describe("allowFrom（登录者白名单，兜底安全闸）", () => {
     expect(fs.readdirSync(dir).some((f) => f.startsWith("allowFrom.json.corrupt-"))).toBe(true);
   });
 
+  it("读-改-写走跨进程锁：陈旧锁自动清理后照常写入", () => {
+    const dir = tmpDir();
+    const lock = path.join(dir, "allowFrom.json.lock");
+    fs.writeFileSync(lock, "stale", "utf-8");
+    const old = Date.now() / 1000 - 60;
+    fs.utimesSync(lock, old, old);
+    addAllowFrom("u9", dir);
+    expect(readAllowFrom(dir)).toEqual(["u9"]);
+    expect(fs.existsSync(lock)).toBe(false); // 本次持锁已释放
+  });
+
   it("格式合法但字段类型不对 → 只保留非空字符串", () => {
     const dir = tmpDir();
     fs.writeFileSync(

@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
+import { withFileLock } from "./file-lock.js";
+
 /**
  * 账号注册表：管理 ~/.wemind 下的多账号清单。
  * - 每个账号一个独立子目录（key = 由 botId 派生的唯一标识，见 deriveAccountKey）。
@@ -14,8 +16,6 @@ export const WEMIND_ROOT = process.env.WEMIND_HOME?.trim() || path.join(os.homed
 
 const REGISTRY_FILE = path.join(WEMIND_ROOT, "accounts.json");
 const REGISTRY_LOCK = `${REGISTRY_FILE}.lock`;
-const LOCK_STALE_MS = 10_000;
-const LOCK_WAIT_MS = 5_000;
 
 export interface AccountMeta {
   key: string;
@@ -80,69 +80,12 @@ export function saveRegistry(reg: AccountsRegistry): void {
   fs.renameSync(tmp, REGISTRY_FILE);
 }
 
-/** 同步等待（CLI 是同步流程；Atomics.wait 不占 CPU）。 */
-function sleepSync(ms: number): void {
-  try {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  } catch {
-    /* ignore */
-  }
-}
-
 /**
  * 注册表的跨进程写锁：`accounts.json` 的「读-改-写」必须串行，否则两个 `wimind login` 并发时后写的那个会用旧快照覆盖前一个账号。
- * 锁文件用 `wx` 原子创建；持有者崩溃留下的陈旧锁（>10s）自动清理。等不到就报错让用户重试，**不**退化成无锁写。
+ * 实现见 `file-lock.ts`（与 allowFrom 共用）。
  */
 function withRegistryLock<T>(fn: () => T): T {
-  fs.mkdirSync(WEMIND_ROOT, { recursive: true });
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    let fd: number | undefined;
-    try {
-      fd = fs.openSync(REGISTRY_LOCK, "wx");
-      fs.writeSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }));
-      fs.closeSync(fd);
-      break;
-    } catch (e) {
-      if (fd !== undefined) {
-        try {
-          fs.closeSync(fd);
-        } catch {
-          /* ignore */
-        }
-        try {
-          fs.unlinkSync(REGISTRY_LOCK);
-        } catch {
-          /* ignore */
-        }
-      }
-      if ((e as NodeJS.ErrnoException)?.code !== "EEXIST")
-        throw e instanceof Error ? e : new Error(String(e));
-      try {
-        const st = fs.statSync(REGISTRY_LOCK);
-        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) {
-          fs.unlinkSync(REGISTRY_LOCK);
-          continue;
-        }
-      } catch {
-        continue; // 锁刚被释放：立即重试
-      }
-      if (Date.now() >= deadline)
-        throw new Error(
-          `账号注册表正被另一个 wimind 进程修改（锁文件 ${REGISTRY_LOCK}）；请稍后重试。若确认没有其它 wimind 在跑，可删除该锁文件。`,
-        );
-      sleepSync(50);
-    }
-  }
-  try {
-    return fn();
-  } finally {
-    try {
-      fs.unlinkSync(REGISTRY_LOCK);
-    } catch {
-      /* 已被清理：忽略 */
-    }
-  }
+  return withFileLock(REGISTRY_LOCK, fn, { subject: "账号注册表" });
 }
 
 export function listAccounts(): AccountMeta[] {

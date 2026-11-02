@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DATA_DIR } from "./account.js";
+import { withFileLock } from "./file-lock.js";
 
 /**
  * 登录者白名单（allowFrom）：每账号一份持久化的「允许发消息的 userId 清单」，取代单一 `WECHAT_OWNER_ID` 环境变量白名单。
@@ -55,19 +56,28 @@ function writeAllowFrom(list: string[], dir: string = DATA_DIR): void {
   fs.renameSync(tmp, fp);
 }
 
+/** 白名单的跨进程写锁：与账号注册表同类的「读-改-写」，两个终端并发 allow/revoke 时后写者会覆盖前者的变更。 */
+function withAllowLock<T>(dir: string, fn: () => T): T {
+  return withFileLock(`${filePath(dir)}.lock`, fn, { subject: "登录者白名单" });
+}
+
 /** 把某个 userId 加入清单（去重）。返回更新后的清单。 */
 export function addAllowFrom(userId: string, dir: string = DATA_DIR): string[] {
-  const list = readAllowFrom(dir);
-  if (userId && !list.includes(userId)) list.push(userId);
-  writeAllowFrom(list, dir);
-  return list;
+  return withAllowLock(dir, () => {
+    const list = readAllowFrom(dir);
+    if (userId && !list.includes(userId)) list.push(userId);
+    writeAllowFrom(list, dir);
+    return list;
+  });
 }
 
 /** 从清单里移除某个 userId。返回更新后的清单。 */
 export function removeAllowFrom(userId: string, dir: string = DATA_DIR): string[] {
-  const list = readAllowFrom(dir).filter((x) => x !== userId);
-  writeAllowFrom(list, dir);
-  return list;
+  return withAllowLock(dir, () => {
+    const list = readAllowFrom(dir).filter((x) => x !== userId);
+    writeAllowFrom(list, dir);
+    return list;
+  });
 }
 
 /** 该 userId 是否在清单里。 */
