@@ -266,15 +266,21 @@ export function planSweep(conns: Array<ConnInfo & { alive: boolean }>): string[]
 /** 定时清扫（index.ts 起 interval）：清掉已死的空闲空壳 + 处理「空闲过期/超编」，不动 busy。 */
 export function sweep(limits: PoolLimits = poolLimits()): void {
   let changed = false;
+  let deadBusy = false;
   const dead = planSweep(
-    [...entries.values()].map((e) => ({ ...info(e), alive: e.conn.isAlive() })),
+    [...entries.values()].map((e) => {
+      const alive = e.conn.isAlive();
+      if (!alive && e.state === "busy") deadBusy = true;
+      return { ...info(e), alive };
+    }),
   );
   for (const id of dead) {
     entries.delete(id);
     changed = true;
   }
   const reap = planReap(poolInfo(), limits, Date.now());
-  if (changed || reap.length) {
+  // busy 的死连接要留在池里等 release/drop，但它的身份记录必须立刻清掉（否则 workers.pid.json 留着死 pid）。
+  if (changed || reap.length || deadBusy) {
     reapByIds(reap);
     writeRecords();
   }

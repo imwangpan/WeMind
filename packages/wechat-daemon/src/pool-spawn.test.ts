@@ -221,14 +221,16 @@ describe("worker 进程池（真进程）", () => {
     expect(spawnCount()).toBe(3);
   });
 
-  it("sweep：清掉已死的空壳 + 按默认策略回收空闲", async () => {
+  it("sweep：清掉已死连接的身份记录（busy 的死连接留给 release/drop）", async () => {
     const g = await acquire(agent("kiro"), 1);
     expect(g.ok).toBe(true);
     const conn = g.ok ? g.conn : null!;
     conn.kill(); // 模拟进程自己崩了
     sweep();
+    expect(poolInfo()).toEqual([]); // 死连接不对外展示
+    expect(readPidRecords(WORKERS_PID_FILE)).toEqual([]); // 身份记录立刻清掉
+    release(conn); // 任务结束：死连接从池里摘掉
     expect(poolInfo()).toEqual([]);
-    expect(readPidRecords(WORKERS_PID_FILE)).toEqual([]); // 身份记录跟着清
   });
 
   it("身份记录：每条连接一条（带 agent/bin/args/state/taskId），killAll 后文件消失", async () => {
