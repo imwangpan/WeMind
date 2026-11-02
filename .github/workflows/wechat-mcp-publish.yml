@@ -60,6 +60,21 @@ jobs:
       - run: npm test
       - name: Verify npm package contents
         run: npm pack --dry-run --workspace @wemind/wechat-mcp
+      - name: Smoke test the packed MCP server
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --workspace @wemind/wechat-mcp --pack-destination "$RUNNER_TEMP"
+          tgz="$(ls "$RUNNER_TEMP"/wemind-wechat-mcp-*.tgz | head -n1)"
+          mkdir -p "$RUNNER_TEMP/smoke-mcp" && cd "$RUNNER_TEMP/smoke-mcp"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$tgz" >/dev/null
+          # 用临时数据目录，别碰 runner 上的真实账号；stdin 关闭后 server 正常退出
+          export WECHAT_DATA_DIR="$RUNNER_TEMP/smoke-mcp-data"
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"1.0"}}}' \
+            | ./node_modules/.bin/wemind-mcp > handshake.json
+          grep -q '"serverInfo"' handshake.json
+          grep -q '"name":"wemind"' handshake.json
       # 只有当前版本尚未发布到 npm 时才会发布；代码变更后需提升版本号，否则只运行检查并跳过发布。
       - name: Check whether this version is already published
         id: version
@@ -75,4 +90,4 @@ jobs:
           fi
       - name: Publish to npm
         if: steps.version.outputs.publish == 'true'
-        run: npm publish --workspace @wemind/wechat-mcp
+        run: npm publish --workspace @wemind/wechat-mcp --provenance

@@ -134,9 +134,10 @@ git push origin main
 
 ```
 校验版本与锁文件一致 → npm ci → lint → format:check → typecheck → build → test
-→ npm pack --dry-run（确认包内容）
+→ npm pack --dry-run（prepack 守卫确认包内容；与 CI 同一道关卡）
+→ tarball 真装到临时目录，用临时数据目录走一次 ACP `initialize` 握手，确认 `serverInfo.name=wemind`
 → 检查 npm 上是否已存在该版本
-→ 不存在则 npm publish（带 provenance 来源证明）；已存在则跳过并输出 notice
+→ 不存在则 npm publish --provenance（来源证明）；已存在则跳过并输出 notice
 ```
 
 **看到 `Publish to npm` 显示 skipped 是正常的**：说明这个版本已经发过了（比如你只改了文档没升版本）。想真正发版，回到第二步升版本号。
