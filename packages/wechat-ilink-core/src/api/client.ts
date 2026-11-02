@@ -75,12 +75,17 @@ async function apiFetch(params: {
   token?: string;
   timeoutMs: number;
   label: string;
+  /** 调用方的取消信号（MCP 客户端断开）：与超时共用同一个 controller。 */
+  signal?: AbortSignal;
 }): Promise<string> {
   const base = ensureTrailingSlash(params.baseUrl);
   const url = new URL(params.endpoint, base);
   const hdrs = buildHeaders({ token: params.token, body: params.body });
 
   const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (params.signal?.aborted) controller.abort();
+  else params.signal?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), params.timeoutMs);
   try {
     const res = await fetch(url.toString(), {
@@ -97,6 +102,7 @@ async function apiFetch(params: {
     return rawText;
   } finally {
     clearTimeout(timer);
+    params.signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -144,6 +150,8 @@ export async function getUpdates(params: {
   token?: string;
   updatesBuf?: string;
   timeoutMs?: number;
+  /** MCP 客户端取消/断开时中止在途长轮询（否则要等满 25s 才回到循环顶部检查）。 */
+  signal?: AbortSignal;
 }): Promise<GetUpdatesResp> {
   const timeout = params.timeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS;
   try {
@@ -157,6 +165,7 @@ export async function getUpdates(params: {
       token: params.token,
       timeoutMs: timeout,
       label: "getUpdates",
+      signal: params.signal,
     });
     const resp = parseJsonResp<GetUpdatesResp>(rawText, "getUpdates");
     // ret 非 0 且没有 errcode 时，调用方（daemon/MCP）只看 errcode 会把它当成「这轮没有新消息」而静默空转。
@@ -166,6 +175,8 @@ export async function getUpdates(params: {
     }
     return resp;
   } catch (err) {
+    // 调用方主动取消 ≠ 长轮询超时：不能伪装成「空结果」，否则 MCP 会继续空转。
+    if (params.signal?.aborted) throw err;
     // 长轮询超时是常态：返回空结果（保留游标），让调用方直接进入下一轮。
     if (err instanceof Error && err.name === "AbortError") {
       return { ret: 0, msgs: [], get_updates_buf: params.updatesBuf };

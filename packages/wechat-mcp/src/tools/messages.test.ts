@@ -78,6 +78,52 @@ describe("getMessages", () => {
     expect(m.saveState).toHaveBeenCalled();
   });
 
+  it("取消信号中止在途长轮询 → 立即 cancelled，不等超时/不重试", async () => {
+    const ac = new AbortController();
+    m.getUpdates.mockImplementation(
+      ({ signal }: { signal?: AbortSignal }) =>
+        new Promise((_, reject) => {
+          signal?.addEventListener("abort", () => {
+            const e = new Error("aborted");
+            e.name = "AbortError";
+            reject(e);
+          });
+        }),
+    );
+    const p = getMessages({ wait: true }, ac.signal);
+    setTimeout(() => ac.abort(), 10);
+    const r = await p;
+    expect(parse(r).cancelled).toBe(true);
+  });
+
+  it("处理响应前重读 state：别的调用刚写入的 token 不会被旧 state 覆盖", async () => {
+    m.loadState
+      .mockReturnValueOnce({ updatesBuf: "", contextTokens: {}, lastMessageId: 0 })
+      .mockReturnValueOnce({
+        updatesBuf: "",
+        contextTokens: { "bot1:other": "ct-other" },
+        lastMessageId: 0,
+      });
+    m.getUpdates.mockResolvedValue({
+      ret: 0,
+      msgs: [
+        {
+          message_type: 1,
+          message_id: 3,
+          from_user_id: "u",
+          context_token: "ct-new",
+          item_list: [{ type: 1, text_item: { text: "hi" } }],
+        },
+      ],
+      get_updates_buf: "buf5",
+    });
+    await getMessages({});
+    const saved = m.saveState.mock.calls.at(-1)![0] as {
+      contextTokens: Record<string, string>;
+    };
+    expect(saved.contextTokens).toMatchObject({ "bot1:other": "ct-other", "bot1:u": "ct-new" });
+  });
+
   it("非登录者消息被忽略，但游标照常推进（不会每轮重复判断）", async () => {
     m.getUpdates.mockResolvedValue({
       ret: 0,

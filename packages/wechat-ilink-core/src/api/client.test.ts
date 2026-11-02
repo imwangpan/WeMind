@@ -232,6 +232,22 @@ describe("getUpdates（长轮询超时语义）", () => {
     expect(resp.errcode).toBe(-14);
   });
 
+  it("外部取消信号 → 立即中止在途长轮询并抛错（不伪装成超时空结果）", async () => {
+    handler = () => {
+      /* 不响应，等外部 abort */
+    };
+    const ac = new AbortController();
+    const p = getUpdates({
+      baseUrl,
+      token: "t",
+      timeoutMs: 5000,
+      signal: ac.signal,
+    }).catch((e) => e);
+    setTimeout(() => ac.abort(), 20);
+    const err = await p;
+    expect(err.name).toBe("AbortError");
+  });
+
   it("非 JSON 响应 → 抛带 label 的清晰错误（而非裸 SyntaxError）", async () => {
     handler = (_req, res) => res.end("<html>proxy error</html>");
     const err = await getUpdates({ baseUrl, token: "t", timeoutMs: 5000 }).catch((e) => e);

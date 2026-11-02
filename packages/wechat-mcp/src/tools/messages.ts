@@ -76,8 +76,14 @@ export async function getMessages(
         token: account.botToken,
         updatesBuf: state.updatesBuf,
         timeoutMs: pollMs,
+        signal,
       });
     } catch (e) {
+      // 客户端取消：立即返回 cancelled，不把 AbortError 当可重试的网络抖动再睡 2s
+      if (signal?.aborted) {
+        saveState(state);
+        return jsonResult({ message_count: 0, messages: [], cancelled: true });
+      }
       // wait 模式：瞬时网络错误退避重试，不让一次网络抖动终结整个长轮询
       if (input.wait) {
         const cls = classifyTransportError(e);
@@ -101,6 +107,9 @@ export async function getMessages(
       );
     }
 
+    // 长轮询可能持续很久：处理响应前重新读一次 state，避免拿旧游标过滤、或把别的工具调用
+    // 刚写入的 context_token 覆盖掉。下面的 load→改→save 全程同步，同一进程内不会被插入。
+    state = loadState();
     if (resp.get_updates_buf) {
       state.updatesBuf = resp.get_updates_buf;
     }
