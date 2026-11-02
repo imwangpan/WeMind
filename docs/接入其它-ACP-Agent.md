@@ -340,7 +340,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
   - **会话恢复**：有 `session/load`？只有 `session/resume`？都没有？当前客户端会按配置里的 `restore` 选 `load`/`resume`；DSH 走 `resume`，其余 agent 先 `load`，失败再试 `resume`/`new`。会话映射按 agent 分开存（`brain-sessions.json` 键 `<agent>:<userId>`，`worker-sessions.json` 键 `<agent>:task`），切换大脑互不覆盖，切回原大脑仍能恢复；
   - **图片**：`initialize.promptCapabilities.image` 是否为 true？false 时带图 `session/prompt` 会报 `-32602`；
   - **MCP**：走 agent 配置文件，还是 ACP `session/new` 的 `mcpServers`？支持 stdio/HTTP 哪些传输？
-  - **反向请求**：是否会发 `session/request_permission` / `fs/*` / `terminal/*`？当前 `handleFrame` 不应答，遇到会挂起；
+  - **反向请求**：是否会发 `session/request_permission` / `fs/*` / `terminal/*`？`acp-brain.ts` / `worker-acp.ts` 已内置应答器：权限请求默认拒绝（`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行），未知 method 回 `-32601`，不会挂起；
   - **进度**：是否逐 token 发 `agent_message_chunk`？committed-only 时 15s 心跳会烧连发额度；
   - **Windows**：二进制是 `.exe` 还是 `.cmd`/`npx`？后者必须 `shell:true`，`binWin` 要写实际文件名。
 - **不支持 ACP 的对象**（如直接调 OpenAI / Anthropic / Ollama 等 LLM HTTP API）走不了本路，需要「第二档：API 适配器」。**注意：仓库当前没有 `Brain` 接口抽象；当前建议先不抽**——ACP 是唯一实现，先不抽接口避免增加间接层；等 API 适配器真正立项时，再抽 `askBrain`/`newSession`/`restart` 契约并改 `index.ts` 调用方，然后写 HTTP 实现（自行维护多轮历史与工具循环）。纯对话容易，复刻 kiro 那样的「会用工具的 agent」相当于自造迷你 agent。该档尚未实现。

@@ -2,7 +2,7 @@
 
 > 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. daemon](05-daemon.md)
 
-MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `wemind`，见 [`docs/发布-wemind-npm.md`](../发布-wemind-npm.md)）。
+MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `@wemind/cli`（命令 `wemind`），见 [`docs/发布-wemind-npm.md`](../发布-wemind-npm.md)）。
 
 ## 4.1 模块结构
 

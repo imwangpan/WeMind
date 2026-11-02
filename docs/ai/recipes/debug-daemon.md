@@ -218,7 +218,7 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 
 | 答复/日志 | 原因 | 处置 |
 |---|---|---|
-| `未知 agent` / `不可用：…` | 预检拒绝，**没 spawn** | `wemind brain` 看 agent 名；`wemind brain check <agent 名>` 单独验 |
+| `未知 agent` / `不可用：…` | 预检拒绝，**没 spawn** | `wemind brain` 看 agent 名；`wemind brain check <账号>` 验的是该账号**当前配置**的大脑（参数是账号，不是 agent 名）；单独验某个 agent 用 `scripts/acp-probe.mjs` |
 | `当前有回合正在进行（等了 30 秒…）` | 等在途回合结束超时 | 稍后重发；长回合可调大 `WEMIND_SWITCH_DRAIN_MS` |
 | `新大脑启动超时（120s …）` | 目标 agent 起不来/太慢 | 查它单独能否 ACP（`scripts/acp-probe.mjs`）；调 `WEMIND_SWITCH_TIMEOUT_MS` |
 | `切换失败，已退回原来那个「X」：<原因>` | 握手/会话阶段失败 | 槽位仍是旧大脑，`brain.json` **未被改写**；下一条消息懒重建旧大脑（日志会再 `spawn`）——这是预期，不是"没起来" |
