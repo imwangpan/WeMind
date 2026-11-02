@@ -195,7 +195,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 
 ## 工具列表
 
-| 工具                  | 说明                                                      | 代码 description（注册原文节选）                                                                                                                                                                        |
+| 工具                  | 说明                                                      | 代码 description（简要转述，非逐字原文）                                                                                                                                                                |
 | --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `login_qrcode`        | 取登录二维码（返回 URL，并在数据目录生成 PNG 与终端文本） | Get a WeChat login QR code. Scan it with WeChat to connect the bot. … You MUST show all three returned forms (image URL / PNG file / terminal text file) to the user.                                   |
 | `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command instead. |
@@ -204,7 +204,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `send_text_message`   | 发文本消息                                                | Send a text message to a WeChat user. … iLink bots cannot initiate conversations: if you have never received a message from that user, this call fails.                                                 |
 | `send_typing`         | 打字状态（`typing` 显示 / `cancel` 取消）                 | Show or cancel the "typing..." indicator for a WeChat user. … Re-send status `typing` every 15-20 seconds while still working, because the indicator expires on its own.                                |
 
-> description 取自 `packages/wechat-mcp/src/index.ts` 的 `registerTool` 第二参数；`…` 为节选标记（完整原文见源码，仅给代码标识符补了反引号）。
+> 上表为 `packages/wechat-mcp/src/index.ts` 的 `registerTool` description 的**简写转述**（`…` 表示省略），不是逐字原文；完整、准确的原文以源码为准。
 > 6 个工具的 description **一律写英文**——MCP 生态惯例，且模型对 `MUST` / `wait=true` 这类强制约束的英文原文遵循度更高。用户能看到的提示文案在 `tools/*.ts` 的 `message` 字段，均为中文。
 > `get_messages` 的完整描述是一段 4 步 `send_typing` 编排指引（收到消息即 `typing`、处理中每 15–20s 续发、回复后 `cancel`），与上文「开始聊天」的流程一致。
 

@@ -35,7 +35,7 @@
 
 ## 工具
 
-| 工具                  | 说明                                                      | 代码 description（`src/index.ts` 注册原文节选）                                                                                                                                                         |
+| 工具                  | 说明                                                      | 代码 description（简要转述，非逐字原文）                                                                                                                                                                |
 | --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `login_qrcode`        | 取登录二维码（返回链接，并在数据目录生成 PNG 与终端文本） | Get a WeChat login QR code. Scan it with WeChat to connect the bot. … You MUST show all three returned forms (image URL / PNG file / terminal text file) to the user.                                   |
 | `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command instead. |
@@ -44,7 +44,7 @@
 | `send_text_message`   | 发文本消息（`state="generating"` 发进度、默认 `finish` 发最终答复） | Send a text message to a WeChat user. … Each call is a separate message; use state="generating" for interim updates, state="finish" (default) for the final reply.                                      |
 | `send_typing`         | 打字状态（`typing` 显示 / `cancel` 取消）                 | Show or cancel the "typing..." indicator for a WeChat user. … Re-send status `typing` every 15-20 seconds while still working, because the indicator expires on its own.                                |
 
-> `…` 为节选标记，完整 description 见 `src/index.ts`。工具说明**一律英文**（MCP 生态惯例 + 模型对 `MUST` / `wait=true` 这类强制约束的英文原文遵循度更高）；用户能看到的提示文案在 `tools/*.ts` 的 `message` 字段，均为中文。
+> 上表为 description 的**简写转述**（`…` 表示省略），不是逐字原文；完整、准确的原文见 `src/index.ts`。工具说明**一律英文**（MCP 生态惯例 + 模型对 `MUST` / `wait=true` 这类强制约束的英文原文遵循度更高）；用户能看到的提示文案在 `tools/*.ts` 的 `message` 字段，均为中文。
 
 ## 使用流程
 
