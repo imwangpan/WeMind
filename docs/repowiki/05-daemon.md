@@ -216,7 +216,7 @@ graph TD
 
 ## 5.7 收发富媒体
 
-- **收图**：poller 提取 `image_item` → `downloadImage` 下载解密 → `sniffMime` 嗅探 MIME → 作为 ACP image 块喂大脑。**前提是 agent 广告 `promptCapabilities.image:true`**（kiro/opencode 支持；DSH 官方 0.2.1-rc.2 实测为 false，带图会 `-32602`）。图片用不了时（全部下载失败 / 大脑不支持）由 `planImageTurn()` 决定：**有文字就只按文字回答**（答复前注明图片被忽略），**没文字才直接拒绝**——不会拿空 prompt 白问一回合，也不会连文字一起丢。
+- **收图**：poller 提取 `image_item` → `downloadImage` 下载解密 → `sniffMime` 嗅探 MIME → 作为 ACP image 块喂大脑。**两个方向**的下载都走 core 的 `readBodyWithLimit()`：收图（CDN 密文）上限 20MB，发图（大脑回复里的图片链接）上限 10MB；边读边计大小，超限立即取消（不把超大响应整个读进内存），`content-length` 只作提前拒绝的提示。**前提是 agent 广告 `promptCapabilities.image:true`**（kiro/opencode 支持；DSH 官方 0.2.1-rc.2 实测为 false，带图会 `-32602`）。图片用不了时（全部下载失败 / 大脑不支持）由 `planImageTurn()` 决定：**有文字就只按文字回答**（答复前注明图片被忽略），**没文字才直接拒绝**——不会拿空 prompt 白问一回合，也不会连文字一起丢。
 - **发图**：`extractImages` 从大脑回复里提取 Markdown `![](src)` 或裸图片 URL → `resolveImageBytes` 下载/读取 → `sendImage` 发出，剩余文本另发。`image-reply.ts` 实现：下载带 15s 超时 + 浏览器 UA（规避图床热链 403）、10MB 上限；失败的图把原链接附文本发给用户（不静默丢图）。
 - **收语音**：直接取 `voice_item.text`（微信侧已转写）当文本喂大脑，零依赖（无需 SILK 解码）。
 - **发文件/视频**：core 的 `sendFile` 按扩展名自动判类型组装。

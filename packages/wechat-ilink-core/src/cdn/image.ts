@@ -37,6 +37,38 @@ export function resolveKey(img: ImageItem): Buffer | null {
   return null;
 }
 
+/** 收图上限：微信压缩后的图片通常远小于此；超过就中止，避免大文件/恶意响应撑爆内存。 */
+export const MAX_INCOMING_IMAGE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * 读响应体，超过上限立刻取消——不把超大响应整个读进内存。
+ * `content-length` 只是提示（可能缺失/撒谎），真正的闸在这里。
+ */
+export async function readBodyWithLimit(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<Buffer> {
+  if (!body) return Buffer.alloc(0);
+  const reader = body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`响应体过大 ${total}`);
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks);
+}
+
 /** 下载并解密一张图片，返回明文 Buffer（失败抛错）。 */
 export async function downloadImage(img: ImageItem): Promise<Buffer> {
   const url =
@@ -49,7 +81,10 @@ export async function downloadImage(img: ImageItem): Promise<Buffer> {
   if (!key) throw new Error("image: 无法解析 aes key");
   const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`image: CDN 下载失败 ${res.status}`);
-  const ciphertext = Buffer.from(await res.arrayBuffer());
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_INCOMING_IMAGE_BYTES)
+    throw new Error(`image: CDN 图片过大 ${declared}`);
+  const ciphertext = await readBodyWithLimit(res.body, MAX_INCOMING_IMAGE_BYTES);
   return decryptAesEcb(ciphertext, key);
 }
 

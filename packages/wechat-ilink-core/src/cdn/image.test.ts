@@ -7,6 +7,7 @@ import {
   encryptAesEcb,
   decryptAesEcb,
   classifyMediaByName,
+  readBodyWithLimit,
 } from "./image.js";
 
 const HEX32 = "00112233445566778899aabbccddeeff"; // 32 hex chars = 16 bytes
@@ -77,6 +78,41 @@ describe("encryptAesEcb / decryptAesEcb 往返", () => {
       const dec = decryptAesEcb(enc, key);
       expect(dec.equals(plain)).toBe(true);
     }
+  });
+});
+
+describe("readBodyWithLimit（超大响应不整个读进内存）", () => {
+  it("超过上限立即取消，不继续读", async () => {
+    let cancelled = false;
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        if (pulls >= 10) controller.close();
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    await expect(readBodyWithLimit(stream, 5)).rejects.toThrow(/过大/);
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThan(10);
+  });
+
+  it("未超限时拼成完整 Buffer", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2]));
+        controller.enqueue(new Uint8Array([3]));
+        controller.close();
+      },
+    });
+    expect([...(await readBodyWithLimit(stream, 10))]).toEqual([1, 2, 3]);
+  });
+
+  it("没有响应体 → 空 Buffer", async () => {
+    expect((await readBodyWithLimit(null, 10)).length).toBe(0);
   });
 });
 

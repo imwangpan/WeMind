@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { readBodyWithLimit } from "@wemind/wechat-ilink-core";
+
 /**
  * 从 brain 的文本回复里提取「要作为图片发送」的引用，并返回去掉这些引用后的纯文本。
  * 覆盖三种来源：
@@ -125,11 +127,11 @@ export async function resolveImageBytes(src: string): Promise<Buffer> {
       },
     });
     if (!res.ok) throw new Error(`下载图片失败 ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_BYTES) throw new Error(`图片过大 ${buf.length}`);
     const ct = res.headers.get("content-type") || "";
     if (!ct.startsWith("image/") && !IMG_EXT.test(src)) throw new Error(`非图片内容(${ct})`);
-    return buf;
+    const declared = Number(res.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_BYTES) throw new Error(`图片过大 ${declared}`);
+    return readBodyWithLimit(res.body, MAX_BYTES);
   }
   const p = src.startsWith("file://") ? fileURLToPath(src) : src;
   if (!IMG_EXT.test(p)) throw new Error(`非图片文件（仅按图片扩展名发送）: ${p}`);

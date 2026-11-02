@@ -181,7 +181,7 @@ iLink 的图片/文件走微信 CDN，密文用 **AES-128-ECB（PKCS7）** 加�
 ### 收图：`downloadImage(img)`
 
 1. 从 `media.full_url` 或 `media.encrypt_query_param` 拼下载 URL；
-2. 解析 AES key（`resolveKey`：`ImageItem.aeskey`（hex，32 字符）优先，其次 `media.aes_key`（base64）），下载密文（20s 超时）；
+2. 解析 AES key（`resolveKey`：`ImageItem.aeskey`（hex，32 字符）优先，其次 `media.aes_key`（base64）），下载密文（20s 超时）；响应体用 `readBodyWithLimit()` 边读边计数，超过 20MB 立即取消（`content-length` 只作提前拒绝提示）；
 3. AES-128-ECB 解密返回明文 Buffer。
 
 ### 发图/发文件：`sendImage` / `sendFile`
