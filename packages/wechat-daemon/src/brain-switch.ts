@@ -65,11 +65,39 @@ function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
   });
 }
 
-/** 环境变量若压着命令结果，答复里必须说清楚（否则用户会以为切换没生效，或下次重启后莫名回到旧的）。 */
+/**
+ * 环境变量若压着命令结果，答复里必须说清楚（否则用户会以为切换没生效，或下次重启后莫名回到旧的）。
+ *
+ * 不止 `WEMIND_BRAIN`：`WEMIND_BRAIN_BIN` / `_ARGS` / `_EXTRA_ARGS` / `_MODEL` 等覆盖同样在重启后重新生效。
+ * 切换命令本身用 `ignoreEnv` 绕开了它们（进程内真的切了），但下次 daemon 启动仍会按环境重解析——不说清楚就是静默漂移。
+ */
+const BRAIN_ENV_OVERRIDES = [
+  "WEMIND_BRAIN",
+  "WEMIND_BRAIN_BIN",
+  "WEMIND_BRAIN_ARGS",
+  "WEMIND_BRAIN_EXTRA_ARGS",
+  "WEMIND_BRAIN_HOME_ENV",
+  "WEMIND_BRAIN_SHELL",
+  "WEMIND_BRAIN_INHERIT",
+  "WEMIND_BRAIN_REAL_HOME",
+  "WEMIND_BRAIN_INHERIT_DIRS",
+] as const;
+
 function envNote(key: string): string {
-  const env = process.env.WEMIND_BRAIN?.trim();
-  if (!env || env.toLowerCase() === key) return "";
-  return `\n⚠️ 环境变量 WEMIND_BRAIN=${env} 仍在生效（优先级高于 brain.json）：本次已切到 ${key}，但**重启后会回到 ${env}**。想长期用 ${key}，请去掉这个环境变量。`;
+  const set = BRAIN_ENV_OVERRIDES.filter((name) => {
+    const value = process.env[name]?.trim();
+    if (!value) return false;
+    // 已经指向本次目标：不算「压着命令结果」，不必为它报警
+    return !(name === "WEMIND_BRAIN" && value.toLowerCase() === key);
+  });
+  if (!set.length) return "";
+  const brain = process.env.WEMIND_BRAIN?.trim();
+  const back =
+    brain && brain.toLowerCase() !== key
+      ? `**重启后会回到 WEMIND_BRAIN=${brain}**`
+      : `重启后这些覆盖仍会套在 ${key} 上`;
+  const list = set.map((name) => `${name}=${process.env[name]?.trim()}`).join("；");
+  return `\n⚠️ 环境变量 ${list} 仍在生效（优先级高于 brain.json）：本次已切到 ${key}，但${back}。想长期稳定，请去掉这些环境变量。`;
 }
 
 function sameAgent(a: ResolvedAgent, b: ResolvedAgent): boolean {

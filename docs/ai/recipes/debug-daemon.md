@@ -222,7 +222,7 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 | `当前有回合正在进行（等了 30 秒…）` | 等在途回合结束超时 | 稍后重发；长回合可调大 `WEMIND_SWITCH_DRAIN_MS` |
 | `新大脑启动超时（120s …）` | 目标 agent 起不来/太慢 | 查它单独能否 ACP（`scripts/acp-probe.mjs`）；调 `WEMIND_SWITCH_TIMEOUT_MS` |
 | `切换失败，已退回原来那个「X」：<原因>` | 握手/会话阶段失败 | 槽位仍是旧大脑，`brain.json` **未被改写**；下一条消息懒重建旧大脑（日志会再 `spawn`）——这是预期，不是"没起来" |
-| `⚠️ 环境变量 WEMIND_BRAIN=… 仍在生效` | 一次性 env 压着命令 | 从进程环境里去掉；否则重启后会回到 env 指的大脑 |
+| `⚠️ 环境变量 WEMIND_BRAIN… 仍在生效` | 一次性 env 压着命令（`WEMIND_BRAIN` 选 agent，`_BIN`/`_ARGS`/`_EXTRA_ARGS` 等覆盖启动方式） | 从进程环境里去掉；否则重启后这些覆盖会重新生效（`WEMIND_BRAIN` 会直接把大脑换回去） |
 | `正在切到「X」，等它完成后再试。` | 并发切换（不同目标） | 等前一次结束；同目标重复请求会复用同一次切换 |
 
 排「启动新大脑期间是不是起了两个进程」：数 `spawn` 行——一次切换**只应有一行**。

@@ -298,6 +298,19 @@ describe("switchBrain", () => {
     expect(loadBrainConfig(dataDir)?.agent).toBe("kiro"); // 磁盘仍是命令的选择
   });
 
+  it("其它 WEMIND_BRAIN_* 覆盖也如实警告：重启后会把新 agent 的 bin/args 顶掉", async () => {
+    setup();
+    process.env.WEMIND_BRAIN_BIN = "C:\\other\\agent.exe";
+    try {
+      const out = await switchBrain("kiro", { userId: "u1", dir: dataDir });
+      expect(out.ok).toBe(true);
+      expect(out.ok === true && out.notice).toContain("WEMIND_BRAIN_BIN=C:\\other\\agent.exe");
+      expect(out.ok === true && out.notice).toContain("重启后这些覆盖仍会套在 kiro 上");
+    } finally {
+      delete process.env.WEMIND_BRAIN_BIN;
+    }
+  });
+
   it("persist=false：只在本进程生效，不写 brain.json（CLI「仅本次」场景）", async () => {
     setup();
     const out = await switchBrain("kiro", { userId: "u1", dir: dataDir, persist: false });
