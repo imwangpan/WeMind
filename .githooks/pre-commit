@@ -1,0 +1,10 @@
+#!/bin/sh
+# CI 会跑 format:check；提交前先查一遍，避免「本地全绿、Actions 红」。
+# 只读检查，不改工作区；失败时按提示跑 npm run format 再重新 add。
+[ -d node_modules ] || exit 0
+
+if ! npm run --silent format:check; then
+  echo ""
+  echo "格式检查未通过：先运行 npm run format，再重新 git add 后提交。"
+  exit 1
+fi

@@ -43,7 +43,11 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
         const base = parsed;
         for (const k of ag.settingsStrip) delete base[k];
         fs.mkdirSync(cfgDir, { recursive: true });
-        fs.writeFileSync(path.join(cfgDir, ag.settingsBase), JSON.stringify(base, null, 2), "utf-8");
+        fs.writeFileSync(
+          path.join(cfgDir, ag.settingsBase),
+          JSON.stringify(base, null, 2),
+          "utf-8",
+        );
       }
     } catch {
       /* best-effort（与 daemon 的 settingsBase 一致：缺失/损坏 → 交给 agent 的默认值） */

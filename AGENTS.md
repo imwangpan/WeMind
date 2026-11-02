@@ -96,6 +96,7 @@ npm run build        # core → daemon/mcp
 npm run typecheck
 npm test             # vitest
 npm run lint
+npm run verify       # 提交前统一自检（与 CI 同口径：lint + format:check + typecheck + build + test + 文档链接）
 npm run check:version    # 包名+版本一致性（发布前必跑）
 npm run daemon       # 直接起 daemon（需已构建）
 wemind version       # 已安装的 CLI 版本（npm i -g @wemind/cli）
@@ -141,8 +142,8 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
       - 面向用户：`README.md`、`docs/新手教程.md`、`packages/*/README.md`（`packages/wechat-daemon/README.md` 会随 npm 包发布，**改了 CLI/环境变量必须同步**）、`docs/使用指南-*.md`、`docs/速查-*.md`；
       - 技术细节：`docs/repowiki/*`、`docs/接入-*.md`（各 agent 的实测结论）；
       - AI 上下文：本文件 `AGENTS.md`、`docs/ai/README.md`、`docs/ai/recipes/*`——**命令 / 参数 / 环境变量 / 数据文件 / 目录结构 / 新增模块的变化，AGENTS.md 与 `docs/ai/README.md` 是硬性同步项**（它们标注的「适用版本 / 最后核对」也要跟着改）。
-    - **自检**：`npm run typecheck` + `npm test` + `npm run lint` + `pwsh -NoProfile -File scripts/check-docs.ps1`（相对链接不许断）。
-    - 反例（都按缺陷处理）：改了命令参数没更新 `--help`/README；新增环境变量只写在代码注释里；改了优先级规则但 `docs/接入其它-ACP-Agent.md` 的表还是旧的；改了行为却没有一条能覆盖它的测试。
+    - **自检**：`npm run verify`（= `npm run lint` + `npm run format:check` + `npm run typecheck` + `npm run build` + `npm test` + `pwsh -NoProfile -File scripts/check-docs.ps1`，与 CI 同口径；相对链接不许断）。`npm install` 会通过 `prepare` 启用 `.githooks/pre-commit`，commit 前再跑一次 `format:check`（只读，不改工作区）。
+    - 反例（都按缺陷处理）：改了命令参数没更新 `--help`/README；新增环境变量只写在代码注释里；改了优先级规则但 `docs/接入其它-ACP-Agent.md` 的表还是旧的；改了行为却没有一条能覆盖它的测试；本地只跑 lint/test 漏 `format:check`，推送后 CI 格式红灯。
 16. **worktree 一律放仓库根 `.worktrees/`**：每个分支一个子目录（如 `.worktrees/gemini`），不要建在 `.agents/worktrees/` 或其它位置（`.gitignore` 已忽略 `.worktrees/`）。分支合并或放弃后及时 `git worktree remove <路径>` + `git branch -d <分支>`，别留残留目录。历史遗留的 `.agents/worktrees/feat/pi-brain` 保留到该分支合并/清理为止，之后不要再往那里建。
 
 ---

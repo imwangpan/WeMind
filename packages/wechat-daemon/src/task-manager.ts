@@ -402,7 +402,10 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
       task.lastOutput = msg;
       persist();
       emitState();
-      push(task.userId, `${msg}（任务记录还在，处理好后按下面方式续跑）` + replyFooter(task, "interrupted"));
+      push(
+        task.userId,
+        `${msg}（任务记录还在，处理好后按下面方式续跑）` + replyFooter(task, "interrupted"),
+      );
       ackIf(task.ackId, msg);
       return;
     }
