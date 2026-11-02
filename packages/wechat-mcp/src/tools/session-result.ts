@@ -7,6 +7,6 @@ export function sessionExpiredResult(botId: string): ToolResult {
   const mins = Math.ceil(getRemainingPauseMs(botId) / 60_000);
   return jsonResult({
     status: "session_expired",
-    message: `微信机器人会话已过期（错误码 ${SESSION_EXPIRED_ERRCODE}），请调用 login_qrcode 重新登录。轮询已暂停约 ${mins} 分钟。`,
+    message: `微信机器人会话已过期（错误码 ${SESSION_EXPIRED_ERRCODE}），轮询已暂停约 ${mins} 分钟。要恢复：先调用 logout 清除旧凭证，再调用 login_qrcode 重新扫码；重启 MCP 客户端也能立即解除冷却（冷却只在进程内）。`,
   });
 }
