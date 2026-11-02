@@ -100,7 +100,7 @@ sequenceDiagram
 - `wait=true` 时用 `LONG_POLL_MS=25s` 长轮询，最长等 7 天（`deadline`）；
 - `POLL_FLOOR_MS=1000`：服务端快速返回空时补足地板间隔，防零间隔请求风暴；
 - 命中 errcode `-14` → `pauseSession` 并返回 `session_expired` 提示（含剩余冷却分钟数）；
-- 过滤 `message_type === 1`（USER）且 `message_id > lastMessageId` 去重，更新 `lastMessageId` 与 `contextTokens[botId:from_user_id]`；
+- 过滤 `message_type === 1`（USER）且 `message_id > lastMessageId` 去重；只放行登录者（`WECHAT_OWNER_ID` 或账号 `userId`）与 `allowFrom.json` 白名单里的发件人，游标仍按**所有**收到的消息推进（被过滤的消息不会每轮重复判断），`contextTokens[botId:from_user_id]` 只记放行者的；
 - `wait` 模式下瞬时网络错误退避 2s 重试，不让一次抖动终结长轮询；
 - `formatMessage` 把消息格式化：text / `[Image]` / `[Voice: 转写文本]` / `[File: 文件名]` / `[Video]`，并处理 `ref_msg`（从 item 取，修复上游死代码）。
 

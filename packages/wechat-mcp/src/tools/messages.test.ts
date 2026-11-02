@@ -10,6 +10,7 @@ const m = vi.hoisted(() => ({
   pauseSession: vi.fn(),
   getRemainingPauseMs: vi.fn(() => 60_000),
   classifyTransportError: vi.fn(),
+  isAllowed: vi.fn(() => false),
 }));
 vi.mock("@wemind/wechat-ilink-core", () => ({
   ...m,
@@ -30,6 +31,7 @@ beforeEach(() => {
   });
   m.isSessionPaused.mockReturnValue(false);
   m.loadState.mockReturnValue({ updatesBuf: "", contextTokens: {}, lastMessageId: 0 });
+  m.isAllowed.mockReturnValue(false);
 });
 
 const parse = (r: { content: Array<{ text: string }> }) => JSON.parse(r.content[0].text);
@@ -62,7 +64,7 @@ describe("getMessages", () => {
         {
           message_type: 1,
           message_id: 5,
-          from_user_id: "u1",
+          from_user_id: "u",
           context_token: "ct",
           item_list: [{ type: 1, text_item: { text: "hi" } }],
         },
@@ -74,6 +76,44 @@ describe("getMessages", () => {
     expect(j.message_count).toBe(1);
     expect(j.messages[0].text).toBe("hi");
     expect(m.saveState).toHaveBeenCalled();
+  });
+
+  it("非登录者消息被忽略，但游标照常推进（不会每轮重复判断）", async () => {
+    m.getUpdates.mockResolvedValue({
+      ret: 0,
+      msgs: [
+        {
+          message_type: 1,
+          message_id: 9,
+          from_user_id: "stranger",
+          context_token: "ct",
+          item_list: [{ type: 1, text_item: { text: "do something" } }],
+        },
+      ],
+      get_updates_buf: "buf3",
+    });
+    const r = await getMessages({});
+    expect(parse(r).message_count).toBe(0);
+    const saved = m.saveState.mock.calls.at(-1)![0] as { lastMessageId: number };
+    expect(saved.lastMessageId).toBe(9);
+  });
+
+  it("allowFrom 白名单里的发件人放行（与 daemon 同一道兜底校验）", async () => {
+    m.isAllowed.mockReturnValue(true);
+    m.getUpdates.mockResolvedValue({
+      ret: 0,
+      msgs: [
+        {
+          message_type: 1,
+          message_id: 10,
+          from_user_id: "trusted",
+          item_list: [{ type: 1, text_item: { text: "hi" } }],
+        },
+      ],
+      get_updates_buf: "buf4",
+    });
+    const r = await getMessages({});
+    expect(parse(r).messages[0].text).toBe("hi");
   });
 
   it("errcode -14 → pauseSession + session_expired", async () => {

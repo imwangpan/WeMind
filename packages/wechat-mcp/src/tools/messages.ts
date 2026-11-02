@@ -11,6 +11,7 @@ import {
   loadState,
   saveState,
   classifyTransportError,
+  isAllowed,
 } from "@wemind/wechat-ilink-core";
 import type { WeixinMessage } from "@wemind/wechat-ilink-core";
 
@@ -104,24 +105,32 @@ export async function getMessages(
       state.updatesBuf = resp.get_updates_buf;
     }
 
-    const newMessages =
+    const incoming =
       resp.msgs?.filter(
         (m) =>
           m.message_type === MessageType.USER && m.message_id && m.message_id > state.lastMessageId,
       ) ?? [];
 
-    if (newMessages.length > 0) {
-      const maxId = Math.max(...newMessages.map((m) => m.message_id ?? 0));
-      state.lastMessageId = maxId;
+    // 与 daemon 同一套发件人校验：只收登录者（或 allowFrom 白名单里的）消息。平台正常只投登录者，
+    // 这道闸防的是发送范围变化 / 同一数据目录被别的入口接到——MCP 客户端拿到非登录者的消息会照做。
+    const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId;
+    const newMessages = incoming.filter(
+      (m) => !!m.from_user_id && (m.from_user_id === owner || isAllowed(m.from_user_id)),
+    );
 
+    if (incoming.length > 0) {
+      // 游标按**所有**收到的消息推进，不能只按放行的：否则被过滤的消息会永远停在游标之后，每轮重复判断。
+      state.lastMessageId = Math.max(...incoming.map((m) => m.message_id ?? 0));
       for (const msg of newMessages) {
         const key = `${account.botId}:${msg.from_user_id}`;
         if (msg.context_token) {
           state.contextTokens[key] = msg.context_token;
         }
       }
-
       saveState(state);
+    }
+
+    if (newMessages.length > 0) {
       return jsonResult({
         message_count: newMessages.length,
         messages: newMessages.map(formatMessage),
