@@ -21,11 +21,6 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci
-      - name: Install Rolldown Linux binding
-        if: runner.os == 'Linux'
-        run: |
-          binding_version="$(node -p "require('./node_modules/rolldown/package.json').optionalDependencies['@rolldown/binding-linux-x64-gnu']")"
-          npm install --no-save --ignore-scripts "@rolldown/binding-linux-x64-gnu@$binding_version"
       - run: npm run lint
       - run: npm run format:check
       - name: Check docs links

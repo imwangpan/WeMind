@@ -19,6 +19,10 @@
 - **pi 的启动横幅不再混进回复（2026-11-01 真机）**：pi-acp 把 pi 的启动信息（`## Context` / `## Skills` …）当作 `agent_message_chunk` 发给客户端（给 Zed 之类看的启动面板），微信里就成了每条新会话首答的前缀。预设新增 `settingsDefaults` 字段（只补沙箱 `settings.json` 里缺失的键，用户显式设过就保留用户的值，真实配置不动）；pi 用 `settingsDefaults: { quietStartup: true }`（pi 官方 settings.md 的开关）关掉。
 - **worker 沙箱按任务 agent 准备（2026-11-01 真机）**：daemon 启动时只按默认任务大脑备一次 `worker-home`；派发到别的 agent（`wemind task --agent pi` / 微信「任务 pi：…」）时它自己的 `settings.json` / `models.json` / 凭据还没进沙箱，pi 会拿空配置跑（任务输出异常）。现在 `worker-pool.ts` 的 `acquire` 在复用/起进程前按**这条任务的 agent** 调 `ensureWorkerHome(ag)`。
 
+### Changed
+
+- **依赖锁文件重建（2026-11-02）**：`package-lock.json` 此前大量 devDependency 条目缺 `resolved`/`integrity`（安装时无法校验 tarball），且只锁了 win32 的 rolldown 原生绑定，Linux CI 要手工补装 `@rolldown/binding-linux-x64-gnu`。现在从零重建：271 个条目全部带 `resolved`/`integrity`（仅 3 个 workspace 链接除外），含 rolldown/esbuild/oxlint/oxfmt 的全平台可选绑定；`.github/workflows/ci.yml` 删除手工安装步骤。锁内版本在 `package.json` 范围内小幅上移（TypeScript 7.0.2、Vitest 3.2.7、MCP SDK 2.4.0、Rolldown 1.2.16 等），`npm ci` + `npm run verify` 全绿（58 个测试文件、632 通过）。
+
 ### Docs
 
 - 新增 `docs/接入-pi.md`（安装三步、预设逐项、探针结论、已知限制、审批漂移预案、验证记录）；新增 `docs/接入-Gemini.md`（预设表、探针结论含 load 回放时序、`--skip-trust` / 模型名 / 自动更新等坑、验证记录）；同步 `README.md`、`docs/新手教程.md`、`packages/wechat-daemon/README.md`、`docs/接入其它-ACP-Agent.md`、`docs/接入-Cline.md`、`docs/使用指南-远程任务（worker）.md`、`docs/速查-数据目录与环境变量.md`、`docs/repowiki/{06,09,README}`、`docs/ai/README.md`、`docs/ai/recipes/{add-acp-agent,run-e2e}.md`、`AGENTS.md`、`scripts/doctor.ps1`、`llms.txt`。
