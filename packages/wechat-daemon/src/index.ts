@@ -250,6 +250,21 @@ export function parseBrainEscape(text: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+/** 判断「继续」类短句时要用到的任务现状（由 task-manager 提供，纯函数便于单测）。 */
+export type TaskFacts = { awaiting: number; active: boolean; interrupted: number };
+
+/**
+ * 这条消息是否走**快车道**：控制指令与任务指令不经过大脑，不该排在一条十几分钟的大脑回合后面。
+ * 「继续」类短句在确实有可续跑任务时也走快车道；问大脑前缀永远走大脑。
+ * 注意：切脑 / 会话 / 交接也在快车道，但它们要操作同一个 ACP 连接，仍会在 ACP 门口等当前回合结束——那是语义要求，不是排队阻塞。
+ */
+export function isFastLane(text: string, tasks: TaskFacts): boolean {
+  const t = (text ?? "").trim();
+  if (!t || parseBrainEscape(t)) return false;
+  if (parseControl(t) || parseTaskControl(t)) return true;
+  return shouldResumeTask(t, tasks);
+}
+
 /** 切脑结果/来源的中文说法（`AI` 总览与答复共用一套词，避免两处说法不一致）。 */
 const SOURCE_LABEL: Record<ResolvedAgent["source"], string> = {
   env: "环境变量",
@@ -1002,6 +1017,18 @@ function notifyWorker(): void {
   wakeWorker = null;
   if (w) w();
 }
+/**
+ * 快车道：控制指令与任务指令不进大脑队列。大脑一条回合可能跑十几分钟，若共用队列，
+ * 「结束任务」「任务列表」「#n 继续」会一直排在那条回合后面——任务侧明明独立于大脑。
+ * 快车道自己串行（命令之间保序），只与大脑并发。
+ */
+const fastQueue: QueuedMsg[] = [];
+let wakeFast: (() => void) | null = null;
+function notifyFast(): void {
+  const w = wakeFast;
+  wakeFast = null;
+  if (w) w();
+}
 
 /** 发件人鉴权：登录者（owner，始终允许）或在登录者白名单 allowFrom 中——兜底校验（微信平台只发送登录者本人的消息，这道闸防的是发送范围变化/别的入口）。 */
 function isAuthorized(from: string, owner: string): boolean {
@@ -1090,13 +1117,20 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
           log("收到「继续」(等待中) → 恢复进度、重置计数、换新 token");
           continue;
         }
-        msgQueue.push({
+        const queued: QueuedMsg = {
           from,
           text,
           imageItems,
           createTimeMs: msg.create_time_ms,
           contextToken: msg.context_token,
-        });
+        };
+        const facts: TaskFacts = {
+          awaiting: awaitingTasks(from).length,
+          active: hasActiveTask(from),
+          interrupted: interruptedTasks(from).length,
+        };
+        if (isFastLane(text, facts)) fastQueue.push(queued);
+        else msgQueue.push(queued);
         enq = true;
       }
       // 新 token 已到 → 补发旧 token 期间挂起的推送。等本批所有消息的计数重置都做完再补发（否则同一批里后一条消息的 reset 会把补发的计数抹掉）；每个发件人一次，用 state 里该用户最新的 token。补发先进 replyChain，排在本批消息触发的进度/答案之前（该循环全程同步，worker 来不及插进来）。
@@ -1108,7 +1142,14 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
         const fresh = state.contextTokens[`${account.botId}:${from}`];
         if (fresh) flushHeldPushes(account, from, fresh);
       }
-      const saveErr = finishPollBatch(enq, () => saveState(state), notifyWorker);
+      const saveErr = finishPollBatch(
+        enq,
+        () => saveState(state),
+        () => {
+          notifyWorker();
+          notifyFast();
+        },
+      );
       if (saveErr)
         log(
           "save state failed:",
@@ -1120,7 +1161,165 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
   }
 }
 
-async function workerLoop(account: AccountData, state: ServerState, owner: string): Promise<void> {
+/** 快车道的单条处理：控制指令 + 任务指令。它们不经过大脑，因此不必排在长回合后面。 */
+async function handleFastItem(
+  account: AccountData,
+  state: ServerState,
+  owner: string,
+  item: QueuedMsg,
+): Promise<void> {
+  const from = item.from;
+  const token = item.contextToken;
+  const latestToken = () => state.contextTokens[`${account.botId}:${from}`];
+  /**
+   * 快车道答复：正常立刻发；但若本用户的大脑回合正在跑、连发额度已到「接近上限」线，
+   * 就先让位——否则会把留给最终答案的最后一条挤掉（答案的 -2 在本进程已收到过消息时按限流处理、不挂起，等于静默丢）。
+   * 让位的答复在回合结束（flushDeferredTaskPushes）后发；仍没额度就转挂起队列。
+   */
+  const notice = (
+    text: string,
+    ctx: string | undefined = token,
+    fallback: string | undefined = latestToken(),
+  ): Promise<void> => {
+    if (activeTurn?.from === from && budgetOf(from).count >= CONSEC_SEND_LIMIT - 2) {
+      const n = deferTaskPush(from, text);
+      log(`快车道答复让位给本回合最终答案 → 回合结束后发（累计 ${n} 条，${from}）`);
+      return Promise.resolve();
+    }
+    return sendNotice(account, from, ctx, text, fallback);
+  };
+  const facts: TaskFacts = {
+    awaiting: awaitingTasks(from).length,
+    active: hasActiveTask(from),
+    interrupted: interruptedTasks(from).length,
+  };
+
+  // 控制指令：单独处理
+  const ctrl = item.text ? parseControl(item.text) : null;
+  if (ctrl) {
+    // owner-only（切脑/交接）：非本人 → 短提示拒绝，**不**转发给大脑（否则大脑可能替用户执行越权动作）
+    if (isOwnerOnly(ctrl) && from !== owner) {
+      const r = "这条指令仅登录者可用。发送「帮助」看你自己的指令。";
+      log("control: denied(not owner)", JSON.stringify(ctrl));
+      await notice(r);
+      return;
+    }
+    // 补发用**最新**token（切换可能几十秒，期间用户又发过消息；旧 token 可能已失效）
+    const notify = (text: string) => notice(text, latestToken() ?? token, latestToken());
+    const notifyFile = (text: string) => {
+      // 接近上限且本用户回合在跑：不再发文件占额度，退化为文本答复并参与「让位」判定（回合结束再发）。
+      if (activeTurn?.from === from && budgetOf(from).count >= CONSEC_SEND_LIMIT - 2)
+        return notice(text);
+      budgetOf(from).count += 1; // .md 也是一条消息，占同一份额度
+      return sendMdOrdered(account, from, latestToken() ?? token, text, latestToken(), (e) =>
+        holdUndelivered(from, text, e),
+      );
+    };
+    let r: string;
+    try {
+      r = await handleControl(ctrl, from, { owner, notify, notifyFile });
+    } catch (e) {
+      r = "处理指令出错：" + String(e);
+    }
+    log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
+    await notice(r);
+    return;
+  }
+
+  // ── 任务路由 ──
+  // 1) 结束任务（可带编号/全部）
+  const tcmd = item.text ? parseTaskControl(item.text) : null;
+  if (tcmd?.kind === "stop") {
+    const r = stopTask(from, tcmd.id);
+    log("task: stop ->", r.replace(/\n/g, " | "));
+    await notice(r);
+    return;
+  }
+  // 2) 任务列表
+  if (tcmd?.kind === "tasks") {
+    await notice(renderTaskList(from));
+    return;
+  }
+  // 3) 给指定编号的任务回话
+  if (tcmd?.kind === "reply") {
+    const r = injectTask(from, tcmd.text, tcmd.id);
+    log(`task: inject(#${tcmd.id}):`, tcmd.text.slice(0, 40));
+    if (r) await notice(r);
+    return;
+  }
+  // 4) 派发：带 agent 名 = 指定 agent 起一条**新任务**（多任务并行）；不带 = 沿用「有任务就发给它，没有就派发」
+  if (tcmd?.kind === "toWorker" && tcmd.agentToken) {
+    // 指定的 agent **只对这条任务生效**，不改默认任务大脑：那是账号级状态（`切换任务大脑` 是 owner-only），顺手改会让「派一条任务」变成一次隐形的全局设置变更，也破坏微信与 CLI（`--agent` 只影响那一条任务）两边的对称。
+    const r = dispatchTask(from, tcmd.text, { agentKey: tcmd.agentToken });
+    log(`task: dispatch(agent=${tcmd.agentToken}):`, r.replace(/\n/g, " | "));
+    await notice(r);
+    return;
+  }
+  if (tcmd?.kind === "toWorker") {
+    // 明确发给 worker：有活跃任务 → 发给它/追加（唯一一条喂下一轮、running 暂存、多条则回编号提示）；
+    // 没有活跃任务 → 派发新任务（不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活）。
+    if (hasActiveTask(from)) {
+      const r = injectTask(from, tcmd.text);
+      log("task: inject(explicit):", tcmd.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
+      if (r) await notice(r);
+    } else {
+      const r = dispatchTask(from, tcmd.text);
+      log("task: dispatch:", r.replace(/\n/g, " | "));
+      await notice(r);
+    }
+    return;
+  }
+
+  // poller 按**入队时**的任务状态把「继续」类短句送进快车道；出队时状态可能已变（任务刚出完结果），
+  // 这时交回大脑队列，保持「到出队才最终判定」的旧语义。
+  if (shouldResumeTask(item.text, facts)) {
+    const r = injectTask(from, item.text);
+    log("task: resume(unnumbered):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
+    if (r) await notice(r);
+    return;
+  }
+  msgQueue.push(item);
+  notifyWorker();
+}
+
+/** 快车道循环：与大脑回合并发，命令之间保持入队顺序。 */
+async function fastWorkerLoop(
+  account: AccountData,
+  state: ServerState,
+  owner: string,
+): Promise<void> {
+  while (true) {
+    if (isSessionPaused(account.botId)) {
+      await sleep(Math.min(getRemainingPauseMs(account.botId), 30_000) || 30_000);
+      continue;
+    }
+    if (fastQueue.length === 0) {
+      await new Promise<void>((r) => {
+        wakeFast = r;
+        if (fastQueue.length > 0) {
+          wakeFast = null;
+          r();
+        }
+      });
+      continue;
+    }
+    const item = fastQueue.shift() as QueuedMsg;
+    try {
+      await handleFastItem(account, state, owner, item);
+    } catch (e) {
+      log("fast command error:", e instanceof Error ? e.stack || e.message : String(e));
+      await sendNotice(
+        account,
+        item.from,
+        item.contextToken,
+        "处理这条指令时出错了，请再发一次试试。",
+        state.contextTokens[`${account.botId}:${item.from}`],
+      ).catch(() => {});
+    }
+  }
+}
+
+async function workerLoop(account: AccountData, state: ServerState): Promise<void> {
   while (true) {
     if (isSessionPaused(account.botId)) {
       await sleep(Math.min(getRemainingPauseMs(account.botId), 30_000) || 30_000);
@@ -1141,82 +1340,10 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
     const token = item.contextToken; // 用这条消息自己带的 context_token 回复（每条消息各有各的 token）
     const latestToken = () => state.contextTokens[`${account.botId}:${from}`]; // 该用户最新缓存 token（仅作 -2 参数错误时的兜底）
 
-    // 控制指令：单独处理
-    const ctrl = item.text ? parseControl(item.text) : null;
-    if (ctrl) {
-      // owner-only（切脑/交接）：非本人 → 短提示拒绝，**不**转发给大脑（否则大脑可能替用户执行越权动作）
-      if (isOwnerOnly(ctrl) && from !== owner) {
-        const r = "这条指令仅登录者可用。发送「帮助」看你自己的指令。";
-        log("control: denied(not owner)", JSON.stringify(ctrl));
-        await sendNotice(account, from, token, r, latestToken());
-        continue;
-      }
-      // 补发用**最新**token（切换可能几十秒，期间用户又发过消息；旧 token 可能已失效）
-      const notify = (text: string) =>
-        sendNotice(account, from, latestToken() ?? token, text, latestToken());
-      const notifyFile = (text: string) => {
-        budgetOf(from).count += 1; // .md 也是一条消息，占同一份额度
-        return sendMdOrdered(account, from, latestToken() ?? token, text, latestToken(), (e) =>
-          holdUndelivered(from, text, e),
-        );
-      };
-      let r: string;
-      try {
-        r = await handleControl(ctrl, from, { owner, notify, notifyFile });
-      } catch (e) {
-        r = "处理指令出错：" + String(e);
-      }
-      log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
-      await sendNotice(account, from, token, r, latestToken());
-      continue;
-    }
-
-    // ── 任务路由 ──
-    // 1) 结束任务（可带编号/全部）
-    const tcmd = item.text ? parseTaskControl(item.text) : null;
-    if (tcmd?.kind === "stop") {
-      const r = stopTask(from, tcmd.id);
-      log("task: stop ->", r.replace(/\n/g, " | "));
-      await sendNotice(account, from, token, r, latestToken());
-      continue;
-    }
-    // 2) 任务列表
-    if (tcmd?.kind === "tasks") {
-      await sendNotice(account, from, token, renderTaskList(from), latestToken());
-      continue;
-    }
-    // 3) 给指定编号的任务回话
-    if (tcmd?.kind === "reply") {
-      const r = injectTask(from, tcmd.text, tcmd.id);
-      log(`task: inject(#${tcmd.id}):`, tcmd.text.slice(0, 40));
-      if (r) await sendNotice(account, from, token, r, latestToken());
-      continue;
-    }
-    // 4) 派发：带 agent 名 = 指定 agent 起一条**新任务**（多任务并行）；不带 = 沿用「有任务就发给它，没有就派发」
-    if (tcmd?.kind === "toWorker" && tcmd.agentToken) {
-      // 指定的 agent **只对这条任务生效**，不改默认任务大脑：那是账号级状态（`切换任务大脑` 是 owner-only），顺手改会让「派一条任务」变成一次隐形的全局设置变更，也破坏微信与 CLI（`--agent` 只影响那一条任务）两边的对称。
-      const r = dispatchTask(from, tcmd.text, { agentKey: tcmd.agentToken });
-      log(`task: dispatch(agent=${tcmd.agentToken}):`, r.replace(/\n/g, " | "));
-      await sendNotice(account, from, token, r, latestToken());
-      continue;
-    }
-    if (tcmd?.kind === "toWorker") {
-      // 明确发给 worker：有活跃任务 → 发给它/追加（唯一一条喂下一轮、running 暂存、多条则回编号提示）；
-      // 没有活跃任务 → 派发新任务（不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活）。
-      if (hasActiveTask(from)) {
-        const r = injectTask(from, tcmd.text);
-        log("task: inject(explicit):", tcmd.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
-        if (r) await sendNotice(account, from, token, r, latestToken());
-      } else {
-        const r = dispatchTask(from, tcmd.text);
-        log("task: dispatch:", r.replace(/\n/g, " | "));
-        await sendNotice(account, from, token, r, latestToken());
-      }
-      continue;
-    }
-    // 2) 明确「问大脑」逃逸前缀 → 去前缀后强制走 brain（即使 worker 在等你）
+    // 快车道消息（控制/任务指令）不会进这个队列；这里只剩大脑消息。
+    // 1) 明确「问大脑」逃逸前缀 → 去前缀后强制走 brain（即使 worker 在等你）
     const brainEscape = item.text ? parseBrainEscape(item.text) : null;
-    // 3) 无前缀消息**默认给大脑**；只有「继续」类短句 + 有可续跑任务（waiting 任意；interrupted 需没有活跃任务）才交给任务（多条时 injectTask 回编号清单）。
+    // 2) 无前缀消息**默认给大脑**；只有「继续」类短句 + 有可续跑任务（waiting 任意；interrupted 需没有活跃任务）才交给任务（多条时 injectTask 回编号清单）。
     //    2026-11-02 前是「只要有一条 waiting 就接管任意无编号消息」——任务出完结果还躺在 waiting，会把用户找大脑的日常消息吞掉（真机踩到两次：#26、#28）。
     //    任务侧的追问走显式寻址：`#<编号> 正文` / `> 正文` / `任务 …`（解析层已分流，不会到这里）。
     if (
@@ -1612,9 +1739,10 @@ export async function runDaemon(): Promise<void> {
   // 进程池清扫：空闲超时的 worker 回收（默认 5 分钟）
   const poolSweep = setInterval(() => sweepWorkerPool(), 30_000);
   poolSweep.unref?.();
-  // 解耦运行：拉取器持续抓消息(永不被大脑阻塞)，处理器串行喂大脑
+  // 解耦运行：拉取器持续抓消息(永不被大脑阻塞)，大脑与快车道各一个处理器并发
   void pollerLoop(account, owner, state);
-  await workerLoop(account, state, owner);
+  void fastWorkerLoop(account, state, owner);
+  await workerLoop(account, state);
 }
 
 // daemon 本体由 cli.ts 的 `wemind daemon` 调用 runDaemon() 启动，此处不再顶层自启。

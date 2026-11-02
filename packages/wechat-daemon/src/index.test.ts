@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   brainErrorMessage,
   brainFailurePlan,
+  isFastLane,
   parseBrainEscape,
   parseControl,
   parseTaskControl,
@@ -119,5 +120,48 @@ describe("brainFailurePlan / brainErrorMessage（大脑失败的处置）", () =
     ).toBe(2);
     expect(brainFailurePlan(new Error("fetch failed")).attemptLimit).toBe(2);
     expect(brainErrorMessage(new Error("fetch failed"))).toMatch(/处理出错了/);
+  });
+});
+
+describe("isFastLane（控制/任务指令不排在大脑回合后面）", () => {
+  const noTasks = { awaiting: 0, active: false, interrupted: 0 };
+
+  it("控制指令走快车道", () => {
+    for (const t of [
+      "帮助",
+      "AI",
+      "切换大脑 opencode",
+      "新会话",
+      "会话列表",
+      "加载 github",
+      "交接",
+    ])
+      expect(isFastLane(t, noTasks), t).toBe(true);
+  });
+
+  it("任务指令走快车道（派发 / 列表 / 结束 / 按编号回话 / 明确寻址）", () => {
+    for (const t of [
+      "任务列表",
+      "结束任务 2",
+      "任务：写周报",
+      "任务 kiro：写周报",
+      "> 继续",
+      "#2 继续",
+      "/reply 2 继续",
+    ])
+      expect(isFastLane(t, noTasks), t).toBe(true);
+  });
+
+  it("「继续」类短句只在确实有可续跑任务时才走快车道", () => {
+    expect(isFastLane("继续", noTasks)).toBe(false);
+    expect(isFastLane("继续", { awaiting: 1, active: true, interrupted: 0 })).toBe(true);
+    expect(isFastLane("继续", { awaiting: 0, active: false, interrupted: 1 })).toBe(true);
+    // 有活跃任务时不去抢已中断的那条（与 shouldResumeTask 同一口径）
+    expect(isFastLane("继续", { awaiting: 0, active: true, interrupted: 1 })).toBe(false);
+  });
+
+  it("普通消息与「问大脑」逃逸仍走大脑队列", () => {
+    for (const t of ["你好", "帮我写个脚本", "问大脑 任务列表", "问大脑 #2 继续", "  "])
+      expect(isFastLane(t, noTasks), t).toBe(false);
   });
 });

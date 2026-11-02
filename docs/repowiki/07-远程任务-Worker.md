@@ -46,7 +46,7 @@
 ```mermaid
 graph TD
     subgraph daemon
-        WL["workerLoop（瞬时路由）"]
+        WL["fastWorkerLoop（瞬时路由）"]
         TM["task-manager.ts<br/>任务表 + runTask 后台循环"]
         POOL["worker-pool.ts<br/>进程池（复用/回收/上限）"]
         WA["worker-acp.ts<br/>class WorkerConn（每实例一条连接）"]
@@ -95,7 +95,7 @@ stateDiagram-v2
 - `running`：正跑一轮。此时该用户来消息 → 按序压入 `pendingInjects`（**一条不丢**，不是只留最近一条），答复「已记下，等这步跑完处理」。
 - `waiting`：等用户回话。收到即转 `running`；若有暂存的 `pendingInjects`，按顺序合并成下一轮前缀一次消费。
 - `interrupted`：**不在 liveTasks 里**——daemon 重启后的遗留任务，或一轮失败于模型/账号侧问题（`providerIssue()`：余额/额度、密钥鉴权、计费、模型不存在）。续跑要用户显式回 `#n 继续`（可续跑任务唯一时裸「继续」也行；多条时任务侧回编号清单，见 `shouldResumeTask()`；§7.4「重启后续跑」）。
-- `runTask` 是后台异步循环：`askWorker` → 推送 `🤖【任务】<输出>` → typing 保活（每 5s）→ 等用户回话 → 续跑。**绝不在 `workerLoop` 里 await 它**，否则长任务会阻塞 poller 入队（含用户回话）。
+- `runTask` 是后台异步循环：`askWorker` → 推送 `🤖【任务】<输出>` → typing 保活（每 5s）→ 等用户回话 → 续跑。**绝不在消息循环里 await 它**，否则长任务会阻塞 poller 入队（含用户回话）。
 
 **无编号消息的归属（2026-11-02 改）**：**默认给对话大脑**——`waiting` 不再接管任意无前缀消息（真机踩过：任务出完结果还躺在 waiting，把用户找大脑的消息吞掉）。只有「继续 / 接着跑 / continue」这类短句 + 有可续跑任务（有 waiting；或没有活跃任务时存在 interrupted；多条时由 `injectTask` 回编号清单）才交给任务表。任务追问用 `#<编号> 正文` / `> 正文` / `任务 …`；`injectTask` 不指定编号时的内部顺序仍是「唯一 waiting → 唯一 live → 0 活跃且 1 条 interrupted → 否则编号清单」，但那只服务于明确发给任务的入口（`任务 正文` / `>`）。
 
@@ -152,7 +152,7 @@ spawn 失败（cwd 不存在/权限不足）时，`WorkerConn` 把 `error` 事�
 
 ## 7.4 微信入口：消息路由
 
-worker 的微信侧路由在 `workerLoop` 内（详见 [5. daemon](05-daemon.md#消息路由)）。指令集：
+worker 的微信侧路由在 `fastWorkerLoop` 的任务分支（详见 [5. daemon](05-daemon.md#消息路由)）。指令集：
 
 | 你发的消息 | 去向 |
 |-----------|------|

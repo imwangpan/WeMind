@@ -10,7 +10,7 @@ daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询�
 
 ```
 packages/wechat-daemon/src/
-├── index.ts            # 主入口：poller/worker 双循环、消息路由、回合编排、发送管理、控制桥扫描
+├── index.ts            # 主入口：poller / 快车道 / 大脑三个循环、消息路由、回合编排、发送管理、控制桥扫描
 ├── chat-commands.ts    # 命令表：解析 + 帮助**同表**驱动（无副作用模块）
 ├── acp-brain.ts        # 默认大脑：常驻 ACP 进程、严格会话恢复（→ 第 6 章）
 ├── agent-slot.ts       # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
@@ -48,7 +48,8 @@ graph TD
     J --> K["读回 tasks.json：未完成任务标「已中断」（**不**自动 spawn）"]
     K --> L["清空 task-inbox + 启动扫描定时器(1s)<br/>（同一个定时器也扫 control-inbox）"]
     L --> M["pollerLoop（后台）"]
-    L --> N["workerLoop（前台 await）"]
+    L --> N["fastWorkerLoop（后台，控制/任务）"]
+    L --> O["workerLoop（前台 await，只喂大脑）"]
 ```
 
 两个关键防御：
@@ -58,7 +59,7 @@ graph TD
 
 ## 5.3 poller / worker 解耦
 
-这是 daemon 内部最重要的架构（动机见 [2. 系统架构](02-系统架构.md#daemon-内部poller--worker-解耦)）。两个并发循环 + 一个内存队列 `msgQueue` + 唤醒回调 `wakeWorker`。
+这是 daemon 内部最重要的架构（动机见 [2. 系统架构](02-系统架构.md#daemon-内部poller--worker-解耦)）。三个并发循环 + 两个内存队列（`msgQueue` / `fastQueue`）+ 两个唤醒回调（`wakeWorker` / `wakeFast`）。
 
 ### pollerLoop —— 永不被大脑阻塞
 
@@ -70,12 +71,25 @@ while true:
   更新游标 get_updates_buf
   过滤 USER 且 message_id > lastMessageId
   先登记本批所有最新 context_token（worker 发送时取最新）
-  逐条：鉴权 → 提取文本/图片 → 重置发送配额 → 入队 → notifyWorker
+  逐条：鉴权 → 提取文本/图片 → 重置发送配额 → 按 isFastLane 分拣到 fastQueue / msgQueue → 唤醒对应循环
 ```
 
 poller 对每条消息**先鉴权再处理**，并把所有最新 token 实时写进 `state.contextTokens`，这样即使大脑在处理旧消息，新消息的 token 也不会丢。
 
-一批消息的收尾走 `poller-batch.ts` 的 `finishPollBatch()`：**先唤醒 worker，再 `saveState`**。顺序刻意如此——磁盘满/权限错误让持久化抛错时，只记一行 `save state failed`，已经入队的消息照常处理；反过来的话 worker 会一直睡到用户下一条消息。
+一批消息的收尾走 `poller-batch.ts` 的 `finishPollBatch()`：**先唤醒两个处理器，再 `saveState`**。顺序刻意如此——磁盘满/权限错误让持久化抛错时，只记一行 `save state failed`，已经入队的消息照常处理；反过来的话处理器会一直睡到用户下一条消息。
+
+### fastWorkerLoop —— 控制/任务快车道
+
+```
+while true:
+  会话暂停中? → sleep
+  队列空? → 等 wakeFast
+  取出一条消息 → handleControl / 任务路由（见 5.4）
+```
+
+控制指令与任务指令不经过大脑，**不该排在一条十几分钟的大脑回合后面**（否则「结束任务」「任务列表」「#2 继续」都会被饿死）。poller 入队时用 `isFastLane()` 分拣：`parseControl` / `parseTaskControl` 命中，或「继续」类短句且当时确实有可续跑任务。快车道出队时会再复核那类短句——状态已变（任务刚结束）就交回 `msgQueue`，保持「到出队才最终判定」的旧语义。命令之间串行保序，只与大脑并发；发送仍走同一条 `replyChain` 和连发额度，不会乱序。
+
+切脑 / 会话 / 交接虽然也在快车道，但它们要操作同一个 ACP 连接，仍会在 ACP 门口等当前回合结束——那是语义要求，不是排队阻塞。
 
 ### workerLoop —— 串行喂大脑
 
@@ -83,29 +97,35 @@ poller 对每条消息**先鉴权再处理**，并把所有最新 token 实时�
 while true:
   会话暂停中? → sleep
   队列空? → 等 wakeWorker
-  取出一条消息 → 消息路由（见 5.4） → handleMessage 或 发给 worker
+  取出一条大脑消息 → handleMessage（见 5.4）
 ```
 
 worker 串行处理，尊重 ACP 单 session 串行约束。`token` 用消息自己携带的 `context_token`，`latestToken()` 取该用户最新缓存 token（仅作 `-2` 参数错误时的兜底）。
 
 ## 5.4 消息路由
 
-每条出队消息按优先级判定去向：
+每条出队消息按优先级判定去向。路由分两段：**poller 先分拣队列**（快车道 / 大脑），快车道内部再按「控制 → 任务」判定。
 
 ```mermaid
 graph TD
-    M["出队消息"] --> C0{"是不是「仅登录者」命令<br/>且发送者不是登录者?"}
+    M["poller 每条消息"] --> L{"isFastLane?<br/>控制/任务指令，或<br/>有可续跑任务的「继续」短句"}
+    L -->|是| FQ["fastQueue → fastWorkerLoop"]
+    L -->|否| BQ["msgQueue → workerLoop"]
+    FQ --> C0{"是不是「仅登录者」命令<br/>且发送者不是登录者?"}
     C0 -->|是| H0["短提示拒绝<br/>（**不转发给大脑**）"]
     C0 -->|否| C1{"parseControl?<br/>MCP / 新会话 / 会话列表 / 恢复 / 重命名 / 删除 / 切脑 / 交接 / 帮助"}
     C1 -->|是| H1["handleControl<br/>（各自处理；切脑/交接仅登录者）"]
     C1 -->|否| C2{"parseTaskControl?"}
     C2 -->|结束任务/任务列表/#n| H2["stopTask / 列表 / 发给指定编号"]
     C2 -->|任务：/ &gt;/ 任务 &lt;agent&gt;：| H3["有任务→发给它<br/>无任务或指定了 agent→dispatchTask"]
-    C2 -->|否| C3{"parseBrainEscape?<br/>问大脑 xxx"}
-    C3 -->|是| H4["强制走 brain"]
-    C3 -->|否| C4{"无前缀 + 非图片<br/>+ 「继续」类短句<br/>+ 有可续跑任务?"}
+    C2 -->|否| C4{"出队时仍可续跑?"}
     C4 -->|是| H5["当作续跑发给任务（injectTask）"]
-    C4 -->|否| H6["handleMessage → brain（默认）"]
+    C4 -->|否| BQ2["交回 msgQueue（状态已变）"]
+    BQ --> C3{"parseBrainEscape?<br/>问大脑 xxx"}
+    C3 -->|是| H4["强制走 brain"]
+    C3 -->|否| C4B{"继续短句 + 可续跑?"}
+    C4B -->|是| H5
+    C4B -->|否| H6["handleMessage → brain（默认）"]
 ```
 
 三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时存在 interrupted）才交给任务侧（`shouldResumeTask()`，2026-11-02 起）；多条可续跑任务时会回编号清单让你指明，不替你选。任务出完结果后不会再接管日常消息；图片消息始终走 brain。
