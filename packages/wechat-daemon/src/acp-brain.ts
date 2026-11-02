@@ -673,6 +673,16 @@ export function restart(): void {
   reset();
 }
 
+/**
+ * MCP 激活集变更后用：切换进行中先等它结束（有界），再重启——否则会把正在预热的新大脑杀在半路。
+ * 返回 false 表示切换在等待上限内仍未结束，这次没有重启（避免留下一个半截的新大脑）。
+ */
+export async function restartForMcpChange(): Promise<boolean> {
+  if (switching && !(await drainSwitch(SWITCH_WAIT_MS))) return false;
+  restart();
+  return true;
+}
+
 /** 当前大脑是否接受图片输入（配置里的能力；默认 true）。 */
 export function supportsImages(): boolean {
   return getAgent("brain").images;

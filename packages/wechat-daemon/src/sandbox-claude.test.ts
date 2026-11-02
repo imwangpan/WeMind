@@ -80,8 +80,13 @@ describe("brain 沙箱（Claude Code）", () => {
 
     expect(catalogNames()).toContain("demo");
     expect(catalogNames()).not.toContain("wechat");
-    expect(addMcp("wechat")).toMatch(/不允许加载/);
-    expect(addMcp("demo")).toMatch(/已加载 MCP「demo」/);
+    const denied = addMcp("wechat");
+    expect(denied.text).toMatch(/不允许加载/);
+    expect(denied.ok).toBe(false);
+    const added = addMcp("demo");
+    expect(added.text).toMatch(/已加载 MCP「demo」/);
+    expect(added).toMatchObject({ ok: true, changed: true });
+    expect(addMcp("demo")).toMatchObject({ ok: true, changed: false }); // 已在激活集：不必重启
 
     // 激活集 → ACP 声明（不落盘）
     expect(activeMcpServers()).toEqual([

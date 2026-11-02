@@ -73,7 +73,7 @@ graph TD
 - `删除会话` 只删 WeMind 的登记（若是当前会话则同时清当前会话记录，下条消息自然开新的）；回复会写明「agent 自己那份历史记录不在 WeMind 手里」——`session/delete` 不是 ACP 通用能力（2026-10-29 实测：opencode/qoder 有、DSH 无 `-32601`；实现仍不依赖它）。
 - `newSession(userId)`：丢弃旧 session（含磁盘映射），重建全新会话（对应微信指令「新会话」）。
 - **ACP 操作串行**：`askBrain` / `newSession` / `resumeSession` 共用一条操作队列（同一时刻只有一个在跑）。微信回合与控制桥是两条独立入口，没有这道门时 `session/new` 会插进 `session/prompt` 中间；切脑的 `drainTurn` 把排队中的操作也计入在途。
-- `restart()`：重启 ACP 进程（MCP 激活集变更后调用，重建后 `load`/`resume` 恢复）。
+- `restart()`：重启 ACP 进程（重建后 `load`/`resume` 恢复）。MCP 激活集变更走 `restartForMcpChange()`：**只有激活集真的变了才重启**（加载已激活的、卸载未激活的都不重启），且**切换进行中先等切换结束**（有界），不会把正在预热的新大脑杀在半路。
 
 ### 运行时换大脑（brain-switch.ts）
 
@@ -145,7 +145,7 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 | `加载 <名>` / `load <名>` | 加入激活集（`wechat` 永久禁止） |
 | `卸载 <名>` / `unload <名>` | 移除 |
 
-加载/卸载后 daemon 重启 ACP 进程以按新沙箱配置重载，下一条消息生效。激活集持久化在 `brain-mcps.json`；**catalog 按 agent 各自约定读取**：kiro 是 `settings/mcp.json`，opencode 是 `opencode.json` 的 `mcp.servers`，qoder 是 `settings.json` 的 `mcpServers`，pi 是沙箱根 `<BRAIN_HOME>/mcp.json`（kiro 格式 `{mcpServers}`），DSH 与 Claude Code 走 ACP `mcpServers`（Claude Code 的 catalog 是真实 `~/.claude.json` 的 `mcpServers`；无文件式 catalog 时用 `WEMIND_MCP_CATALOG`）。**不要跨 agent 借配置文件。**
+加载/卸载后 daemon 重启 ACP 进程以按新沙箱配置重载，下一条消息生效。**只有激活集真的变了才重启**（重复加载/卸载未激活项不会白杀一次进程）；**切脑进行中先等切换结束再重启**，避免把正在预热的新大脑杀在半路。激活集持久化在 `brain-mcps.json`；**catalog 按 agent 各自约定读取**：kiro 是 `settings/mcp.json`，opencode 是 `opencode.json` 的 `mcp.servers`，qoder 是 `settings.json` 的 `mcpServers`，pi 是沙箱根 `<BRAIN_HOME>/mcp.json`（kiro 格式 `{mcpServers}`），DSH 与 Claude Code 走 ACP `mcpServers`（Claude Code 的 catalog 是真实 `~/.claude.json` 的 `mcpServers`；无文件式 catalog 时用 `WEMIND_MCP_CATALOG`）。**不要跨 agent 借配置文件。**
 
 ### 记忆/规则/技能继承（mirrorRealKiro）
 

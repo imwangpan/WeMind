@@ -97,8 +97,8 @@ describe("brain 沙箱（Cline）", () => {
 
     expect(catalogNames()).toContain("demo");
     expect(catalogNames()).not.toContain("wechat");
-    expect(addMcp("wechat")).toMatch(/不允许加载/);
-    expect(addMcp("demo")).toMatch(/已加载 MCP「demo」/);
+    expect(addMcp("wechat").text).toMatch(/不允许加载/);
+    expect(addMcp("demo").text).toMatch(/已加载 MCP「demo」/);
 
     ensureBrainHome();
     const cfg = readJson(path.join(brainCfg, "mcp.json"));

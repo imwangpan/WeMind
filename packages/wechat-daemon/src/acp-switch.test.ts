@@ -23,7 +23,15 @@ const savedNodeOptions = process.env.NODE_OPTIONS;
 process.env.NODE_OPTIONS = ""; // 子进程会继承它；调试器注入会让假 agent 卡在握手（同 spawn-agent.test.ts）
 
 const { switchBrain, preflightSwitch, switchInFlightTarget } = await import("./brain-switch.js");
-const { askBrain, newSession, resumeSession, restart } = await import("./acp-brain.js");
+const {
+  askBrain,
+  beginSwitch,
+  endSwitch,
+  newSession,
+  restart,
+  restartForMcpChange,
+  resumeSession,
+} = await import("./acp-brain.js");
 const { getAgent, resetSlotsForTest, seedSlots, setAgent } = await import("./agent-slot.js");
 const { loadBrainConfig, saveBrainConfig } = await import("./brain-config.js");
 const { readPidRecords } = await import("./pid-record.js");
@@ -441,6 +449,24 @@ describe("ACP 操作串行门（控制桥 vs 微信回合）", () => {
     await turn;
     const after = methods().filter((m) => m.startsWith("session/new")).length;
     expect(after).toBe(before); // 过期请求没有真的开新会话
+  });
+});
+
+describe("MCP 变更后的重启门", () => {
+  it("切换进行中先等切换结束再重启（不杀正在预热的新大脑）", async () => {
+    beginSwitch();
+    let settled = false;
+    const p = restartForMcpChange().then((ok) => {
+      settled = true;
+      return ok;
+    });
+    try {
+      await new Promise((r) => setTimeout(r, 150));
+      expect(settled).toBe(false); // 切换没结束就不重启
+    } finally {
+      endSwitch();
+    }
+    await expect(p).resolves.toBe(true);
   });
 });
 

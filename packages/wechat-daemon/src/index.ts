@@ -38,7 +38,7 @@ import type {
 import {
   askBrain,
   newSession,
-  restart,
+  restartForMcpChange,
   resumeSession,
   supportsImages,
   heartbeatMs,
@@ -385,15 +385,13 @@ async function handleControl(c: ChatCommand, userId: string, ctx: ControlCtx): P
   if (c.kind === "resume") return await resumeSessionCmd({ ...sc(), resume: resumeSession }, c.ref);
   if (c.kind === "rename") return renameSessionCmd(sc(), c.ref, c.name);
   if (c.kind === "delete") return deleteSessionCmd(sc(), c.ref);
-  if (c.kind === "add") {
-    const r = addMcp(c.name);
-    restart(); // 重启 acp 进程，使其按新沙箱 mcp.json 重新加载
-    return r;
-  }
-  if (c.kind === "remove") {
-    const r = removeMcp(c.name);
-    restart();
-    return r;
+  if (c.kind === "add" || c.kind === "remove") {
+    const r = c.kind === "add" ? addMcp(c.name) : removeMcp(c.name);
+    if (!r.ok || !r.changed) return r.text; // 失败/没变化都不重启大脑
+    // 切换进行中先等它结束再重启，别把正在预热的新大脑杀在半路
+    if (!(await restartForMcpChange()))
+      return `${r.text}\n（大脑正在切换中，这次没有重启它；切换完成后请再发一次这条指令，让新 MCP 列表生效。）`;
+    return r.text;
   }
   if (c.kind === "ai") return agentOverview();
   if (c.kind === "brain")

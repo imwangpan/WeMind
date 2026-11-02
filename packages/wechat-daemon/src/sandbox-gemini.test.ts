@@ -98,8 +98,8 @@ describe("brain 沙箱（gemini）", () => {
 
   it("加载 MCP 后写回同一个 settings.json，且 wechat 仍被拒、设置不被冲掉", async () => {
     const { addMcp } = await import("./mcp-sandbox.js");
-    expect(addMcp("wechat")).toMatch(/不允许/);
-    expect(addMcp("demo")).toMatch(/已加载/);
+    expect(addMcp("wechat").text).toMatch(/不允许/);
+    expect(addMcp("demo").text).toMatch(/已加载/);
 
     const cfg = readJson(path.join(brainCfg, "settings.json"));
     expect(Object.keys(cfg.mcpServers)).toEqual(["demo"]);

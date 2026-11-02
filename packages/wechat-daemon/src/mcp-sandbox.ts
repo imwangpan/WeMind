@@ -370,30 +370,58 @@ export function ensureBrainHome(forAgent?: ResolvedAgent): void {
   applySettingsDefaults(ag); // 预设默认设置项（如 pi 的 quietStartup：关掉 pi-acp 当消息发出来的启动横幅）
 }
 
-export function addMcp(name: string): string {
+export interface McpChangeResult {
+  /** 指令是否执行成功；失败时调用方不应重启大脑。 */
+  ok: boolean;
+  /** 激活集是否真的变了；没变就不必重启 ACP 进程。 */
+  changed: boolean;
+  /** 给用户的答复原文。 */
+  text: string;
+}
+
+export function addMcp(name: string): McpChangeResult {
   const ag = getAgent("brain");
-  if (FORBIDDEN.has(name)) return `不允许加载「${name}」（防它把消息发回自己）。`;
+  if (FORBIDDEN.has(name))
+    return { ok: false, changed: false, text: `不允许加载「${name}」（防它把消息发回自己）。` };
   const cat = loadCatalog(ag);
-  if (!cat[name]) return `未找到 MCP「${name}」。可选：${catalogNames().join(", ") || "（无）"}`;
+  if (!cat[name])
+    return {
+      ok: false,
+      changed: false,
+      text: `未找到 MCP「${name}」。可选：${catalogNames().join(", ") || "（无）"}`,
+    };
   // 预校验：坏条目不进激活集（官方 DSH 的 session/new 会因起不来的 MCP 回滚整会话）
   if (ag.mcpViaAcp && !toAcpMcpServers({ [name]: cat[name] }).servers.length)
-    return `MCP「${name}」的定义无法转换（需要 command 或 url），已拒绝加载。`;
+    return {
+      ok: false,
+      changed: false,
+      text: `MCP「${name}」的定义无法转换（需要 command 或 url），已拒绝加载。`,
+    };
   const a = loadActive();
-  if (!a.includes(name)) {
+  const changed = !a.includes(name);
+  if (changed) {
     a.push(name);
     saveActive(a);
   }
   applySandbox(ag);
-  return `已加载 MCP「${name}」。当前激活：${a.join(", ")}（下一条消息生效）`;
+  return {
+    ok: true,
+    changed,
+    text: `已加载 MCP「${name}」。当前激活：${a.join(", ")}（下一条消息生效）`,
+  };
 }
 
-export function removeMcp(name: string): string {
+export function removeMcp(name: string): McpChangeResult {
   const a = loadActive();
-  if (!a.includes(name)) return `「${name}」当前未激活。`;
+  if (!a.includes(name)) return { ok: false, changed: false, text: `「${name}」当前未激活。` };
   const next = a.filter((x) => x !== name);
   saveActive(next);
   applySandbox(getAgent("brain"));
-  return `已卸载 MCP「${name}」。当前激活：${next.join(", ") || "（空）"}`;
+  return {
+    ok: true,
+    changed: true,
+    text: `已卸载 MCP「${name}」。当前激活：${next.join(", ") || "（空）"}`,
+  };
 }
 
 export function listMcp(): string {
