@@ -17,8 +17,25 @@ import {
 } from "./session-map.js";
 import { ensureEntry, markUsed, titleOf, touchEntry } from "./session-registry.js";
 import { stripHandoffPrefix } from "./handoff.js";
-import { waitForFrameQuiet } from "./acp-quiet.js";
-import { handleReverseRequest } from "./acp-reverse.js";
+import {
+  applyAcpModel,
+  applyAcpSessionMode,
+  availableAcpModes,
+  acpTurnChunks,
+  acpTurnText,
+  beginAcpTurn,
+  clearAcpTurn,
+  drainAcpReplay,
+  endAcpTurn,
+  feedAcpStdout,
+  handleAcpFrame,
+  newTurnState,
+  promptAcp,
+  requestAcp,
+  type AcpHost,
+  type AcpPending,
+  type AcpProgressEvent,
+} from "./acp-connection.js";
 import { LineDecoder } from "./line-decoder.js";
 
 /**
@@ -28,10 +45,11 @@ import { LineDecoder } from "./line-decoder.js";
  * - 自愈：session/prompt 超时/失败 → 杀进程重建；重建后用 session/load 恢复上下文。
  * - 诊断日志（[wemind/wechat-daemon/acp] 前缀，进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差。
  * 跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
+ * 协议细节（帧处理、请求/回合超时、模型与模式、回放静默）与 worker 共用 `acp-connection.ts`；本模块只保留常驻单例与会话持久化。
  *
  * **agent 显式传参**：本模块不再持有「当前 agent」常量（改造前是 import 时解析的 `AGENT`，
  * 于是热切换只能重启整个 daemon）。入口 `askBrain`/`newSession` 取一次槽位（`getAgent("brain")`），
- * 之后 `ensureProcess(ag)` / `ensureSession(ag,…)` / `applyModel(ag,…)` / `promptRequest(ag,…)` 一路显式传下去——
+ * 之后 `ensureProcess(ag)` / `ensureSession(ag,…)` / `applyAcpModel(host, ag, …)` / `promptAcp(host, …)` 一路显式传下去——
  * 过程内不再读槽位，「握手到一半被换掉 agent」在结构上不可能发生（不需要锁）。
  */
 
@@ -50,33 +68,29 @@ function firstFrameMs(ag: ResolvedAgent): number {
   return Number(process.env.WECHAT_BRAIN_FIRST_FRAME_MS) || ag.firstFrameMs || 25_000;
 }
 
-type Pending = {
-  resolve: (v: unknown) => void;
-  reject: (e: Error) => void;
-  clear: () => void;
-  method: string;
-};
-
 let child: ChildProcessWithoutNullStreams | null = null;
 let initialized = false;
 let idCounter = 0;
-const pending = new Map<number, Pending>();
+const pending = new Map<number, AcpPending>();
 const userSessions = new Map<string, string>(); // 本进程已建立的 session
-const assembling = new Map<string, string[]>(); // sessionId -> 当前回合文本块
+const turn = newTurnState(); // 当前回合的拼接缓冲与进度状态
+const rpcState = { lastFrameAt: 0, frameSeq: 0 }; // 最近收帧时间 + 累计序号（首帧/回放判定）
 const stdoutLines = new LineDecoder();
-let lastFrameAt = 0; // 最近一次收到任何 stdout 帧的时间
-let frameSeq = 0; // 收到帧的累计序号（用于判定本回合是否出过帧）
-type ProgressEvent =
-  | { type: "tool"; kind?: string; purpose?: string; title?: string }
-  | { type: "answer" }
-  | { type: "thinking" }
-  | { type: "activity" };
-let currentOnProgress: ((ev: ProgressEvent) => void) | null = null; // 当前回合进度回调
-let answerStarted = false; // 当前回合是否已通知"开始写回复"
-let thoughtStarted = false; // 当前回合是否已通知"正在思考"
-const seenUpdateTypes = new Set<string>(); // 诊断：本回合出现过的 sessionUpdate 类型
-const seenTools = new Set<string>(); // 当前回合已上报的工具标题，去重
 const hintedSessions = new Set<string>(); // 已带上「可发图」约定提示的 session（每会话首轮带上一次）
+type ProgressEvent = AcpProgressEvent;
+
+const host: AcpHost = {
+  pending,
+  turn,
+  state: rpcState,
+  hasProcess: () => !!child,
+  noProcessMessage: "no acp process",
+  nextId: () => ++idCounter,
+  write: (payload) => {
+    child?.stdin.write(JSON.stringify(payload) + "\n");
+  },
+  log: (message) => dlog(message),
+};
 
 // ---- 并发门（切脑用）----
 // 一回合是一段长异步（可能几分钟）：热切换必须先**等在跑的回合结束**，绝不在整回合上持锁。
@@ -177,7 +191,7 @@ function reset(): void {
   }
   pending.clear();
   userSessions.clear();
-  assembling.clear();
+  clearAcpTurn(turn);
   stdoutLines.reset();
 }
 
@@ -204,144 +218,6 @@ function saveSessionMap(m: Record<string, string>): void {
   writeSessionMap(brainSessionMapPath(DATA_DIR), m); // 原子写：半截 JSON 等于所有会话丢失
 }
 
-function handleFrame(f: Record<string, any>): void {
-  lastFrameAt = Date.now();
-  frameSeq += 1;
-  if (typeof f.id === "number" && (f.result !== undefined || f.error !== undefined)) {
-    const p = pending.get(f.id);
-    if (!p) return;
-    p.clear();
-    pending.delete(f.id);
-    if (f.error) {
-      dlog(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`);
-      p.reject(new Error(JSON.stringify(f.error)));
-    } else p.resolve(f.result);
-    return;
-  }
-  // agent -> client 的反向请求（带 method + id）；必须应答，否则会挂到超时
-  if (f.method && f.id !== undefined) {
-    handleReverseRequest(f, (payload) => child?.stdin.write(JSON.stringify(payload) + "\n"), dlog);
-    return;
-  }
-  if (f.method === "session/update") {
-    const u = f.params?.update;
-    if (u?.sessionUpdate) seenUpdateTypes.add(String(u.sessionUpdate)); // 诊断
-    // 任意 session/update 帧都视为"活动" → 让 daemon 静默刷新心跳基线（流式期间不误报"仍在处理"）
-    if (currentOnProgress) {
-      try {
-        currentOnProgress({ type: "activity" });
-      } catch {
-        /* ignore */
-      }
-    }
-    if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
-      const arr = assembling.get(f.params.sessionId);
-      if (arr) arr.push(String(u.content.text ?? ""));
-      if (!answerStarted && currentOnProgress) {
-        answerStarted = true;
-        try {
-          currentOnProgress({ type: "answer" });
-        } catch {
-          /* ignore */
-        }
-      }
-    } else if (u?.sessionUpdate === "agent_thought_chunk") {
-      if (!thoughtStarted && currentOnProgress) {
-        thoughtStarted = true;
-        try {
-          currentOnProgress({ type: "thinking" });
-        } catch {
-          /* ignore */
-        }
-      }
-    } else if (
-      (u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") &&
-      currentOnProgress
-    ) {
-      const tid = String(u.toolCallId ?? u.title ?? ""); // 每个工具调用只上报一次
-      if (tid && !seenTools.has(tid)) {
-        seenTools.add(tid);
-        const purpose =
-          typeof u.rawInput?.__tool_use_purpose === "string"
-            ? u.rawInput.__tool_use_purpose
-            : undefined;
-        try {
-          currentOnProgress({ type: "tool", kind: u.kind, purpose, title: u.title });
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  }
-}
-
-function onStdout(d: Buffer): void {
-  for (const line of stdoutLines.push(d)) {
-    let f: Record<string, any>;
-    try {
-      f = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    handleFrame(f);
-  }
-}
-
-function request(method: string, params: unknown, timeoutMs: number): Promise<any> {
-  return new Promise((resolve, reject) => {
-    if (!child) {
-      reject(new Error("no acp process"));
-      return;
-    }
-    const id = ++idCounter;
-    dlog(`→ ${method}#${id}`);
-    const t = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error(`${method} timeout after ${timeoutMs}ms`));
-    }, timeoutMs);
-    pending.set(id, { resolve, reject, clear: () => clearTimeout(t), method });
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-  });
-}
-
-/**
- * session/prompt 专用：空闲超时（PROMPT_IDLE_MS 内无任何帧才判卡死）+ 硬上限（PROMPT_CAP_MS）。
- * 只要 brain 还在出帧（工具进度/正文），就不打断——避免误杀"慢但在干活"的长查询。
- */
-function promptRequest(ag: ResolvedAgent, params: unknown): Promise<any> {
-  return new Promise((resolve, reject) => {
-    if (!child) {
-      reject(new Error("no acp process"));
-      return;
-    }
-    const id = ++idCounter;
-    const startedAt = Date.now();
-    lastFrameAt = Date.now(); // 重置空闲基线：从本次 prompt 发出算起，避免用上一回合的旧时间戳误判
-    const startSeq = frameSeq; // 记录起点，用于判定本回合是否出过帧
-    const firstFrame = firstFrameMs(ag);
-    dlog(
-      `→ session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms firstFrame=${firstFrame}ms)`,
-    );
-    const iv = setInterval(() => {
-      const idle = Date.now() - lastFrameAt;
-      const total = Date.now() - startedAt;
-      const noFrameYet = frameSeq === startSeq; // 本回合从未出过帧
-      const firstFrameTimeout = noFrameYet && total > firstFrame;
-      if (firstFrameTimeout || idle > PROMPT_IDLE_MS || total > PROMPT_CAP_MS) {
-        if (pending.delete(id)) {
-          clearInterval(iv);
-          const why = firstFrameTimeout ? "no-first-frame" : idle > PROMPT_IDLE_MS ? "idle" : "cap";
-          reject(new Error(`session/prompt ${why} timeout (idle=${idle}ms total=${total}ms)`));
-        }
-      }
-    }, 5000);
-    pending.set(id, { resolve, reject, clear: () => clearInterval(iv), method: "session/prompt" });
-    child.stdin.write(
-      JSON.stringify({ jsonrpc: "2.0", id, method: "session/prompt", params }) + "\n",
-    );
-  });
-}
-
 async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   if (isAlive() && initialized) return;
   reset();
@@ -353,7 +229,7 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   dlog(`spawn ${ag.name} acp pid=${proc.pid} bin=${ag.bin} args=[${ag.args.join(" ")}]`);
   // 身份记录（JSON）：manage.ts 据此算进程特征串与展示 live 状态，不必猜「配置里的 agent 是不是正在跑的那个」
   writePidRecords(BRAIN_PID_FILE, [pidRecordOf(proc.pid!, ag)]);
-  proc.stdout.on("data", onStdout);
+  proc.stdout.on("data", (d) => feedAcpStdout(stdoutLines, d, (f) => handleAcpFrame(f, host)));
   proc.stderr.on("data", () => {
     /* ignore */
   });
@@ -369,7 +245,12 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
     if (child === proc) reset();
   });
   try {
-    await request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
+    await requestAcp(
+      host,
+      "initialize",
+      { protocolVersion: 1, clientCapabilities: {} },
+      REQ_TIMEOUT,
+    );
   } catch (e) {
     // A：initialize 超时/失败最常见的原因是 args 覆盖漏了 ACP 子命令——把诊断提示附在同一行日志里
     dlog(`initialize failed: ${String(e)}${acpArgsHint(ag)}`);
@@ -377,63 +258,6 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   }
   initialized = true;
   dlog("initialized");
-}
-
-/** 按配置选模型路由（如 DSH 的 deepseek-account）；没有 model 的 agent 跳过。 */
-async function applyModel(ag: ResolvedAgent, sid: string): Promise<void> {
-  if (!ag.model || ag.modelArg) return; // modelArg：模型已随启动参数传给 agent（gemini 不支持 set_config_option）
-  try {
-    await request(
-      "session/set_config_option",
-      { sessionId: sid, configId: "model", value: ag.model },
-      REQ_TIMEOUT,
-    );
-    dlog(`model set ${ag.model}`);
-  } catch (e) {
-    dlog(`model set failed (${String(e)})`);
-    throw e;
-  }
-}
-
-/** 从 `session/new|load|resume` 的回包里取可用模式 id；agent 不报 `modes` 时返回 null（=不校验，照样尝试）。 */
-function availableModeIds(res: any): string[] | null {
-  const list = res?.modes?.availableModes;
-  if (!Array.isArray(list)) return null;
-  const ids = list.map((m: any) => String(m?.id ?? m)).filter(Boolean);
-  return ids.length ? ids : null;
-}
-
-/** 会话建立/恢复后切到预设声明的模式（免审批：claude-code 的 bypassPermissions、codex 的 agent-full-access）。
- *  **失败只记日志、不抛**：模式不可用（如 claude-code 以 root 跑却没有 IS_SANDBOX）时进程仍可用，
- *  审批请求继续由应答器处理（默认拒绝，WEMIND_ACP_AUTO_ALLOW=1 放行）；抛错反而会把整轮打成失败。 */
-async function applySessionMode(
-  ag: ResolvedAgent,
-  sid: string,
-  modes: string[] | null = null,
-): Promise<void> {
-  if (!ag.sessionMode) return;
-  if (modes && !modes.includes(ag.sessionMode)) {
-    dlog(
-      `session mode ${ag.sessionMode} 不在 agent 报告的可用模式 [${modes.join(",")}] 里——跳过；审批请求仍由应答器处理`,
-    );
-    return;
-  }
-  try {
-    await request("session/set_mode", { sessionId: sid, modeId: ag.sessionMode }, REQ_TIMEOUT);
-    dlog(`session mode set ${ag.sessionMode}`);
-  } catch (e) {
-    dlog(`session mode set failed (${String(e)})——继续；审批请求仍由应答器处理`);
-  }
-}
-
-/** 恢复会话后，agent 可能还在异步回放历史（gemini 的 loadSession 里 streamHistory 不 await）：
- *  先等帧流安静下来再开始本轮提问，否则回放的历史会被拼进答复。 */
-async function drainLoadReplay(ag: ResolvedAgent): Promise<void> {
-  if (!ag.replayOnLoad) return;
-  const before = frameSeq;
-  const r = await waitForFrameQuiet({ seq: () => frameSeq });
-  const drained = frameSeq - before;
-  if (drained > 0) dlog(`drained ${drained} replay frame(s)${r.timedOut ? " (cap)" : ""}`);
 }
 
 async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string> {
@@ -450,12 +274,13 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
     for (const method of methods) {
       let restored: any;
       try {
-        restored = await request(
+        restored = await requestAcp(
+          host,
           `session/${method}`,
           { sessionId: saved, cwd: BRAIN_HOME, mcpServers },
           REQ_TIMEOUT,
         );
-        await drainLoadReplay(ag);
+        await drainAcpReplay(host, ag);
       } catch (e) {
         dlog(`session/${method} failed (${String(e)})`);
         continue;
@@ -463,23 +288,28 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
       // 恢复已经成功：模型设置失败只记日志，不能退回 session/new——那会丢掉刚恢复的上下文。
       // （applyModel 自己会记 `model set failed`，这里只负责不让它把恢复判成失败。）
       try {
-        await applyModel(ag, saved);
+        await applyAcpModel(host, ag, saved, REQ_TIMEOUT);
       } catch {
         /* 已在 applyModel 内记日志 */
       }
-      await applySessionMode(ag, saved, availableModeIds(restored));
+      await applyAcpSessionMode(host, ag, saved, availableAcpModes(restored), REQ_TIMEOUT);
       userSessions.set(userId, saved);
       markUsed(ag.name, userId, saved); // 会话登记表：把它顶到「最近使用」（列表按此排序）
       dlog(`session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
       return saved;
     }
   }
-  const res = (await request("session/new", { cwd: BRAIN_HOME, mcpServers }, REQ_TIMEOUT)) as {
+  const res = (await requestAcp(
+    host,
+    "session/new",
+    { cwd: BRAIN_HOME, mcpServers },
+    REQ_TIMEOUT,
+  )) as {
     sessionId?: string;
   };
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
-  await applyModel(ag, res.sessionId);
-  await applySessionMode(ag, res.sessionId, availableModeIds(res));
+  await applyAcpModel(host, ag, res.sessionId, REQ_TIMEOUT);
+  await applyAcpSessionMode(host, ag, res.sessionId, availableAcpModes(res), REQ_TIMEOUT);
   userSessions.set(userId, res.sessionId);
   map[keyOf(ag, userId)] = res.sessionId;
   saveSessionMap(map);
@@ -528,12 +358,7 @@ async function runTurn(
 ): Promise<string> {
   await ensureProcess(ag);
   const sid = await ensureSession(ag, userId);
-  assembling.set(sid, []);
-  currentOnProgress = onProgress ?? null;
-  answerStarted = false;
-  thoughtStarted = false;
-  seenUpdateTypes.clear();
-  seenTools.clear();
+  beginAcpTurn(turn, sid, onProgress);
   const t0 = Date.now();
   const prompt: unknown[] = [];
   if (images?.length && !ag.images) {
@@ -555,26 +380,33 @@ async function runTurn(
   }
   prompt.push({ type: "text", text: message || "（用户发来一张图片，请查看并回应）" });
   try {
-    await promptRequest(ag, { sessionId: sid, prompt });
-    const txt = (assembling.get(sid) ?? []).join("").trim();
+    await promptAcp(
+      host,
+      { sessionId: sid, prompt },
+      {
+        idleMs: PROMPT_IDLE_MS,
+        capMs: PROMPT_CAP_MS,
+        firstFrameMs: firstFrameMs(ag),
+      },
+    );
+    const txt = acpTurnText(turn, sid);
     // 成功回合才登记：轮次 +1、刷新最近使用、首次写入标题（用户消息前 30 字；纯图片消息没有文字 → 留给下一次）
     // 标题取**剥掉交接前缀**后的正文：不然列表里全是「【交接摘要 · 来自 …】」，用户认不出哪条是哪条。
     touchEntry(ag.name, userId, sid, { title: titleOf(stripHandoffPrefix(message)) });
     dlog(
-      `prompt ok ${Date.now() - t0}ms chunks=${(assembling.get(sid) ?? []).length} updateTypes=[${[...seenUpdateTypes].join(",")}]`,
+      `prompt ok ${Date.now() - t0}ms chunks=${acpTurnChunks(turn, sid)} updateTypes=[${[...turn.seenUpdateTypes].join(",")}]`,
     );
     return txt;
   } catch (e) {
-    const chunks = (assembling.get(sid) ?? []).length;
-    const sinceFrame = lastFrameAt ? Date.now() - lastFrameAt : -1;
+    const chunks = acpTurnChunks(turn, sid);
+    const sinceFrame = rpcState.lastFrameAt ? Date.now() - rpcState.lastFrameAt : -1;
     dlog(
       `prompt FAIL ${Date.now() - t0}ms chunks=${chunks} lastFrameAgo=${sinceFrame}ms err=${String(e)} -> rebuild`,
     );
     reset(); // 自愈：杀掉可能假死的进程，下条消息重建并 session/load 恢复
     throw e;
   } finally {
-    currentOnProgress = null;
-    assembling.delete(sid);
+    endAcpTurn(turn, sid);
   }
 }
 
@@ -616,14 +448,15 @@ export async function resumeSession(
     let lastErr = "";
     for (const method of methods) {
       try {
-        const restored = await request(
+        const restored = await requestAcp(
+          host,
           `session/${method}`,
           { sessionId, cwd: BRAIN_HOME, mcpServers },
           REQ_TIMEOUT,
         );
-        await drainLoadReplay(ag);
-        await applyModel(ag, sessionId);
-        await applySessionMode(ag, sessionId, availableModeIds(restored));
+        await drainAcpReplay(host, ag);
+        await applyAcpModel(host, ag, sessionId, REQ_TIMEOUT);
+        await applyAcpSessionMode(host, ag, sessionId, availableAcpModes(restored), REQ_TIMEOUT);
         userSessions.set(userId, sessionId);
         const map = loadSessionMap(ag);
         map[keyOf(ag, userId)] = sessionId;

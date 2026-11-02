@@ -17,6 +17,7 @@ packages/wechat-daemon/src/
 ├── control-inbox-runner.ts # 控制桥收件箱扫描（单条串行/过期不执行/失败必写应答）
 ├── task-inbox-runner.ts    # 任务收件箱扫描（时间序/先删后做/出错回 ack）
 ├── chat-commands.ts    # 命令表：解析 + 帮助**同表**驱动（无副作用模块）
+├── acp-connection.ts   # brain/worker 共用：帧处理、超时、模型/模式、回放静默（→ 第 6 章）
 ├── acp-brain.ts        # 默认大脑：常驻 ACP 进程、严格会话恢复（→ 第 6 章）
 ├── agent-slot.ts       # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
 ├── brain-switch.ts     # 运行时换大脑（预检/等在途回合结束/启动新大脑/回滚）（→ 第 6 章）
