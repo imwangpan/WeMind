@@ -110,6 +110,7 @@ poller（长轮询，不被大脑阻塞）
 | **外发管线 / SendPipeline** | `send-pipeline.ts`：串行链、最小间隔、按用户连发预算、旧 token 挂起/补发、任务推送让位；注入假发送函数即可单测 |
 | **CLI 共享上下文 / cli-context** | `cli-context.ts`：账号选择（key/label）、daemon 与控制桥存活判断、`viaBridge`（控制桥请求/等待/过期） |
 | **CLI 任务命令 / cli-task** | `cli-task.ts`：`task*` 四条的收件箱写入、答复文案与退出码；`manage.ts` 只做分派 |
+| **CLI 会话命令 / cli-session** | `cli-session.ts`：`session list/new/resume/rename/delete` 与 `session-current`；读直接读登记表，写优先走控制桥，旧版 daemon 的降级说明也在这里 |
 | **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
 | **preset / `ACP_AGENT_PRESETS`** | **代码里的叫法**；用户面统一写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）。一条 = 二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
 | **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |

@@ -34,6 +34,7 @@ packages/wechat-daemon/src/
 ├── manage.ts           # 多账号 + CLI 入口与命令分派（→ 第 8、7 章）
 ├── cli-context.ts      # CLI 共用上下文：账号选择、daemon/控制桥存活、viaBridge
 ├── cli-task.ts         # CLI 的 task* 命令（文件桥写入 + 答复文案）
+├── cli-session.ts      # CLI 的 session* 命令（读登记表 / 写走控制桥）
 ├── image-reply.ts      # 从大脑回复提取图片引用
 └── md-reply.ts         # 长回复转 .md 文件
 ```
