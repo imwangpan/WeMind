@@ -61,7 +61,8 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 
 | 文件 | 职责 |
 |---|---|
-| `packages/wechat-daemon/src/index.ts` | 消息路由、回合编排、进度节流、brain/worker 分流、快车道（`fastWorkerLoop`）；轮询/收件箱扫描分别委派给下面的 runner |
+| `packages/wechat-daemon/src/index.ts` | 消息路由、回合编排、进度节流、brain/worker 分流、快车道（`fastWorkerLoop`）；轮询/收件箱扫描委派给下面的 runner，纯路由判定在 `daemon-routing.ts` |
+| `packages/wechat-daemon/src/daemon-routing.ts` | 纯路由判定（可单测）：快车道/「继续」归属、控制与任务指令解析、大脑错误分类与用户提示、文本/工具标题提取 |
 | `packages/wechat-daemon/src/access.ts` | 发件人兜底鉴权：登录者始终放行，其余看登录者白名单 |
 | `packages/wechat-daemon/src/control-inbox-runner.ts` | 控制桥收件箱扫描（`ControlInboxRunner`）：单条串行、过期不执行、失败一定写应答 |
 | `packages/wechat-daemon/src/task-inbox-runner.ts` | 任务收件箱扫描（`scanTaskInbox`）：按时间序、先删后做、坏文件丢弃、出错回 ack |
