@@ -166,18 +166,20 @@ function formatMessage(msg: WeixinMessage) {
         textParts.push(item.text_item?.text ?? "");
         break;
       case 2:
-        textParts.push("[Image]");
+        textParts.push("[Image: not downloaded (MCP cannot fetch media)]");
         break;
       case 3:
         textParts.push(item.voice_item?.text ? `[Voice: ${item.voice_item.text}]` : "[Voice]");
         break;
       case 4:
         textParts.push(
-          item.file_item?.file_name ? `[File: ${item.file_item.file_name}]` : "[File]",
+          item.file_item?.file_name
+            ? `[File: ${item.file_item.file_name} (not downloaded)]`
+            : "[File: not downloaded (MCP cannot fetch media)]",
         );
         break;
       case 5:
-        textParts.push("[Video]");
+        textParts.push("[Video: not downloaded (MCP cannot fetch media)]");
         break;
     }
   }

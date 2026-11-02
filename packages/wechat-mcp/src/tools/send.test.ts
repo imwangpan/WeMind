@@ -83,6 +83,14 @@ describe("sendTextMessage", () => {
     expect(m.sendMessage).toHaveBeenCalledTimes(2);
   });
 
+  it("state=generating 用于进度消息，默认 finish 用于最终答复", async () => {
+    m.sendMessage.mockResolvedValue(undefined);
+    await sendTextMessage({ to: "u1", text: "progress", state: "generating" });
+    expect(m.sendMessage.mock.calls[0][0].body.msg.message_state).toBe(1);
+    await sendTextMessage({ to: "u1", text: "final" });
+    expect(m.sendMessage.mock.calls[1][0].body.msg.message_state).toBe(2);
+  });
+
   it("非 -2 错误直接抛出（鉴权/传输问题不重试）", async () => {
     m.sendMessage.mockRejectedValue(new ILinkError("sendMessage", -1, "bad"));
     await expect(sendTextMessage({ to: "u1", text: "hi" })).rejects.toThrow(/bad/);

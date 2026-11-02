@@ -78,6 +78,32 @@ describe("getMessages", () => {
     expect(m.saveState).toHaveBeenCalled();
   });
 
+  it("媒体消息明确标注「未下载」；语音带微信转写文本", async () => {
+    m.getUpdates.mockResolvedValue({
+      ret: 0,
+      msgs: [
+        {
+          message_type: 1,
+          message_id: 11,
+          from_user_id: "u",
+          item_list: [
+            { type: 2 },
+            { type: 5 },
+            { type: 4, file_item: { file_name: "a.pdf" } },
+            { type: 3, voice_item: { text: "你好" } },
+          ],
+        },
+      ],
+      get_updates_buf: "buf6",
+    });
+    const r = await getMessages({});
+    const text = parse(r).messages[0].text as string;
+    expect(text).toContain("[Image: not downloaded");
+    expect(text).toContain("[Video: not downloaded");
+    expect(text).toContain("a.pdf (not downloaded)");
+    expect(text).toContain("[Voice: 你好]");
+  });
+
   it("取消信号中止在途长轮询 → 立即 cancelled，不等超时/不重试", async () => {
     const ac = new AbortController();
     m.getUpdates.mockImplementation(

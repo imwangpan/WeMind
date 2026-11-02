@@ -103,11 +103,11 @@ sequenceDiagram
 - 过滤 `message_type === 1`（USER）且 `message_id > lastMessageId` 去重；只放行登录者（`WECHAT_OWNER_ID` 或账号 `userId`）与 `allowFrom.json` 白名单里的发件人，游标仍按**所有**收到的消息推进（被过滤的消息不会每轮重复判断），`contextTokens[botId:from_user_id]` 只记放行者的；
 - `wait` 模式下瞬时网络错误退避 2s 重试，不让一次抖动终结长轮询；客户端取消信号会直接中止**在途**长轮询并返回 `cancelled`（核心里与超时共用一个 AbortController）；
 - 处理响应前**重新读一次** `state` 再做 load→改→save（全程同步）：长轮询可能持续很久，期间别的工具调用写入的 `context_token` 不会被旧 state 覆盖；
-- `formatMessage` 把消息格式化：text / `[Image]` / `[Voice: 转写文本]` / `[File: 文件名]` / `[Video]`，并处理 `ref_msg`（从 item 取，修复上游死代码）。
+- `formatMessage` 把消息格式化：text / `[Image: not downloaded…]` / `[Voice: 转写文本]` / `[File: 文件名 (not downloaded)]` / `[Video: not downloaded…]`，并处理 `ref_msg`（从 item 取，修复上游死代码）。媒体只给占位符是**明示的限制**：MCP 形态不下载图片/视频/文件（daemon 形态才有收图解密链路）。
 
 ## 4.6 发送与打字（tools/send.ts、tools/typing.ts）
 
-**`send_text_message`**：从 `state.contextTokens[botId:to]` 取该用户的 context_token，**没有则报错**（iLink 不能主动发起对话，必须先收到对方消息）。组装 `BOT` + `FINISH` + `TEXT` 消息发出。
+**`send_text_message`**：从 `state.contextTokens[botId:to]` 取该用户的 context_token，**没有则报错**（iLink 不能主动发起对话，必须先收到对方消息）。组装 `BOT` + `TEXT` 消息发出；`state="generating"` 用于进度消息，默认 `finish` 表示最终答复（每次调用都是一条独立消息）。`ret=-2` 退避重试一次，仍失败给出可操作错误。
 
 **`send_typing`**：先 `getConfig` 取 `typing_ticket`（缺失视为失败、不带空 ticket 继续），再 `sendTyping` —— `status=1` 显示打字、`status=2` 取消。
 

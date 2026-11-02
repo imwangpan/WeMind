@@ -92,7 +92,9 @@ IMPORTANT BEHAVIOR — you MUST follow this workflow:
 3. While you are still processing the request, keep calling send_typing with status="typing" periodically (every 15-20 seconds) to keep the typing indicator alive.
 4. Once you have finished processing and sent your reply via send_text_message, call send_typing with status="cancel" and to=<from_user_id> to stop the typing indicator.
 
-This ensures the WeChat user sees a "typing..." indicator while you are working on their request.`,
+This ensures the WeChat user sees a "typing..." indicator while you are working on their request.
+
+Media limitation: image / video / file items are returned as placeholders without downloadable content; voice messages include WeChat's own transcription. If you need the actual media, use the daemon form (WeMind) instead.`,
     inputSchema: getMessagesSchema,
   },
   async (input, ctx) => {
@@ -106,7 +108,8 @@ server.registerTool(
   {
     description: `Send a text message to a WeChat user.
 
-The 'to' field is the from_user_id from a message you received via get_messages. iLink bots cannot initiate conversations: if you have never received a message from that user, this call fails.`,
+The 'to' field is the from_user_id from a message you received via get_messages. iLink bots cannot initiate conversations: if you have never received a message from that user, this call fails.
+Each call is delivered as a separate WeChat message. Use state="generating" for interim/progress updates; state="finish" (default) marks your final reply.`,
     inputSchema: sendTextMessageSchema,
   },
   async (input) => {

@@ -20,9 +20,19 @@ import { jsonResult, type ToolResult } from "./tool-result.js";
 export const sendTextMessageSchema = z.object({
   to: z.string().min(1).describe("The WeChat user ID to send the message to."),
   text: z.string().min(1).describe("The text message to send."),
+  state: z
+    .enum(["finish", "generating"])
+    .optional()
+    .describe(
+      "Use 'generating' for interim/progress messages and 'finish' (default) for your final reply. Each call is a separate WeChat message.",
+    ),
 });
 
-export async function sendTextMessage(input: { to: string; text: string }): Promise<ToolResult> {
+export async function sendTextMessage(input: {
+  to: string;
+  text: string;
+  state?: "finish" | "generating";
+}): Promise<ToolResult> {
   const account = loadAccount();
   if (!account?.botToken) {
     throw new ProtocolError(
@@ -49,7 +59,7 @@ export async function sendTextMessage(input: { to: string; text: string }): Prom
       to_user_id: input.to,
       client_id: generateId("wemind/wechat-mcp"),
       message_type: MessageType.BOT,
-      message_state: MessageState.FINISH,
+      message_state: input.state === "generating" ? MessageState.GENERATING : MessageState.FINISH,
       item_list: [{ type: MessageItemType.TEXT, text_item: { text: input.text } }],
       context_token: contextToken,
     },
