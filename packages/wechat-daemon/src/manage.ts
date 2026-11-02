@@ -629,6 +629,17 @@ async function cmdBrainSet(
     throw new Error(
       `未知 agent「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制用 --bin 搭配任一 agent）`,
     );
+  // auto 不绑定具体 agent：写进 presets.auto 永远读不到，顶层覆盖会下发给探测到的任意 agent（把 A 的 bin/args 发给 B）。
+  if (
+    agent === "auto" &&
+    (opts.bin !== undefined ||
+      opts.args !== undefined ||
+      opts.extraArgs !== undefined ||
+      opts.shell !== undefined)
+  )
+    throw new Error(
+      "`auto` 是「自动探测」，不绑定具体 agent，不能配 --bin/--args/--extra-args/--shell；请指定具体 agent（如 brain set kiro --bin …）",
+    );
   if (opts.model !== undefined) {
     if (!opts.model.trim()) throw new Error("--model 缺少参数值（清空/跟随默认请写 --model auto）");
     // auto 只是「自动探测」，解析时会被替换成探测到的具体 agent：写进 presets.auto 永远读不到，
@@ -1048,7 +1059,11 @@ async function cmdSession(rest: string[]): Promise<string> {
   const pi = argv.indexOf("--page");
   let page: number | undefined;
   if (pi >= 0) {
-    page = Number(argv[pi + 1]) || undefined;
+    const raw = argv[pi + 1];
+    if (raw === undefined || raw.startsWith("--")) throw new Error("--page 缺少参数值");
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1) throw new Error(`--page 必须是正整数：${raw}`);
+    page = n;
     argv.splice(pi, 2);
   }
   const pos = argv.filter((x) => x && !x.startsWith("--"));
@@ -1199,6 +1214,13 @@ async function cmdTask(
     30_000,
   );
 }
+/** 任务编号必须是正整数：0/负数以前被当成「没给编号」，会落到唯一那条任务上（发错目标）。 */
+function parseTaskId(raw: string): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`任务编号必须是正整数：${raw}`);
+  return n;
+}
+
 async function cmdTaskReply(text: string, sel?: string, id?: number): Promise<string> {
   if (!text) throw new Error('用法: task-reply ["#编号"] "<内容>" [<key|label>]');
   const key = pickKey(sel);
@@ -1301,33 +1323,24 @@ function cmdTaskStatus(sel?: string): string {
 export async function runManage(argv: string[]): Promise<void> {
   const cmd = argv.shift();
   const rest = [...argv];
-  const li = rest.indexOf("--label");
-  let label: string | undefined;
-  if (li >= 0) {
-    label = rest[li + 1];
-    rest.splice(li, 2);
-  }
+  // 取开关值：缺值（`--cwd` 后面没东西，或紧跟另一个开关）直接报错——以前会静默当成「没写」，用默认值继续跑。
+  const takeValue = (flag: string): string | undefined => {
+    const i = rest.indexOf(flag);
+    if (i < 0) return undefined;
+    const v = rest[i + 1];
+    if (v === undefined || v.startsWith("--")) throw new Error(`${flag} 缺少参数值`);
+    rest.splice(i, 2);
+    return v;
+  };
+  const label = takeValue("--label");
   const si = rest.indexOf("--start");
   const autoStart = si >= 0;
   if (autoStart) rest.splice(si, 1);
-  const ci = rest.indexOf("--cwd");
-  let cwd: string | undefined;
-  if (ci >= 0) {
-    cwd = rest[ci + 1];
-    rest.splice(ci, 2);
-  }
-  const ri = rest.indexOf("--runner");
-  let runner: string | undefined;
-  if (ri >= 0) {
-    runner = rest[ri + 1];
-    rest.splice(ri, 2);
-  }
-  const ai = rest.indexOf("--agent");
-  let agentKey: string | undefined;
-  if (ai >= 0) {
-    agentKey = rest[ai + 1];
-    rest.splice(ai, 2);
-  }
+  const cwd = takeValue("--cwd");
+  const runner = takeValue("--runner");
+  if (runner && !["builtin", "pm2"].includes(runner.toLowerCase()))
+    throw new Error(`未知 runner「${runner}」（可用：builtin / pm2）`);
+  const agentKey = takeValue("--agent");
 
   switch (cmd) {
     case "version":
@@ -1368,9 +1381,9 @@ export async function runManage(argv: string[]): Promise<void> {
       // 兼容两种写法：`task-reply "#3 内容"` 与 `task-reply 3 "内容"`
       const first = rest[0] ?? "";
       const m = first.match(/^[#＃](\d+)\s*([\s\S]*)$/);
-      if (m) console.log(await cmdTaskReply(m[2], rest[1], Number(m[1])));
+      if (m) console.log(await cmdTaskReply(m[2], rest[1], parseTaskId(m[1])));
       else if (rest.length >= 2 && /^\d+$/.test(first))
-        console.log(await cmdTaskReply(rest[1], rest[2], Number(first)));
+        console.log(await cmdTaskReply(rest[1], rest[2], parseTaskId(first)));
       else console.log(await cmdTaskReply(first, rest[1]));
       break;
     }
@@ -1383,7 +1396,7 @@ export async function runManage(argv: string[]): Promise<void> {
     case "task-stop": {
       const a = rest[0];
       const id: number | "all" | undefined =
-        a === "all" || a === "全部" ? "all" : a && /^\d+$/.test(a) ? Number(a) : undefined;
+        a === "all" || a === "全部" ? "all" : a && /^\d+$/.test(a) ? parseTaskId(a) : undefined;
       console.log(await cmdTaskStop(id === undefined ? a : rest[1], id));
       break;
     }

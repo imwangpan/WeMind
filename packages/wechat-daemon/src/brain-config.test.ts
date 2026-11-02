@@ -158,6 +158,19 @@ describe("mergeBrainConfig（读-改-写，不丢段）", () => {
     expect(updated.presets?.kiro.extraArgs).toEqual(["--new"]);
   });
 
+  it("显式传空 args/extraArgs = 清空，顶层与 presets 一起清（否则下次启动又被旧值盖回来）", () => {
+    const existing: BrainConfig = {
+      agent: "opencode",
+      args: ["acp"],
+      extraArgs: ["--verbose"],
+      presets: { opencode: { args: ["acp"], extraArgs: ["--verbose"], bin: "keep.cmd" } },
+    };
+    const next = mergeBrainConfig(existing, { agent: "opencode", args: [], extraArgs: [] });
+    expect(next.args).toBeUndefined();
+    expect(next.extraArgs).toBeUndefined();
+    expect(next.presets!.opencode).toEqual({ bin: "keep.cmd" }); // 没被清空的覆盖仍保留
+  });
+
   it("换 agent 时模型覆盖也迁进 presets（切回来仍按它建会话）", () => {
     const existing: BrainConfig = {
       agent: "deepseek",

@@ -172,39 +172,35 @@ export function mergeBrainConfig(existing: BrainConfig | null, patch: BrainConfi
 
   const next: BrainConfig = { agent: patch.agent };
   if (patch.bin) next.bin = patch.bin;
-  if (patch.args) next.args = patch.args;
-  if (patch.extraArgs) next.extraArgs = patch.extraArgs;
+  if (patch.args?.length) next.args = patch.args;
+  if (patch.extraArgs?.length) next.extraArgs = patch.extraArgs;
   if (patch.shell !== undefined) next.shell = patch.shell;
   if (patch.homeEnvVar) next.homeEnvVar = patch.homeEnvVar;
   if (patch.model) next.model = patch.model;
   // 同一个 agent 再设一次（如只改了 args）：没给的启动覆盖沿用原值——它们本来就属于这个 agent，
-  // 丢掉会让「切走再切回」丢 --bin 的坑在原地重现。
+  // 丢掉会让「切走再切回」丢 --bin 的坑在原地重现。注意 `args: []` 是**显式清空**，不沿用。
   if (prev && prev === nextAgent) {
     if (!patch.bin && existing?.bin) next.bin = existing.bin;
-    if (!patch.args && existing?.args?.length) next.args = existing.args;
-    if (!patch.extraArgs && existing?.extraArgs?.length) next.extraArgs = existing.extraArgs;
+    if (patch.args === undefined && existing?.args?.length) next.args = existing.args;
+    if (patch.extraArgs === undefined && existing?.extraArgs?.length)
+      next.extraArgs = existing.extraArgs;
     if (patch.shell === undefined && existing?.shell !== undefined) next.shell = existing.shell;
     if (!patch.homeEnvVar && existing?.homeEnvVar) next.homeEnvVar = existing.homeEnvVar;
     if (!patch.model && existing?.model) next.model = existing.model;
   }
 
-  if (
-    next.bin ||
-    next.args?.length ||
-    next.extraArgs?.length ||
-    next.shell !== undefined ||
-    next.homeEnvVar ||
-    next.model
-  ) {
-    const ov: PresetOverride = { ...presets[nextAgent] };
-    if (next.bin) ov.bin = next.bin;
-    if (next.args?.length) ov.args = next.args;
-    if (next.extraArgs?.length) ov.extraArgs = next.extraArgs;
-    if (next.shell !== undefined) ov.shell = next.shell;
-    if (next.homeEnvVar) ov.homeEnvVar = next.homeEnvVar;
-    if (next.model) ov.model = next.model;
-    presets[nextAgent] = ov;
-  }
+  // presets 是「按 agent 名保存的启动覆盖」，读配置时优先于顶层；清空 args 必须连它一起清，否则下次启动又被旧值盖回来。
+  const ov: PresetOverride = { ...presets[nextAgent] };
+  if (next.bin) ov.bin = next.bin;
+  if (next.args?.length) ov.args = next.args;
+  else if (patch.args !== undefined) delete ov.args;
+  if (next.extraArgs?.length) ov.extraArgs = next.extraArgs;
+  else if (patch.extraArgs !== undefined) delete ov.extraArgs;
+  if (next.shell !== undefined) ov.shell = next.shell;
+  if (next.homeEnvVar) ov.homeEnvVar = next.homeEnvVar;
+  if (next.model) ov.model = next.model;
+  if (Object.keys(ov).length) presets[nextAgent] = ov;
+  else delete presets[nextAgent];
   if (Object.keys(presets).length) next.presets = presets;
 
   const worker = patch.worker ?? existing?.worker;

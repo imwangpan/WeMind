@@ -4,7 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { descendantPids, helpText, agentLabel, resolveTaskCwd, taskAckOutcome } from "./manage.js";
+import {
+  descendantPids,
+  helpText,
+  agentLabel,
+  resolveTaskCwd,
+  runManage,
+  taskAckOutcome,
+} from "./manage.js";
 import { isAlive } from "./proc-identity.js";
 
 /*
@@ -62,6 +69,21 @@ describe("resolveTaskCwd（--cwd 相对路径按用户当前目录解析）", ()
     expect(() => resolveTaskCwd("nope", base)).toThrow(/工作目录不存在/);
     fs.writeFileSync(path.join(base, "file.txt"), "x");
     expect(() => resolveTaskCwd("file.txt", base)).toThrow(/不是目录/);
+  });
+});
+
+describe("CLI 参数校验（缺值 / 非法编号 / 未知 runner）", () => {
+  it("开关缺值直接报错，不再静默用默认值", async () => {
+    await expect(runManage(["task", "x", "--cwd"])).rejects.toThrow(/--cwd 缺少参数值/);
+    await expect(runManage(["start", "x", "--runner"])).rejects.toThrow(/--runner 缺少参数值/);
+    await expect(runManage(["session", "list", "--page"])).rejects.toThrow(/--page 缺少参数值/);
+  });
+
+  it("未知 runner / 非法页码 / 0 号任务直接拒绝", async () => {
+    await expect(runManage(["start", "x", "--runner", "foo"])).rejects.toThrow(/未知 runner/);
+    await expect(runManage(["session", "list", "--page", "0"])).rejects.toThrow(/正整数/);
+    await expect(runManage(["task-reply", "#0 hi"])).rejects.toThrow(/正整数/);
+    await expect(runManage(["task-stop", "0"])).rejects.toThrow(/正整数/);
   });
 });
 
@@ -274,6 +296,15 @@ describe("brain set --model（模型覆盖写入磁盘）", () => {
       /不能配 --model/,
     );
     expect(fs.readFileSync(path.join(home, "t1", "brain.json"), "utf-8")).toBe(before);
+  });
+
+  it("auto 不接受 --bin/--args/--shell（自动探测不绑定具体 agent）", async () => {
+    await expect(runManage(["brain", "set", "auto", "--bin", "x", "t1"])).rejects.toThrow(
+      /不绑定具体 agent/,
+    );
+    await expect(runManage(["brain", "set", "auto", "--args", "acp", "t1"])).rejects.toThrow(
+      /不绑定具体 agent/,
+    );
   });
 
   it("拼错的开关直接报错（以前被当未知参数静默过滤）", async () => {
