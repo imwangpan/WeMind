@@ -63,12 +63,13 @@ const parse = (r: { content: Array<{ type: "text"; text: string }> }) =>
   JSON.parse(r.content[0].text);
 
 describe("checkQrcodeStatus 高级态（不再静默卡死）", () => {
-  it("need_verifycode → 明确提示需验证码、指向 CLI", async () => {
+  it("need_verifycode → 明确说明 MCP 与 CLI 都不支持", async () => {
     m.pollQRStatus.mockResolvedValue({ status: "need_verifycode" });
     const r = await checkQrcodeStatus();
     expect(parse(r).status).toBe("need_verifycode");
     expect(parse(r).message).toMatch(/验证码/);
-    expect(parse(r).message).toMatch(/wemind login/);
+    expect(parse(r).message).toMatch(/MCP 与 CLI/);
+    expect(parse(r).message).toMatch(/暂不支持/);
   });
 
   it("verify_code_blocked → 同样明确提示", async () => {

@@ -33,7 +33,9 @@ const m = vi.hoisted(() => ({
   saveHandoff: vi.fn(),
   killIdle: vi.fn(),
   hasActiveTask: vi.fn(() => false),
-  taskPoolSummary: vi.fn(() => []),
+  taskPoolSummary: vi.fn<() => { agent: string; busy: number; idle: number; taskIds: number[] }[]>(
+    () => [],
+  ),
   loadAccount: vi.fn(),
   clearSessionPause: vi.fn(),
 }));
