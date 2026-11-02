@@ -63,6 +63,13 @@ describe("parseControlRequest（唯一入口校验）", () => {
     });
   });
 
+  it("session.unpause 只带 id/kind 也通过（登录后解除 -14 冷却）", () => {
+    expect(parseControlRequest({ id: "u1", kind: "session.unpause", at: 5 })).toMatchObject({
+      id: "u1",
+      kind: "session.unpause",
+    });
+  });
+
   it("未知 kind / 缺 id / 非对象 → null（daemon 不会去执行）", () => {
     expect(parseControlRequest({ id: "x", kind: "shell.exec", text: "rm -rf /" })).toBeNull();
     expect(parseControlRequest({ kind: "brain.switch" })).toBeNull();
@@ -200,6 +207,12 @@ describe("controlTimeoutMs", () => {
         WEMIND_SWITCH_DRAIN_MS: "1000",
       }),
     ).toBe(600_000); // 显式配得更长就听用户的
+  });
+
+  it("session.unpause 用短上限：旧 daemon 不认识这个 kind 时不能卡住登录 30s", () => {
+    expect(controlTimeoutMs("session.unpause", {})).toBe(3000);
+    expect(controlTimeoutMs("session.unpause", { WEMIND_CONTROL_TIMEOUT_MS: "5000" })).toBe(3000);
+    expect(controlTimeoutMs("session.unpause", { WEMIND_CONTROL_TIMEOUT_MS: "1000" })).toBe(1000);
   });
 
   it("brain.handoff 要跑一整个模型回合：默认不能停在 30s", () => {

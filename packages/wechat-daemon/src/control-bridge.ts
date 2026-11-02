@@ -31,6 +31,8 @@ export type ControlKind =
   | "session.resume"
   | "session.rename"
   | "session.delete"
+  /** 重新登录后解除 daemon 进程内的 -14 冷却（`clearSessionPause` 是进程内状态，CLI 自己清不到）。 */
+  | "session.unpause"
   | "task.list"
   | "task.reply"
   | "task.stop";
@@ -44,6 +46,7 @@ const KINDS: ReadonlySet<string> = new Set<ControlKind>([
   "session.resume",
   "session.rename",
   "session.delete",
+  "session.unpause",
   "task.list",
   "task.reply",
   "task.stop",
@@ -273,5 +276,7 @@ export function controlTimeoutMs(kind: ControlKind, env: NodeJS.ProcessEnv = pro
     const cap = Number(env.WECHAT_BRAIN_CAP_MS) || 900_000;
     return Math.max(base, cap + 15_000);
   }
+  // 登录后的「解除冷却」是尽力而为：旧 daemon 不认识这个 kind 会静默丢弃，不能为它卡住登录 30s。
+  if (kind === "session.unpause") return Math.min(base, 3000);
   return base;
 }

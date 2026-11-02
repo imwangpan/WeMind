@@ -12,6 +12,7 @@ import {
   isSessionPaused,
   pauseSession,
   getRemainingPauseMs,
+  clearSessionPause,
   loadAccount,
   loadState,
   saveState,
@@ -1405,6 +1406,10 @@ async function handleControlRequest(req: ControlRequest, owner: string): Promise
     case "session.delete":
       if (!req.ref) return "❌ 用法：session delete <序号|名字|id前缀>";
       return deleteSessionCmd(sc(), req.ref);
+    case "session.unpause":
+      clearSessionPause(account.botId);
+      log("control(cli): 已解除 -14 冷却，继续轮询");
+      return "✅ 已解除会话过期冷却，继续轮询。";
     case "task.list":
       return renderTaskList(owner);
     case "task.reply": {

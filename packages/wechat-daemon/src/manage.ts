@@ -484,6 +484,7 @@ async function loginInto(
       console.log("\n登录成功，正在登记…");
       const { key, msg } = finalizeStaging(staging, label);
       console.log(msg);
+      await unpauseIfRunning(key);
       if (autoStart) {
         startDaemon(key, runner);
         console.log(`已启动 daemon（账号 ${key}）。`);
@@ -927,6 +928,16 @@ export function taskAckOutcome(
  *  - 没有答复 → 老版 daemon 不认这条通道（或它正在退出）：回退到「已发送」措辞并说明一句，
  *    不把「没等到」当成「成功了」——达上限被拒与「派发成功」在旧措辞里长得一模一样。
  */
+/** 登录成功后让**正在运行的** daemon 解除 -14 冷却（`clearSessionPause` 是进程内状态，CLI 自己清不到它）。 */
+async function unpauseIfRunning(key: string): Promise<void> {
+  if (!bridgeReady(key)) return;
+  try {
+    await viaBridge(key, { kind: "session.unpause" });
+  } catch {
+    /* 尽力而为：daemon 忙/正在退出/旧版本不认识，都不影响登录本身 */
+  }
+}
+
 async function taskOutcome(
   key: string,
   ackId: string,
