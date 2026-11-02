@@ -90,6 +90,11 @@ export function newRequestId(now: number = Date.now()): string {
   return `${now}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** 文件 id 只允许安全字符：它直接拼进 `control-out/<id>.json`，不能让 `../`、盘符或路径分隔符逃出目录。 */
+function isSafeFileId(id: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(id) && !id.includes("..") && !id.includes(":");
+}
+
 /** 写请求（原子：tmp + rename，避免 daemon 读到半截 JSON）。 */
 export function writeControlRequest(req: ControlRequest, dir: string = DATA_DIR): void {
   const d = controlInboxDir(dir);
@@ -127,7 +132,7 @@ export function parseControlRequest(raw: unknown): ControlRequest | null {
   const kind = typeof o.kind === "string" ? o.kind : "";
   if (!KINDS.has(kind)) return null;
   const id = typeof o.id === "string" && o.id ? o.id : "";
-  if (!id) return null;
+  if (!id || !isSafeFileId(id)) return null;
   const str = (v: unknown): string | undefined =>
     typeof v === "string" && v.trim() ? v.trim().slice(0, 2000) : undefined;
   const req: ControlRequest = {
@@ -155,6 +160,7 @@ export function parseControlRequest(raw: unknown): ControlRequest | null {
 
 /** 写应答（原子）。 */
 export function writeControlResponse(res: ControlResponse, dir: string = DATA_DIR): void {
+  if (!isSafeFileId(res.id)) return; // 应答文件名由请求 id 拼成：不安全就不写（否则可借 ../ 覆盖账号数据）
   const d = controlOutDir(dir);
   fs.mkdirSync(d, { recursive: true });
   const tmp = path.join(d, `${res.id}.json.tmp`);
@@ -163,6 +169,7 @@ export function writeControlResponse(res: ControlResponse, dir: string = DATA_DI
 }
 
 export function readControlResponse(id: string, dir: string = DATA_DIR): ControlResponse | null {
+  if (!isSafeFileId(id)) return null;
   try {
     const j = JSON.parse(fs.readFileSync(path.join(controlOutDir(dir), `${id}.json`), "utf-8"));
     if (!j || typeof j !== "object") return null;

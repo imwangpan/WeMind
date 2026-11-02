@@ -70,8 +70,18 @@ describe("回结果通道：写答复与短轮询", () => {
 
   it("等不到就超时返回 null（老 daemon 不认这条通道 → CLI 退回「已发送」措辞）", async () => {
     const t0 = Date.now();
-    expect(await awaitTaskAck(dir, "从未写过", 300, 50)).toBeNull();
+    expect(await awaitTaskAck(dir, "never-written", 300, 50)).toBeNull();
     expect(Date.now() - t0).toBeGreaterThanOrEqual(250);
+  });
+
+  it("ack id 不能带 ../ 或盘符：不能借答复文件名写出 task-out", async () => {
+    writeTaskAck(dir, "../evil", "✅ 已派发");
+    writeTaskAck(dir, "C:evil", "✅ 已派发");
+    expect(fs.existsSync(path.join(dir, "evil.json"))).toBe(false);
+    expect(files(taskOutDir(dir))).toEqual([]);
+    const t0 = Date.now();
+    expect(await awaitTaskAck(dir, "../evil", 1000, 50)).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(300); // 不安全 id 立即拒绝，不去读目录外
   });
 
   it("id 为空时静默不写（没有请求方，别在目录里留无主答复）", () => {

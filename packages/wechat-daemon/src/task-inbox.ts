@@ -21,6 +21,11 @@ export type TaskAck = { id: string; at: number; ok: boolean; text: string };
 export const taskInboxDir = (base: string): string => path.join(base, TASK_INBOX_DIRNAME);
 export const taskOutDir = (base: string): string => path.join(base, TASK_OUT_DIRNAME);
 
+/** 文件 id 只允许安全字符：它直接拼进 `task-out/<id>.json`，不能让 `../`、盘符或路径分隔符逃出目录。 */
+function isSafeFileId(id: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(id) && !id.includes("..") && !id.includes(":");
+}
+
 /** 原子写（临时文件 + rename）：daemon 扫目录时不会读到半截 JSON。 */
 function atomicWriteJson(fp: string, obj: unknown): void {
   fs.mkdirSync(path.dirname(fp), { recursive: true });
@@ -43,7 +48,7 @@ export function writeTaskCmd(base: string, obj: Record<string, unknown>): string
 
 /** daemon 侧：把一条命令的结果写回去（CLI 正在短轮询它）。写失败不影响命令本身。 */
 export function writeTaskAck(base: string, id: string | undefined, text: string): void {
-  if (!id) return;
+  if (!id || !isSafeFileId(id)) return;
   try {
     atomicWriteJson(path.join(taskOutDir(base), `${id}.json`), {
       id,
@@ -63,6 +68,7 @@ export async function awaitTaskAck(
   timeoutMs = 8000,
   pollMs = 150,
 ): Promise<TaskAck | null> {
+  if (!isSafeFileId(id)) return null;
   const fp = path.join(taskOutDir(base), `${id}.json`);
   const t0 = Date.now();
   for (;;) {

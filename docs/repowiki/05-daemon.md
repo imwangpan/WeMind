@@ -241,7 +241,7 @@ daemon 通过一个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s�
 - **与微信回合串行**：`askBrain` / `newSession` / `resumeSession` 在 `acp-brain.ts` 里共用一条操作队列，控制桥与微信回合不会同时碰同一个 ACP 进程；切脑的 drain 也把排队中的操作算在内。
 - **应答即答复**：`{ id, at, ok, text }`，`ok = !text.startsWith("❌")`；CLI 端 `ok=false` 时置退出码 1，脚本能判成败。超时（默认 30s，`WEMIND_CONTROL_TIMEOUT_MS`）如实报「没等到回复」；`brain.switch` / `brain.handoff` 按各自的长耗时放宽（见 `controlTimeoutMs`）。
 - **`.bridge` 凭据**：daemon 启动时清空两个桥目录并写 `control-out/.bridge`（内容 = 自己的 pid）。CLI 据此判断对方是不是「认识桥的版本」——详见 [7. 远程任务 Worker](07-远程任务-Worker.md) §7.5。
-- **安全边界**：请求字段只有 `target`（agent 名）/`ref`/`name`/`text`/`taskId`/`page`，**没有 `bin`/`args`/`shell` 的位置**（`parseControlRequest` 是唯一入口校验）。
+- **安全边界**：请求字段只有 `target`（agent 名）/`ref`/`name`/`text`/`taskId`/`page`/`expiresAt`，**没有 `bin`/`args`/`shell` 的位置**（`parseControlRequest` 是唯一入口校验）。请求/应答 id 只允许 `[A-Za-z0-9._-]`（不含 `..`/盘符）——`control-out/<id>.json` 与 `task-out/<id>.json` 都由它拼成，不校验就能借 `../` 覆盖账号数据。
 - 启动时清空 `task-inbox/` 作废重启前残留命令（防重放）。
 
 ---

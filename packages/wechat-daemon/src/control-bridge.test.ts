@@ -148,6 +148,15 @@ describe("收件箱 / 应答文件", () => {
     expect(readControlResponse("没写过", dir)).toBeNull();
   });
 
+  it("应答 id 不能带 ../ 或盘符：不能借应答文件名写出 control-out", () => {
+    writeControlResponse({ id: "../evil", at: 1, ok: true, text: "x" }, dir);
+    writeControlResponse({ id: "C:evil", at: 1, ok: true, text: "x" }, dir);
+    expect(fs.existsSync(path.join(dir, "evil.json"))).toBe(false);
+    expect(readControlResponse("../evil", dir)).toBeNull();
+    expect(parseControlRequest({ id: "../evil", kind: "session.new" })).toBeNull();
+    expect(parseControlRequest({ id: "C:evil", kind: "session.new" })).toBeNull();
+  });
+
   it("awaitControlResponse：已有应答立即返回；超时返回 null", async () => {
     writeControlResponse({ id: "r2", at: 1, ok: false, text: "❌ 失败" }, dir);
     expect(await awaitControlResponse("r2", dir, 500, 10)).toMatchObject({ ok: false });
