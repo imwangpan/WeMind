@@ -90,10 +90,11 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 | `packages/wechat-daemon/src/sandbox-inherit.ts` | 记忆/技能继承（brain 与 worker 共用）：junction/拷贝 + `.wemind-inherited.json` 清单，换 agent 时清掉上一个 agent 留下的 `skills`/`AGENTS.md` |
 | `packages/wechat-daemon/src/spawn-agent.ts` | 统一 spawn（Windows `.cmd` 经 shell + 逐参数引号） |
 | `packages/wechat-daemon/src/brain-check.ts` | `wemind brain check` 的真 ACP 握手 |
-| `packages/wechat-daemon/src/manage.ts` | `wemind` 入口与命令分派（生命周期、账号、brain 等仍在；任务/会话命令已拆到 `cli-task.ts` / `cli-session.ts`） |
+| `packages/wechat-daemon/src/manage.ts` | `wemind` 入口与命令分派（生命周期、账号等仍在；brain/任务/会话命令已拆到 `cli-brain.ts` / `cli-task.ts` / `cli-session.ts`） |
 | `packages/wechat-daemon/src/cli-context.ts` | CLI 共用上下文：账号选择、daemon/控制桥存活判断、`viaBridge` |
 | `packages/wechat-daemon/src/cli-task.ts` | `task` / `task-reply` / `task-stop` / `task-list` / `task-status` 的文件桥实现与答复文案 |
 | `packages/wechat-daemon/src/cli-session.ts` | `session` / `session-current` 的 CLI 侧实现：读直接读登记表，写优先走控制桥（daemon 不在时 `rename`/`delete` 可安全直改） |
+| `packages/wechat-daemon/src/cli-brain.ts` | `brain show/set/unset/check/switch/handoff` 的 CLI 侧实现；`--restart` 的重启动作由入口注入（`startDaemon`），模块不反向依赖 `manage.ts` |
 | `packages/wechat-mcp/src/tools/*` | 6 个 MCP 工具 |
 
 ---
