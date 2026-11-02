@@ -1,6 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 
-import { canSendImage, extractImages, imageFailureNote, planImageTurn } from "./image-reply.js";
+import {
+  canSendImage,
+  extractImages,
+  imageFailureNote,
+  planImageTurn,
+  resolveImageBytes,
+} from "./image-reply.js";
 
 describe("extractImages", () => {
   it("提取 Markdown 图片并从正文移除", () => {
@@ -86,6 +92,62 @@ describe("planImageTurn（图片用不了时别丢文字、也别拿空 prompt �
   it("图片用不了且没有文字：直接拒绝（不问大脑）", () => {
     expect(planImageTurn(1, 0, true, false)).toMatchObject({ kind: "reject" });
     expect(planImageTurn(1, 1, false, false)).toMatchObject({ kind: "reject" });
+  });
+});
+
+describe("resolveImageBytes 的 URL 安全闸", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("公网图片正常下载", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(new Uint8Array([1, 2, 3]), {
+            status: 200,
+            headers: { "content-type": "image/png" },
+          }),
+      ),
+    );
+    await expect(resolveImageBytes("https://93.184.216.34/a.png")).resolves.toEqual(
+      Buffer.from([1, 2, 3]),
+    );
+  });
+
+  it("重定向到内网地址：拒绝，且不再对目标发起第二次请求", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (u: string) => {
+        calls.push(String(u));
+        return new Response(null, {
+          status: 302,
+          headers: { location: "http://127.0.0.1/secret.png" },
+        });
+      }),
+    );
+    await expect(resolveImageBytes("https://93.184.216.34/a.png")).rejects.toThrow(/内网/);
+    expect(calls).toEqual(["https://93.184.216.34/a.png"]);
+  });
+
+  it("重定向超过 3 跳：停止跟随并报错", async () => {
+    let n = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        n += 1;
+        return new Response(null, {
+          status: 302,
+          headers: { location: `http://93.184.216.34/r${n}.png` },
+        });
+      }),
+    );
+    await expect(resolveImageBytes("https://93.184.216.34/a.png")).rejects.toThrow(
+      /重定向次数过多/,
+    );
+    expect(n).toBe(4); // 原请求 + 3 次跟随
   });
 });
 
