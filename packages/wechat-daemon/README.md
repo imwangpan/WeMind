@@ -45,7 +45,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 | `wemind brain [show\|set\|unset\|check]` | 查看 / 设置（写入磁盘）/ 清除 / 自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`）；只加启动开关用 `--extra-args "…"`（追加，保留预设的 ACP 模式参数），`--args "…"` 是整段替换（漏掉 `acp` 会握手超时，`wemind brain` 会警告） |
 | `wemind brain switch <agent 名\|auto>` | **热切换对话大脑**：daemon 在跑也不重启、不打断在途回合；失败自动回滚。`--worker` 设默认任务大脑；`wemind brain handoff` 生成交接摘要 |
 | `wemind session new [名字] / list / resume <ref> / rename <ref> <名> / delete <ref>` | 会话管理：新建 / 列表 / 严格恢复 / 改名 / 删除（`ref` = 序号、名字或 id 前缀） |
-| `wemind task "<描述>" [--agent 名] [--cwd 目录]` | 派发任务给 worker（多任务并行、按编号回话） |
+| `wemind task "<描述>" [--agent 名] [--cwd 目录]` | 派发任务给 worker（多任务并行、按编号回话；`--cwd` 相对路径按当前终端目录解析） |
 | `wemind task-list / task-reply <编号> "…" / task-stop [编号\|全部]` | 任务列表、回话续跑（`task-reply 继续`）、结束（在等回复的进程回池复用） |
 | `wemind allow / revoke / allowlist` | 授权管理（谁能驱动这个 bot） |
 | `wemind logout / delete / label / set-default` | 账号运维 |

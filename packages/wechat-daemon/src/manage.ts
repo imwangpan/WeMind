@@ -1136,6 +1136,19 @@ function cmdSessionCurrent(key: string): string {
     : `${key} 当前没有会话当前会话记录（下一条消息会开新会话）。agent=${agent}`;
 }
 
+/** `task --cwd` 的相对路径按**用户当前目录**解析（daemon 的 cwd 可能不同），并要求目录确实存在。 */
+export function resolveTaskCwd(cwd: string | undefined, base: string = process.cwd()): string {
+  const p = path.resolve(base, cwd || ".");
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(p);
+  } catch {
+    throw new Error(`工作目录不存在：${p}`);
+  }
+  if (!st.isDirectory()) throw new Error(`--cwd 不是目录：${p}`);
+  return p;
+}
+
 async function cmdTask(
   text: string,
   cwd: string | undefined,
@@ -1145,7 +1158,7 @@ async function cmdTask(
   if (!text) throw new Error('用法: task "<任务描述>" [--cwd 目录] [--agent <名字>] [<key|label>]');
   const key = pickKey(sel);
   requireDaemonAlive(key);
-  const useCwd = cwd || process.cwd();
+  const useCwd = resolveTaskCwd(cwd);
   // 答复等 daemon：**起进程有结果之后**它才发（达上限/agent 起不来是那时才知道的），
   // 所以这里不能自己编「已派发」——旧写法轮询 task-state.json 的 active，会把「达上限被拒」和
   // 甚至上一条任务的编号报成成功。

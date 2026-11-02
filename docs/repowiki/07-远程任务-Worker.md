@@ -256,7 +256,7 @@ graph LR
 
 | 命令 | 作用 |
 |------|------|
-| `task "<描述>" [--cwd <目录>] [--agent <名字>] [<key\|label>]` | 派发任务（默认 cwd=终端当前目录） |
+| `task "<描述>" [--cwd <目录>] [--agent <名字>] [<key\|label>]` | 派发任务（默认 cwd=终端当前目录；相对路径按终端当前目录解析，不存在/非目录提前报错） |
 | `task-list [<key\|label>]` | 任务列表（编号/agent/状态/轮次/时长） |
 | `task-status [<key\|label>]` | 任务概览（任务表有记录时与 `task-list` 同一份；表为空才退回读 `task-state.json` 记录） |
 | `task-reply <编号> "<内容>" [<key\|label>]` | 回复/发话给任务（编号也可写成 `"#2 继续"` 放在第一个参数里；不给编号 = 唯一那条） |

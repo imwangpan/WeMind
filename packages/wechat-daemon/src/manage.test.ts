@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { descendantPids, helpText, agentLabel } from "./manage.js";
+import { descendantPids, helpText, agentLabel, resolveTaskCwd } from "./manage.js";
 import { isAlive } from "./proc-identity.js";
 
 /*
@@ -43,6 +43,25 @@ describe("helpText（CLI 帮助面）", () => {
     ])
       expect(h).toContain(s);
     expect(h).not.toContain("（无 CLI）"); // CLI 帮助不列只在微信里存在的操作（加载/卸载 MCP）
+  });
+});
+
+describe("resolveTaskCwd（--cwd 相对路径按用户当前目录解析）", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-cwd-"));
+  fs.mkdirSync(path.join(base, "sub"));
+
+  it("相对路径 → 以用户当前目录为基准的绝对路径", () => {
+    expect(resolveTaskCwd("sub", base)).toBe(path.join(base, "sub"));
+  });
+
+  it("省略 → 当前目录", () => {
+    expect(resolveTaskCwd(undefined, base)).toBe(path.resolve(base));
+  });
+
+  it("不存在 / 不是目录 → 提前报错（不把相对路径丢给 daemon 解析）", () => {
+    expect(() => resolveTaskCwd("nope", base)).toThrow(/工作目录不存在/);
+    fs.writeFileSync(path.join(base, "file.txt"), "x");
+    expect(() => resolveTaskCwd("file.txt", base)).toThrow(/不是目录/);
   });
 });
 
