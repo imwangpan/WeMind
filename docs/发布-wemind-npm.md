@@ -307,7 +307,7 @@ npx -y @wemind/cli list                   # 验证「npx 写全包名」这条�
 
 - npm 侧：24h 内可 `npm unpublish @wemind/cli@<ver>`（只在「包完全不可用」时用）；否则 `npm deprecate @wemind/cli@<ver> "原因"` 并尽快发补丁版。
 - 已装用户：`npm i -g @wemind/cli@<上一版>`。
-- 数据兼容：**1.2.0 起账号目录的文件格式有变化**——`brain.pid` 由裸整数改成 JSON 身份记录、新增 `workers.pid.json`（记录数组）/ `session-registry.json` / `tasks.json`，`brain.json` 多了 `worker` / `presets` 段。**升级方向有兼容**（旧 `brain.pid` 整数被宽容读取；`brain-sessions.json` 的旧键首次读取时自动迁移并回写）。**回滚到 1.1.x**：旧代码不认这些新文件，表现为 `list`/`stop` 把进程当「已停止」且不杀（安全侧：宁可不杀）、任务与会话登记看不到；但**登录态（`account.json`）与消息游标（`state.json`）不受影响**，`tasks.json` / `session-registry.json` 是派生/运行态数据，删掉只丢列表与「继续」续跑能力。重新升级回 1.2.0 即恢复。
+- 数据兼容：**1.2.0 起账号目录的文件格式有变化**——`brain.pid` 由裸整数改成 JSON 身份记录、新增 `workers.pid.json`（记录；单条为对象、多条为数组）/ `session-registry.json` / `tasks.json`，`brain.json` 多了 `worker` / `presets` 段。**升级方向有兼容**（旧 `brain.pid` 整数被宽容读取；`brain-sessions.json` 的旧键首次读取时自动迁移并回写）。**回滚到 1.1.x**：旧代码不认这些新文件，表现为 `list`/`stop` 把进程当「已停止」且不杀（安全侧：宁可不杀）、任务与会话登记看不到；但**登录态（`account.json`）与消息游标（`state.json`）不受影响**，`tasks.json` / `session-registry.json` 是派生/运行态数据，删掉只丢列表与「继续」续跑能力。重新升级回 1.2.0 即恢复。
 
 ---
 

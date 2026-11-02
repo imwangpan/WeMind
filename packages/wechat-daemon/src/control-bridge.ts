@@ -14,7 +14,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
  * 与既有 task-inbox 的分工：task-inbox 是**单向**（CLI 派活，结果从微信回）；控制桥要**回话**（CLI 要打印成功/失败），
  * 所以多了 out 目录与轮询。
  *
- * **安全边界**：桥只接受**agent 名与纯数据**（target/ref/name/text/id/page），**绝不接受 bin/args/shell**——
+ * **安全边界**：桥只接受**agent 名与纯数据**（target/ref/name/id/page），**绝不接受 bin/args/shell**——
  * 就算被伪造（进程能写账号目录，task-inbox 本来也是这个性质），最坏也只是「选一个已装的 agent 或清掉自己的会话」，
  * 不能借此让 daemon 执行任意程序。`parseControlRequest` 是唯一的入口校验。
  */
@@ -32,10 +32,7 @@ export type ControlKind =
   | "session.rename"
   | "session.delete"
   /** 重新登录后解除 daemon 进程内的 -14 冷却（`clearSessionPause` 是进程内状态，CLI 自己清不到）。 */
-  | "session.unpause"
-  | "task.list"
-  | "task.reply"
-  | "task.stop";
+  | "session.unpause";
 
 const KINDS: ReadonlySet<string> = new Set<ControlKind>([
   "brain.switch",
@@ -47,9 +44,6 @@ const KINDS: ReadonlySet<string> = new Set<ControlKind>([
   "session.rename",
   "session.delete",
   "session.unpause",
-  "task.list",
-  "task.reply",
-  "task.stop",
 ]);
 
 export type ControlRequest = {
@@ -64,10 +58,6 @@ export type ControlRequest = {
   ref?: string;
   /** 会话名字（session.new / session.rename）。 */
   name?: string;
-  /** 任务正文（task.reply）。 */
-  text?: string;
-  /** 任务编号（task.reply / task.stop；"all" = 全部）。 */
-  taskId?: number | "all";
   /** 会话列表页码。 */
   page?: number;
 };
@@ -152,11 +142,6 @@ export function parseControlRequest(raw: unknown): ControlRequest | null {
   if (ref) req.ref = ref;
   const name = str(o.name);
   if (name) req.name = name;
-  const text = str(o.text);
-  if (text) req.text = text;
-  if (o.taskId === "all") req.taskId = "all";
-  else if (typeof o.taskId === "number" && Number.isInteger(o.taskId) && o.taskId > 0)
-    req.taskId = o.taskId;
   if (typeof o.page === "number" && Number.isInteger(o.page) && o.page > 0) req.page = o.page;
   return req;
 }

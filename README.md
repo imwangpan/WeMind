@@ -222,7 +222,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain-home/`                                 | brain 沙箱（由该 agent 配置里的 `homeEnvVar` 指向它；kiro 是 `KIRO_HOME`，opencode 是 `XDG_CONFIG_HOME`），含 agent 配置与 ACP 会话 |
 | `worker-sessions.json`                        | worker（远程任务）`ACP sessionId` 映射（键 `<agent>:task-<编号>@<userId>`），任务中断后据此 `load`/`resume` 续跑 |
 | `worker-home/`                                | worker 沙箱（同 brain 机制；MCP 继承**全量除 `wechat`** ＋ 记忆/技能/settings）                              |
-| `workers.pid.json`                            | worker 进程池的**身份记录数组**（每条的 pid / agent / 真实 bin+args / busy\|idle / 任务编号）；`wemind stop` 一次杀光全部，旧账号的裸整数 `worker.pid` 仍兼容读取 |
+| `workers.pid.json`                            | worker 进程池的**身份记录**（每条的 pid / agent / 真实 bin+args / busy\|idle / 任务编号；**单条时文件里是单个对象，多条是数组**）；`wemind stop` 一次杀光全部，旧账号的裸整数 `worker.pid` 仍兼容读取 |
 | `session-registry.json`                       | 会话**登记表**（名字/标题/轮次/最近使用；最多 50 条/人·大脑）——只供列表展示，「当前是哪个」的唯一权威仍是 `brain-sessions.json` |
 | `tasks.json`                                  | 任务表（编号/agent/状态/轮次/cwd/最近输出），用于**重启后续跑**：未完成的标「已中断」，回「继续」才续跑；损坏则降级为空表（只影响列表，不影响运行） |
 | `handoff.json`                                | 交接摘要（`交接` 生成；TTL 24h，切到别的大脑后第一条消息带上一次即消费）                                     |

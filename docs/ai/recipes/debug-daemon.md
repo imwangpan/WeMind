@@ -87,7 +87,7 @@ wemind session list <key|label>
 | `worker-home/` | worker 沙箱 |
 | `daemon.pid` | daemon 进程 |
 | `brain.pid` | 大脑进程**身份记录**（JSON：pid/agent/bin/args/shell） |
-| `workers.pid.json` | **worker 池**身份记录（JSON 数组：pid/agent/state: busy\|idle/taskId） |
+| `workers.pid.json` | **worker 池**身份记录（pid/agent/state: busy\|idle/taskId；单条为对象、多条为数组） |
 
 关键日志：
 

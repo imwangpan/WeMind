@@ -92,8 +92,8 @@ stateDiagram-v2
     interrupted --> running: 回「继续」/「#n」→ 拉进程 + load/resume 续跑
 ```
 
-- `running`：正跑一轮。此时该用户来消息 → 暂存为 `pendingInject`（只留最近一条），答复「已记下，等这步跑完处理」。
-- `waiting`：等用户回话。收到即转 `running`；若有暂存的 `pendingInject` 直接消费。
+- `running`：正跑一轮。此时该用户来消息 → 按序压入 `pendingInjects`（**一条不丢**，不是只留最近一条），答复「已记下，等这步跑完处理」。
+- `waiting`：等用户回话。收到即转 `running`；若有暂存的 `pendingInjects`，按顺序合并成下一轮前缀一次消费。
 - `interrupted`：**不在 liveTasks 里**——daemon 重启后的遗留任务，或一轮失败于模型/账号侧问题（`providerIssue()`：余额/额度、密钥鉴权、计费、模型不存在）。续跑要用户显式回 `#n 继续`（只有一条可续跑任务时裸「继续」也行，见 `shouldResumeTask()`；§7.4「重启后续跑」）。
 - `runTask` 是后台异步循环：`askWorker` → 推送 `🤖【任务】<输出>` → typing 保活（每 5s）→ 等用户回话 → 续跑。**绝不在 `workerLoop` 里 await 它**，否则长任务会阻塞 poller 入队（含用户回话）。
 

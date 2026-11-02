@@ -51,7 +51,6 @@ describe("parseControlRequest（唯一入口校验）", () => {
       ref: "1",
       name: "周报",
       page: 2,
-      taskId: 3,
     });
     expect(r).toMatchObject({
       id: "x1",
@@ -59,7 +58,6 @@ describe("parseControlRequest（唯一入口校验）", () => {
       ref: "1",
       name: "周报",
       page: 2,
-      taskId: 3,
     });
   });
 
@@ -113,16 +111,15 @@ describe("parseControlRequest（唯一入口校验）", () => {
     expect(isControlRequestExpired({ expiresAt: 999 }, 1000)).toBe(true);
   });
 
-  it("非法数值/超长文本被规整（taskId 只收正整数或 all；文本截断）", () => {
+  it("非法数值/超长文本被规整（page 只收正整数；字符串字段截断）", () => {
     const r = parseControlRequest({
       id: "x",
-      kind: "task.reply",
-      taskId: -3,
-      text: "a".repeat(5000),
+      kind: "session.list",
+      page: -3,
+      ref: "a".repeat(5000),
     })!;
-    expect(r.taskId).toBeUndefined();
-    expect(r.text!.length).toBe(2000);
-    expect(parseControlRequest({ id: "x", kind: "task.stop", taskId: "all" })!.taskId).toBe("all");
+    expect(r.page).toBeUndefined();
+    expect(r.ref!.length).toBe(2000);
   });
 });
 
@@ -194,7 +191,7 @@ describe("收件箱 / 应答文件", () => {
 describe("controlTimeoutMs", () => {
   it("普通命令用 base（默认 30s，env 可调）", () => {
     expect(controlTimeoutMs("session.list", {})).toBe(30_000);
-    expect(controlTimeoutMs("task.reply", { WEMIND_CONTROL_TIMEOUT_MS: "5000" })).toBe(5000);
+    expect(controlTimeoutMs("session.new", { WEMIND_CONTROL_TIMEOUT_MS: "5000" })).toBe(5000);
   });
 
   it("brain.switch 给足「等在途回合结束 + 启动新大脑」的时间：不能比 daemon 自己的上限还短", () => {

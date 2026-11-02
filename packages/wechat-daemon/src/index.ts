@@ -1414,19 +1414,6 @@ async function handleControlRequest(req: ControlRequest, owner: string): Promise
       log("control(cli): 已解除 -14 冷却，继续轮询");
       return "✅ 已解除会话过期冷却，继续轮询。";
     }
-    case "task.list":
-      return renderTaskList(owner);
-    case "task.reply": {
-      if (!req.text) return '❌ 用法：task-reply [#编号] "内容"';
-      const r = injectTask(
-        owner,
-        req.text,
-        typeof req.taskId === "number" ? req.taskId : undefined,
-      );
-      return r || "已把这句话发给任务（它继续跑，结果会发到微信）。";
-    }
-    case "task.stop":
-      return stopTask(owner, req.taskId);
   }
 }
 
