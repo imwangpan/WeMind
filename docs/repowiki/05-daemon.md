@@ -10,7 +10,11 @@ daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询�
 
 ```
 packages/wechat-daemon/src/
-├── index.ts            # 主入口：poller / 快车道 / 大脑三个循环、消息路由、回合编排、发送管理、控制桥扫描
+├── index.ts            # 主入口：poller / 快车道 / 大脑三个循环、消息路由、回合编排、进度节流
+├── send-pipeline.ts    # 外发管线：串行链、节流、连发预算、旧 token 挂起/补发、任务推送让位
+├── access.ts           # 发件人兜底鉴权（登录者 + allowFrom）
+├── control-inbox-runner.ts # 控制桥收件箱扫描（单条串行/过期不执行/失败必写应答）
+├── task-inbox-runner.ts    # 任务收件箱扫描（时间序/先删后做/出错回 ack）
 ├── chat-commands.ts    # 命令表：解析 + 帮助**同表**驱动（无副作用模块）
 ├── acp-brain.ts        # 默认大脑：常驻 ACP 进程、严格会话恢复（→ 第 6 章）
 ├── agent-slot.ts       # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）

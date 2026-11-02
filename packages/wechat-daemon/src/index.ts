@@ -78,16 +78,8 @@ import {
   type SessionCtx,
 } from "./session-manager.js";
 import { syncFromPointerMap, currentSessionIdOf } from "./session-registry.js";
-import {
-  clearControlDirs,
-  controlInboxDir,
-  isControlRequestExpired,
-  markBridgeReady,
-  readControlInbox,
-  sweepControlOut,
-  writeControlResponse,
-  type ControlRequest,
-} from "./control-bridge.js";
+import { clearControlDirs, markBridgeReady, type ControlRequest } from "./control-bridge.js";
+import { ControlInboxRunner } from "./control-inbox-runner.js";
 import {
   HANDOFF_PROMPT,
   HANDOFF_TTL_MS,
@@ -107,6 +99,7 @@ import {
   type ImageFailure,
 } from "./image-reply.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
+import { isAuthorizedSender } from "./access.js";
 import { shouldDeferTaskPush } from "./pending-push.js";
 import { SendPipeline } from "./send-pipeline.js";
 import { finishPollBatch } from "./poller-batch.js";
@@ -128,7 +121,8 @@ import {
   providerIssue,
   type TaskStateSnapshot,
 } from "./task-manager.js";
-import { clearTaskDirs, taskInboxDir, writeTaskAck } from "./task-inbox.js";
+import { clearTaskDirs, writeTaskAck } from "./task-inbox.js";
+import { scanTaskInbox } from "./task-inbox-runner.js";
 import {
   killAll as killWorkerPool,
   killIdle as killIdleConns,
@@ -264,6 +258,15 @@ export function isFastLane(text: string, tasks: TaskFacts): boolean {
   if (!t || parseBrainEscape(t)) return false;
   if (parseControl(t) || parseTaskControl(t)) return true;
   return shouldResumeTask(t, tasks);
+}
+
+/** 大脑队列里的无编号消息是否该交给任务：只有「继续」类短句 + 确实有可续跑任务；带图片的消息永远给大脑。 */
+export function shouldResumeInBrainQueue(
+  text: string,
+  imageCount: number,
+  tasks: TaskFacts,
+): boolean {
+  return imageCount === 0 && shouldResumeTask(text, tasks);
 }
 
 /** 切脑结果/来源的中文说法（`AI` 总览与答复共用一套词，避免两处说法不一致）。 */
@@ -838,11 +841,6 @@ function notifyFast(): void {
   if (w) w();
 }
 
-/** 发件人鉴权：登录者（owner，始终允许）或在登录者白名单 allowFrom 中——兜底校验（微信平台只发送登录者本人的消息，这道闸防的是发送范围变化/别的入口）。 */
-function isAuthorized(from: string, owner: string): boolean {
-  return !!from && (from === owner || isAllowed(from));
-}
-
 async function pollerLoop(
   account: AccountData,
   owner: string,
@@ -887,7 +885,7 @@ async function pollerLoop(
       // 先登记本批所有最新 token（worker 发送时取最新）
       for (const m of news) {
         const f = m.from_user_id ?? "";
-        if (isAuthorized(f, owner))
+        if (isAuthorizedSender(f, owner, isAllowed))
           log(
             `recv msg id=${m.message_id} ctx=…${m.context_token ? m.context_token.slice(-12) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`,
           );
@@ -900,7 +898,7 @@ async function pollerLoop(
       for (const msg of news) {
         state.lastMessageId = Math.max(state.lastMessageId, msg.message_id ?? 0);
         const from = msg.from_user_id ?? "";
-        if (!isAuthorized(from, owner)) {
+        if (!isAuthorizedSender(from, owner, isAllowed)) {
           log("ignore unauthorized sender:", from);
           continue;
         }
@@ -950,7 +948,8 @@ async function pollerLoop(
       const flushTo = new Set<string>();
       for (const msg of news) {
         const from = msg.from_user_id ?? "";
-        if (!msg.context_token || flushTo.has(from) || !isAuthorized(from, owner)) continue;
+        if (!msg.context_token || flushTo.has(from) || !isAuthorizedSender(from, owner, isAllowed))
+          continue;
         flushTo.add(from);
         const fresh = state.contextTokens[`${account.botId}:${from}`];
         if (fresh) sends.flushHeldPushes(from, fresh);
@@ -1168,8 +1167,7 @@ async function workerLoop(
     //    任务侧的追问走显式寻址：`#<编号> 正文` / `> 正文` / `任务 …`（解析层已分流，不会到这里）。
     if (
       !brainEscape &&
-      item.imageItems.length === 0 &&
-      shouldResumeTask(item.text, {
+      shouldResumeInBrainQueue(item.text, item.imageItems.length, {
         awaiting: awaitingTasks(from).length,
         active: hasActiveTask(from),
         interrupted: interruptedTasks(from).length,
@@ -1215,93 +1213,8 @@ async function workerLoop(
 }
 
 // ===== 本地命令入口（文件桥）：CLI 写 task-inbox/*.json，daemon 扫描分发到 task-manager，结果写回 task-out/*.json =====
-const TASK_INBOX_DIR = taskInboxDir(DATA_DIR);
 const TASK_STATE_FILE = path.join(DATA_DIR, "task-state.json");
 const TASK_SCAN_MS = Number(process.env.WEMIND_TASK_SCAN_MS) || 1000;
-
-/** 扫描 task-inbox：按文件名(时间戳)升序逐个读、分发到 task-manager（dispatch/reply/stop）、删文件。本地命令默认作用于 owner。 */
-function scanTaskInbox(owner: string): void {
-  let files: string[];
-  try {
-    files = fs.readdirSync(TASK_INBOX_DIR).filter((f) => f.endsWith(".json"));
-  } catch {
-    return;
-  } // 目录不存在/读失败：跳过
-  if (!files.length) return;
-  files.sort(); // 文件名带时间戳前缀，字典序即时间序
-  for (const f of files) {
-    const fp = path.join(TASK_INBOX_DIR, f);
-    let cmd: {
-      kind?: string;
-      text?: string;
-      cwd?: string;
-      agent?: string;
-      id?: number | string;
-      ack?: string;
-    };
-    try {
-      cmd = JSON.parse(fs.readFileSync(fp, "utf-8"));
-    } catch {
-      try {
-        fs.unlinkSync(fp);
-      } catch {
-        /* ignore */
-      }
-      continue;
-    } // 坏文件丢弃
-    try {
-      fs.unlinkSync(fp);
-    } catch {
-      /* ignore */
-    } // 先删，避免重复处理
-    try {
-      if (cmd.kind === "dispatch") {
-        // 答复由 task-manager 在**起进程有结果之后**发（达上限/起不来都是那时才知道），这里只把 ack id 递进去
-        log(
-          "local task dispatch:",
-          dispatchTask(owner, String(cmd.text ?? ""), {
-            ...(cmd.cwd ? { cwd: String(cmd.cwd) } : {}),
-            ...(cmd.agent ? { agentKey: String(cmd.agent) } : {}),
-            ...(cmd.ack ? { ackId: String(cmd.ack) } : {}),
-          }).slice(0, 60),
-        );
-      } else if (cmd.kind === "reply") {
-        const id = Number(cmd.id) > 0 ? Number(cmd.id) : undefined;
-        const ackId = cmd.ack === undefined ? undefined : String(cmd.ack);
-        const r = injectTask(owner, String(cmd.text ?? ""), id, ackId);
-        log(
-          "local task reply:",
-          id ? `#${id}` : "-",
-          String(cmd.text ?? "").slice(0, 40),
-          r.slice(0, 40),
-        );
-      } else if (cmd.kind === "stop") {
-        log(
-          "local task stop:",
-          stopTask(
-            owner,
-            cmd.id === "all" ? "all" : Number(cmd.id) > 0 ? Number(cmd.id) : undefined,
-            cmd.ack === undefined ? undefined : String(cmd.ack),
-          ),
-        );
-      } else {
-        log("unknown task-inbox cmd:", cmd.kind);
-        writeTaskAck(
-          DATA_DIR,
-          cmd.ack === undefined ? undefined : String(cmd.ack),
-          `❌ 不认识的任务命令：${cmd.kind}`,
-        );
-      }
-    } catch (e) {
-      log("task-inbox dispatch error:", String(e));
-      writeTaskAck(
-        DATA_DIR,
-        cmd.ack === undefined ? undefined : String(cmd.ack),
-        `❌ 命令执行出错：${String(e)}`,
-      );
-    }
-  }
-}
 
 /**
  * 执行一条 CLI 桥请求，返回要打印给用户的那句话。
@@ -1357,59 +1270,6 @@ async function handleControlRequest(req: ControlRequest, owner: string): Promise
       log("control(cli): 已解除 -14 冷却，继续轮询");
       return "✅ 已解除会话过期冷却，继续轮询。";
     }
-  }
-}
-
-// ===== 控制桥（CLI ↔ daemon）：CLI 写 control-inbox，这里执行 + 写 control-out =====
-let controlBusy = false; // 同时只处理一条：切换/会话恢复本来就要串行（它们争的是同一个 ACP 连接）
-
-/** 扫描控制桥收件箱。异步：brain.switch 要等启动新大脑（最长 ~2 分钟），期间不能再处理下一条。 */
-async function scanControlInbox(owner: string): Promise<void> {
-  if (controlBusy) return;
-  sweepControlOut(3_600_000, Date.now(), DATA_DIR);
-  const items = readControlInbox(DATA_DIR);
-  if (!items.length) return;
-  controlBusy = true;
-  try {
-    for (const { file, req } of items) {
-      try {
-        fs.unlinkSync(path.join(controlInboxDir(DATA_DIR), file));
-      } catch {
-        /* ignore */
-      } // 先删，避免重复处理
-      if (!req) {
-        log("control: 非法请求（未知 kind / 坏 JSON），已丢弃:", file);
-        continue;
-      }
-      // CLI 已经等到超时并放弃：不要再执行（否则「CLI 说没等到、daemon 却照做」）。
-      if (isControlRequestExpired(req)) {
-        log("control: 请求已超时，跳过执行:", req.kind, file);
-        writeControlResponse(
-          {
-            id: req.id,
-            at: Date.now(),
-            ok: false,
-            text: "❌ 请求已超时（CLI 已不再等待），本次未执行。",
-          },
-          DATA_DIR,
-        );
-        continue;
-      }
-      log("control(cli):", req.kind, JSON.stringify({ target: req.target, ref: req.ref }));
-      let text: string;
-      try {
-        text = await handleControlRequest(req, owner);
-      } catch (e) {
-        text = `❌ 处理出错：${String(e)}`;
-      }
-      // 约定：❌ 开头即失败（CLI 据此定退出码）。应答一定写——不写的话 CLI 会白等到超时。
-      writeControlResponse(
-        { id: req.id, at: Date.now(), ok: !text.startsWith("❌"), text },
-        DATA_DIR,
-      );
-    }
-  } finally {
-    controlBusy = false;
   }
 }
 
@@ -1540,11 +1400,22 @@ export async function runDaemon(): Promise<void> {
   setTaskAckSink((id, text) => writeTaskAck(DATA_DIR, id, text)); // 本地命令的回结果通道（`wemind task` 等着的「到底派上了没有」）
   // 本地命令入口：启动清空收件箱与答复目录（作废重启前残留命令、防重放），再起独立定时器扫描分发（不挂 poller，避免被 25s 长轮询阻塞）
   clearTaskDirs(DATA_DIR);
-  setInterval(() => scanTaskInbox(owner), TASK_SCAN_MS);
+  const taskInboxOps = {
+    dispatch: dispatchTask,
+    inject: injectTask,
+    stop: stopTask,
+    writeAck: (ackId: string | undefined, text: string) => writeTaskAck(DATA_DIR, ackId, text),
+    log,
+  };
+  setInterval(() => scanTaskInbox(DATA_DIR, owner, taskInboxOps), TASK_SCAN_MS);
   // 控制桥：同样「启动清空 + 独立定时器扫描」（作废重启前的残留命令，防重放）
   clearControlDirs(DATA_DIR);
   markBridgeReady(DATA_DIR, process.pid); // 凭据：CLI 据此判断「在跑的这个 daemon 认不认识控制桥」
-  setInterval(() => void scanControlInbox(owner), TASK_SCAN_MS);
+  const controlInbox = new ControlInboxRunner(DATA_DIR, {
+    handle: handleControlRequest,
+    log,
+  });
+  setInterval(() => void controlInbox.scan(owner), TASK_SCAN_MS);
   // 任务表：读回上次的（未完成的标「已中断」，不自动恢复）；编号接着排
   const restored = initTasks(DATA_DIR);
   if (restored.interrupted.length)

@@ -7,6 +7,7 @@ import {
   parseBrainEscape,
   parseControl,
   parseTaskControl,
+  shouldResumeInBrainQueue,
 } from "./index.js";
 
 describe("parseControl（daemon 直接处理的控制指令）", () => {
@@ -120,6 +121,41 @@ describe("brainFailurePlan / brainErrorMessage（大脑失败的处置）", () =
     ).toBe(2);
     expect(brainFailurePlan(new Error("fetch failed")).attemptLimit).toBe(2);
     expect(brainErrorMessage(new Error("fetch failed"))).toMatch(/处理出错了/);
+  });
+});
+
+describe("shouldResumeInBrainQueue（大脑队列里的无编号消息）", () => {
+  const noTasks = { awaiting: 0, active: false, interrupted: 0 };
+
+  it("没有可续跑任务时，「继续」仍归大脑", () => {
+    expect(shouldResumeInBrainQueue("继续", 0, noTasks)).toBe(false);
+  });
+
+  it("有 waiting 任务时，「继续」类短句交给任务", () => {
+    expect(shouldResumeInBrainQueue("继续", 0, { awaiting: 1, active: true, interrupted: 0 })).toBe(
+      true,
+    );
+    expect(
+      shouldResumeInBrainQueue("接着跑", 0, { awaiting: 1, active: true, interrupted: 0 }),
+    ).toBe(true);
+  });
+
+  it("没有活跃任务、只有中断任务时，也允许「继续」续跑", () => {
+    expect(
+      shouldResumeInBrainQueue("继续", 0, { awaiting: 0, active: false, interrupted: 1 }),
+    ).toBe(true);
+  });
+
+  it("带图片的消息永远给大脑（不拿旧任务接图片）", () => {
+    expect(shouldResumeInBrainQueue("继续", 1, { awaiting: 1, active: true, interrupted: 0 })).toBe(
+      false,
+    );
+  });
+
+  it("普通消息即使有 waiting 任务也走大脑", () => {
+    expect(
+      shouldResumeInBrainQueue("帮我写周报", 0, { awaiting: 1, active: true, interrupted: 0 }),
+    ).toBe(false);
   });
 });
 

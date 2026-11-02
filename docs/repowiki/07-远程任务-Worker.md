@@ -226,7 +226,7 @@ graph LR
 - **答复方向**（1.2.0）：命令文件带 `ack` 答复编号，daemon 处理完写 `task-out/<id>.json {id, at, ok, text}`；CLI 短轮询后打印 `text`。**派发的答复等 `acquire` 之后才发**（达上限/起不来是那时才知道的），所以 `wemind task` 说的「已派发」是真话——在此之前它只能猜，达上限被拒会被报成「已派发任务 #2（opencode）」（上一条的编号，因为 `active` 本来就是 true）。**空 `text` 也是一种答复**（＝「已送达、无别的话」），CLI 据此立刻用自己的措辞；`ok=false` 时 CLI 打印 daemon 的文案并把退出码置 1（达上限、编号不存在等能被脚本看见）；等不到答复（老版 daemon）则退回「已发送…」并附一句说明，不把「没等到」当成功。
 - **状态方向**：daemon 在派发/每轮/waiting/停止时原子写 `task-state.json` → CLI 读并显示（顶层字段复制最近一条任务，另带 `tasks` 数组，旧版 CLI 读不错）。
 - daemon 启动清空 `task-inbox/` 与 `task-out/` 防重放；CLI 写命令前预检 daemon 存活（读 `daemon.pid` + **身份校验**）。
-- 两侧共用 `task-inbox.ts`（目录、原子写、答复读写、清理），路径与格式只有一处定义。
+- 两侧共用 `task-inbox.ts`（目录、原子写、答复读写、清理），路径与格式只有一处定义；daemon 侧的扫描编排在 `task-inbox-runner.ts`（先删后做、坏文件丢弃、执行出错写回 ❌ ack）。
 
 ### 控制桥（`control-inbox/` → `control-out/`）
 
@@ -237,7 +237,7 @@ graph LR
     CLI["wemind（本地终端）"]
     IN["control-inbox/&lt;ts&gt;-&lt;id&gt;.json"]
     OUT["control-out/&lt;id&gt;.json"]
-    DM["daemon：scanControlInbox → handleControlRequest"]
+    DM["daemon：ControlInboxRunner.scan → handleControlRequest"]
     SAME["与微信指令**同一段实现**"]
 
     CLI -->|写请求 + 短轮询等应答| IN
@@ -248,10 +248,10 @@ graph LR
 ```
 
 - **复用同一段代码**：`handleControlRequest` 调的就是微信指令走的那几个函数（`切换大脑` = `switchBrain`、`新会话` = `newSessionCmd`…），会话类命令以**登录者**作为 userId（CLI 代表机主本人）。
-- **先删后做**：daemon 先 `unlink` 请求文件再执行（崩了不会重启后被重放）；`controlBusy` 保证一次只处理一条。
+- **先删后做**：daemon 先 `unlink` 请求文件再执行（崩了不会重启后被重放）；`ControlInboxRunner` 的 busy 标志保证一次只处理一条。scan 编排在 `control-inbox-runner.ts`，有单测覆盖过期、失败写应答、单条异常继续、串行门。
 - **超时如实报**：CLI 短轮询默认 30s（`WEMIND_CONTROL_TIMEOUT_MS`）；`brain.switch` 自动放大到 `启动新大脑 + 等在途回合结束 + 15s`，否则正确的长切换会被误报超时。超时/没等到 → 直接说「没等到回复」，**不假装成功**。
 - **`.bridge` 凭据（升级期可用性）**：daemon 启动时把**自己的 pid** 写进 `control-out/.bridge`，并在启动时清空两个桥目录。CLI 拿它与 `daemon.pid` 比对——对不上说明 daemon 在跑**旧版本**（不认识桥），于是：**必须由 daemon 执行**的命令（`session new|resume`、`brain switch|worker|handoff`）**发出前**就拒绝并给出「`wemind stop <key> && wemind start <key>`」；**文件类**命令照常——`session rename|delete` 直接改登记表、`session list` 直接读登记表（附一行「按下次会用的那个大脑列」的说明）、`task-list` 读 `tasks.json`（只在 daemon 没跑时注明「上次记录」）。这把 30s～165s 的静默等待换成一句能照做的话。
-- **安全边界**：请求里只有 `target`（**agent 名**）/`ref`/`name`/`text`/`taskId`/`page`，**没有也不可能有 `bin`/`args`/`shell` 的位置**——就算被伪造（进程本就能写账号目录，task-inbox 同性质），最坏也只是「选一个已装的 agent 或清掉自己的会话」。`parseControlRequest` 是唯一入口校验。
+- **安全边界**：请求里只有 `target`（**agent 名**）/`ref`/`name`/`page`/`expiresAt`，**没有也不可能有 `bin`/`args`/`shell` 的位置**——就算被伪造（进程本就能写账号目录，task-inbox 同性质），最坏也只是「选一个已装的 agent 或清掉自己的会话」。`parseControlRequest` 是唯一入口校验。
 
 ### 本地命令
 

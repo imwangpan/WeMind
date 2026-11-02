@@ -29,6 +29,7 @@
 
 ### Changed
 
+- **收件箱与鉴权编排抽成可测模块（2026-11-02）**：`index.ts` 里的 `scanTaskInbox` / `scanControlInbox` 与发件人鉴权分别抽到 `task-inbox-runner.ts`、`control-inbox-runner.ts`（`ControlInboxRunner`）、`access.ts`，`index.ts` 只负责注入 task-manager / `handleControlRequest` / `isAllowed`。新增 15 条用例：任务收件箱（时间序、先删后做、坏文件、未知 kind、执行出错继续）、控制桥（过期不执行但写应答、❌ 与抛错的 ok 判定、坏文件不影响后续、busy 串行门）、鉴权（登录者/白名单/空发件人），以及大脑队列的路由判定（带图片与普通消息永远走大脑）。行为不变。
 - **外发管线抽成可测的 `SendPipeline`（2026-11-02）**：串行链、最小间隔、按用户连发预算、旧 token 挂起/补发、任务推送让位原先散在 `index.ts` 的模块级变量与函数里，没有自动化测试；现在集中到 `send-pipeline.ts`，`index.ts` 只负责把真实发送函数与账号接进去。新增 `send-pipeline.test.ts` 12 条用例（顺序与间隔、发送失败不卡链、`sendNotice` 计额度、旧 token 挂起/新 token 补发、批量与额度双重限制、补发重挂与放弃、让位补发、图片失败、`.md` 回退）。行为不变。
 - **控制桥应答不再无限堆积（2026-11-02）**：此前 `control-out/<id>.json` 只在 daemon 启动时清空，CLI 读到应答也不删——长期运行的 daemon 会持续堆积（每次 CLI 崩在读取前就多一个）。现在 CLI 读到即删；daemon 每秒扫描控制桥时顺手清掉 mtime 超过 1 小时的旧应答（`.bridge` 不参与）。
 - **控制桥删除从未使用的任务请求类型（2026-11-02）**：`control-bridge.ts` 的 `task.list`/`task.reply`/`task.stop` 自 1.2.0 加入以来没有任何 CLI 调用方——任务命令一直走 `task-inbox/` + `task-out/` 的任务桥。保留它们只会扩大控制桥的协议面；现删除这三个 kind 与只服务于它们的 `text`/`taskId` 字段，`task` 系列命令行为不变。

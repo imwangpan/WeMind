@@ -104,6 +104,10 @@ poller（长轮询，不被大脑阻塞）
 | **进程池 / worker-pool** | `worker-pool.ts`：同 agent 空闲复用 → 回收最旧腾位 → spawn；并发 `WEMIND_MAX_WORKERS`、空闲 `WEMIND_IDLE_MAX`、回收 `WEMIND_WORKER_REAP_MS` |
 | **daemon.log 轮转** | `log-rotate.ts`：builtin watchdog 用管道 + 逐块追加在运行中轮转（`WEMIND_LOG_MAX_MB` 默认 10、`WEMIND_LOG_KEEP` 默认 3）；`run-daemon.ps1` 每次重拉前轮转；pm2 交给 `pm2-logrotate` |
 | **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收 agent 名与纯数据**（无 `bin`/`args`/`shell`） |
+| **控制桥扫描 / ControlInboxRunner** | `control-inbox-runner.ts`：同一时刻只执行一条、过期请求不执行但一定写回失败应答、单条异常不拖垮后续 |
+| **任务收件箱扫描 / scanTaskInbox** | `task-inbox-runner.ts`：按文件名时间序处理 dispatch/reply/stop，先删文件再执行，坏 JSON 丢弃，执行出错写回 ❌ ack |
+| **发件人鉴权 / isAuthorizedSender** | `access.ts`：登录者始终放行，其余人看 `allowFrom`（兜底校验；平台正常只投登录者） |
+| **外发管线 / SendPipeline** | `send-pipeline.ts`：串行链、最小间隔、按用户连发预算、旧 token 挂起/补发、任务推送让位；注入假发送函数即可单测 |
 | **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
 | **preset / `ACP_AGENT_PRESETS`** | **代码里的叫法**；用户面统一写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）。一条 = 二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
 | **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |

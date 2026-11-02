@@ -61,7 +61,10 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 
 | 文件 | 职责 |
 |---|---|
-| `packages/wechat-daemon/src/index.ts` | 消息路由、回合编排、进度节流、brain/worker 分流、快车道（`fastWorkerLoop`）、控制桥扫描（`scanControlInbox`） |
+| `packages/wechat-daemon/src/index.ts` | 消息路由、回合编排、进度节流、brain/worker 分流、快车道（`fastWorkerLoop`）；轮询/收件箱扫描分别委派给下面的 runner |
+| `packages/wechat-daemon/src/access.ts` | 发件人兜底鉴权：登录者始终放行，其余看登录者白名单 |
+| `packages/wechat-daemon/src/control-inbox-runner.ts` | 控制桥收件箱扫描（`ControlInboxRunner`）：单条串行、过期不执行、失败一定写应答 |
+| `packages/wechat-daemon/src/task-inbox-runner.ts` | 任务收件箱扫描（`scanTaskInbox`）：按时间序、先删后做、坏文件丢弃、出错回 ack |
 | `packages/wechat-daemon/src/send-pipeline.ts` | 外发管线（`SendPipeline`）：串行链、最小间隔、按用户连发预算、旧 token 挂起/补发、任务推送让位；可注入假发送函数做单测 |
 | `packages/wechat-daemon/src/acp-brain.ts` | 常驻 ACP 客户端（对话大脑）；含 `resumeSession`（严格恢复）、`beginSwitch/drainTurn/warmup`、`drainLoadReplay`（gemini 的 load 后异步回放） |
 | `packages/wechat-daemon/src/acp-quiet.ts` | `waitForFrameQuiet`：恢复会话后等异步回放帧安静（200ms 静默窗口、最多 3s；brain 与 worker 共用） |
