@@ -596,7 +596,7 @@ export async function newSession(userId: string, opts: { deadline?: number } = {
 /**
  * 「恢复会话」：把某条**已有的**会话切回当前，**严格恢复**——只认真接上的 load/resume，
  * 接不上就如实报错，**绝不**回退成 session/new（那会让用户以为上下文回来了，其实是一张白纸），
- * 也**不改**会话当前会话记录（当前会话原样保留，用户还能继续用）。
+ * 也**不改**当前会话记录（当前会话原样保留，用户还能继续用）。
  * 成功才动磁盘：userSessions + 当前会话表（`<agent>:<userId>` → 这条）。
  */
 export async function resumeSession(

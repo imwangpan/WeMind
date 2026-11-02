@@ -490,7 +490,7 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
     }
   }
   // 收尾：连接还给进程池（活着才有复用价值；被 stop 时可能已经死了，release 会就地清掉空壳）。
-  // 会话当前会话记录只在「任务真的结束」（已被 stop、不在表里）时清掉：回到「已中断」的任务要留着它，用户重述进展后还能再试。
+  // 当前会话记录只在「任务真的结束」（已被 stop、不在表里）时清掉：回到「已中断」的任务要留着它，用户重述进展后还能再试。
   if (task.conn === conn) {
     if (tasks.get(task.id) !== task) conn.dropSession(task.key);
     release(conn);

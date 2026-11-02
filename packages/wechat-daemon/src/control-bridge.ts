@@ -8,7 +8,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
  * `control-out/<id>.json` 应答；CLI 短轮询应答并打印。
  *
  * 为什么要有它：切换大脑/开新会话/恢复会话都必须**在 daemon 进程里**发生（进程内的 ACP 连接、
- * 会话当前会话记录、任务表都是 daemon 的活状态）。CLI 另起一个进程去改文件只能改「下次启动才读」的配置，
+ * 当前会话记录、任务表都是 daemon 的活状态）。CLI 另起一个进程去改文件只能改「下次启动才读」的配置，
  * 那就回到「切脑要重启 daemon、打断在途任务」的老问题。桥让 CLI 与微信指令走同一段代码。
  *
  * 与既有 task-inbox 的分工：task-inbox 是**单向**（CLI 派活，结果从微信回）；控制桥要**回话**（CLI 要打印成功/失败），

@@ -1074,7 +1074,7 @@ function splitKeyArg(args: string[]): { args: string[]; sel?: string } {
 
 /**
  * `wemind session <new|list|resume|rename|delete>`。
- * 读写规则：**读**永远可用（直接读登记表）；**写**优先走 daemon（单一写者，且会话当前会话记录/agent 侧状态都是它的活状态）。
+ * 读写规则：**读**永远可用（直接读登记表）；**写**优先走 daemon（单一写者，且当前会话记录/agent 侧状态都是它的活状态）。
  * 例外：`rename`/`delete` 只动登记表这一个文件，daemon 没跑时直接改也是安全的；`resume` 必须真让 agent load，没 daemon 做不了。
  */
 async function cmdSession(rest: string[]): Promise<string> {
@@ -1129,7 +1129,7 @@ async function cmdSession(rest: string[]): Promise<string> {
       sessionKey(agentNameOf(key), userId),
     );
     return [
-      cleared ? "已清空当前会话记录" : "当前本来就没有会话当前会话记录",
+      cleared ? "已清空当前会话记录" : "当前本来就没有会话记录",
       "（daemon 未运行：下次启动后你发的第一条消息会开一个新会话）",
       name ? `名字等新会话建好后再登记：wemind session rename 1 ${name}` : "",
     ]
@@ -1194,7 +1194,7 @@ function cmdSessionCurrent(key: string): string {
   const sid = userId ? currentSessionIdOf(agent, userId, accountDir(key)) : undefined;
   return sid
     ? `${key} 当前会话：${sid}（agent=${agent}）`
-    : `${key} 当前没有会话当前会话记录（下一条消息会开新会话）。agent=${agent}`;
+    : `${key} 当前没有会话记录（下一条消息会开新会话）。agent=${agent}`;
 }
 
 /** `task --cwd` 的相对路径按**用户当前目录**解析（daemon 的 cwd 可能不同），并要求目录确实存在。 */
