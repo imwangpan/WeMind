@@ -112,6 +112,7 @@ poller（长轮询，不被大脑阻塞）
 | **CLI 任务命令 / cli-task** | `cli-task.ts`：`task*` 四条的收件箱写入、答复文案与退出码；`manage.ts` 只做分派 |
 | **CLI 会话命令 / cli-session** | `cli-session.ts`：`session list/new/resume/rename/delete` 与 `session-current`；读直接读登记表，写优先走控制桥，旧版 daemon 的降级说明也在这里 |
 | **CLI 大脑命令 / cli-brain** | `cli-brain.ts`：`brain show/set/unset/check/switch/handoff` 与 `agentLabel`；`--restart` 的重启由入口注入，不在模块里硬连生命周期 |
+| **CLI 登录 / cli-login** | `cli-login.ts`：扫码登录的暂存目录、二维码刷新、登记与登录后解除 `-14` 暂停；`--start` 的启动由入口注入 |
 | **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
 | **preset / `ACP_AGENT_PRESETS`** | **代码里的叫法**；用户面统一写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）。一条 = 二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
 | **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |

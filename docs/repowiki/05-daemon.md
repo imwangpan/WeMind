@@ -36,6 +36,7 @@ packages/wechat-daemon/src/
 ├── cli-task.ts         # CLI 的 task* 命令（文件桥写入 + 答复文案）
 ├── cli-session.ts      # CLI 的 session* 命令（读登记表 / 写走控制桥）
 ├── cli-brain.ts        # CLI 的 brain* 命令（配置 / 自检 / 热切换 / 交接）
+├── cli-login.ts        # CLI 扫码登录（独立暂存目录 / 二维码 / 登记 / 解除暂停）
 ├── image-reply.ts      # 从大脑回复提取图片引用
 └── md-reply.ts         # 长回复转 .md 文件
 ```
