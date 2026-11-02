@@ -151,7 +151,7 @@ API：`pauseSession` / `isSessionPaused` / `getRemainingPauseMs` / `clearSession
 
 **原子写**：所有写入磁盘都用「先写临时文件再 rename」（同盘 rename 原子），避免写途崩溃/并发产生半截损坏文件；写/rename 失败时会清掉临时文件，不在数据目录里留 `*.tmp-*` 垃圾。**坏文件处理**：读取时若解析失败，不静默清空，而是备份坏文件（`.corrupt-<时间戳>`）+ 记日志，便于人工恢复。**错误不吞**：只有 `ENOENT`（文件不存在）才当作「首次运行」返回空；权限等 fs 错误会向上抛——否则调用方下一步 save 会覆盖掉真实凭证。删除类函数（`clearAccount` / `clearQrState`）返回布尔值表示是否真的删掉了；`clearAccount` 对非 ENOENT 的删除失败会**抛错**（调用方据此如实报告，不能把「删失败」与「本来就没登录」混为一谈），`clearQrState` 仍只记日志并返回 false。
 
-**Windows 权限提示**：`account.json` 含 bot token。POSIX 下设权限 `600`；Windows 下 `chmod` 是 no-op，文件以明文存放，启动保存时会有一次性告警，提示用文件夹权限或磁盘加密保护。
+**文件权限**：`account.json`（bot token）、`state.json`（`context_token`）、`qr_login.json`（扫码态）在 POSIX 下都由原子写在 rename **之前**收紧为 `600`，不会出现先 0644 再 chmod 的窗口。**Windows 权限提示**：`chmod` 是 no-op，文件以明文存放；保存凭证时会有一次性告警，提示用文件夹权限或磁盘加密保护。
 
 提供 `loadAccount`/`saveAccount`/`clearAccount`、`loadState`/`saveState`/`resetState`、`loadQrState`/`saveQrState`/`clearQrState`。
 

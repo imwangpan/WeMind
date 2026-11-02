@@ -13,7 +13,7 @@
 | `api/error-codes` | `ILinkError` / `classifyILinkCode` / `describeILinkCode`（`ret=-2` 参数错误、`errcode=-14` 会话过期） |
 | `api/session-guard` | `-14` 会话过期后的进程内冷却（fail-closed，避免对死会话狂打） |
 | `api/transport-errors` | 网络层错误分类（timeout/dns/tls/connection/network/http，判定是否可重试；`HttpStatusError` 携带状态码，429/5xx 可重试） |
-| `store/account` | `account.json` / `state.json` 持久化（**原子写**）、数据目录解析（`WECHAT_ACCOUNT` / `WECHAT_DATA_DIR`） |
+| `store/account` | `account.json` / `state.json` / `qr_login.json` 持久化（**原子写**，POSIX 下 rename 前收紧为 600）、数据目录解析（`WECHAT_ACCOUNT` / `WECHAT_DATA_DIR`） |
 | `store/accounts` | 多账号注册表（`~/.wemind/accounts.json`） |
 | `store/allow-from` | 发件人授权清单（allowFrom，配对授权） |
 | `cdn/image` | CDN 媒体 AES-128-ECB 加解密：`downloadImage`（收图）/ `sendImage` / `sendFile`（发图/文件/视频） |

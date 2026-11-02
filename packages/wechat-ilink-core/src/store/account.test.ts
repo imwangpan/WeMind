@@ -95,6 +95,21 @@ describe("saveAccountTo（按目录写凭证）", () => {
   });
 });
 
+describe("POSIX 文件权限", () => {
+  it("account.json / state.json / qr_login.json 全部收紧为 600（都含凭证类数据）", () => {
+    if (process.platform === "win32") return;
+    const dir = tmpDir();
+    saveAccountTo(dir, ACCOUNT);
+    saveState({ updatesBuf: "b", contextTokens: { "bot:u": "ct" }, lastMessageId: 1 }, dir);
+    saveQrState({ qrcode: "q", qrcodeUrl: "u", createdAt: 1 }, dir);
+
+    for (const f of ["account.json", "state.json", "qr_login.json"]) {
+      const mode = fs.statSync(path.join(dir, f)).mode & 0o777;
+      expect(mode, f).toBe(0o600);
+    }
+  });
+});
+
 describe("loadAccount（损坏/不存在）", () => {
   it("文件不存在 → null（首次运行，正常）", () => {
     expect(loadAccount(tmpDir())).toBeNull();

@@ -54,12 +54,27 @@ function isNotFound(err: unknown): boolean {
   return (err as NodeJS.ErrnoException | null)?.code === "ENOENT";
 }
 
+/**
+ * POSIX 下把文件收成 600。数据目录里的 `account.json` / `state.json`（含 context_token）/ `qr_login.json` 都属于凭证类，
+ * 不能按默认 umask 落成 0644。在 rename **之前**收紧临时文件：rename 会保留权限位，也不存在「先 0644 再 chmod」的窗口。
+ * Windows 的 chmod 是 no-op，由 `saveAccountTo()` 的明文告警兜底。
+ */
+function restrictPerms(filePath: string): void {
+  if (process.platform === "win32") return;
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** 原子写：先写临时文件再 rename 覆盖（同盘 rename 原子），避免写途崩溃/并发产生半截损坏文件。 */
 function writeJson(filePath: string, data: unknown): void {
   ensureDir(path.dirname(filePath));
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   try {
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
+    restrictPerms(tmp);
     fs.renameSync(tmp, filePath);
   } catch (e) {
     // 写/rename 失败时清掉临时文件，避免数据目录里堆积 *.tmp-* 垃圾
@@ -87,23 +102,15 @@ let warnedWinPerms = false;
  */
 export function saveAccountTo(dir: string, account: AccountData): void {
   const file = path.join(dir, FILES.account);
-  writeJson(file, account);
-  if (process.platform === "win32") {
+  writeJson(file, account); // POSIX 600 由 writeJson 在 rename 前统一收紧
+  if (process.platform === "win32" && !warnedWinPerms) {
     // Windows 上 fs.chmod 实际是 no-op，无法用 0o600 限制访问。
     // 不做无效操作，改为一次性提醒（详见 README 的安全说明）。
-    if (!warnedWinPerms) {
-      warnedWinPerms = true;
-      console.error(
-        `[wemind/wechat-ilink-core] warning: ${file} stores the bot token in plaintext; ` +
-          `Windows cannot restrict it via chmod. Protect ${dir} with folder permissions or disk encryption.`,
-      );
-    }
-  } else {
-    try {
-      fs.chmodSync(file, 0o600);
-    } catch {
-      /* best-effort */
-    }
+    warnedWinPerms = true;
+    console.error(
+      `[wemind/wechat-ilink-core] warning: ${file} stores the bot token in plaintext; ` +
+        `Windows cannot restrict it via chmod. Protect ${dir} with folder permissions or disk encryption.`,
+    );
   }
 }
 
