@@ -69,15 +69,80 @@ export function parseJsonc(text: string): Record<string, unknown> | null {
     /* 继续做宽松清洗 */
   }
   try {
-    const cleaned = text
-      .replace(/\/\*[\s\S]*?\*\//g, "") // 块注释
-      .replace(/(^|[^:])\/\/.*$/gm, "$1") // 行注释（避开 http:// 里的 //）
-      .replace(/,(\s*[}\]])/g, "$1"); // 尾随逗号
-    const parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(stripTrailingCommas(stripJsonComments(text)));
     return isObj(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+/** 字符串感知地去掉行注释与块注释：字符串里的同形文本是数据，不能删（手写正则版会改坏 `"x // y"`）。 */
+function stripJsonComments(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"') {
+      out += c;
+      i++;
+      while (i < text.length) {
+        const ch = text[i];
+        out += ch;
+        i++;
+        if (ch === "\\") {
+          if (i < text.length) out += text[i++]; // 转义字符连同下一个字符原样保留
+        } else if (ch === '"') break;
+      }
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") {
+      i += 2;
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+/** 字符串感知地去掉尾随逗号（字符串里的 `,}` / `,]` 原样保留）。 */
+function stripTrailingCommas(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"') {
+      out += c;
+      i++;
+      while (i < text.length) {
+        const ch = text[i];
+        out += ch;
+        i++;
+        if (ch === "\\") {
+          if (i < text.length) out += text[i++];
+        } else if (ch === '"') break;
+      }
+      continue;
+    }
+    if (c === ",") {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (text[j] === "}" || text[j] === "]") {
+        i++;
+        continue;
+      }
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 // ---- ACP 传输：把 catalog 条目转成 session/new 的 mcpServers（配了 mcpViaAcp 的 agent 用） ----

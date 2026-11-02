@@ -68,6 +68,24 @@ describe("parseJsonc", () => {
     expect(parseJsonc('{"url":"https://a.b/c"}')).toEqual({ url: "https://a.b/c" });
   });
 
+  it("字符串里的 //、/* */、转义引号、尾随逗号形状都原样保留", () => {
+    const text = `{
+      // 真注释
+      "a": "x // y",
+      "b": "/* keep */",
+      "c": "say \\"//\\"",
+      "d": ",} ,]",
+      "e": 1, /* 真块注释 */
+    }`;
+    expect(parseJsonc(text)).toEqual({
+      a: "x // y",
+      b: "/* keep */",
+      c: 'say "//"',
+      d: ",} ,]",
+      e: 1,
+    });
+  });
+
   it("非法内容 → null", () => {
     expect(parseJsonc("not json")).toBeNull();
   });
