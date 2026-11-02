@@ -1215,7 +1215,7 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
     }
     // 2) 明确「问大脑」逃逸前缀 → 去前缀后强制走 brain（即使 worker 在等你）
     const brainEscape = item.text ? parseBrainEscape(item.text) : null;
-    // 3) 无前缀消息**默认给大脑**；只有「继续」类短句 + 有可续跑任务（waiting 任意；interrupted 需没有活跃任务）才交给任务。
+    // 3) 无前缀消息**默认给大脑**；只有「继续」类短句 + 有可续跑任务（waiting 任意；interrupted 需没有活跃任务）才交给任务（多条时 injectTask 回编号清单）。
     //    2026-11-02 前是「只要有一条 waiting 就接管任意无编号消息」——任务出完结果还躺在 waiting，会把用户找大脑的日常消息吞掉（真机踩到两次：#26、#28）。
     //    任务侧的追问走显式寻址：`#<编号> 正文` / `> 正文` / `任务 …`（解析层已分流，不会到这里）。
     if (

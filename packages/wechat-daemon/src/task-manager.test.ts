@@ -548,6 +548,41 @@ describe("任务表写入磁盘与重启续跑", () => {
     await vi.waitFor(() => expect(has(pushed, "接着干")).toBe(true));
   });
 
+  it("多条「已中断」任务时裸「继续」不替你选：进任务侧、回编号清单", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 3 },
+        tasks: [
+          {
+            id: 1,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-1@u1",
+            status: "running",
+            turns: 1,
+            startedAt: 1,
+          },
+          {
+            id: 2,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-2@u1",
+            status: "running",
+            turns: 1,
+            startedAt: 2,
+          },
+        ],
+      }),
+    );
+    expect(initTasks(tmpDir).interrupted).toEqual([1, 2]);
+    // 路由闸放行（有可续跑任务），但 injectTask 在「活跃 0 条 + 已中断多条」时不替用户挑
+    expect(shouldResumeTask("继续", { awaiting: 0, active: false, interrupted: 2 })).toBe(true);
+    expect(injectTask("u1", "继续")).toContain("有 2 条已中断的任务，请指明编号续跑");
+    expect(conns.length).toBe(0); // 没起进程
+  });
+
   it("无编号「继续」也能续跑（微信侧走的就是这条路）；日常提问不会被陈旧的中断任务吞掉", async () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),

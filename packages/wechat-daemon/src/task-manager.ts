@@ -225,7 +225,7 @@ export function looksLikeResume(text: string | undefined): boolean {
 }
 
 /**
- * 无编号消息是否该交给任务续跑：只有「继续」类短句 + 存在可续跑的任务（有 waiting；或没有活跃任务时只有 interrupted）。
+ * 无编号消息是否该交给任务续跑：只有「继续」类短句 + 存在可续跑的任务（有 waiting；或没有活跃任务时存在 interrupted，多条时由 `injectTask` 回编号清单）。
  * 2026-11-02 起 waiting **不再**接管任意无编号消息——任务出完结果后还躺在 waiting，会把用户找大脑的日常消息吞掉（真机踩到两次：陈旧任务 #26、#28）。
  * 其余消息一律走大脑；任务侧的追问用 `#<编号> 正文` / `> 正文` / `任务 …` 显式寻址。
  */
