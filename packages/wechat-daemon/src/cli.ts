@@ -4,18 +4,20 @@
  * - 子命令 `daemon`：跑 daemon 本体（长轮询 + 大脑 + worker），通常由 pm2 调用，用户不直接用。
  * - 其余子命令（login/list/start/stop/task…）：交给 manage 派发。
  */
+import { cliHook } from "./cli-dispatch.js";
 import { runDaemon } from "./index.js";
 import { runManage } from "./manage.js";
 import { runWatchdog } from "./watchdog-runner.js";
 
 const argv = process.argv.slice(2);
+const hook = cliHook(argv);
 
-if (argv[0] === "daemon") {
+if (hook === "daemon") {
   runDaemon().catch((err: unknown) => {
     console.error("[wemind/wechat-daemon] fatal:", err);
     process.exit(1);
   });
-} else if (argv[0] === "_watchdog") {
+} else if (hook === "watchdog") {
   runWatchdog().catch((err: unknown) => {
     console.error("[wemind/wechat-daemon/watchdog] fatal:", err);
     process.exit(1);

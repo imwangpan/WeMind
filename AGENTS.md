@@ -36,7 +36,7 @@ WeMind 把**个人微信**变成 AI agent 的输入输出通道，对外有两�
    - **会话列表/恢复/改名/删除** → `session-manager.ts` → `session-registry.ts`（登记表）+ `session-map.ts`（当前会话表）；
    - **交接** → `handoff.ts`；**CLI↔daemon 控制桥** → `control-bridge.ts`；
    - **命令解析与帮助** → `chat-commands.ts`（无副作用模块，`index.ts` 里只做薄包装）；
-   - CLI/账号 → `cli.ts` / `manage.ts` / `brain-config.ts`。
+   - CLI/账号 → `cli.ts`（入口分派在 `cli-dispatch.ts`）/ `manage.ts` / `brain-config.ts`。
 5. 任务配方：[`docs/ai/recipes/`](docs/ai/recipes/)。
 
 ---

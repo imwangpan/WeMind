@@ -243,7 +243,7 @@ poller（长轮询，不被大脑阻塞）
 | 改 ACP 自愈/超时 | `acp-brain.ts` | `worker-acp.ts`（同步）、`brain-check.ts` |
 | 改 MCP 挂载 | `mcp-sandbox.ts` | `agent-mcp.ts`、`worker-sandbox.ts`、`sandbox-inherit.ts`（记忆/技能继承与换 agent 清理）、`docs/ai/recipes/add-mcp.md` |
 | 改微信消息/回复 | `index.ts` | `md-reply.ts`、`image-reply.ts` |
-| 改 CLI | `cli.ts` | `manage.ts` |
+| 改 CLI | `cli.ts`（分派 `cli-dispatch.ts`） | `manage.ts` |
 | 改数据/账号 | `wechat-ilink-core/src/store/*` | `brain-config.ts`、`docs/repowiki/08` |
 | 排查不回复 | `docs/ai/recipes/debug-daemon.md` | `daemon.log`、`brain.json`、`brain check` |
 | 端到端验收 | `docs/ai/recipes/run-e2e.md` | `scripts/doctor.ps1` |
