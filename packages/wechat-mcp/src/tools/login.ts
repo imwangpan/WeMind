@@ -231,7 +231,7 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
     case "verify_code_blocked":
       return unsupportedResult(
         statusResponse.status,
-        "本次登录需要输入验证码，MCP 登录流程不支持该步骤。请在终端用 CLI 完成登录（已安装 `@wemind/cli` 时运行 `wemind login`；没装可运行 `npx -y @wemind/cli login`），或稍后重试。",
+        "本次登录需要输入验证码，WeMind 的 MCP 与 CLI 登录流程都暂不支持该步骤。请稍后重试；若反复出现，请先确认微信侧没有待处理的登录验证。",
       );
 
     case "scaned_but_redirect":
@@ -241,7 +241,7 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
         : "";
       return unsupportedResult(
         statusResponse.status,
-        `本次登录需要 IDC 重定向${host}，MCP 登录流程不支持该步骤。请在终端用 CLI 完成登录（已安装 \`@wemind/cli\` 时运行 \`wemind login\`；没装可运行 \`npx -y @wemind/cli login\`）。`,
+        `本次登录需要 IDC 重定向${host}，WeMind 的 MCP 与 CLI 登录流程都暂不支持该步骤。请稍后重试。`,
       );
     }
 

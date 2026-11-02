@@ -180,7 +180,7 @@ AI Agent 调用 `login_qrcode` 生成二维码，你可以通过以下方式扫�
 
 > **提示**：如果手机扫码后页面一直加载，请切换到**移动数据网络**（关闭 WiFi）。
 
-> **MCP 登录也会登记账号（2026-11-02）**：登录成功后，如果数据目录就是 CLI 的标准账号目录（默认 `~/.wemind/default`，且没设 `WECHAT_DATA_DIR`），MCP 会把它写进 `~/.wemind/accounts.json`——之后 `wemind list` / `wemind start` 能看到这个账号。自定义 `WECHAT_DATA_DIR` 时不登记（CLI 注册表指向 `~/.wemind/<key>`，硬登记会让它去错目录找凭证）。需要验证码 / IDC 重定向时，MCP 会提示改用 CLI 登录（`wemind login`，没装可用 `npx -y @wemind/cli login`）。
+> **MCP 登录也会登记账号（2026-11-02）**：登录成功后，如果数据目录就是 CLI 的标准账号目录（默认 `~/.wemind/default`，且没设 `WECHAT_DATA_DIR`），MCP 会把它写进 `~/.wemind/accounts.json`——之后 `wemind list` / `wemind start` 能看到这个账号。自定义 `WECHAT_DATA_DIR` 时不登记（CLI 注册表指向 `~/.wemind/<key>`，硬登记会让它去错目录找凭证）。需要验证码 / IDC 重定向时，MCP 与 CLI 都会直接说明「暂不支持该步骤」并让你稍后重试（两者共用同一套登录能力，都不会静默等到超时）。
 
 ### 2. 确认登录
 

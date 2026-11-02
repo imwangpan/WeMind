@@ -6,6 +6,7 @@ import {
   accountDir,
   deriveAccountKey,
   registerAccount,
+  listAccounts,
   fetchQRCode,
   pollQRStatus,
   saveQrState,
@@ -19,6 +20,23 @@ import { bridgeReady, viaBridge } from "./cli-context.js";
 
 const BASE = process.env.WEMIND_ILINK_BASE?.trim() || "https://ilinkai.weixin.qq.com";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 官方状态机里 WeMind 尚未实现的四种高级态。以前它们落进默认分支按「等待」轮询到 15 分钟超时，
+ * 用户只看到二维码一直转、不知道需要做什么；这里直接失败并给出可执行的下一步。
+ * 导出仅供单测。
+ */
+export function loginUnsupportedHint(status: string, redirectHost?: string): string {
+  if (status === "need_verifycode")
+    return "本次登录需要输入验证码，wemind login 暂不支持该步骤。请稍后重试；若反复出现，请先确认微信侧没有待处理的登录验证。";
+  if (status === "verify_code_blocked")
+    return "验证码尝试次数过多，微信暂时阻止了这次登录。请稍后（通常几十分钟后）再重新扫码。";
+  if (status === "scaned_but_redirect" || status === "binded_redirect") {
+    const host = redirectHost ? `（微信要求切换到 ${redirectHost}）` : "";
+    return `本次登录需要切换到微信指定的接入点${host}，wemind login 暂不支持该步骤。请稍后重试。`;
+  }
+  return `登录遇到暂不支持的状态「${status}」。请稍后重试。`;
+}
 
 function openFile(p: string): void {
   try {
@@ -53,17 +71,27 @@ export function createLoginStagingDir(): string {
   return fs.mkdtempSync(path.join(WEMIND_ROOT, ".staging-"));
 }
 
-/** 把本次登录的暂存目录按 botId 收进账号目录 + 登记。 */
+/**
+ * 把本次登录的暂存目录按 botId 收进账号目录 + 登记。
+ * 目录已存在（同一微信号重新扫码）时**并入**而不是报错：只覆盖本次新写的凭证，保留会话/白名单/大脑配置——
+ * `logout` 明确保留目录以便重登，若这里拒绝，那条路径与文档承诺的「重新登录」都无法执行。
+ */
 export function finalizeStaging(staging: string, label?: string): { key: string; msg: string } {
   const acc = readAccount(staging);
   if (!acc?.botId) throw new Error(`staging 无有效登录（${staging}）`);
   const key = deriveAccountKey(acc.botId);
   const dest = accountDir(key);
-  if (fs.existsSync(dest)) {
+  const existed = fs.existsSync(dest);
+  const prevLabel = existed ? listAccounts().find((a) => a.key === key)?.label : undefined;
+  if (existed) {
+    if (!fs.statSync(dest).isDirectory())
+      throw new Error(`账号路径已存在但不是目录: ${dest}（请先处理该路径再重登）`);
+    // 逐项覆盖暂存目录里的文件（account.json 等），不删除目标目录中的其它内容。
+    fs.cpSync(staging, dest, { recursive: true, force: true });
     fs.rmSync(staging, { recursive: true, force: true });
-    throw new Error(`账号目录已存在: ${dest}（该微信号此前已登录过；如需重登请先 delete ${key}）`);
+  } else {
+    fs.renameSync(staging, dest);
   }
-  fs.renameSync(staging, dest);
   for (const f of [
     "qrcode.png",
     "qrcode.txt",
@@ -84,10 +112,13 @@ export function finalizeStaging(staging: string, label?: string): { key: string;
     botId: acc.botId,
     userId: acc.userId,
     baseUrl: acc.baseUrl,
-    label: label || key,
+    label: label || prevLabel || key, // 重登不带 --label 时保留原别名，避免一次扫码把用户起的名字改回 key
   });
   if (acc.userId) addAllowFrom(acc.userId, dest); // 配对：扫码登录者自动授权
-  return { key, msg: `已登录：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}` };
+  return {
+    key,
+    msg: `已登录：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}${existed ? "（已并入现有账号，会话与白名单保留）" : ""}`,
+  };
 }
 
 /**
@@ -211,6 +242,13 @@ async function loginInto(
       await refresh();
       continue;
     }
+    if (
+      s.status === "need_verifycode" ||
+      s.status === "verify_code_blocked" ||
+      s.status === "scaned_but_redirect" ||
+      s.status === "binded_redirect"
+    )
+      throw new Error(loginUnsupportedHint(s.status, s.redirect_host));
     await sleep(1500);
   }
   throw new Error("超时（15 分钟）未完成登录");

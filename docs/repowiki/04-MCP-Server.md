@@ -83,7 +83,7 @@ sequenceDiagram
 - `login_qrcode` 会生成三种扫码形式：二维码 URL、PNG 图片（`qrcode.png`）、终端 ANSI 文本（`qrcode.txt`），并在文案里**强制要求 Agent 自己 `cat qrcode.txt`** 把二维码显示给用户。
 - 二维码 TTL 为 5 分钟（`QR_TTL_MS`），新鲜则复用。
 - `check_qrcode_status` 在 `confirmed` 时保存凭证、清扫码态、清会话冷却、通知上线；若数据目录就是 CLI 的标准账号目录（`DATA_DIR === accountDir(ACCOUNT_KEY)`，默认 `~/.wemind/default` 且未设 `WECHAT_DATA_DIR`），再按目录名登记进 `accounts.json`——否则 CLI 的 `list` / `start` 看不到 MCP 登录的账号。自定义 `WECHAT_DATA_DIR` 不登记（注册表只能指向 `accountDir(key)`，登记会让 CLI 去错目录找凭证）。
-- `logout`：通知下线 + 重置状态 + 清凭证 +（标准目录且注册表条目 botId 与本账号一致时）注销账号条目；凭证文件删不掉时返回 `logout_failed` 并说明原因，不谎称「已清除」。需要验证码 / IDC 重定向时，提示改用 CLI（`wemind login`，或 `npx -y @wemind/cli login`）。
+- `logout`：通知下线 + 重置状态 + 清凭证 +（标准目录且注册表条目 botId 与本账号一致时）注销账号条目；凭证文件删不掉时返回 `logout_failed` 并说明原因，不谎称「已清除」。需要验证码 / IDC 重定向时，MCP 与 CLI 都会直接说明暂不支持该步骤并提示稍后重试（两者共用同一套登录能力）。
 - 默认基础 URL 为 `https://ilinkai.weixin.qq.com`。
 
 ## 4.5 消息轮询（tools/messages.ts）

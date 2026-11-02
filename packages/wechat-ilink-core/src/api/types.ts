@@ -280,7 +280,7 @@ export interface QRCodeResponse {
  * 扫码登录状态轮询响应。
  * 官方完整状态机（8 态，见 openclaw-weixin login-qr.ts）：
  *   wait / scaned / confirmed / expired / scaned_but_redirect / need_verifycode / verify_code_blocked / binded_redirect
- * [实测] WeMind 的登录流程只处理常见 4 态（wait/scaned/confirmed/expired）；其余高级态（验证码回填、IDC 重定向、已绑定）当前未实现——如遇到，会落到默认分支按「等待」处理。类型在此列全以对齐官方、便于将来补全。
+ * [实测] WeMind 的登录流程只处理常见 4 态（wait/scaned/confirmed/expired）；其余高级态（验证码回填、IDC 重定向、已绑定）当前未实现——CLI 与 MCP 遇到时都会**立即失败并说明暂不支持**（不再静默等待），类型在此列全以对齐官方、便于将来补全。
  */
 export interface QRStatusResponse {
   status:
