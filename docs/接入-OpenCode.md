@@ -58,7 +58,7 @@ opencode mcp list
 
 要点：
 - 把示例里的 `<repo>` / `<abs>` 换成**你自己的 clone 绝对路径**（不要照抄别人的本机路径）。
-- **V2 结构是 `mcp.servers`**（server 名不直接挂在 `mcp` 下）。README 现有 OpenCode 片段是 V1 的 `mcp.<name>` 写法，**应更新**。
+- **V2 结构是 `mcp.servers`**（server 名不直接挂在 `mcp` 下）。README 的 OpenCode 片段已是 V2 `mcp.servers` 写法（2026-11-02 核对）。
 - 工具以 `wemind_*` 命名；默认 Code Mode 下经 `tools.wemind.*` 暴露。
 - 需 OpenCode 侧自行遵循 `get_messages(wait=true)`→`send_typing`→`send_text_message`→`send_typing(cancel)` 的工作流。
 
