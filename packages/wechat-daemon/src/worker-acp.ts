@@ -13,12 +13,29 @@ import {
   sessionKey,
 } from "./session-map.js";
 import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
-import { waitForFrameQuiet } from "./acp-quiet.js";
-import { handleReverseRequest } from "./acp-reverse.js";
+import {
+  applyAcpModel,
+  applyAcpSessionMode,
+  availableAcpModes,
+  acpTurnChunks,
+  acpTurnText,
+  beginAcpTurn,
+  clearAcpTurn,
+  drainAcpReplay,
+  endAcpTurn,
+  feedAcpStdout,
+  handleAcpFrame,
+  newTurnState,
+  promptAcp,
+  requestAcp,
+  type AcpHost,
+  type AcpPending,
+  type AcpProgressEvent,
+} from "./acp-connection.js";
 import { LineDecoder } from "./line-decoder.js";
 
 /**
- * worker ACP 连接：**一条连接＝一个 ACP agent 进程**，约 70% 复制自 acp-brain.ts，差异：
+ * worker ACP 连接：**一条连接＝一个 ACP agent 进程**；协议细节（帧处理/请求与回合超时/模型与模式设置/回放静默）与 brain 共用 `acp-connection.ts`，本模块只保留任务侧差异：
  * - **每连接一实例**（child/pending/session/进度全在实例里，不再是模块级全局）——多任务并行要有多个进程；
  *   进程池（worker-pool.ts）持有它们、按 agent 复用，任务结束把连接**还给进程池**而不是杀掉；
  * - **每任务一个 session key**（`task-<编号>@<userId>`），持久化到 worker-sessions.json，重建后 session/load 续上下文；
@@ -50,18 +67,7 @@ function firstFrameMs(a: ResolvedAgent): number {
   );
 }
 
-export type WorkerProgressEvent =
-  | { type: "tool"; kind?: string; purpose?: string; title?: string }
-  | { type: "answer" }
-  | { type: "thinking" }
-  | { type: "activity" };
-
-type Pending = {
-  resolve: (v: unknown) => void;
-  reject: (e: Error) => void;
-  clear: () => void;
-  method: string;
-};
+export type WorkerProgressEvent = AcpProgressEvent;
 
 let connSeq = 0;
 
@@ -98,17 +104,12 @@ export class WorkerConn {
   private child: ChildProcessWithoutNullStreams | null = null;
   private initialized = false;
   private idCounter = 0;
-  private pending = new Map<number, Pending>();
+  private pending = new Map<number, AcpPending>();
   private sessions = new Map<string, string>(); // sessionKey -> sessionId
-  private assembling = new Map<string, string[]>(); // sessionId -> 当前轮文本块
+  private turn = newTurnState(); // 当前回合的拼接缓冲与进度状态
+  private rpcState = { lastFrameAt: 0, frameSeq: 0 }; // 最近收帧时间 + 累计序号
   private stdoutLines = new LineDecoder();
-  private lastFrameAt = 0;
-  private frameSeq = 0;
-  private currentOnProgress: ((ev: WorkerProgressEvent) => void) | null = null;
-  private answerStarted = false;
-  private thoughtStarted = false;
-  private seenUpdateTypes = new Set<string>();
-  private seenTools = new Set<string>();
+  private host: AcpHost;
   private cwd?: string; // 本任务的工作目录（spawn 时生效；子进程 cwd 不可中途改）
   private spawnError?: Error; // spawn 失败的真实原因（cwd 不存在/权限），kill() 用它答复而不是笼统的 killed
   /** spawn 后立刻回调：池据此把 pid 身份记录写入磁盘（`wemind stop` 靠它精确找到本进程）。 */
@@ -117,6 +118,16 @@ export class WorkerConn {
   constructor(agent: ResolvedAgent) {
     this.agent = agent;
     this.id = `w${++connSeq}`;
+    this.host = {
+      pending: this.pending,
+      turn: this.turn,
+      state: this.rpcState,
+      hasProcess: () => !!this.child,
+      noProcessMessage: "no worker process",
+      nextId: () => ++this.idCounter,
+      write: (payload) => this.write(JSON.stringify(payload)),
+      log: (message) => dlog(`${this.id}(${this.agent.name}) ${message}`),
+    };
   }
 
   isAlive(): boolean {
@@ -166,7 +177,7 @@ export class WorkerConn {
     }
     this.pending.clear();
     this.sessions.clear();
-    this.assembling.clear();
+    clearAcpTurn(this.turn);
     this.stdoutLines.reset();
     dlog(`${this.id}(${this.agent.name}) killed`);
   }
@@ -198,185 +209,39 @@ export class WorkerConn {
   ): Promise<string> {
     await this.ensureProcess();
     const sid = await this.ensureSession(key, opts.strictResume === true);
-    this.assembling.set(sid, []);
-    this.currentOnProgress = onProgress ?? null;
-    this.answerStarted = false;
-    this.thoughtStarted = false;
-    this.seenUpdateTypes.clear();
-    this.seenTools.clear();
+    beginAcpTurn(this.turn, sid, onProgress);
     const t0 = Date.now();
     const prompt: unknown[] = [{ type: "text", text: instruction || "（继续）" }];
     try {
-      await this.promptRequest({ sessionId: sid, prompt });
-      const txt = (this.assembling.get(sid) ?? []).join("").trim();
+      await promptAcp(
+        this.host,
+        { sessionId: sid, prompt },
+        {
+          idleMs: PROMPT_IDLE_MS,
+          capMs: PROMPT_CAP_MS,
+          firstFrameMs: firstFrameMs(this.agent),
+        },
+      );
+      const txt = acpTurnText(this.turn, sid);
       dlog(
-        `${this.id}(${this.agent.name}) prompt ok ${Date.now() - t0}ms chunks=${(this.assembling.get(sid) ?? []).length} updateTypes=[${[...this.seenUpdateTypes].join(",")}]`,
+        `${this.id}(${this.agent.name}) prompt ok ${Date.now() - t0}ms chunks=${acpTurnChunks(this.turn, sid)} updateTypes=[${[...this.turn.seenUpdateTypes].join(",")}]`,
       );
       return txt;
     } catch (e) {
-      const chunks = (this.assembling.get(sid) ?? []).length;
-      const sinceFrame = this.lastFrameAt ? Date.now() - this.lastFrameAt : -1;
+      const chunks = acpTurnChunks(this.turn, sid);
+      const sinceFrame = this.rpcState.lastFrameAt ? Date.now() - this.rpcState.lastFrameAt : -1;
       dlog(
         `${this.id}(${this.agent.name}) prompt FAIL ${Date.now() - t0}ms chunks=${chunks} lastFrameAgo=${sinceFrame}ms err=${String(e)} -> rebuild`,
       );
       this.kill();
       throw e;
     } finally {
-      this.currentOnProgress = null;
-      this.assembling.delete(sid);
+      endAcpTurn(this.turn, sid);
     }
   }
 
   private write(line: string): void {
     this.child?.stdin.write(line + "\n");
-  }
-
-  private handleReverseRequest(f: Record<string, any>): void {
-    handleReverseRequest(
-      f,
-      (payload) => this.write(JSON.stringify(payload)),
-      (message) => dlog(`${this.id} ${message}`),
-    );
-  }
-
-  private handleFrame(f: Record<string, any>): void {
-    this.lastFrameAt = Date.now();
-    this.frameSeq += 1;
-    if (typeof f.id === "number" && (f.result !== undefined || f.error !== undefined)) {
-      const p = this.pending.get(f.id);
-      if (!p) return;
-      p.clear();
-      this.pending.delete(f.id);
-      if (f.error) {
-        dlog(`${this.id} ← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`);
-        p.reject(new Error(JSON.stringify(f.error)));
-      } else p.resolve(f.result);
-      return;
-    }
-    if (f.method && f.id !== undefined) {
-      this.handleReverseRequest(f);
-      return;
-    }
-    if (f.method === "session/update") {
-      const u = f.params?.update;
-      if (u?.sessionUpdate) this.seenUpdateTypes.add(String(u.sessionUpdate));
-      if (this.currentOnProgress) {
-        try {
-          this.currentOnProgress({ type: "activity" });
-        } catch {
-          /* ignore */
-        }
-      }
-      if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
-        const arr = this.assembling.get(f.params.sessionId);
-        if (arr) arr.push(String(u.content.text ?? ""));
-        if (!this.answerStarted && this.currentOnProgress) {
-          this.answerStarted = true;
-          try {
-            this.currentOnProgress({ type: "answer" });
-          } catch {
-            /* ignore */
-          }
-        }
-      } else if (u?.sessionUpdate === "agent_thought_chunk") {
-        if (!this.thoughtStarted && this.currentOnProgress) {
-          this.thoughtStarted = true;
-          try {
-            this.currentOnProgress({ type: "thinking" });
-          } catch {
-            /* ignore */
-          }
-        }
-      } else if (
-        (u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") &&
-        this.currentOnProgress
-      ) {
-        const tid = String(u.toolCallId ?? u.title ?? "");
-        if (tid && !this.seenTools.has(tid)) {
-          this.seenTools.add(tid);
-          const purpose =
-            typeof u.rawInput?.__tool_use_purpose === "string"
-              ? u.rawInput.__tool_use_purpose
-              : undefined;
-          try {
-            this.currentOnProgress({ type: "tool", kind: u.kind, purpose, title: u.title });
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-    }
-  }
-
-  private onStdout(d: Buffer): void {
-    for (const line of this.stdoutLines.push(d)) {
-      let f: Record<string, any>;
-      try {
-        f = JSON.parse(line);
-      } catch {
-        continue; // 有的 agent 会往 stdout 混日志行（DSH 实测），非 JSON 直接跳过
-      }
-      this.handleFrame(f);
-    }
-  }
-
-  private request(method: string, params: unknown, timeoutMs: number): Promise<any> {
-    return new Promise((resolve, reject) => {
-      if (!this.child) {
-        reject(new Error("no worker process"));
-        return;
-      }
-      const id = ++this.idCounter;
-      dlog(`${this.id} → ${method}#${id}`);
-      const t = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`${method} timeout after ${timeoutMs}ms`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve, reject, clear: () => clearTimeout(t), method });
-      this.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
-    });
-  }
-
-  /** session/prompt 专用：空闲超时 + 首帧超时 + 硬上限（漫长任务，比 brain 宽松）。 */
-  private promptRequest(params: unknown): Promise<any> {
-    return new Promise((resolve, reject) => {
-      if (!this.child) {
-        reject(new Error("no worker process"));
-        return;
-      }
-      const id = ++this.idCounter;
-      const startedAt = Date.now();
-      this.lastFrameAt = Date.now();
-      const startSeq = this.frameSeq;
-      const firstMs = firstFrameMs(this.agent);
-      dlog(
-        `${this.id} → session/prompt#${id} (idle=${PROMPT_IDLE_MS}ms cap=${PROMPT_CAP_MS}ms firstFrame=${firstMs}ms)`,
-      );
-      const iv = setInterval(() => {
-        const idle = Date.now() - this.lastFrameAt;
-        const total = Date.now() - startedAt;
-        const noFrameYet = this.frameSeq === startSeq;
-        const firstFrameTimeout = noFrameYet && total > firstMs;
-        if (firstFrameTimeout || idle > PROMPT_IDLE_MS || total > PROMPT_CAP_MS) {
-          if (this.pending.delete(id)) {
-            clearInterval(iv);
-            const why = firstFrameTimeout
-              ? "no-first-frame"
-              : idle > PROMPT_IDLE_MS
-                ? "idle"
-                : "cap";
-            reject(new Error(`session/prompt ${why} timeout (idle=${idle}ms total=${total}ms)`));
-          }
-        }
-      }, 5000);
-      this.pending.set(id, {
-        resolve,
-        reject,
-        clear: () => clearInterval(iv),
-        method: "session/prompt",
-      });
-      this.write(JSON.stringify({ jsonrpc: "2.0", id, method: "session/prompt", params }));
-    });
   }
 
   private async ensureProcess(): Promise<void> {
@@ -396,7 +261,9 @@ export class WorkerConn {
       `${this.id} spawn ${this.agent.name} worker pid=${proc.pid} cwd=${cwd} home=${WORKER_HOME} task=${this.taskId ?? "-"}`,
     );
     this.onSpawn?.(this); // 立刻落 pid 身份记录（在握手之前，`wemind stop` 才来得及找到它）
-    proc.stdout.on("data", (d) => this.onStdout(d));
+    proc.stdout.on("data", (d) =>
+      feedAcpStdout(this.stdoutLines, d, (f) => handleAcpFrame(f, this.host)),
+    );
     proc.stderr.on("data", () => {
       /* ignore */
     });
@@ -412,7 +279,12 @@ export class WorkerConn {
       if (this.child === proc) this.kill();
     });
     try {
-      await this.request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
+      await requestAcp(
+        this.host,
+        "initialize",
+        { protocolVersion: 1, clientCapabilities: {} },
+        REQ_TIMEOUT,
+      );
     } catch (e) {
       // spawn 失败（cwd 不存在/权限）不是「args 漏了 acp」，别贴那条误导性提示
       const hint = this.spawnError ? "" : acpArgsHint(this.agent);
@@ -421,61 +293,6 @@ export class WorkerConn {
     }
     this.initialized = true;
     dlog(`${this.id} initialized`);
-  }
-
-  private async applyModel(sid: string): Promise<void> {
-    if (!this.agent.model || this.agent.modelArg) return; // modelArg：模型已随启动参数传给 agent（gemini 不支持 set_config_option）
-    try {
-      await this.request(
-        "session/set_config_option",
-        { sessionId: sid, configId: "model", value: this.agent.model },
-        REQ_TIMEOUT,
-      );
-      dlog(`${this.id} model set ${this.agent.model}`);
-    } catch (e) {
-      dlog(`${this.id} model set failed (${String(e)})`);
-      throw e;
-    }
-  }
-
-  /** 从 `session/new|load|resume` 的回包里取可用模式 id；agent 不报 `modes` 时返回 null（=不校验，照样尝试）。 */
-  private static availableModeIds(res: any): string[] | null {
-    const list = res?.modes?.availableModes;
-    if (!Array.isArray(list)) return null;
-    const ids = list.map((m: any) => String(m?.id ?? m)).filter(Boolean);
-    return ids.length ? ids : null;
-  }
-
-  /** 会话建立/恢复后切到预设声明的模式（免审批）；失败只记日志、不抛——审批请求仍由应答器兜底。 */
-  private async applySessionMode(sid: string, modes: string[] | null = null): Promise<void> {
-    if (!this.agent.sessionMode) return;
-    if (modes && !modes.includes(this.agent.sessionMode)) {
-      dlog(
-        `${this.id} session mode ${this.agent.sessionMode} 不在可用模式 [${modes.join(",")}] 里——跳过；审批请求仍由应答器处理`,
-      );
-      return;
-    }
-    try {
-      await this.request(
-        "session/set_mode",
-        { sessionId: sid, modeId: this.agent.sessionMode },
-        REQ_TIMEOUT,
-      );
-      dlog(`${this.id} session mode set ${this.agent.sessionMode}`);
-    } catch (e) {
-      dlog(`${this.id} session mode set failed (${String(e)})——继续；审批请求仍由应答器处理`);
-    }
-  }
-
-  /** 恢复会话后 agent 可能还在异步回放历史（gemini 的 loadSession 里 streamHistory 不 await）：
-   *  等帧流安静下来再提问，别让回放的历史混进本轮答复。 */
-  private async drainLoadReplay(): Promise<void> {
-    if (!this.agent.replayOnLoad) return;
-    const before = this.frameSeq;
-    const r = await waitForFrameQuiet({ seq: () => this.frameSeq });
-    const drained = this.frameSeq - before;
-    if (drained > 0)
-      dlog(`${this.id} drained ${drained} replay frame(s)${r.timedOut ? " (cap)" : ""}`);
   }
 
   /** 取会话：内存 → 磁盘（load/resume 恢复） → 新建。key 由调用方给（每任务一个）。
@@ -493,14 +310,21 @@ export class WorkerConn {
         this.agent.restore === "resume" ? ["resume"] : ["load", "resume"];
       for (const method of methods) {
         try {
-          const restored = await this.request(
+          const restored = await requestAcp(
+            this.host,
             `session/${method}`,
             { sessionId: saved, cwd: this.effectiveCwd(), mcpServers },
             REQ_TIMEOUT,
           );
-          await this.drainLoadReplay();
-          await this.applyModel(saved);
-          await this.applySessionMode(saved, WorkerConn.availableModeIds(restored));
+          await drainAcpReplay(this.host, this.agent);
+          await applyAcpModel(this.host, this.agent, saved, REQ_TIMEOUT);
+          await applyAcpSessionMode(
+            this.host,
+            this.agent,
+            saved,
+            availableAcpModes(restored),
+            REQ_TIMEOUT,
+          );
           this.sessions.set(key, saved);
           dlog(
             `${this.id} session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`,
@@ -515,14 +339,21 @@ export class WorkerConn {
           `接不上原会话 ${saved}（该 agent 不支持恢复、或这条会话已被它自己清理）。重试还是同一个结果——想重来请结束这条任务后重新派一条（把进展写进新任务里）。`,
         );
     }
-    const res = (await this.request(
+    const res = (await requestAcp(
+      this.host,
       "session/new",
       { cwd: this.effectiveCwd(), mcpServers },
       REQ_TIMEOUT,
     )) as { sessionId?: string };
     if (!res?.sessionId) throw new Error("session/new returned no sessionId");
-    await this.applyModel(res.sessionId);
-    await this.applySessionMode(res.sessionId, WorkerConn.availableModeIds(res));
+    await applyAcpModel(this.host, this.agent, res.sessionId, REQ_TIMEOUT);
+    await applyAcpSessionMode(
+      this.host,
+      this.agent,
+      res.sessionId,
+      availableAcpModes(res),
+      REQ_TIMEOUT,
+    );
     this.sessions.set(key, res.sessionId);
     // 重新读改写：多个连接并存时，别用陈旧的记录整张覆盖（会抹掉别的任务刚写的 key）
     const fresh = loadSessionMap(this.agent);

@@ -89,8 +89,8 @@ poller（长轮询，不被大脑阻塞）
 | 术语 | 含义 |
 |---|---|
 | **ACP** | Agent Client Protocol，JSON-RPC 2.0 over stdio，每行一个 JSON；Zed 提出 |
-| **brain** | 对话大脑，`acp-brain.ts`，每用户一个 session |
-| **worker** | 远程任务执行器，`worker-acp.ts` 的 `class WorkerConn`，**一条任务一条连接**（进程池复用） |
+| **brain** | 对话大脑，`acp-brain.ts`，每用户一个 session；协议细节走 `acp-connection.ts` |
+| **worker** | 远程任务执行器，`worker-acp.ts` 的 `class WorkerConn`，**一条任务一条连接**（进程池复用）；协议细节同样走 `acp-connection.ts` |
 | **agent 槽位（agent-slot）** | `agent-slot.ts`：`getAgent("brain"\|"worker")` 懒解析 + 记忆化；`setAgent` 供热切换改写（取代了模块常量） |
 | **热切换 / brain-switch** | `brain-switch.ts`：预检 → 等回合结束 → 启动新大脑 → **成功才写入磁盘**；失败退回 |
 | **drain / 等在途回合结束** | 切换/停止前「等在跑的回合自然结束」的门（默认 30s，超时=诚实失败，不砍回合） |
@@ -252,8 +252,9 @@ poller（长轮询，不被大脑阻塞）
 | 任务 | 先读 | 再读 |
 |---|---|---|
 | 接新 ACP agent | `brain-agents.ts` | `acp-brain.ts`、`mcp-sandbox.ts`、`docs/ai/recipes/add-acp-agent.md` |
-| 改 ACP 自愈/超时 | `acp-brain.ts` | `worker-acp.ts`（同步）、`brain-check.ts` |
+| 改 ACP 自愈/超时 | `acp-connection.ts`（帧/超时/模型与模式，brain 与 worker 共用） | `acp-brain.ts` / `worker-acp.ts`（进程生命周期与会话持久化各自实现）、`brain-check.ts` |
 | 改反向请求应答（权限 / fs / terminal） | `acp-reverse.ts` | `acp-reverse.test.ts`；brain、worker、`brain check` 三处共用 |
+| **ACP 连接公共层 / acp-connection** | `acp-connection.ts`：帧分类、请求/回合超时、模型与模式、回放静默；`acp-connection.test.ts` 覆盖 |
 | 改 MCP 挂载 | `mcp-sandbox.ts` | `agent-mcp.ts`、`worker-sandbox.ts`、`sandbox-inherit.ts`（记忆/技能继承与换 agent 清理）、`docs/ai/recipes/add-mcp.md` |
 | 改微信消息/回复 | `index.ts`、`send-pipeline.ts` | `md-reply.ts`、`image-reply.ts` |
 | 改 CLI | `cli.ts`（分派 `cli-dispatch.ts`） | `manage.ts` |
