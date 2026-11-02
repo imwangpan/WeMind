@@ -57,6 +57,20 @@ export function buildShellLine(
 }
 
 /**
+ * Windows 经 shell 启动时的子进程环境：设置 `NoDefaultCurrentDirectoryInExePath=1`，禁止 cmd/CreateProcess
+ * 从**当前目录**解析裸命令名。worker 的 cwd 是任务目录（`--cwd`，可能指向用户项目），里面若有一个同名
+ * `.cmd`，就会被当成要启动的 agent——这是提权/劫持面。POSIX 原样返回，不引入 Windows 专用变量。
+ * 导出仅供单测。
+ */
+export function shellEnv(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv | undefined,
+): NodeJS.ProcessEnv | undefined {
+  if (platform !== "win32") return env;
+  return { ...(env ?? process.env), NoDefaultCurrentDirectoryInExePath: "1" };
+}
+
+/**
  * 启动 agent：`shell=true` 的走「整串命令行 + shell」（见文件头注释），其余直接 spawn。
  * 默认 `windowsHide: true`（不闪控制台窗口），其余选项透传。
  */
@@ -66,5 +80,8 @@ export function spawnAgent(
 ): ChildProcessWithoutNullStreams {
   const base: SpawnOptionsWithoutStdio = { windowsHide: true, ...opts };
   if (!agent.shell) return spawn(agent.bin, agent.args, base);
-  return spawn(buildShellLine(agent.bin, agent.args), { ...base, shell: true });
+  const shellOpts: SpawnOptionsWithoutStdio = { ...base, shell: true };
+  const env = shellEnv(process.platform, base.env);
+  if (env !== base.env) shellOpts.env = env;
+  return spawn(buildShellLine(agent.bin, agent.args), shellOpts);
 }

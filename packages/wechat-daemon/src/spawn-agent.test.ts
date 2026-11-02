@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { buildShellLine, quoteCmdArg, quoteShArg, spawnAgent } from "./spawn-agent.js";
+import { buildShellLine, quoteCmdArg, quoteShArg, shellEnv, spawnAgent } from "./spawn-agent.js";
 
 // 下面两个 spawnAgent 用例会真起一个 node 子进程（Windows 上单跑 0.5–0.7s）。全量跑时多个测试文件并发、各自都在起进程，实测会超过 vitest 默认的 5s 而偶发失败。这里是「等确定会退出的子进程」，放宽超时不是掩盖问题；纯字符串拼接的用例仍走默认超时。
 const SPAWN_TEST_TIMEOUT_MS = 20_000;
@@ -65,6 +65,21 @@ describe("buildShellLine", () => {
   it("POSIX：逐参数按 sh 规则加引号", () => {
     expect(buildShellLine("/opt/my app/bin", ["acp"], "linux")).toBe("'/opt/my app/bin' acp");
     expect(buildShellLine("opencode", ["acp"], "darwin")).toBe("opencode acp");
+  });
+});
+
+describe("shellEnv", () => {
+  it("Windows：设置 NoDefaultCurrentDirectoryInExePath，保留调用方环境", () => {
+    expect(shellEnv("win32", { FOO: "bar" })).toMatchObject({
+      FOO: "bar",
+      NoDefaultCurrentDirectoryInExePath: "1",
+    });
+  });
+
+  it("POSIX：原样返回（不引入 Windows 专用变量）", () => {
+    const env = { FOO: "bar" };
+    expect(shellEnv("linux", env)).toBe(env);
+    expect(shellEnv("darwin", undefined)).toBeUndefined();
   });
 });
 
