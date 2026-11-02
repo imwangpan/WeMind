@@ -391,7 +391,7 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
   }
   task.status = "running";
   emitState();
-  const got = await acquire(ag, task.id);
+  const got = await acquire(ag, task.id, task.cwd);
   if (!got.ok) {
     const msg = `⚠️ 任务 #${task.id} 没起得来：${got.problem}`;
     // 续跑（`strictResume`）起不来 ≠ 新派发起不来：新任务从没跑过，删掉是对；续跑的记录必须留着——

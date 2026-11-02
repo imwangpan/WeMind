@@ -31,6 +31,11 @@ function dlog(...a: unknown[]): void {
 }
 
 const WORKER_CWD = process.env.WEMIND_WORKER_CWD?.trim() || os.homedir(); // 任务工作目录默认值
+
+/** 实际生效的任务工作目录：显式 cwd 优先，否则 `WEMIND_WORKER_CWD` / 用户主目录。 */
+export function effectiveWorkerCwd(cwd?: string): string {
+  return cwd?.trim() || WORKER_CWD;
+}
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WEMIND_WORKER_IDLE_MS) || 180_000; // 无任何帧多久算"卡死"（比 brain 宽松：3min）
 const PROMPT_CAP_MS = Number(process.env.WEMIND_WORKER_CAP_MS) || 1_800_000; // 单轮硬上限 30min（漫长任务）
@@ -126,7 +131,7 @@ export class WorkerConn {
   }
 
   effectiveCwd(): string {
-    return this.cwd ?? WORKER_CWD;
+    return effectiveWorkerCwd(this.cwd);
   }
 
   hasSession(key: string): boolean {

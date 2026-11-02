@@ -172,6 +172,22 @@ describe("worker 进程池（真进程）", () => {
     expect(cfg.quietStartup).toBe(true); // 预设默认项也补上
   });
 
+  it("换 cwd 不复用旧进程：子进程 cwd 不能中途改", async () => {
+    const a = agent("kiro");
+    const g1 = await acquire(a, 1, root);
+    expect(g1.ok).toBe(true);
+    if (!g1.ok) return;
+    expect(g1.conn.effectiveCwd()).toBe(root);
+    release(g1.conn);
+
+    const g2 = await acquire(a, 2, dataDir);
+    expect(g2.ok).toBe(true);
+    if (!g2.ok) return;
+    expect(g2.conn.id).not.toBe(g1.conn.id); // 新进程，不是把旧进程改目录
+    expect(g2.conn.effectiveCwd()).toBe(dataDir);
+    expect(spawnCount()).toBe(2);
+  });
+
   it("两个 agent 并行：两条连接、两个进程，各答各的", async () => {
     const gK = await acquire(agent("kiro"), 1);
     const gO = await acquire(agent("opencode"), 2);

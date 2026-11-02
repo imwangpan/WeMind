@@ -135,7 +135,7 @@ stateDiagram-v2
 | 沙箱 home | `BRAIN_HOME`（默认空 MCP） | `WORKER_HOME`（继承全量 MCP 除 wechat） |
 | 超时 | idle 120s / cap 15min / 首帧 25s | idle 180s / cap 30min / 首帧 30s（更宽松） |
 
-子进程 cwd 在 spawn 时固定，故 cwd 在派发（首轮）生效。中断恢复靠 `reset()` 后下次 `ensureSession` 走 `session/load`（不支持时 `session/resume`）。
+子进程 cwd 在 spawn 时固定，**且 cwd 是连接身份的一部分**（`connKey = agent 身份 + 实际生效 cwd`）：换 `--cwd` 会起新进程，绝不会复用停在上一个项目里的旧进程。中断恢复靠 `reset()` 后下次 `ensureSession` 走 `session/load`（不支持时 `session/resume`）。
 
 ### worker 沙箱
 
@@ -303,8 +303,8 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 ## 7.9 测试覆盖
 
 - `task-manager.test.ts`：任务表 —— 派发/waiting/回话续跑/stop、**编号递增不复用**、`injectTask` 不指定编号时回一份编号清单、`任务 <agent 名>：正文` 解析与 agent 路由、指定 agent 不改默认任务大脑（回归护栏）、上限拒绝、stop 单条/全部、**provider 报错（余额不足）→ 转「已中断」、回「继续」能续跑**、**`shouldResumeTask()` 只放行「继续」类短句（普通消息不进任务）**、**任务结果/中断推送末尾带 `#n 正文` 的回复提示**，以及 `providerIssue()` 的分类（余额/密钥/402/模型名 → 归类；429/超时/网络 → 不归类）。
-- `worker-pool.test.ts`：纯策略（`planAcquire`/`planReap`）—— 复用同 agent 空闲、回收最旧腾位、上限判定、空闲阈值。
-- `pool-spawn.test.ts`：**真起进程**验池的行为——同 agent 第二次任务复用同一条连接（只 spawn 一次）、结束「等你回复」的任务时留着复用、回收后进程消失。
+- `worker-pool.test.ts`：纯策略（`planAcquire`/`planReap`）—— 复用同 agent + 同 cwd 的空闲、cwd 不同即不同身份、回收最旧腾位、上限判定、空闲阈值。
+- `pool-spawn.test.ts`：**真起进程**验池的行为——同 agent + 同 cwd 第二次任务复用同一条连接（只 spawn 一次）、换 cwd 起新进程、结束「等你回复」的任务时留着复用、回收后进程消失。
 - `task-store.test.ts`：`tasks.json` 往返、损坏降级为空表、中断态标记、编号跨重启连续。
 - `pid-record.test.ts`：`brain.pid`/`workers.pid.json` 的整数/JSON/数组三种形态兼容读。
 

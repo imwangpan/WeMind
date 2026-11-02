@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   agentKey,
+  connKey,
   planAcquire,
   planReap,
   planSweep,
@@ -56,6 +57,18 @@ describe("agentKey", () => {
     expect(agentKey(mk("kiro", "/bin/kiro", ["acp"]))).not.toBe(
       agentKey(mk("kiro", "/other/kiro", ["acp"])),
     );
+  });
+});
+
+describe("connKey", () => {
+  it("cwd 也是身份：同 agent 换工作目录 → 不同键（不能复用旧进程）", () => {
+    const a = { name: "kiro", bin: "/bin/kiro", args: ["acp"] } as unknown as ResolvedAgent;
+    expect(connKey(a, "/proj/a")).not.toBe(connKey(a, "/proj/b"));
+  });
+
+  it("显式 cwd 与默认 cwd 相同 → 同一个键", () => {
+    const a = { name: "kiro", bin: "/bin/kiro", args: ["acp"] } as unknown as ResolvedAgent;
+    expect(connKey(a)).toBe(connKey(a, "  "));
   });
 });
 

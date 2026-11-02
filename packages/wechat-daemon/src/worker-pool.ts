@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import { createConn, type WorkerConn } from "./worker-acp.js";
+import { createConn, effectiveWorkerCwd, type WorkerConn } from "./worker-acp.js";
 import { pidRecordOf, writePidRecords, type PidRecord, type PidState } from "./pid-record.js";
 import type { ResolvedAgent } from "./brain-agents.js";
 import { ensureWorkerHome } from "./worker-sandbox.js";
@@ -14,7 +14,7 @@ import { ensureWorkerHome } from "./worker-sandbox.js";
  * 于是任务结束只是把连接**还给进程池**：同 agent 的下一个任务直接复用，空闲久了才回收。
  *
  * 策略（`planAcquire`/`planReap` 是纯函数，可单独测——IO 与判定分离）：
- *  - 同 agent 的空闲连接优先复用（**最旧的先用**：它本来就最接近被回收，先让它干活正好续命）；
+ *  - 同 agent + 同 cwd 的空闲连接优先复用（**最旧的先用**：它本来就最接近被回收，先让它干活正好续命）；cwd 不同必须换进程（子进程 cwd 不能中途改）；
  *  - 没有可复用的就 spawn；
  *  - 同时运行的**任务**数上限 `WEMIND_MAX_WORKERS`（默认 3）：超了**直接拒绝派发**（用户当场知道），不排队（排队会让任务悄悄等着）；
  *  - 空闲连接数上限 `WEMIND_IDLE_MAX`（默认 2）、空闲超 `WEMIND_WORKER_REAP_MS`（默认 5min）回收，都从最旧的开始；
@@ -66,6 +66,14 @@ export type AcquirePlan =
 /** agent 身份键：同一个 agent 但启动参数不同（如 `--bin` 改过）必须算两个进程。 */
 export function agentKey(ag: ResolvedAgent): string {
   return `${ag.name}|${ag.bin}|${ag.args.join(" ")}`;
+}
+
+/**
+ * 连接身份键：agent 身份 + **实际生效的任务工作目录**。
+ * 子进程的 cwd 不能中途改，所以换 `--cwd` 必须换进程；不把 cwd 纳入身份就会复用旧进程、让它在上一个项目里干活。
+ */
+export function connKey(ag: ResolvedAgent, cwd?: string): string {
+  return `${agentKey(ag)}|cwd=${effectiveWorkerCwd(cwd)}`;
 }
 
 /**
@@ -181,8 +189,9 @@ function reapByIds(ids: string[]): void {
 export async function acquire(
   ag: ResolvedAgent,
   taskId?: number,
+  cwd?: string,
 ): Promise<{ ok: true; conn: WorkerConn } | { ok: false; problem: string }> {
-  const key = agentKey(ag);
+  const key = connKey(ag, cwd);
   const plan = planAcquire(poolInfo(), key, poolLimits(), Date.now());
   if (plan.kind === "reject") return { ok: false, problem: plan.problem };
   // 为**这条任务的 agent** 备沙箱：daemon 启动时只按默认任务大脑备过一次，派到别的 agent（如 `--agent pi`）时
@@ -202,6 +211,7 @@ export async function acquire(
       e.state = "busy";
       e.taskId = taskId;
       e.lastUsedAt = Date.now();
+      e.conn.setCwd(cwd); // 身份键已保证 cwd 相同；这里同步一次，防止连接被别处改过
       writeRecords();
       return { ok: true, conn: e.conn };
     }
@@ -215,6 +225,7 @@ export async function acquire(
       writeRecords(); // 进程刚起来就落记录（握手之前），`wemind stop` 才来得及抓到它
     }
   });
+  conn.setCwd(cwd);
   const entry: Entry = {
     conn,
     key,
