@@ -115,6 +115,18 @@ graph TD
 - 控制桥**只接受 agent 名与纯数据**，所以 `brain switch` 带 `--bin`/`--args`/`--shell`/`--model` 会被直接拒绝——那是 `brain set` 的活（配置变更，只写入磁盘）。带这些字段的配置改完，**daemon 在跑、认桥时可用 `wemind brain switch <同名 agent>` 当场应用**（`sameAgent()` 按 name/bin/args/model 判「是不是同一个」——改过就算一次真切换），否则重启 daemon；`--shell` 不在判据里，只能重启。安全边界见 [7. Worker](07-远程任务-Worker.md) §7.5。
 - `WEMIND_BRAIN` 压过命令式切换这一条，对**每个账号各自**成立。
 
+### 少数 agent 的真实 home 仍跨账号共享
+
+微信消息、`brain-sessions.json` / `worker-sessions.json`、`tasks.json` 与两个沙箱都按账号隔离，但下面三处**没有**随账号隔离——原因是 agent 自己没提供对应的目录/环境变量接口，WeMind 不替它发明配置（§4.14「用 agent，不改造它」）：
+
+| agent | 仍读写真实 home 的部分 | 影响 |
+| --- | --- | --- |
+| `codex` | 适配器没有沙箱配置目录，认证/配置取真实 `~/.codex`（WeMind 只能把 cwd 指到沙箱根） | 多个账号共用同一份 codex 登录态与配置 |
+| `pi` | `pi-acp` 从真实 `homedir()` 读 `~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills`；`settings.json` 原样复制还会带上其中的 `packages` / `extensions` | 会话映射、prompts、skills 跨账号共享 |
+| `qoder` | `memory/` 是真实 `~/.qoder/memory` 的 junction（刻意共享记忆） | 用户画像/偏好跨账号共享 |
+
+**同一台机器、多个账号由不同的人使用**时，这些数据是共享面；同一个人自用多账号不受影响。其他 agent（kiro / opencode / deepseek / gemini / cline / claude-code）的配置目录都已被 `configSubdir` 指到各自账号的沙箱。
+
 ### 进程身份（pid-record.ts）
 
 `brain.pid` 不再是裸整数，而是 **JSON 身份记录**（`{pid, agent, bin, args, shell, state, startedAt, writtenAt}`），worker 侧是 `workers.pid.json` **身份记录**（单条时是对象、多条时是数组，读侧都认）。原因：`manage.ts` 过去用**配置里**的 agent 算进程特征串（bin+args）来判定/杀进程，有三种情况会失效——① `wemind brain set X` 不带 `--restart`（配置已改、旧 agent 进程还在跑，`list` 显示「已停止」、`stop` 跳过不杀；1.2.0 起 `brain set` 对纯 agent 名会当场应用，这种「配置与进程不一致」已少见，但带 `--bin` 的改动、或 daemon 没跑时改配置仍会出现）；② 热切换窗口内；③ **多任务/多 agent 并存**（多 worker 之后是常态）。现在按记录里**起进程时真实用的** bin/args 算，缺失时回退配置（兼容旧账号）；旧版 CLI 读新格式会拿到 `NaN` → 显示「已停止」且**不杀**（安全侧）。
