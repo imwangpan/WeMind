@@ -63,6 +63,11 @@ function handle(f) {
     out({ jsonrpc: "2.0", id: f.id, error: { code: -32602, message: "session not found" } });
     return;
   }
+  // 恢复成功但模型设置失败：模拟「会话还在，但配置的模型在 agent 侧不可用」
+  if (mode === "fail-model" && f.method === "session/set_config_option") {
+    out({ jsonrpc: "2.0", id: f.id, error: { code: -32603, message: "model not found" } });
+    return;
+  }
   const delay = (mode === "slow-init" && f.method === "initialize") || (mode === "slow-prompt" && f.method === "session/prompt") ? 700 : 0;
   setTimeout(() => {
     if (f.method === "initialize") out({ jsonrpc: "2.0", id: f.id, result: { protocolVersion: 1, agentCapabilities: {} } });
@@ -374,6 +379,17 @@ describe("会话（ACP 侧写入 + 严格恢复）", () => {
     expect(pointerOf("u1")).toBe("sess-cur"); // 原来的当前会话记录原样
     expect(methods().some((m) => m.startsWith("session/new"))).toBe(false); // 没有偷偷开新会话
     expect(entries().some((x) => x.sessionId === "sess-ghost")).toBe(false); // 也没登记一条假会话
+  });
+
+  it("恢复成功但模型设置失败：仍用恢复的会话，不退回新建", async () => {
+    fs.writeFileSync(sessionsFile, JSON.stringify({ "opencode:u1": "sess-old" }));
+    setup("fail-model");
+    setAgent("brain", { ...getAgent("brain"), model: "test-model" });
+    expect(await askBrain("u1", "接着上次说")).toContain("答:");
+    expect(methods().some((m) => m.startsWith("session/new"))).toBe(false); // 没有丢掉恢复的上下文
+    const prompts = methods().filter((m) => m.startsWith("session/prompt"));
+    expect(prompts[prompts.length - 1]).toContain("sess-old"); // 这一轮进了恢复的那条会话
+    expect(JSON.parse(fs.readFileSync(sessionsFile, "utf-8"))["opencode:u1"]).toBe("sess-old");
   });
 
   it("免审批会话模式：会话建立后发 session/set_mode；agent 不支持（-32601）时回合照常成功", async () => {

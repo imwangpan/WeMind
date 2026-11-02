@@ -447,22 +447,30 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
     const methods: Array<"load" | "resume"> =
       ag.restore === "resume" ? ["resume"] : ["load", "resume"];
     for (const method of methods) {
+      let restored: any;
       try {
-        const restored = await request(
+        restored = await request(
           `session/${method}`,
           { sessionId: saved, cwd: BRAIN_HOME, mcpServers },
           REQ_TIMEOUT,
         );
         await drainLoadReplay(ag);
-        await applyModel(ag, saved);
-        await applySessionMode(ag, saved, availableModeIds(restored));
-        userSessions.set(userId, saved);
-        markUsed(ag.name, userId, saved); // 会话登记表：把它顶到「最近使用」（列表按此排序）
-        dlog(`session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
-        return saved;
       } catch (e) {
         dlog(`session/${method} failed (${String(e)})`);
+        continue;
       }
+      // 恢复已经成功：模型设置失败只记日志，不能退回 session/new——那会丢掉刚恢复的上下文。
+      // （applyModel 自己会记 `model set failed`，这里只负责不让它把恢复判成失败。）
+      try {
+        await applyModel(ag, saved);
+      } catch {
+        /* 已在 applyModel 内记日志 */
+      }
+      await applySessionMode(ag, saved, availableModeIds(restored));
+      userSessions.set(userId, saved);
+      markUsed(ag.name, userId, saved); // 会话登记表：把它顶到「最近使用」（列表按此排序）
+      dlog(`session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
+      return saved;
     }
   }
   const res = (await request("session/new", { cwd: BRAIN_HOME, mcpServers }, REQ_TIMEOUT)) as {
