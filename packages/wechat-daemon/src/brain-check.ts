@@ -123,9 +123,12 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
   try {
     await req("initialize", { protocolVersion: 1, clientCapabilities: {} });
     const s = (await req("session/new", { cwd: home, mcpServers: [] })) as { sessionId?: string };
+    // 没有 sessionId 就等于没有会话：daemon 第一条消息就会失败。以前这里照样报 ✅（detail 里只写 `sessionId=?`），自检失去意义。
+    if (!s?.sessionId)
+      throw new Error("session/new 没有返回 sessionId——agent 的 ACP 实现不完整，无法建立会话");
     // 预设声明了 sessionMode（免审批）就一并验证：不发这一步的话，模式不可用（如 claude-code 以 root 跑且没设 IS_SANDBOX=1）在这里永远显示 ✅
     let modeNote = "";
-    if (ag.sessionMode && s?.sessionId) {
+    if (ag.sessionMode) {
       try {
         await req("session/set_mode", { sessionId: s.sessionId, modeId: ag.sessionMode });
         modeNote = `，mode=${ag.sessionMode}`;
@@ -135,7 +138,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
     }
     return {
       ok: true,
-      detail: `ACP 握手成功（initialize + session/new，sessionId=${s?.sessionId ?? "?"}${modeNote}）`,
+      detail: `ACP 握手成功（initialize + session/new，sessionId=${s.sessionId}${modeNote}）`,
       ms: Date.now() - started,
     };
   } catch (e) {

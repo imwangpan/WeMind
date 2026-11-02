@@ -74,7 +74,7 @@ import {
   renameSession,
 } from "./session-registry.js";
 import { clearSessionPointer, brainSessionMapPath, sessionKey } from "./session-map.js";
-import { awaitTaskAck, writeTaskCmd as writeTaskCommand } from "./task-inbox.js";
+import { awaitTaskAck, type TaskAck, writeTaskCmd as writeTaskCommand } from "./task-inbox.js";
 
 /**
  * WeMind 多账号管理 CLI。
@@ -252,7 +252,9 @@ function startDaemon(key: string, runner?: string): void {
   // start 前先停现有任何 runner（pm2 app / builtin 后台守护进程），避免同账号双跑抢 token
   stopDaemon(key);
   const useRunner = (runner || process.env.WEMIND_RUNNER || "builtin").toLowerCase();
-  console.log((useRunner === "pm2" ? pm2Start(key, cliPath) : watchdogStart(key, cliPath)).msg);
+  const r = useRunner === "pm2" ? pm2Start(key, cliPath) : watchdogStart(key, cliPath);
+  if (!r.ok) process.exitCode = 1; // runner 起不来时别让「已启动」的文案配一个成功退出码
+  console.log(r.msg);
 }
 
 /**
@@ -716,8 +718,12 @@ function cmdBrainUnset(key: string): string {
 async function cmdBrainCheck(key: string): Promise<string> {
   const ag = resolveAgent(loadBrainConfig(accountDir(key)));
   const problem = agentProblem(ag);
-  if (problem) return `❌ ${key} 的大脑不可用：${problem}`;
+  if (problem) {
+    process.exitCode = 1; // 自检失败必须让脚本/CI 看得见（以前只打印 ❌，退出码仍是 0）
+    return `❌ ${key} 的大脑不可用：${problem}`;
+  }
   const r = await checkAgent(ag);
+  if (!r.ok) process.exitCode = 1;
   return `${r.ok ? "✅" : "❌"} ${key} 大脑自检（${ag.name}，bin=${ag.bin}）：${r.detail}（${r.ms}ms）`;
 }
 
@@ -886,6 +892,23 @@ function writeTaskCmd(key: string, obj: Record<string, unknown>): string {
 }
 
 /**
+ * 把任务答复翻成 CLI 文案与成败（导出仅供单测）。
+ * `ok=false` = daemon 明确拒绝/失败（达上限、「没有 #9 号任务」），文案照打，但调用方要把退出码置 1；
+ * 等不到答复不算失败（老版 daemon / 刚启动），只多一句说明。
+ */
+export function taskAckOutcome(
+  a: Pick<TaskAck, "ok" | "text"> | null,
+  fallback: string,
+): { text: string; failed: boolean } {
+  if (!a)
+    return {
+      text: `${fallback}\n（没等到 daemon 答复：它可能还在跑旧版本，或刚启动。用 task-list / task-status 核对实际状态。）`,
+      failed: false,
+    };
+  return { text: a.text || fallback, failed: !a.ok };
+}
+
+/**
  * 等这次命令的答复（daemon 把真实结果写进 `task-out/<id>.json`）。
  * 三种情形分得很清楚：
  *  - 有答复、有文案 → 打印 daemon 的那句话（失败原因、「没有 #9 号任务」这类只有它知道的事）；
@@ -899,11 +922,11 @@ async function taskOutcome(
   fallback: string,
   timeoutMs = 5000,
 ): Promise<string> {
-  const a = await awaitTaskAck(accountDir(key), ackId, timeoutMs);
-  if (!a)
-    return `${fallback}\n（没等到 daemon 答复：它可能还在跑旧版本，或刚启动。用 task-list / task-status 核对实际状态。）`;
-  return a.text || fallback;
+  const o = taskAckOutcome(await awaitTaskAck(accountDir(key), ackId, timeoutMs), fallback);
+  if (o.failed) process.exitCode = 1; // daemon 明确拒绝/失败（达上限、没有 #9 号任务）：文案照打，退出码非 0
+  return o.text;
 }
+
 /**
  * 选账号：显式 key/label 优先，否则用默认账号（`accounts.json` 的 `default`；缺失时回落第一个登记的账号，见 core 的 `getDefaultKey`）。
  * `session`/`task*` 早就是这个口径；`start`/`stop` 也走这里——所以「省略账号」= 默认账号。

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { descendantPids, helpText, agentLabel, resolveTaskCwd } from "./manage.js";
+import { descendantPids, helpText, agentLabel, resolveTaskCwd, taskAckOutcome } from "./manage.js";
 import { isAlive } from "./proc-identity.js";
 
 /*
@@ -62,6 +62,29 @@ describe("resolveTaskCwd（--cwd 相对路径按用户当前目录解析）", ()
     expect(() => resolveTaskCwd("nope", base)).toThrow(/工作目录不存在/);
     fs.writeFileSync(path.join(base, "file.txt"), "x");
     expect(() => resolveTaskCwd("file.txt", base)).toThrow(/不是目录/);
+  });
+});
+
+describe("taskAckOutcome（任务答复的文案与退出码）", () => {
+  it("daemon 明确失败 → 用它的文案，并标记 failed（CLI 退出码非 0）", () => {
+    expect(taskAckOutcome({ ok: false, text: "❌ 已达任务上限" }, "已发送")).toEqual({
+      text: "❌ 已达任务上限",
+      failed: true,
+    });
+  });
+
+  it("成功且无额外文案 → 用调用方文案，不算失败", () => {
+    expect(taskAckOutcome({ ok: true, text: "" }, "已发送任务")).toEqual({
+      text: "已发送任务",
+      failed: false,
+    });
+  });
+
+  it("等不到答复 → 回退措辞 + 说明，不算失败（老版 daemon）", () => {
+    const r = taskAckOutcome(null, "已发送任务");
+    expect(r.failed).toBe(false);
+    expect(r.text).toContain("已发送任务");
+    expect(r.text).toContain("没等到 daemon 答复");
   });
 });
 

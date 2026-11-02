@@ -222,7 +222,7 @@ graph LR
 ```
 
 - **命令方向**：CLI 原子写（临时文件 + rename）命令文件 → daemon 定时扫描（按时间戳升序）→ 调 task-manager → 删文件。
-- **答复方向**（1.2.0）：命令文件带 `ack` 答复编号，daemon 处理完写 `task-out/<id>.json {id, at, ok, text}`；CLI 短轮询后打印 `text`。**派发的答复等 `acquire` 之后才发**（达上限/起不来是那时才知道的），所以 `wemind task` 说的「已派发」是真话——在此之前它只能猜，达上限被拒会被报成「已派发任务 #2（opencode）」（上一条的编号，因为 `active` 本来就是 true）。**空 `text` 也是一种答复**（＝「已送达、无别的话」），CLI 据此立刻用自己的措辞；等不到答复（老版 daemon）则退回「已发送…」并附一句说明，不把「没等到」当成功。
+- **答复方向**（1.2.0）：命令文件带 `ack` 答复编号，daemon 处理完写 `task-out/<id>.json {id, at, ok, text}`；CLI 短轮询后打印 `text`。**派发的答复等 `acquire` 之后才发**（达上限/起不来是那时才知道的），所以 `wemind task` 说的「已派发」是真话——在此之前它只能猜，达上限被拒会被报成「已派发任务 #2（opencode）」（上一条的编号，因为 `active` 本来就是 true）。**空 `text` 也是一种答复**（＝「已送达、无别的话」），CLI 据此立刻用自己的措辞；`ok=false` 时 CLI 打印 daemon 的文案并把退出码置 1（达上限、编号不存在等能被脚本看见）；等不到答复（老版 daemon）则退回「已发送…」并附一句说明，不把「没等到」当成功。
 - **状态方向**：daemon 在派发/每轮/waiting/停止时原子写 `task-state.json` → CLI 读并显示（顶层字段复制最近一条任务，另带 `tasks` 数组，旧版 CLI 读不错）。
 - daemon 启动清空 `task-inbox/` 与 `task-out/` 防重放；CLI 写命令前预检 daemon 存活（读 `daemon.pid` + **身份校验**）。
 - 两侧共用 `task-inbox.ts`（目录、原子写、答复读写、清理），路径与格式只有一处定义。
