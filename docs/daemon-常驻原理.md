@@ -34,7 +34,7 @@
         │  while: 跑 node daemon; 退出后睡 5s 再跑
         ▼
    node  <cli.js> daemon            ← ② daemon 本体（业务，常驻）
-        │  poller + worker 两个 while(true) 循环，永不自然退出
+        │  poller + fastWorker + worker 三个循环，永不自然退出
         ▼
    ACP agent（kiro-cli / opencode / dsh / qodercli…）  ← ③ 大脑/worker（懒启动、可自愈重建）
 ```
@@ -154,12 +154,13 @@ if (-not $createdNew) { 记日志「已有实例在跑」; exit 0 }   # 抢不�
 
 ## 4. 第②层：daemon 本体为何「不自己退」
 
-`index.ts` 起来后跑两个**永不返回**的循环（详见架构里的「拉取/处理解耦」）：
+`index.ts` 起来后跑三个**永不返回**的循环（详见架构里的「拉取/处理解耦」）：
 
 - **poller**：`while(true)` 里 `getUpdates` 长轮询（25s 超时，无消息就继续轮询）、更新 token、把消息入队；
-- **worker**：`while(true)` 串行从队列取消息喂大脑。
+- **fastWorker**：从快车道队列取控制/任务指令，和大脑子回合并发处理；
+- **worker**：从消息队列串行取内容喂大脑。
 
-两个循环用 `Promise.all` 并发常驻，所以**正常情况下 node 进程永不自然结束**。它只会因为：
+`pollerLoop` 与 `fastWorkerLoop` 以 `void` 启动，`workerLoop` 由 `await` 常驻；三者并发运行，所以**正常情况下 node 进程永不自然结束**。它只会因为：
 
 1. **未捕获异常**（曾导致静默 `code=1`，已加全局 `unhandledRejection`/`uncaughtException` 处理器记录而不退出）；
 2. **被 `taskkill`**（管理命令停止、或部署时手动重启）；

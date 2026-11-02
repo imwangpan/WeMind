@@ -35,7 +35,7 @@ WeMind 把**个人微信**变成 AI agent 的输入输出通道，对外有两�
    - **多任务 / 进程池 / 任务编号** → `task-manager.ts` → `worker-pool.ts` → `worker-acp.ts`（`class WorkerConn`）→ `task-store.ts`；
    - **会话列表/恢复/改名/删除** → `session-manager.ts` → `session-registry.ts`（登记表）+ `session-map.ts`（当前会话表）；
    - **交接** → `handoff.ts`；**CLI↔daemon 控制桥** → `control-bridge.ts`；
-   - **命令解析与帮助** → `chat-commands.ts`（无副作用模块，`index.ts` 里只做薄包装）；
+   - **命令解析与帮助** → `chat-commands.ts`（解析与帮助同表驱动，无副作用）；解析入口在 `daemon-routing.ts`，分派在 `daemon-control.ts` 的 `handleControl`；
    - CLI/账号 → `cli.ts`（入口分派在 `cli-dispatch.ts`）/ `manage.ts`（分派与账号/进程生命周期）/ `cli-brain.ts`、`cli-login.ts`、`cli-task.ts`、`cli-session.ts` / `brain-config.ts`。
 5. 任务配方：[`docs/ai/recipes/`](docs/ai/recipes/)。
 
@@ -96,7 +96,7 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 | `packages/wechat-daemon/src/manage.ts` | `wemind` 入口与命令分派（生命周期、账号等仍在；brain/登录/任务/会话命令已拆到 `cli-brain.ts` / `cli-login.ts` / `cli-task.ts` / `cli-session.ts`） |
 | `packages/wechat-daemon/src/cli-context.ts` | CLI 共用上下文：账号选择、daemon/控制桥存活判断、`viaBridge` |
 | `packages/wechat-daemon/src/cli-task.ts` | `task` / `task-reply` / `task-stop` / `task-list` / `task-status` 的文件桥实现与答复文案 |
-| `packages/wechat-daemon/src/cli-session.ts` | `session` / `session-current` 的 CLI 侧实现：读直接读登记表，写优先走控制桥（daemon 不在时 `rename`/`delete` 可安全直改） |
+| `packages/wechat-daemon/src/cli-session.ts` | `session`（含 `current` 子命令）的 CLI 侧实现：列表读登记表、`current` 读当前会话表（`brain-sessions.json`），写优先走控制桥（daemon 不在时 `rename`/`delete` 可安全直改） |
 | `packages/wechat-daemon/src/cli-brain.ts` | `brain show/set/unset/check/switch/handoff` 的 CLI 侧实现；`--restart` 的重启动作由入口注入（`startDaemon`），模块不反向依赖 `manage.ts` |
 | `packages/wechat-daemon/src/cli-login.ts` | 扫码登录（独立暂存目录、二维码刷新、登记、可选自启）与登录后的 `session.unpause`；`--start` 的启动动作由入口注入 |
 | `packages/wechat-mcp/src/tools/*` | 6 个 MCP 工具 |
@@ -158,7 +158,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
       - AI 上下文：本文件 `AGENTS.md`、`docs/ai/README.md`、`docs/ai/recipes/*`——**命令 / 参数 / 环境变量 / 数据文件 / 目录结构 / 新增模块的变化，AGENTS.md 与 `docs/ai/README.md` 是硬性同步项**（它们标注的「适用版本 / 最后核对」也要跟着改）。
     - **自检**：`npm run verify`（= `npm run lint` + `npm run format:check` + `npm run typecheck` + `npm run build` + `npm run check:version` + 两个发布包的 `npm pack --dry-run` + `npm test` + `pwsh -NoProfile -File scripts/check-docs.ps1`，与 CI 同口径；相对链接不许断）。`npm install` 会通过 `prepare` 启用 `.githooks/pre-commit`，commit 前再跑一次 `format:check`（只读，不改工作区）。
     - 反例（都按缺陷处理）：改了命令参数没更新 `--help`/README；新增环境变量只写在代码注释里；改了优先级规则但 `docs/接入其它-ACP-Agent.md` 的表还是旧的；改了行为却没有一条能覆盖它的测试；本地只跑 lint/test 漏 `format:check`，推送后 CI 格式红灯。
-16. **worktree 一律放仓库根 `.worktrees/`**：每个分支一个子目录（如 `.worktrees/gemini`），不要建在 `.agents/worktrees/` 或其它位置（`.gitignore` 已忽略 `.worktrees/`）。分支合并或放弃后及时 `git worktree remove <路径>` + `git branch -d <分支>`，别留残留目录。历史遗留的 `.agents/worktrees/feat/pi-brain` 保留到该分支合并/清理为止，之后不要再往那里建。
+16. **worktree 一律放仓库根 `.worktrees/`**：每个分支一个子目录（如 `.worktrees/gemini`），不要建在 `.agents/worktrees/` 或其它位置（`.gitignore` 已忽略 `.worktrees/`）。分支合并或放弃后及时 `git worktree remove <路径>` + `git branch -d <分支>`，别留残留目录。历史遗留的 `.agents/worktrees/feat/pi-brain` 已清理；远端 `feat/pi-brain-v2` 尚未合并，需要时按上面的位置新建 worktree。
 
 ---
 
@@ -169,7 +169,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 | 新增 ACP agent | `brain-agents.ts` 的 `ACP_AGENT_PRESETS`；按 [`docs/ai/recipes/add-acp-agent.md`](docs/ai/recipes/add-acp-agent.md) |
 | 改**默认模型 / 模型跟随日常 dsh** | `brain-agents.ts` 的 `realProfile` + `profile-model.ts`（读真实 profile 的默认模型——优先 `- id: acp`，否则 `agent-default-model`）+ 两个沙箱的 `syncProfilePatch`（**原样复制** `profiles/<名>/cordis.patch.yml`；缺 `- id: acp` 只提示、不代改） |
 | 改 ACP 协议/自愈/超时 | 协议层（帧/超时/模型与模式/回放）→ `acp-connection.ts`（brain 与 worker 共用）；进程生命周期与会话持久化 → `acp-brain.ts` / `worker-acp.ts` 各自看 |
-| 改**热切换**（等在途回合结束/启动新大脑/回滚） | `brain-switch.ts` + `acp-brain.ts`（`beginSwitch/drainTurn/warmup`）；答复在 `index.ts` 的 `AI`/`切换大脑` 分支 |
+| 改**热切换**（等在途回合结束/启动新大脑/回滚） | `brain-switch.ts` + `acp-brain.ts`（`beginSwitch/drainTurn/warmup`）；答复在 `daemon-control.ts` 的 `AI`/`切换大脑` 分支 |
 | 改**多任务/进程池/编号** | `worker-pool.ts`（策略纯函数 `planAcquire/planReap`；`acquire` 起进程/复用前按这条任务的 agent 调 `ensureWorkerHome(ag)` 备沙箱）+ `worker-acp.ts`（`WorkerConn`）+ `task-manager.ts` + `task-store.ts` |
 | 改**会话管理** | `session-manager.ts`（操作层）+ `session-registry.ts`（登记表）；`acp-brain.ts` 的 `resumeSession` 是严格恢复 |
 | 改**交接** | `handoff.ts`（写入磁盘/带上/消费）+ `index.ts` 的 workerLoop 前缀带上 |
@@ -215,11 +215,11 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 - **`daemon.log` 会轮转（2026-11-02）**：内置 watchdog 把子进程 stdout/stderr 接成管道，由 `log-rotate.ts` 的 `RotatingLog` 逐块追加并在运行中轮转（`WEMIND_LOG_MAX_MB` 默认 10、`WEMIND_LOG_KEEP` 默认 3；`daemon.log.1` 最新，`0` = 不留历史）。`scripts/run-daemon.ps1` 在每次重拉前轮转；pm2 runner 交给 `pm2-logrotate`（repowiki 10）。轮转只能用「每次打开→写→关闭」，Windows 上不能改名仍被写入进程持有的文件——改 watchdog 时别换回继承 fd。
 - **长大脑回合不再阻塞任务/控制指令（2026-11-02）**：消息入队时按 `isFastLane()` 分两条队列——控制指令与任务指令（含确实有可续跑任务的「继续」短句）进 `fastQueue`，由 `fastWorkerLoop` 与大脑回合并发处理；其余进 `msgQueue` 串行喂大脑。切脑/会话/交接仍要操作同一个 ACP 连接，会在 ACP 门口等当前回合结束（语义要求）；快车道命令之间串行保序，发送共用 `replyChain` 与连发额度。改路由时两条队列都要看，别只改 `workerLoop`。
 - **无编号消息默认归大脑（2026-11-02 改）**：此前是「只要有一条 waiting 任务，任何无前缀消息都喂给它」——真机两次被陈旧任务吞掉（#26、#28：任务早已出完结果，用户想找大脑聊天，消息却进了任务）。现在 `task-manager.shouldResumeTask()` 只放行「继续 / 接着跑 / continue」这类短句，且必须存在可续跑任务（有 waiting；或没有活跃任务时存在 interrupted——多条时任务侧回编号清单，不替你选）；其余一律走大脑。任务追问一律显式寻址：`#<编号> 正文`（全角 `＃`、全角冒号 `：` 均可；半角冒号留给时间 `#1:30`）、`> 正文`（明确发给任务的短前缀；没有任务时会新开一条）、`任务 …`。每条任务结果/中断推送末尾都会带一行 `↩ 回这条任务用「#28 正文」；不带前缀的消息会交给大脑。`——改路由时这行必须跟着改，用户就是靠它学写法的。**真机验证（2026-11-02）**：waiting 任务 #29 在表里时，无前缀「只回复数字 7」走大脑（回复 7），`#29 只回复数字 8` 才进任务。
-- **大脑侧的 provider 报错也只试一次（2026-10-29）**：agent 会把 provider 的一切回合失败都包成 `-32603 … turn failed: …`，所以余额不足这类**永久**错误按协议错误码看就是「后端瞬时错误」——老口径重试 3 次（每次都要冷启动一个 agent 进程），最后丢给用户一句「稍后把消息再发一次」。现在 `index.ts` 的 `brainFailurePlan()` 先过与任务侧**同一张** `providerIssue()` 关键字表：认出额度/余额、密钥鉴权、计费、模型不存在 → **只试 1 次**，并直接把原因回复给用户（「（这次没答上来：额度/余额不足。这类问题重试不会好——把账号/模型处理好后把消息再发一次就行）」）；「密钥/鉴权」「模型不可用」两类再加一句**要重启一次 daemon** 才会读到新登录态/模型（运行中的 daemon 不重读 brain.json、不重新同步凭据）；**限流优先仍按 backend 重试 3 次**（判据顺序别改）。日志行 `brain error (try 1, provider：额度/余额不足)`。
+- **大脑侧的 provider 报错也只试一次（2026-10-29）**：agent 会把 provider 的一切回合失败都包成 `-32603 … turn failed: …`，所以余额不足这类**永久**错误按协议错误码看就是「后端瞬时错误」——老口径重试 3 次（每次都要冷启动一个 agent 进程），最后丢给用户一句「稍后把消息再发一次」。现在 `daemon-routing.ts` 的 `brainFailurePlan()` 先过与任务侧**同一张** `providerIssue()` 关键字表：认出额度/余额、密钥鉴权、计费、模型不存在 → **只试 1 次**，并直接把原因回复给用户（「（这次没答上来：额度/余额不足。这类问题重试不会好——把账号/模型处理好后把消息再发一次就行）」）；「密钥/鉴权」「模型不可用」两类再加一句**要重启一次 daemon** 才会读到新登录态/模型（运行中的 daemon 不重读 brain.json、不重新同步凭据）；**限流优先仍按 backend 重试 3 次**（判据顺序别改）。日志行 `brain error (try 1, provider：额度/余额不足)`。
 - **VS Code 集成终端里 `wemind start` 会「假启动」（2026-10-29 修）**：VS Code 的「智能自动附加」给终端里每个 node 注入 `NODE_OPTIONS=--require <…>/ms-vscode.js-debug/bootloader.js` + `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true`），被注入的进程要**等调试器接上才执行主脚本**；终端里的前台命令会被接上（`stop`/`list` 看着一切正常），但 `start` **脱离出去的后台守护进程不会被接** → 进程活着、一行 JS 不跑：答复说「已启动」，实际 `daemon.log` / `wrapper.pid` 不更新、daemon 没起（`wemind list` 显示未运行，进程表里只有一个没有子进程的 `cli.js _watchdog`）。现在 `watchdog-runner.ts` 的两次脱离式 spawn 都过 `debug-env.ts` 的 `stripVscodeDebugEnv()`：只摘 VS Code 自己那段 `--require`，用户其它 `NODE_OPTIONS` 原样保留。**前台 `wemind daemon` 的 ACP 子进程同样要摘**（`spawn-agent.ts` 的 `spawnEnv()`）：否则 daemon 自己跑得好好的，它 spawn 的 agent（多为 node 脚本）却继承 bootloader、等调试器等到 `initialize` 超时。同一注入也是「本机跑测试偶发超时」的原因——测试用 `NODE_OPTIONS=` 前缀跑。
 - **权限口径（2026-10-29 统一，平台事实已确认）**：**必须扫码登录该 bot 才能给它发消息**（微信平台限制），所以每个 bot 只有它的**登录者**（扫码登录它的那个微信号）能发。文档一律用「**登录者**」与「**登录者白名单**（`allowFrom`，**默认拒绝**；它是**兜底校验**，正常只含登录者一个 userId，防发送范围变化/别的入口）」，作用范围写成「**整个账号（仅登录者）**」/「**登录者的会话**」/「**登录者的任务**」；**禁用**「账号本人 / 授权用户 / **主号 / 主账号**」——「主号」会被读成「多个微信账号之间有一个有权限的主号」，`label` 只是别名（示例统一用 `工作号`）。**一个微信账号 = 一个真人、一个 daemon**：微信侧换大脑只能由该账号的登录者切**它自己**那个（`OWNER_ONLY_KINDS`），本机 CLI 才能用 `key|label` 指定任意账号（范围/限制/两入口区别见 README「多账号管理」与 `docs/repowiki/06`「多账号下的范围、两个入口」）。
 - **重启后旧 `context_token` 期间的外发要挂起（2026-10-29 修）**：`state.contextTokens` 从磁盘恢复，daemon 重启后仍是上次运行留下的 token；该用户发来下一条消息之前，任务结果（`setTaskPush`）与 CLI 指令答复（`sendNotice`）必然 `ret=-2 (prepare failed)`，`reply()` 重试仍是同一个旧 token（修复前**静默丢失**，真机复现：任务跑完只在 `任务列表` 里看得到）。现在这类「必须送达」的外发**只在该用户本进程还没发过消息时**（`freshTokenUsers`）失败才挂进 `pending-push.ts` 的内存队列（每人 20 条、超出丢最旧）；该用户下一条消息一到，poller 等这一批消息的计数重置**全部做完**后补发（每个发件人一次）：按入队顺序、计入连发额度、每轮最多 5 条且不越过本回合留给答复的额度，排在该批消息触发的进度/答案之前；重置计数改按「还没发完的条数」（`inflightSends`）算、不清零——否则排队中的发送会把最终答案挤到限流上。补发失败（任何原因）重新挂起，同一条最多 3 次。本进程收到过该用户消息之后，`-2` 按限流处理、不挂起；回合内的普通回复不挂起。队列不跨重启（任务结果仍在 `tasks.json`）。日志关键词「`send -2（旧 token）→ 挂起`」「`新 token 已到 → 补发挂起消息`」「`补发 N 次仍失败 → 重新挂起`」「`放弃这条挂起的推送`」。
-- **原「待实测」清单已批量实测（2026-10-29，结论见 [`docs/ai/recipes/run-e2e.md`](docs/ai/recipes/run-e2e.md) §7.3）**：① `session/delete` opencode/qoder 有、DSH 无（`-32601`）；② `session/load` 回放 opencode 2 帧/857ms、qoder 3 帧/804ms，DSH `resume` 0 帧/195ms；③ 冷启动 `initialize`/`session/new`：DSH 5.8s/50ms、opencode ~650ms/~800ms、qoder 1.7s/1.5s——均远小于 `REQ_TIMEOUT=30s`，暂不加 `reqTimeoutMs`；④ opencode+qoder 两条任务并行结果都送达，未见限流型 `ret=-2`；⑥ 同 agent 并发一轮样本未见互踩（见本节「同 agent 并发」条）；⑦ 强杀后 DSH（`resume`）/opencode（`load`）能接回原任务会话，qoder 任务续跑未单独测。
+- **原「待实测」清单已批量实测（2026-10-29，结论见 [`docs/ai/recipes/run-e2e.md`](docs/ai/recipes/run-e2e.md) §7.3）**：① `session/delete` opencode/qoder 有、DSH 无（`-32601`）；② `session/load` 回放 opencode 2 帧/857ms、qoder 3 帧/804ms，DSH `resume` 0 帧/195ms；③ 冷启动 `initialize`/`session/new`：DSH 5.8s/50ms、opencode ~650ms/~800ms、qoder 1.7s/1.5s——均远小于 `REQ_TIMEOUT=30s`，暂不加 `reqTimeoutMs`；④ opencode+qoder 两条任务并行结果都送达，未见限流型 `ret=-2`；⑥ 同 agent 并发一轮样本未见互踩（见本节「同 agent 并发」条）；⑦ 强杀后 DSH（`resume`）/opencode（`load`）能接回原任务会话；qoder 任务续跑已实测（2026-10-27，1.1.78，见 [`docs/接入-Qoder.md`](docs/接入-Qoder.md) M3-3）。
 - **仍未单独测（2026-10-30）**：⑤ Windows `taskkill /T /F` 在 `session/load` 途中、以及**杀掉池中某个特定进程**时的行为。
 
 ---

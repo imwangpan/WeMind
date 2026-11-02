@@ -118,7 +118,7 @@ export async function runWatchdog(): Promise<void> {
     if (code === DAEMON_ALREADY_RUNNING_EXIT_CODE) {
       // 同账号已有另一个 daemon 在消费同一个 bot token：本后台守护进程再拉只会每 5s 撞一次，停在这里。
       rotator.writeLine(
-        `[wimind/wechat-daemon/wrapper] 同账号已有 daemon 在跑（exit ${code}），本后台守护进程退出。${new Date().toISOString()}`,
+        `[wemind/wechat-daemon/wrapper] 同账号已有 daemon 在跑（exit ${code}），本后台守护进程退出。${new Date().toISOString()}`,
       );
       return;
     }

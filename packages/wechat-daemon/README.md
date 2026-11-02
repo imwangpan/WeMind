@@ -124,9 +124,9 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 ### 第三步：升版本号（一条命令）
 
 ```powershell
-npm run release:patch    # 1.1.0 → 1.1.1（Bug 修复）
-npm run release:minor    # 1.2.0 → 1.3.0（向后兼容的新功能）
-npm run release:major    # 1.1.0 → 2.0.0（不兼容改动）
+npm run release:patch    # 1.3.0 → 1.3.1（Bug 修复）
+npm run release:minor    # 1.3.0 → 1.4.0（向后兼容的新功能）
+npm run release:major    # 1.3.0 → 2.0.0（不兼容改动）
 ```
 
 这三个脚本等价于：

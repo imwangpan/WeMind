@@ -2,7 +2,7 @@
 
 > 上一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md) ｜ 下一页：[8. 数据存储与多账号](08-数据存储与多账号.md)
 >
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-01
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
 
 除了「对话大脑」，daemon 还能把**漫长任务**交给**受控的 ACP worker 进程**跑 —— 你在电脑上派发任务后离开，它在「需要你决策」（列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑。这就是**远程 human-in-the-loop（人在回路）**。
 
@@ -283,7 +283,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 - **同时运行的任务数有上限**（默认 3，`WEMIND_MAX_WORKERS`），超出直接拒绝（不排队）。
 - **连续发送上限共享**：worker 进展回传与对话大脑共用同一份约 10 条额度（一轮通常只推 1 条，几乎不触发；多任务并发时才需要留意）。
 - **资源占用**：池里每个进程都是一个完整 agent（内存/网络），靠空闲回收与上限约束。
-- 中断续跑的可行性最终取决于各 agent 能否 `load`/`resume` 回该会话（2026-10-29 实测：DSH `resume` 与 opencode `load` 能接回同一 sessionId；qoder 的任务续跑未单独测。见 §7.9 与 `docs/ai/recipes/run-e2e.md`）。
+- 中断续跑的可行性最终取决于各 agent 能否 `load`/`resume` 回该会话（2026-10-29 实测：DSH `resume` 与 opencode `load` 能接回同一 sessionId；qoder 的任务续跑已实测（2026-10-27，1.1.78）。见 §7.9 与 `docs/ai/recipes/run-e2e.md`）。
 
 ## 7.8 配置项
 
@@ -311,7 +311,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 - `task-store.test.ts`：`tasks.json` 往返、损坏降级为空表、中断态标记、编号跨重启连续。
 - `pid-record.test.ts`：`brain.pid`/`workers.pid.json` 的整数/JSON/数组三种形态兼容读。
 
-**已实测（2026-10-29）**：同 agent 并发（opencode 两条）一轮样本未见互踩（长期风险仍在）；被强杀后 DSH（`resume`）/opencode（`load`）能接回原任务会话，qoder 任务续跑未单独测。**仍未单独测**：`taskkill /T /F` 在 `session/load` 途中、以及杀池中某个特定 pid 的行为。结论与测量脚本见 `docs/ai/recipes/run-e2e.md` §7.3。
+**已实测（2026-10-29）**：同 agent 并发（opencode 两条）一轮样本未见互踩（长期风险仍在）；被强杀后 DSH（`resume`）/opencode（`load`）能接回原任务会话；qoder 任务续跑已实测（2026-10-27，1.1.78）。**仍未单独测**：`taskkill /T /F` 在 `session/load` 途中、以及杀池中某个特定 pid 的行为。结论与测量脚本见 `docs/ai/recipes/run-e2e.md` §7.3。
 
 ---
 

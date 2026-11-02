@@ -1,6 +1,6 @@
 # 接入 Claude Code（ACP 适配器）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-01 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / 强杀后 `session/load` / stdio MCP / `bypassPermissions`）；**真机微信单轮 E2E 已通过**（2026-10-31）；重启续聊 / MCP 加载 / 任务派发待真机复测。
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / 强杀后 `session/load` / stdio MCP / `bypassPermissions`）；**真机微信单轮 E2E 已通过**（2026-10-31）；重启续聊 / MCP 加载 / 任务派发待真机复测。
 >
 > 实测环境：Windows 11、Node 24.21.0、`@agentclientprotocol/claude-agent-acp` **0.99.1**、Claude Code **2.1.314**。适配器是 pre-1.0，升级后请按 §8 重新跑探针。
 

@@ -2,7 +2,7 @@
 
 > 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md)
 >
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-01
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
 
 daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。本章聚焦 daemon 本体（`index.ts`）的运行逻辑；大脑、worker、沙箱在后续章节展开。
 
@@ -58,7 +58,7 @@ graph TD
     H --> I["syncFromPointerMap：按当前会话表回填会话登记表<br/>（老账号没有 session-registry.json 时的首次迁移）"]
     I --> J["clearControlDirs + markBridgeReady(自己的 pid)<br/>→ 清控制桥残留、写下「我认识桥」凭据"]
     J --> K["读回 tasks.json：未完成任务标「已中断」（**不**自动 spawn）"]
-    K --> L["清空 task-inbox + 启动扫描定时器(1s)<br/>（同一个定时器也扫 control-inbox）"]
+    K --> L["清空 task-inbox / control-inbox<br/>+ 各自启动扫描定时器(1s)"]
     L --> M["pollerLoop（后台）"]
     L --> N["fastWorkerLoop（后台，控制/任务）"]
     L --> O["workerLoop（前台 await，只喂大脑）"]
@@ -261,7 +261,7 @@ graph TD
 
 ## 5.9 本地命令文件桥与控制桥
 
-daemon 通过一个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s，**不挂在 poller 上**避免被 25s 长轮询阻塞）扫描两个目录：
+daemon 通过两个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s，**不挂在 poller 上**避免被 25s 长轮询阻塞）分别扫描两个目录：
 
 | 目录 | 方向 | 用途 |
 |------|------|------|

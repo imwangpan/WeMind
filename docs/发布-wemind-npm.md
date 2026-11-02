@@ -36,7 +36,7 @@ npx -y @wemind/cli list  # 不安装临时用：必须写全包名
 | 包 | 目录 | 发布状态 | 说明 |
 | --- | --- | --- | --- |
 | `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | 私有，**永不发布** | iLink 协议内核；被另两个包**构建时内联**（`alwaysBundle`），不是运行时依赖 |
-| `@wemind/wechat-mcp` | `packages/wechat-mcp` | **已发布**（1.0.4） | MCP server，bin `wemind-mcp`，已有 `wechat-mcp-publish.yml` |
+| `@wemind/wechat-mcp` | `packages/wechat-mcp` | **已发布**（1.0.5） | MCP server，bin `wemind-mcp`，已有 `wechat-mcp-publish.yml` |
 | `@wemind/cli` | `packages/wechat-daemon` | **本次发布** | 常驻 daemon + ACP 大脑 + worker + 多账号 CLI，**bin `wemind`** |
 
 结论：不需要拆仓。运行时依赖只有 `qrcode`（第三方）＋内核（已内联），产物是**单文件 `dist/cli.js`（约 155 KB）**，具备「装了就独立跑」的前提。

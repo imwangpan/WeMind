@@ -81,8 +81,8 @@ export const DEFAULT_SETTINGS_STRIP = ["mcpServers", "enabledPlugins", "provider
 
 /**
  * 已知 ACP agent。
- * - `kiro` 为默认且**已实测**。
- * - 其余均为**示例（未实测）**：参数/包名以各自官方为准，接入前请核对（见 docs/接入其它-ACP-Agent.md）。
+ * - 内置 9 个预设都**至少过了探针级实测**（kiro / opencode / deepseek / qoder / cline / gemini 另有真机使用或 E2E 记录）。
+ * - 包名/参数/ACP 能力仍随上游版本变化：升级 agent 后按 docs/接入其它-ACP-Agent.md 复验；自定义 agent 需自行核对官方参数。
  * - 区别两类：① **原生 ACP**（CLI 自带 ACP 模式，直接起，如 kiro、gemini）；② **需适配器**（CLI 本身不说 ACP，要起一个适配器进程，如 Claude Code、Codex）。
  */
 export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
@@ -329,7 +329,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // - 2026-10-30 探针实测（codex-acp 2.5.0 / Codex CLI 0.165，Windows）：
   //   loadSession ✅、promptCapabilities.image ✅、session/set_mode ✅、session/set_config_option(model) ✅、session/load 后上下文保留、
   //   工具调用 0 反向请求（只收到无 id 的 _auth/status_update 通知）；首帧 ~20ms、首字 3–4s、带图整轮 ~24s。
-  //   详见 docs/接入-Codex.md（真机微信 E2E 未做）。
+  //   真机 E2E 已通过（2026-11-01：worker 与 brain 通道均通）；详见 docs/接入-Codex.md。
   codex: {
     name: "codex",
     bin: "codex-acp",

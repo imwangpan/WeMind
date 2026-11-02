@@ -111,8 +111,8 @@ poller（长轮询，不被大脑阻塞）
 | **路由判定 / daemon-routing** | `daemon-routing.ts`：快车道与「继续」归属、控制/任务指令解析、大脑错误分类与提示；纯函数，`index.ts` 只调用 |
 | **控制指令分派 / daemon-control** | `daemon-control.ts`：微信控制指令（MCP/会话/切脑/任务大脑/交接/AI/帮助）与控制桥请求共用同一批实现；`index.ts` 只接入入口 |
 | **CLI 共享上下文 / cli-context** | `cli-context.ts`：账号选择（key/label）、daemon 与控制桥存活判断、`viaBridge`（控制桥请求/等待/过期） |
-| **CLI 任务命令 / cli-task** | `cli-task.ts`：`task*` 四条的收件箱写入、答复文案与退出码；`manage.ts` 只做分派 |
-| **CLI 会话命令 / cli-session** | `cli-session.ts`：`session list/new/resume/rename/delete` 与 `session-current`；读直接读登记表，写优先走控制桥，旧版 daemon 的降级说明也在这里 |
+| **CLI 任务命令 / cli-task** | `cli-task.ts`：`task` / `task-reply` / `task-stop` / `task-list` / `task-status` 五条的收件箱写入、答复文案与退出码；`manage.ts` 只做分派 |
+| **CLI 会话命令 / cli-session** | `cli-session.ts`：`session list/new/resume/rename/delete` 与 `session current`；列表读登记表、`current` 读当前会话表，写优先走控制桥，旧版 daemon 的降级说明也在这里 |
 | **CLI 大脑命令 / cli-brain** | `cli-brain.ts`：`brain show/set/unset/check/switch/handoff` 与 `agentLabel`；`--restart` 的重启由入口注入，不在模块里硬连生命周期 |
 | **CLI 登录 / cli-login** | `cli-login.ts`：扫码登录的暂存目录、二维码刷新、登记与登录后解除 `-14` 暂停；`--start` 的启动由入口注入 |
 | **`.bridge` 凭据** | `control-out/.bridge` 记着 daemon 的 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
@@ -235,7 +235,7 @@ poller（长轮询，不被大脑阻塞）
 | 会话只能保留「当前一条」 | ⚪ **已不成立（1.2.0）** | 登记表 + 五条会话指令（列表/新/恢复/改名/删除）；当前会话表仍是唯一权威 |
 | ACP 有 `session/delete` | ✅ **已实测（2026-10-29）**：opencode/qoder 有，DSH 没有（`-32601`） | 当前实现仍只删 WeMind 登记、回复写明 agent 侧归档仍在（三家里有一家没有，就不能依赖它） |
 | 各 agent `session/load` 会回放历史帧 | ✅ **已实测（2026-10-29）**：opencode 2 帧/857ms、qoder 3 帧/804ms；DSH 无 load，`resume` 0 帧/195ms | 回放帧在无 prompt 时本就被丢弃（`acp-brain.ts`）；时间远小于超时 |
-| 被强杀后各 agent 能 `load`/`resume` 回该任务会话 | ✅ **已实测（2026-10-29）**：DSH（resume）与 opencode（load）能接回同一 sessionId；qoder 任务续跑未单独测 | 「重启后续跑」对这些 agent 成立；接不上时的诚实文案仍保留 |
+| 被强杀后各 agent 能 `load`/`resume` 回该任务会话 | ✅ **已实测（2026-10-29）**：DSH（resume）与 opencode（load）能接回同一 sessionId；qoder 任务续跑已实测（2026-10-27，1.1.78） | 「重启后续跑」对这些 agent 成立；接不上时的诚实文案仍保留 |
 | 同 agent 两个 worker 共用配置目录不互踩 | ⚪ **一轮样本未见互踩（2026-10-29）** | 不同 agent 各有 `configSubdir`；同 agent 并发等于「两个终端在同一配置目录」，长期风险仍在 |
 | 多任务并发时 `sendNotice` 会撞 `ret=-2` | ⚪ **未观察到限流型（2026-10-29）** | 真机里的 `-2` 全是重启后旧 token（见下一行）；额度仍按用户共享，压力大就调小并发 |
 | Windows `taskkill /T /F` 杀池中特定进程 | ⚪ **待实测** | daemon 强杀 + `wemind stop` 已验证无孤儿；「杀池中某个特定 pid」与「`session/load` 途中强杀」未单独测 |
@@ -258,7 +258,7 @@ poller（长轮询，不被大脑阻塞）
 | **ACP 连接公共层 / acp-connection** | `acp-connection.ts`：帧分类、请求/回合超时、模型与模式、回放静默；`acp-connection.test.ts` 覆盖 |
 | 改 MCP 挂载 | `mcp-sandbox.ts` | `agent-mcp.ts`、`worker-sandbox.ts`、`sandbox-inherit.ts`（记忆/技能继承与换 agent 清理）、`docs/ai/recipes/add-mcp.md` |
 | 改微信消息/回复 | `index.ts`、`send-pipeline.ts` | `md-reply.ts`、`image-reply.ts` |
-| 改 CLI | `cli.ts`（分派 `cli-dispatch.ts`） | `manage.ts` |
+| 改 CLI | `cli.ts`（分派 `cli-dispatch.ts`） | `manage.ts` + 按主题拆出的 `cli-context.ts` / `cli-task.ts` / `cli-session.ts` / `cli-brain.ts` / `cli-login.ts` |
 | 改数据/账号 | `wechat-ilink-core/src/store/*` | `brain-config.ts`、`docs/repowiki/08` |
 | 排查不回复 | `docs/ai/recipes/debug-daemon.md` | `daemon.log`、`brain.json`、`brain check` |
 | 端到端验收 | `docs/ai/recipes/run-e2e.md` | `scripts/doctor.ps1` |

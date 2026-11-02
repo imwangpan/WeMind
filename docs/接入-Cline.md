@@ -190,6 +190,7 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 5. **图片不支持（实测）**：`initialize` 广告 `image:true`，但 3.0.74 ACP `prompt` 的 `de()` 只保留 `text` 块，image 被丢弃；预设显式 `images:false`，daemon 收到纯图片消息会直接回「当前大脑暂不支持看图」，不再让模型猜；带文字的消息只按文字回答并注明图片被忽略。
 6. **微信真机 E2E 已完成（2026-10-31）**：文本消息/回复、多轮上下文、重启后 `session/load`（PINEAPPLE）、worker 任务均通过。
 7. **同 agent 并发**：两个 worker 共用 `<worker-home>/cline`（与其它 agent 相同）；Cline 的会话库是 SQLite，长期并发风险要观察。
+8. **「新会话」不隔离文件系统（暂缓项）**：Cline 作为工具型 agent，会在任务 cwd 内看到并操作文件；旧 session transcript 也落在 `brain-home/cline/data/sessions/`（cwd 内）。这是工具型 agent 的预期行为，WeMind 不额外改写 `.clineignore` 或搬移其数据目录；需要强隔离时请把任务 `--cwd` 指到独立目录。
 
 ---
 

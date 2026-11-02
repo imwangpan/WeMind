@@ -1,6 +1,6 @@
 # 配方：端到端验收
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-01
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
 >
 > 目标：用最短路径证明「微信 → daemon → ACP 大脑 → 微信」真的通，而不是只看编译通过。
 > 前置：已构建、已登录一个 bot、`allowFrom` 包含你的微信（登录时自动写入，通常无需手动加）、至少一个 ACP agent 可用。
@@ -270,7 +270,7 @@ MCP
 
 ### 7.2 历史待实测清单（2026-10-28；结论见 7.3）
 
-下列问题当时**没有**静态答案。绝大部分已在 §7.3 实测并写进对应文档；本表保留作为复验清单，不要再把「表里还列着」当成「尚未测」——只剩 §7.3 中标明的少数未单独测项（如 `session/load` 途中强杀、qoder 任务续跑）仍开放。
+下列问题当时**没有**静态答案。绝大部分已在 §7.3 实测并写进对应文档；本表保留作为复验清单，不要再把「表里还列着」当成「尚未测」——只剩 §7.3 中标明的少数未单独测项（如 `session/load` 途中强杀）仍开放（qoder 任务续跑已于 2026-10-27 实测）。
 
 | # | 问题 | 怎么测 | 结论影响 |
 |---|---|---|---|
@@ -294,7 +294,7 @@ MCP
 | 4 | **多任务并行推送到微信**：opencode + qoder 两条任务并行、结果都送达，**没有观察到限流型 `ret=-2`**。真机上出现的 `-2` 全部属于「daemon 重启后、用户下一条消息之前」的旧 `context_token`（见下方 7.4）——那条已修。 |
 | 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 wrapper+daemon+worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
 | 6 | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。 |
-| 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑未单独测（按同一 ACP 路径推断可用）。 |
+| 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑已实测（2026-10-27，1.1.78：`session/load ok`，STEP-A/STEP-B 产物齐全，见 `docs/接入-Qoder.md` M3-3）。 |
 | 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 广告 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**广告 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 预设 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进沙箱（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
 
 ### 7.4 真机踩到的坑：重启后旧 `context_token`（2026-10-29 已修）

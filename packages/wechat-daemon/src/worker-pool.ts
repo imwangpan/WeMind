@@ -24,7 +24,7 @@ import { ensureWorkerHome } from "./worker-sandbox.js";
  * 这里是「空闲**连接**留多久」，两个时间尺度不同，故不复用同一个变量名。
  *
  * 同一 agent 并发 = 两个进程共用一个配置目录（等价「同一个 agent 开两个终端」）：不同 agent 各有自己的子目录天然隔离，
- * 同 agent 的会话/缓存文件是否互踩是**待实测**项（见方案「待实测」5/6），文档如实写明。
+ * 同 agent 的会话/缓存文件已有一轮并发样本（2026-10-29，opencode 两条），未见互踩；长期风险仍在（见方案「待实测」5/6）。
  */
 
 export const WORKERS_PID_FILE = path.join(DATA_DIR, "workers.pid.json");
