@@ -141,6 +141,12 @@ describe("clearAccount", () => {
   it("本来就没有 → 返回 false，不抛错", () => {
     expect(clearAccount(tmpDir())).toBe(false);
   });
+
+  it("删除失败（不是「本来就没有」）→ 抛错，调用方不能谎称已清除", () => {
+    const dir = tmpDir();
+    fs.mkdirSync(path.join(dir, "account.json")); // 目录无法 unlink → EPERM/EISDIR
+    expect(() => clearAccount(dir)).toThrow();
+  });
 });
 
 describe("state 读写", () => {

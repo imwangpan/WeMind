@@ -223,7 +223,14 @@ export async function logout(): Promise<ToolResult> {
 
   clearQrState();
   resetState();
-  clearAccount();
+  try {
+    clearAccount();
+  } catch (e) {
+    return jsonResult({
+      status: "logout_failed",
+      message: `登出未完成：凭证文件删不掉（${e instanceof Error ? e.message : String(e)}）。文件可能被占用或无权限；处理后再调用 logout，别把它当成已登出。`,
+    });
+  }
 
   return jsonResult({ status: "logged_out", message: "已登出，凭证已清除。" });
 }

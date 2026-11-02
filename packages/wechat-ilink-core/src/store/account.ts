@@ -111,9 +111,12 @@ export function saveAccount(account: AccountData): void {
   saveAccountTo(DATA_DIR, account);
 }
 
-/** 删除凭证。返回是否真的删掉了（登录流程据此判断「本来就没登录」还是「删失败」）。 */
+/**
+ * 删除凭证。返回是否真的删掉了（false = 本来就没有）。
+ * 删除失败（权限/文件被占用）会**抛错**，不再与「本来就没登录」混成同一个 false——调用方（MCP logout）据此如实报告，而不是谎称「凭证已清除」。
+ */
 export function clearAccount(dir: string = DATA_DIR): boolean {
-  return removeFile(path.join(dir, FILES.account));
+  return removeFile(path.join(dir, FILES.account), true);
 }
 
 /** 空状态：唯一来源，避免 loadState/resetState 各写一份、将来加字段时漏改。 */
@@ -145,13 +148,14 @@ export function clearQrState(dir: string = DATA_DIR): boolean {
   return removeFile(path.join(dir, FILES.qrState));
 }
 
-function removeFile(filePath: string): boolean {
+function removeFile(filePath: string, strict = false): boolean {
   try {
     fs.unlinkSync(filePath);
     return true;
   } catch (e) {
     if (isNotFound(e)) return false; // 本来就没有：正常
     console.error(`[wemind/wechat-ilink-core/store] failed to remove ${filePath}: ${String(e)}`);
+    if (strict) throw e instanceof Error ? e : new Error(String(e));
     return false;
   }
 }

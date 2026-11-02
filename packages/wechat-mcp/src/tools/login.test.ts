@@ -227,6 +227,17 @@ describe("logout", () => {
     expect(m.clearAccount).toHaveBeenCalled();
   });
 
+  it("删凭证失败 → logout_failed，不谎称已清除", async () => {
+    m.loadAccount.mockReturnValue({ botToken: "t", botId: "b", baseUrl: "https://x" });
+    m.clearAccount.mockImplementation(() => {
+      throw new Error("EPERM: operation not permitted");
+    });
+    const r = await logout();
+    expect(parse(r).status).toBe("logout_failed");
+    expect(parse(r).message).toMatch(/删不掉/);
+    expect(parse(r).message).toMatch(/别把它当成已登出/);
+  });
+
   it("notifyStop 内部已 best-effort 吞错，这里不会因它抛错而中断清理", async () => {
     m.loadAccount.mockReturnValue({ botToken: "t", botId: "b", baseUrl: "https://x" });
     // 真实 notifyStop 不会 reject（内部 try/catch）；这里验证 logout 没有额外的脆弱依赖

@@ -83,7 +83,7 @@ sequenceDiagram
 - `login_qrcode` 会生成三种扫码形式：二维码 URL、PNG 图片（`qrcode.png`）、终端 ANSI 文本（`qrcode.txt`），并在文案里**强制要求 Agent 自己 `cat qrcode.txt`** 把二维码显示给用户。
 - 二维码 TTL 为 5 分钟（`QR_TTL_MS`），新鲜则复用。
 - `check_qrcode_status` 在 `confirmed` 时保存凭证、清扫码态、清会话冷却、通知上线。
-- `logout`：通知下线 + 重置状态 + 清凭证。
+- `logout`：通知下线 + 重置状态 + 清凭证；凭证文件删不掉时返回 `logout_failed` 并说明原因，不谎称「已清除」。
 - 默认基础 URL 为 `https://ilinkai.weixin.qq.com`。
 
 ## 4.5 消息轮询（tools/messages.ts）
