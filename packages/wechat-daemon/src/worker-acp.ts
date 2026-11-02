@@ -109,6 +109,7 @@ export class WorkerConn {
   private seenUpdateTypes = new Set<string>();
   private seenTools = new Set<string>();
   private cwd?: string; // 本任务的工作目录（spawn 时生效；子进程 cwd 不可中途改）
+  private spawnError?: Error; // spawn 失败的真实原因（cwd 不存在/权限），kill() 用它答复而不是笼统的 killed
   /** spawn 后立刻回调：池据此把 pid 身份记录写入磁盘（`wemind stop` 靠它精确找到本进程）。 */
   onSpawn?: (conn: WorkerConn) => void;
 
@@ -155,9 +156,12 @@ export class WorkerConn {
         /* ignore */
       }
     }
+    const reason = this.spawnError
+      ? `进程启动失败：${this.spawnError.message}`
+      : "worker conn killed";
     for (const p of this.pending.values()) {
       p.clear();
-      p.reject(new Error("worker conn killed"));
+      p.reject(new Error(reason));
     }
     this.pending.clear();
     this.sessions.clear();
@@ -394,6 +398,7 @@ export class WorkerConn {
   private async ensureProcess(): Promise<void> {
     if (this.isAlive() && this.initialized) return;
     this.kill();
+    this.spawnError = undefined; // 上一次的 spawn 失败不能污染这一次
     const kept: string[] = [];
     const env = agentEnv(this.agent, WORKER_HOME, kept); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
     if (kept.length) dlog(`${this.id} env defaults kept from parent: ${kept.join(",")}`);
@@ -418,15 +423,16 @@ export class WorkerConn {
       if (this.child === proc) this.kill();
     });
     proc.on("error", (e) => {
+      this.spawnError = e instanceof Error ? e : new Error(String(e));
       dlog(`${this.id}(${this.agent.name}) error ${String(e)}`);
       if (this.child === proc) this.kill();
     });
     try {
       await this.request("initialize", { protocolVersion: 1, clientCapabilities: {} }, REQ_TIMEOUT);
     } catch (e) {
-      dlog(
-        `${this.id}(${this.agent.name}) initialize failed: ${String(e)}${acpArgsHint(this.agent)}`,
-      );
+      // spawn 失败（cwd 不存在/权限）不是「args 漏了 acp」，别贴那条误导性提示
+      const hint = this.spawnError ? "" : acpArgsHint(this.agent);
+      dlog(`${this.id}(${this.agent.name}) initialize failed: ${String(e)}${hint}`);
       throw e;
     }
     this.initialized = true;

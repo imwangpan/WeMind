@@ -272,6 +272,14 @@ describe("worker 进程池（真进程）", () => {
     expect(await Promise.all(pids.map((p) => waitDead(p)))).toEqual([true, true]);
   });
 
+  it("cwd 不存在：报真实原因（ENOENT），不被笼统的 worker conn killed 覆盖", async () => {
+    const g = await acquire(agent("kiro"), 1, path.join(root, "没有这个目录"));
+    expect(g.ok).toBe(false);
+    expect(g.ok === false && g.problem).not.toContain("worker conn killed");
+    expect(g.ok === false && g.problem).toMatch(/进程启动失败|ENOENT/);
+    expect(poolInfo()).toEqual([]);
+  });
+
   it("起进程失败：不乱留记录、如实报错（bin 不存在）", async () => {
     const bad = { ...agent("kiro"), bin: path.join(root, "没有这个.exe") } as ResolvedAgent;
     const g = await acquire(bad, 1);

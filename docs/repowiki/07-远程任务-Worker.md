@@ -137,6 +137,8 @@ stateDiagram-v2
 
 子进程 cwd 在 spawn 时固定，**且 cwd 是连接身份的一部分**（`connKey = agent 身份 + 实际生效 cwd`）：换 `--cwd` 会起新进程，绝不会复用停在上一个项目里的旧进程。中断恢复靠 `reset()` 后下次 `ensureSession` 走 `session/load`（不支持时 `session/resume`）。
 
+spawn 失败（cwd 不存在/权限不足）时，`WorkerConn` 把 `error` 事件的真实原因带进 pending 请求的拒绝信息（`进程启动失败：spawn … ENOENT`），不再被笼统的 `worker conn killed` 覆盖，也不会误贴「args 漏了 acp」的提示。
+
 ### worker 沙箱
 
 `WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain 沙箱**策略相反**：worker 是无人值守的任务执行机，继承 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）—— 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。写入磁盘方式按 agent：kiro/opencode 由 `applyWorkerSandbox` 写沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。记忆/技能（`mirrorRealKiro`）与 settings（`syncSettings`，含模型/信任）继承与 brain 一致；预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`，关掉 pi-acp 当消息发出来的启动横幅）也只补缺失键、用户显式设过就保留。
