@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { writeJsonAtomic } from "./atomic-json.js";
 import type { ResolvedAgent } from "./brain-agents.js";
 
 /**
@@ -36,11 +37,7 @@ export function writeBrainState(dir: string, ag: ResolvedAgent): void {
     startedAt: Date.now(),
   };
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, BRAIN_RUNTIME_FILE);
-    const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(body, null, 2) + "\n", "utf-8");
-    fs.renameSync(tmp, file);
+    writeJsonAtomic(path.join(dir, BRAIN_RUNTIME_FILE), body);
   } catch {
     /* best-effort */
   }

@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import path from "node:path";
 
+import { writeJsonAtomic } from "./atomic-json.js";
 import { brainPidMarkers } from "./proc-identity.js";
 import type { ResolvedAgent } from "./brain-agents.js";
 
@@ -107,11 +107,8 @@ export function writePidRecords(file: string, recs: PidRecord[]): void {
     /* 文件不存在 → 继续写 */
   }
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.tmp`;
     const body = recs.length === 1 ? recs[0] : recs;
-    fs.writeFileSync(tmp, JSON.stringify(body, null, 2) + "\n", "utf-8");
-    fs.renameSync(tmp, file);
+    writeJsonAtomic(file, body);
   } catch {
     /* best-effort：记录写失败不该影响起进程 */
   }

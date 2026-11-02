@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
+import { writeJsonAtomic } from "./atomic-json.js";
+
 /**
  * 账号级「大脑」持久配置（brain.json）。
  *
@@ -124,13 +126,9 @@ export function loadBrainConfig(dir: string = DATA_DIR): BrainConfig | null {
   return cfg;
 }
 
-/** 原子写入账号的大脑配置（临时文件 + rename，避免读到半截）。 */
+/** 原子写入账号的大脑配置（唯一临时文件 + rename，避免读到半截、也不与其它写者抢同一个 tmp）。 */
 export function saveBrainConfig(cfg: BrainConfig, dir: string = DATA_DIR): void {
-  fs.mkdirSync(dir, { recursive: true });
-  const fp = brainConfigPath(dir);
-  const tmp = `${fp}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
-  fs.renameSync(tmp, fp);
+  writeJsonAtomic(brainConfigPath(dir), cfg);
 }
 
 /**

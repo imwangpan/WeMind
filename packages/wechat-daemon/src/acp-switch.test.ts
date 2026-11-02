@@ -127,7 +127,6 @@ beforeEach(() => {
   resetSlotsForTest();
   restart();
   fs.rmSync(path.join(dataDir, "brain.json"), { force: true });
-  fs.rmSync(path.join(dataDir, "brain.json.tmp"), { recursive: true, force: true });
   fs.rmSync(pidFile, { force: true });
   fs.rmSync(sessionsFile, { force: true });
   fs.rmSync(path.join(dataDir, "session-registry.json"), { force: true });
@@ -321,12 +320,23 @@ describe("switchBrain", () => {
 
   it("写盘失败：槽位仍是旧大脑，答复「已退回」不是撒谎", async () => {
     setup();
-    fs.mkdirSync(path.join(dataDir, "brain.json.tmp")); // 逼 saveBrainConfig 的 writeFileSync 失败
-    const out = await switchBrain("kiro", { userId: "u1", dir: dataDir });
+    // 临时文件名现在带 pid/时间/随机后缀，没法预先占位；直接在 rename 到 brain.json 这一步注入失败
+    const realRename = fs.renameSync;
+    const spy = vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (String(to).endsWith("brain.json")) throw new Error("EACCES: simulated");
+      return realRename(from, to);
+    });
+    let out: Awaited<ReturnType<typeof switchBrain>>;
+    try {
+      out = await switchBrain("kiro", { userId: "u1", dir: dataDir });
+    } finally {
+      spy.mockRestore();
+    }
     expect(out.ok).toBe(false);
     expect(out.ok === false && out.problem).toContain("已退回原来那个「opencode」");
     expect(getAgent("brain").name).toBe("opencode"); // 先落盘再换槽位：没写成功就不换
     expect(loadBrainConfig(dataDir)?.agent).toBe("opencode");
+    expect(fs.readdirSync(dataDir).some((f) => f.includes("brain.json.tmp-"))).toBe(false); // 失败不留临时文件
     expect(await askBrain("u1", "还在吗")).toContain("答:"); // 旧大脑照常答
   });
 });

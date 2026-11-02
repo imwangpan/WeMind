@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { writeJsonAtomic } from "./atomic-json.js";
 import { formatWhen } from "./session-registry.js";
 
 /**
@@ -73,13 +74,9 @@ export function loadHandoff(dir: string = DATA_DIR, now: number = Date.now()): H
   return h.expiresAt > now ? h : null;
 }
 
-/** 原子写摘要（tmp + rename）。 */
+/** 原子写摘要（唯一临时文件 + rename）。 */
 export function saveHandoff(h: Handoff, dir: string = DATA_DIR): void {
-  fs.mkdirSync(dir, { recursive: true });
-  const fp = handoffPath(dir);
-  const tmp = `${fp}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(h, null, 2) + "\n", "utf-8");
-  fs.renameSync(tmp, fp);
+  writeJsonAtomic(handoffPath(dir), h);
 }
 
 /** 删摘要（注入的那回合成功后调用）；返回是否确有文件。 */

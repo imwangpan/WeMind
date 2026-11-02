@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
+import { writeJsonAtomic } from "./atomic-json.js";
+
 /**
  * brainstorm/worker 共用的 session 映射键规则：`<agent>:<key>`。
  * 换大脑后各 agent 的会话互不覆盖，切回原大脑仍能 session/load 回原上下文。
@@ -67,12 +69,9 @@ export function backupCorruptSessionMap(file: string): string | undefined {
   }
 }
 
-/** 原子写当前会话表（tmp + rename）：这个文件在关键路径上（ensureSession → session/load），半截 JSON 等于「所有会话丢失」。 */
+/** 原子写当前会话表（唯一临时文件 + rename）：这个文件在关键路径上（ensureSession → session/load），半截 JSON 等于「所有会话丢失」。 */
 export function writeSessionMap(file: string, map: Record<string, string>): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(map, null, 2) + "\n", "utf-8");
-  fs.renameSync(tmp, file);
+  writeJsonAtomic(file, map);
 }
 
 /** 清掉某个键的当前会话记录（如「删除会话」删的正是当前那条）；返回是否确有改动。 */

@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
+
+import { writeJsonAtomic } from "./atomic-json.js";
 import {
   brainSessionMapPath,
   clearSessionPointer,
@@ -102,11 +104,7 @@ export function loadRegistry(dir: string = DATA_DIR, now: number = Date.now()): 
 /** 原子写登记表。写失败只记日志、**不抛**：登记表是派生元数据，绝不能因为一次磁盘问题拖垮一个回合或一次启动。 */
 export function saveRegistry(reg: SessionRegistry, dir: string = DATA_DIR): void {
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    const fp = registryPath(dir);
-    const tmp = `${fp}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(reg, null, 2) + "\n", "utf-8");
-    fs.renameSync(tmp, fp);
+    writeJsonAtomic(registryPath(dir), reg);
   } catch (e) {
     console.error("[wemind/wechat-daemon] session-registry save failed:", String(e));
   }
