@@ -283,6 +283,36 @@ describe("brain set --model（模型覆盖写入磁盘）", () => {
   });
 });
 
+describe("agentLabel（list 的 agent 列）", () => {
+  it("daemon 没跑时只看配置；运行中优先显示实际大脑，不一致时两者都写", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-manage-label-"));
+    try {
+      fs.writeFileSync(path.join(dir, "brain.json"), JSON.stringify({ agent: "deepseek" }));
+      expect(agentLabel(dir)).toBe("deepseek");
+      expect(
+        agentLabel(dir, {
+          agent: "deepseek",
+          source: "file",
+          bin: "dsh.cmd",
+          args: [],
+          startedAt: 1,
+        }),
+      ).toBe("deepseek");
+      expect(
+        agentLabel(dir, {
+          agent: "cline",
+          source: "env",
+          bin: "cline.cmd",
+          args: ["--acp"],
+          startedAt: 1,
+        }),
+      ).toBe("cline（运行，来源 env；配置 deepseek）");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe.skipIf(!isPosix)("descendantPids（POSIX 进程树）", () => {
   it("能查到子进程与孙进程；叶子 pid 返回空", async () => {
     // 父 → 子 → 孙，每层都用 node 起下一层，命令行稳定可查
@@ -311,36 +341,6 @@ describe.skipIf(!isPosix)("descendantPids（POSIX 进程树）", () => {
       parent.on("error", reject);
     });
     spawned.push(childPid);
-
-    describe("agentLabel（list 的 agent 列）", () => {
-      it("daemon 没跑时只看配置；运行中优先显示实际大脑，不一致时两者都写", () => {
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-manage-label-"));
-        try {
-          fs.writeFileSync(path.join(dir, "brain.json"), JSON.stringify({ agent: "deepseek" }));
-          expect(agentLabel(dir)).toBe("deepseek");
-          expect(
-            agentLabel(dir, {
-              agent: "deepseek",
-              source: "file",
-              bin: "dsh.cmd",
-              args: [],
-              startedAt: 1,
-            }),
-          ).toBe("deepseek");
-          expect(
-            agentLabel(dir, {
-              agent: "cline",
-              source: "env",
-              bin: "cline.cmd",
-              args: ["--acp"],
-              startedAt: 1,
-            }),
-          ).toBe("cline（运行，来源 env；配置 deepseek）");
-        } finally {
-          fs.rmSync(dir, { recursive: true, force: true });
-        }
-      });
-    });
 
     const desc = descendantPids(parent.pid as number);
     expect(desc).toContain(childPid);
