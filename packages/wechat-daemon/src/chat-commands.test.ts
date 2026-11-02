@@ -261,4 +261,20 @@ describe("renderHelp：按角色裁剪", () => {
     expect(cli).toContain("wemind session resume <ref>");
     expect(cli).toContain("wemind task-list");
   });
+
+  it("CLI 形态的会话/任务命令都标出可选的账号选择", () => {
+    const cli = renderHelp("owner", "cli");
+    for (const s of [
+      "wemind session new [名字] [<key|label>]",
+      "wemind session list [--page N] [<key|label>]",
+      "wemind session resume <ref> [<key|label>]",
+      "wemind session rename <ref> <名字> [<key|label>]",
+      "wemind session delete <ref> [<key|label>]",
+      'wemind task "正文" [--agent <名字>] [--cwd 目录] [<key|label>]',
+      'wemind task-reply <编号> "正文" [<key|label>]',
+      "wemind task-list [<key|label>]",
+      "wemind task-stop [编号|全部] [<key|label>]",
+    ])
+      expect(cli).toContain(s);
+  });
 });

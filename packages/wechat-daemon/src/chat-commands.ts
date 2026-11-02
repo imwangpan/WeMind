@@ -122,7 +122,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     section: "session",
     zh: "新会话 [名字]",
     slash: "/new [名字]",
-    cli: "wemind session new [名字]",
+    cli: "wemind session new [名字] [<key|label>]",
     brief: "清空上下文重开（可命名）",
     match: (t) => {
       const m = t.match(/^(?:新会话|重置|清空上下文|\/new|new\s*session)(?:\s+([\s\S]+))?$/i);
@@ -136,7 +136,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     section: "session",
     zh: "会话列表 [页]",
     slash: "/sessions [页]",
-    cli: "wemind session list [--page N]",
+    cli: "wemind session list [--page N] [<key|label>]",
     brief: "列出本人会话（← 当前 标当前）",
     match: (t) => {
       const m = t.match(
@@ -155,7 +155,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     section: "session",
     zh: "恢复会话 <序号|名字|id前缀>",
     slash: "/resume <同上>",
-    cli: "wemind session resume <ref>",
+    cli: "wemind session resume <ref> [<key|label>]",
     brief: "切回旧会话（失败明确报错，不静默新建）",
     match: (t) => {
       const m = t.match(/^(?:恢复会话|回到会话|切换会话|\/resume)\s+([\s\S]+)$/i);
@@ -167,7 +167,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     section: "session",
     zh: '重命名会话 <序号|名字|"带空格的名字"> <新名字>',
     slash: "/rename <同上>",
-    cli: "wemind session rename <ref> <名字>",
+    cli: "wemind session rename <ref> <名字> [<key|label>]",
     brief: "给会话起名字（命名后不会被淘汰；旧名字带空格时用引号括起来）",
     match: (t) => {
       // 旧名字可能含空格：用 "" / “” / 「」 括起来才能和后面的新名字分开（§F81）。序号、单段名字照旧不用引号。
@@ -185,7 +185,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     section: "session",
     zh: "删除会话 <序号|名字|id前缀>",
     slash: "/delete <同上>",
-    cli: "wemind session delete <ref>",
+    cli: "wemind session delete <ref> [<key|label>]",
     brief: "只删登记（agent 侧的历史记录不动）",
     match: (t) => {
       const m = t.match(/^(?:删除会话|删会话|\/delete|\/del)\s+([\s\S]+)$/i);
@@ -261,7 +261,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     section: "task",
     zh: "任务 [<agent 名>：]正文",
     slash: "/task [<agent 名>] 正文",
-    cli: 'wemind task "正文" [--agent <名字>]',
+    cli: 'wemind task "正文" [--agent <名字>] [--cwd 目录] [<key|label>]',
     brief: "派发新任务（有活跃任务时发给它）；带 agent 名就由它执行（只影响这一条）",
     match: (t) => {
       // ① `任务：正文` / `task: 正文`（沿用旧写法，不带 agent 名）
@@ -291,7 +291,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     section: "task",
     zh: "#<编号> 正文",
     slash: "/reply <编号> 正文",
-    cli: 'wemind task-reply <编号> "正文"',
+    cli: 'wemind task-reply <编号> "正文" [<key|label>]',
     brief: "给指定编号的任务回话（回任务都用它；无前缀消息走大脑）",
     match: (t) => {
       const m = t.match(/^(?:[#＃](\d+)[\s：]+|\/reply\s+(\d+)\s+)([\s\S]+)$/i);
@@ -306,7 +306,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     section: "task",
     zh: "任务列表",
     slash: "/tasks",
-    cli: "wemind task-list",
+    cli: "wemind task-list [<key|label>]",
     brief: "编号 / agent / 状态 / 轮次 / 已运行",
     match: (t) => (/^(?:任务列表|任务清单|列出任务|\/tasks?)$/i.test(t) ? { kind: "tasks" } : null),
   },
@@ -315,7 +315,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     section: "task",
     zh: "结束任务 [编号]、结束全部任务",
     slash: "/stop [编号|全部]",
-    cli: "wemind task-stop [编号|全部]",
+    cli: "wemind task-stop [编号|全部] [<key|label>]",
     brief: "结束任务（进程留着复用）",
     match: (t) => {
       if (/^(?:结束全部任务|停止全部任务|\/stop\s+(?:all|全部))$/i.test(t))

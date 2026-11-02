@@ -263,7 +263,7 @@ graph LR
 | `task-reply <编号> "<内容>" [<key\|label>]` | 回复/发话给任务（编号也可写成 `"#2 继续"` 放在第一个参数里；不给编号 = 唯一那条） |
 | `task-stop [<编号\|全部\|all>] [<key\|label>]` | 结束任务（不给编号 = 唯一那条，多条并存回一份编号清单） |
 | `brain switch <agent 名\|auto> [--worker]` | 热切换对话大脑 / 设默认任务大脑 |
-| `session list\|new\|resume\|rename\|delete` | 会话管理（走控制桥） |
+| `session list\|new\|resume\|rename\|delete [<key\|label>]` | 会话管理（走控制桥；省略账号 = 默认账号） |
 | `brain handoff` | 生成交接摘要 |
 
 两个入口最终都汇到同一套 task-manager，微信侧行为不变。
