@@ -58,7 +58,7 @@ server.registerTool(
   {
     description: `Check whether the QR code from login_qrcode has been scanned and confirmed.
 
-Call this repeatedly until it returns status 'confirmed'. If it returns 'expired', call login_qrcode again for a fresh code. If it returns 'need_verifycode' or an IDC-redirect status, the MCP login flow cannot complete — tell the user to run the "wemind login" CLI command instead.`,
+Call this repeatedly until it returns status 'confirmed'. If it returns 'expired', call login_qrcode again for a fresh code. If it returns 'need_verifycode' or an IDC-redirect status, the MCP login flow cannot complete — tell the user to run the "wemind login" CLI command (or "npx -y @wemind/cli login" if the CLI is not installed) in a terminal instead.`,
     inputSchema: checkQrcodeStatusSchema,
   },
   async () => {

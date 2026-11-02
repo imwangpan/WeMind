@@ -38,7 +38,7 @@
 | 工具                  | 说明                                                      | 代码 description（简要转述，非逐字原文）                                                                                                                                                                |
 | --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `login_qrcode`        | 取登录二维码（返回链接，并在数据目录生成 PNG 与终端文本） | Get a WeChat login QR code. Scan it with WeChat to connect the bot. … You MUST show all three returned forms (image URL / PNG file / terminal text file) to the user.                                   |
-| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command instead. |
+| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command (or `npx -y @wemind/cli login`) instead. |
 | `logout`              | 登出并清除已保存的凭证                                    | Log out the current WeChat bot session. … Clears saved credentials, runtime state and any pending QR login. Only call this when the user asks to log out or wants to switch accounts.                   |
 | `get_messages`        | 长轮询收消息（`wait=true` 阻塞直到收到，最长 7 天；图片/视频/文件只给占位符，语音带微信转写） | Poll for new WeChat messages. Always call with `wait=true` to block until a message arrives.（后接 4 步 typing 工作流；媒体不可下载）                                                                                 |
 | `send_text_message`   | 发文本消息（`state="generating"` 发进度、默认 `finish` 发最终答复） | Send a text message to a WeChat user. … Each call is a separate message; use state="generating" for interim updates, state="finish" (default) for the final reply.                                      |
@@ -57,6 +57,7 @@
 ## 注意
 
 - 凭证存在 `~/.wemind/<account>/account.json`（**Windows 下为明文**，请用文件夹权限/磁盘加密保护）。
+- **与 CLI 账号体系对接**：标准目录（默认 `~/.wemind/default`、未设 `WECHAT_DATA_DIR`）登录成功后会自动登记进 `~/.wemind/accounts.json`，`wemind list` / `start` 可直接看到；退登时按 botId 核对后注销条目。自定义 `WECHAT_DATA_DIR` 不登记（注册表指向 `~/.wemind/<key>`，登记会指错目录）。
 - iLink **不能主动发起对话**，只能在收到用户消息的会话上下文内回复。
 - 这是腾讯新开放的插件通道，官方保留随时停服的权利，勿用于关键业务；需较新微信客户端并启用 ClawBot 插件。
 

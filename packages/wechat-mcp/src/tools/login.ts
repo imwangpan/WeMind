@@ -18,6 +18,11 @@ import {
   clearQrState,
   resetState,
   DATA_DIR,
+  ACCOUNT_KEY,
+  accountDir,
+  registerAccount,
+  unregisterAccount,
+  loadRegistry,
 } from "@wemind/wechat-ilink-core";
 import type { QRStatusResponse } from "@wemind/wechat-ilink-core";
 
@@ -27,6 +32,48 @@ const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 
 /** 本地二维码 TTL：超过即视为过期，重新取一张，避免 Agent 拿着废码反复轮询。 */
 const QR_TTL_MS = 5 * 60_000;
+
+/**
+ * MCP 与 CLI 的账号体系对接（F60）。
+ *
+ * MCP 形态把凭证写在 `DATA_DIR`（默认 `~/.wemind/default`），但不经过 `wemind login` 的暂存 → 按 botId 归档流程，
+ * 因此 `accounts.json` 里没有它：用户之后运行 `wemind list` / `wemind start` 看不到这个已登录账号。
+ * 只要 MCP 的目录就是 CLI 认可的标准账号目录（`accountDir(ACCOUNT_KEY)`，即没有自定义 WECHAT_DATA_DIR），
+ * 登录后按这个目录名登记一条，退登时按 botId 核对后再注销。
+ * 自定义 `WECHAT_DATA_DIR` 时不登记——注册表指向的是 `accountDir(key)`，登了反而会让 CLI 去错目录找凭证。
+ */
+function isCliAccountLayout(): boolean {
+  try {
+    return path.resolve(DATA_DIR) === path.resolve(accountDir(ACCOUNT_KEY));
+  } catch {
+    return false;
+  }
+}
+
+function registerCliAccount(acc: { botId: string; userId: string; baseUrl: string }): void {
+  if (!isCliAccountLayout()) return;
+  try {
+    registerAccount({
+      key: ACCOUNT_KEY,
+      botId: acc.botId,
+      userId: acc.userId,
+      baseUrl: acc.baseUrl,
+      label: ACCOUNT_KEY,
+    });
+  } catch (e) {
+    // 登记失败不影响登录本身（凭证已写好）；只记日志，用户仍可 wemind adopt 手动接管。
+    console.error("[wemind/wechat-mcp] account registry update failed:", String(e));
+  }
+}
+
+function unregisterCliAccount(botId: string | undefined): void {
+  if (!botId || !isCliAccountLayout()) return;
+  try {
+    if (loadRegistry().accounts[ACCOUNT_KEY]?.botId === botId) unregisterAccount(ACCOUNT_KEY);
+  } catch (e) {
+    console.error("[wemind/wechat-mcp] account registry cleanup failed:", String(e));
+  }
+}
 
 function isQrFresh(createdAt: number): boolean {
   return Date.now() - createdAt < QR_TTL_MS;
@@ -161,6 +208,7 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
         baseUrl,
         savedAt: Date.now(),
       });
+      registerCliAccount({ botId: ilink_bot_id, userId: ilink_user_id, baseUrl });
       clearQrState();
 
       // 重新登录成功：解掉该账号的 -14 冷却，并通知服务端上线（notifyStart 自身 best-effort）
@@ -183,7 +231,7 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
     case "verify_code_blocked":
       return unsupportedResult(
         statusResponse.status,
-        "本次登录需要输入验证码，MCP 登录流程不支持该步骤。请改用 `wemind login` 命令行完成登录，或稍后重试。",
+        "本次登录需要输入验证码，MCP 登录流程不支持该步骤。请在终端用 CLI 完成登录（已安装 `@wemind/cli` 时运行 `wemind login`；没装可运行 `npx -y @wemind/cli login`），或稍后重试。",
       );
 
     case "scaned_but_redirect":
@@ -193,7 +241,7 @@ export async function checkQrcodeStatus(): Promise<ToolResult> {
         : "";
       return unsupportedResult(
         statusResponse.status,
-        `本次登录需要 IDC 重定向${host}，MCP 登录流程不支持该步骤。请改用 \`wemind login\` 命令行完成登录。`,
+        `本次登录需要 IDC 重定向${host}，MCP 登录流程不支持该步骤。请在终端用 CLI 完成登录（已安装 \`@wemind/cli\` 时运行 \`wemind login\`；没装可运行 \`npx -y @wemind/cli login\`）。`,
       );
     }
 
@@ -216,6 +264,7 @@ export const logoutSchema = z.object({});
 
 export async function logout(): Promise<ToolResult> {
   const account = loadAccount();
+  const botId = account?.botId;
   if (account?.botToken) {
     // notifyStop 内部已是 best-effort，失败只记日志；这里不再重复吞错
     await notifyStop({ baseUrl: account.baseUrl, token: account.botToken });
@@ -232,5 +281,6 @@ export async function logout(): Promise<ToolResult> {
     });
   }
 
+  unregisterCliAccount(botId);
   return jsonResult({ status: "logged_out", message: "已登出，凭证已清除。" });
 }

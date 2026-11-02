@@ -7,6 +7,7 @@ import path from "node:path";
 // DATA_DIR 用真实临时目录：二维码 PNG/TXT 的写入磁盘与「文件缺失时重渲染」都要真的读写文件。
 // 目录必须在 vi.hoisted 里创建——vi.mock 工厂会被提升到 import 之前，引用普通顶层变量会 TDZ 报错。
 const m = vi.hoisted(() => ({
+  root: undefined as unknown as string,
   dataDir: undefined as unknown as string,
   fetchQRCode: vi.fn(),
   pollQRStatus: vi.fn(),
@@ -20,11 +21,20 @@ const m = vi.hoisted(() => ({
   saveQrState: vi.fn(),
   clearQrState: vi.fn(),
   resetState: vi.fn(),
+  registerAccount: vi.fn(),
+  unregisterAccount: vi.fn(),
+  loadRegistry: vi.fn(),
 }));
 // 用 getter 而不是取值记录：登录模块在 import 时就绑定 DATA_DIR，若这里给记录，会拿到 hoisted 阶段的 undefined。getter 保证每次读到的都是最新值。
-m.dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-login-"));
+m.root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-login-"));
+// 标准 CLI 布局：DATA_DIR = accountDir("default")，登录后应登记进 accounts.json
+m.dataDir = path.join(m.root, "default");
+fs.mkdirSync(m.dataDir, { recursive: true });
 vi.mock("@wemind/wechat-ilink-core", () => ({
   ...m,
+  ACCOUNT_KEY: "default",
+  // 函数在调用时读 m.root（工厂执行时它还没赋值，不能像常量一样提前捕获）
+  accountDir: (key: string) => path.join(m.root, key),
   get DATA_DIR() {
     return m.dataDir;
   },
@@ -36,6 +46,9 @@ import { checkQrcodeStatus, loginQrcode, logout } from "./login.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  m.clearAccount.mockReset();
+  m.loadRegistry.mockReset();
+  m.loadRegistry.mockReturnValue({ accounts: {} });
   m.loadAccount.mockReturnValue(null); // 未登录
   m.loadQrState.mockReturnValue({ qrcode: "qr", qrcodeUrl: "url", createdAt: Date.now() }); // 新鲜二维码
 });
@@ -108,6 +121,33 @@ describe("checkQrcodeStatus 正常态（保持原行为）", () => {
       baseUrl: "https://ilinkai.weixin.qq.com",
       token: "bt",
     });
+    // 标准布局：登记进 CLI 的 accounts.json，`wemind list` 才能看到这个账号
+    expect(m.registerAccount).toHaveBeenCalledWith({
+      key: "default",
+      botId: "bid",
+      userId: "uid",
+      baseUrl: "https://ilinkai.weixin.qq.com",
+      label: "default",
+    });
+  });
+
+  it("自定义 WECHAT_DATA_DIR（非 CLI 标准目录）：不登记（注册表会指向错目录）", async () => {
+    const saved = m.dataDir;
+    m.dataDir = path.join(m.root, "custom-data");
+    fs.mkdirSync(m.dataDir, { recursive: true });
+    try {
+      m.pollQRStatus.mockResolvedValue({
+        status: "confirmed",
+        bot_token: "bt",
+        ilink_bot_id: "bid",
+        ilink_user_id: "uid",
+      });
+      expect(parse(await checkQrcodeStatus()).status).toBe("confirmed");
+      expect(m.registerAccount).not.toHaveBeenCalled();
+    } finally {
+      m.dataDir = saved;
+      fs.rmSync(path.join(m.root, "custom-data"), { recursive: true, force: true });
+    }
   });
 
   it("confirmed 但服务端数据不全 → 抛错且不写入磁盘半份凭证", async () => {
@@ -225,6 +265,20 @@ describe("logout", () => {
     expect(parse(await logout()).status).toBe("logged_out");
     expect(m.notifyStop).not.toHaveBeenCalled();
     expect(m.clearAccount).toHaveBeenCalled();
+  });
+
+  it("登出成功且注册表条目就是本账号 → 注销条目（目录保留）", async () => {
+    m.loadAccount.mockReturnValue({ botToken: "t", botId: "b", userId: "u", baseUrl: "https://x" });
+    m.loadRegistry.mockReturnValue({ accounts: { default: { key: "default", botId: "b" } } });
+    expect(parse(await logout()).status).toBe("logged_out");
+    expect(m.unregisterAccount).toHaveBeenCalledWith("default");
+  });
+
+  it("注册表条目是别的 botId → 不动（别删别人的账号）", async () => {
+    m.loadAccount.mockReturnValue({ botToken: "t", botId: "b", userId: "u", baseUrl: "https://x" });
+    m.loadRegistry.mockReturnValue({ accounts: { default: { key: "default", botId: "另一个" } } });
+    expect(parse(await logout()).status).toBe("logged_out");
+    expect(m.unregisterAccount).not.toHaveBeenCalled();
   });
 
   it("删凭证失败 → logout_failed，不谎称已清除", async () => {

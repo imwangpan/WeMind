@@ -180,6 +180,8 @@ AI Agent 调用 `login_qrcode` 生成二维码，你可以通过以下方式扫�
 
 > **提示**：如果手机扫码后页面一直加载，请切换到**移动数据网络**（关闭 WiFi）。
 
+> **MCP 登录也会登记账号（2026-11-02）**：登录成功后，如果数据目录就是 CLI 的标准账号目录（默认 `~/.wemind/default`，且没设 `WECHAT_DATA_DIR`），MCP 会把它写进 `~/.wemind/accounts.json`——之后 `wemind list` / `wemind start` 能看到这个账号。自定义 `WECHAT_DATA_DIR` 时不登记（CLI 注册表指向 `~/.wemind/<key>`，硬登记会让它去错目录找凭证）。需要验证码 / IDC 重定向时，MCP 会提示改用 CLI 登录（`wemind login`，没装可用 `npx -y @wemind/cli login`）。
+
 ### 2. 确认登录
 
 Agent 调用 `check_qrcode_status` 确认登录状态。
@@ -198,7 +200,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | 工具                  | 说明                                                      | 代码 description（简要转述，非逐字原文）                                                                                                                                                                |
 | --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `login_qrcode`        | 取登录二维码（返回 URL，并在数据目录生成 PNG 与终端文本） | Get a WeChat login QR code. Scan it with WeChat to connect the bot. … You MUST show all three returned forms (image URL / PNG file / terminal text file) to the user.                                   |
-| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command instead. |
+| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command (or `npx -y @wemind/cli login`) instead. |
 | `logout`              | 登出并清除已保存的凭证                                    | Log out the current WeChat bot session. … Clears saved credentials, runtime state and any pending QR login. Only call this when the user asks to log out or wants to switch accounts.                   |
 | `get_messages`        | 长轮询收消息（`wait=true` 阻塞直到收到）                  | Poll for new WeChat messages. Always call with `wait=true` to block until a message arrives.（后接 4 步 typing 工作流）                                                                                 |
 | `send_text_message`   | 发文本消息                                                | Send a text message to a WeChat user. … iLink bots cannot initiate conversations: if you have never received a message from that user, this call fails.                                                 |
