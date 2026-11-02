@@ -12,6 +12,7 @@ import {
   runManage,
   taskAckOutcome,
   deleteGuard,
+  stopSummary,
 } from "./manage.js";
 import { isAlive } from "./proc-identity.js";
 
@@ -74,7 +75,7 @@ describe("resolveTaskCwd（--cwd 相对路径按用户当前目录解析）", ()
 });
 
 describe("deleteGuard（daemon 没停干净不删目录）", () => {
-  it("daemon 还活着 → 拒绝并给出下一步", () => {
+  it("还有进程活着 → 拒绝并给出下一步", () => {
     const msg = deleteGuard("abc", true);
     expect(msg).toMatch(/仍在运行/);
     expect(msg).toMatch(/wemind stop abc/);
@@ -82,6 +83,26 @@ describe("deleteGuard（daemon 没停干净不删目录）", () => {
 
   it("已停止 → 放行", () => {
     expect(deleteGuard("abc", false)).toBeNull();
+  });
+});
+
+describe("stopSummary（stop 的实际结果决定能否删目录）", () => {
+  it("kill 后仍有目标存活 → ok=false，文案点名进程", () => {
+    const r = stopSummary(["daemon 1"], [], ["daemon 1"]);
+    expect(r.ok).toBe(false);
+    expect(r.msg).toMatch(/未能停止 daemon 1/);
+    expect(r.msg).toMatch(/仍在运行/);
+  });
+
+  it("跳过非本程序不算失败；全部停止 → ok=true", () => {
+    const r = stopSummary(["daemon 1"], ["runner 2"], []);
+    expect(r.ok).toBe(true);
+    expect(r.msg).toContain("已停止 daemon 1");
+    expect(r.msg).toContain("跳过 runner 2");
+  });
+
+  it("没有任何候选 → 明确「无运行中的进程」", () => {
+    expect(stopSummary([], [], [])).toEqual({ msg: "无运行中的进程", ok: true });
   });
 });
 

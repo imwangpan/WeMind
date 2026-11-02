@@ -180,10 +180,27 @@ function startDaemon(key: string, runner?: string): void {
   console.log(r.msg);
 }
 
+export type StopResult = {
+  msg: string;
+  /** kill 后所有目标都确认不在了。false 时调用方**不能**删账号目录（进程可能还在写）。 */
+  ok: boolean;
+};
+
+/** 汇总 stop 的三类结果。`survivors` 是 kill 后仍活着的目标；导出仅供单测。 */
+export function stopSummary(stopped: string[], skipped: string[], survivors: string[]): StopResult {
+  const parts: string[] = [];
+  if (stopped.length) parts.push(`已停止 ${stopped.join(" + ")}`);
+  if (skipped.length)
+    parts.push(`跳过 ${skipped.join(" + ")}（非本程序，未杀；已清陈旧 pid 文件）`);
+  if (survivors.length) parts.push(`未能停止 ${survivors.join(" + ")}（仍在运行）`);
+  return { msg: parts.length ? parts.join("；") : "无运行中的进程", ok: survivors.length === 0 };
+}
+
 /**
  * 停止某账号的常驻：先 pm2 delete（方案 a），再按 pid 兜底杀 wrapper/daemon/brain/worker（兼容直接启动的）。停的是**整条链**：除列出的进程外，还连带它们的子进程树。
+ * 只有确认全部目标都停下才清 pid 文件：否则 `delete` 的存活检查会在文件被删后失去依据（旧实现先删文件再查，必然判「已停止」）。
  */
-function stopDaemon(key: string): string {
+function stopDaemon(key: string): StopResult {
   pm2Stop(key); // best-effort：停掉 pm2 托管的 app（若有）
   const dir = accountDir(key);
   const ag = resolveAgent(loadBrainConfig(dir));
@@ -218,12 +235,14 @@ function stopDaemon(key: string): string {
   const stopped: string[] = [];
   const skipped: string[] = [];
   const toKill: number[] = [];
+  const nameOf = new Map<number, string>();
   const seen = new Set<number>();
   for (const c of cand) {
     if (!c.pid || seen.has(c.pid) || !isAlive(c.pid)) continue;
     seen.add(c.pid);
     if (matchesMarkers(lines.get(c.pid), c.markers)) {
       toKill.push(c.pid);
+      nameOf.set(c.pid, c.name);
       stopped.push(`${c.name} ${c.pid}`);
     } else {
       skipped.push(`${c.name} ${c.pid}`); // 活着的 pid 但不是我们的（pid 复用）→ 不杀
@@ -231,25 +250,26 @@ function stopDaemon(key: string): string {
   }
   // 身份校验都通过了才动手：一次性杀掉这些进程**及其子进程树**（见 killProcessTrees 注释）。
   killProcessTrees(toKill);
-  for (const f of [
-    "wrapper.pid",
-    "daemon.pid",
-    "brain.pid",
-    "worker.pid",
-    "workers.pid.json",
-    BRAIN_RUNTIME_FILE,
-  ]) {
-    try {
-      fs.unlinkSync(path.join(dir, f));
-    } catch {
-      /* ignore */
+  // kill 之后仍活着的目标（权限不足、进程卡住等）：保留 pid 文件让下一次 stop 还能找到它。
+  const survivors = toKill
+    .filter((pid) => isAlive(pid))
+    .map((pid) => `${nameOf.get(pid) ?? "进程"} ${pid}`);
+  if (!survivors.length)
+    for (const f of [
+      "wrapper.pid",
+      "daemon.pid",
+      "brain.pid",
+      "worker.pid",
+      "workers.pid.json",
+      BRAIN_RUNTIME_FILE,
+    ]) {
+      try {
+        fs.unlinkSync(path.join(dir, f));
+      } catch {
+        /* ignore */
+      }
     }
-  }
-  const parts: string[] = [];
-  if (stopped.length) parts.push(`已停止 ${stopped.join(" + ")}`);
-  if (skipped.length)
-    parts.push(`跳过 ${skipped.join(" + ")}（非本程序，未杀；已清陈旧 pid 文件）`);
-  return parts.length ? parts.join("；") : "无运行中的进程";
+  return stopSummary(stopped, skipped, survivors);
 }
 
 /** 旧流程的固定暂存目录：仅 `wimind finalize` 兼容命令使用；新登录走 createLoginStagingDir()。 */
@@ -324,7 +344,7 @@ async function cmdLogout(sel: string): Promise<string> {
   const key = resolveKey(sel);
   const dir = accountDir(key);
   const acc = readAccount(dir);
-  const stopMsg = stopDaemon(key);
+  const stop = stopDaemon(key);
   if (acc?.botToken) {
     try {
       await notifyStop({ baseUrl: acc.baseUrl, token: acc.botToken });
@@ -339,7 +359,7 @@ async function cmdLogout(sel: string): Promise<string> {
       /* ignore */
     }
   }
-  return `账号 ${key} 已登出（${stopMsg}）。目录与会话保留，可重新登录。`;
+  return `账号 ${key} 已登出（${stop.msg}）。目录与会话保留，可重新登录。`;
 }
 
 /**
@@ -348,14 +368,15 @@ async function cmdLogout(sel: string): Promise<string> {
  */
 export function deleteGuard(key: string, alive: boolean): string | null {
   return alive
-    ? `账号 ${key} 的 daemon 仍在运行（stop 未成功），为避免删掉它正在使用的文件，本次**没有删除目录**。\n先确认并结束它：wemind stop ${key}（或看 wemind list / 进程管理器），再执行 delete。`
+    ? `账号 ${key} 仍有 WeMind 进程未能停止（仍在运行），为避免删掉它正在使用的文件，本次**没有删除目录**。\n先确认并结束它：wemind stop ${key}（或看 wemind list / 进程管理器），再执行 delete。`
     : null;
 }
 
 function cmdDelete(sel: string): string {
   const key = resolveKey(sel);
-  const stopMsg = stopDaemon(key);
-  const blocked = deleteGuard(key, daemonAlive(key));
+  const stop = stopDaemon(key);
+  // 用 stop 的实际结果判定，而不是再看 daemonAlive：旧实现先删 pid 文件再查，永远得到「已停止」。
+  const blocked = deleteGuard(key, !stop.ok || daemonAlive(key));
   if (blocked) throw new Error(blocked);
   try {
     fs.rmSync(accountDir(key), { recursive: true, force: true });
@@ -363,7 +384,7 @@ function cmdDelete(sel: string): string {
     throw new Error(`删除目录失败: ${String(e)}`);
   }
   unregisterAccount(key);
-  return `账号 ${key} 已删除（${stopMsg}，已移除目录与注册）。`;
+  return `账号 ${key} 已删除（${stop.msg}，已移除目录与注册）。`;
 }
 
 function cmdStart(sel?: string, runner?: string): string {
@@ -423,7 +444,7 @@ export async function runManage(argv: string[]): Promise<void> {
       break;
     case "stop": {
       const k = pickKey(rest[0]); // 省略账号 = 默认账号（答复带上解析到的账号，避免「静默换目标」）
-      console.log(`账号 ${k}：${stopDaemon(k)}`);
+      console.log(`账号 ${k}：${stopDaemon(k).msg}`);
       break;
     }
     case "task":
