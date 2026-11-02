@@ -7,6 +7,7 @@ import {
   awaitControlResponse,
   bridgePidOf,
   clearControlDirs,
+  sweepControlOut,
   controlInboxDir,
   controlOutDir,
   controlTimeoutMs,
@@ -161,12 +162,27 @@ describe("收件箱 / 应答文件", () => {
     expect(parseControlRequest({ id: "C:evil", kind: "session.new" })).toBeNull();
   });
 
-  it("awaitControlResponse：已有应答立即返回；超时返回 null", async () => {
+  it("awaitControlResponse：已有应答立即返回并读后删除；超时返回 null", async () => {
     writeControlResponse({ id: "r2", at: 1, ok: false, text: "❌ 失败" }, dir);
     expect(await awaitControlResponse("r2", dir, 500, 10)).toMatchObject({ ok: false });
+    expect(readControlResponse("r2", dir)).toBeNull(); // 读走即删，长期运行不堆应答文件
     const t0 = Date.now();
     expect(await awaitControlResponse("永远没有的", dir, 60, 10)).toBeNull();
     expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it("sweepControlOut：只清超过保留期的旧应答，保留新应答与 .bridge", () => {
+    writeControlResponse({ id: "old", at: 1, ok: true, text: "没人读" }, dir);
+    writeControlResponse({ id: "fresh", at: 2, ok: true, text: "刚写完" }, dir);
+    markBridgeReady(dir, 123);
+    const oldPath = path.join(controlOutDir(dir), "old.json");
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(oldPath, old, old); // mtime 拨到 2 小时前
+
+    expect(sweepControlOut(3_600_000, Date.now(), dir)).toBe(1);
+    expect(readControlResponse("old", dir)).toBeNull();
+    expect(readControlResponse("fresh", dir)).toMatchObject({ id: "fresh" });
+    expect(bridgePidOf(dir)).toBe(123); // 凭据不是 .json，永不参与清理
   });
 
   it("clearControlDirs：清空并重建（daemon 启动时作废残留命令）", () => {

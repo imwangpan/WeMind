@@ -183,7 +183,7 @@ export function isControlRequestExpired(
   return typeof req.expiresAt === "number" && Number.isFinite(req.expiresAt) && now > req.expiresAt;
 }
 
-/** 短轮询等应答；超时返回 null（CLI 据此如实说「没等到回复」而不是假装成功）。 */
+/** 短轮询等应答；超时返回 null（CLI 据此如实说「没等到回复」而不是假装成功）。读到后删掉应答文件，避免长期堆积。 */
 export async function awaitControlResponse(
   id: string,
   dir: string = DATA_DIR,
@@ -193,10 +193,46 @@ export async function awaitControlResponse(
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const r = readControlResponse(id, dir);
-    if (r) return r;
+    if (r) {
+      if (isSafeFileId(id)) {
+        try {
+          fs.unlinkSync(path.join(controlOutDir(dir), `${id}.json`));
+        } catch {
+          /* ignore */
+        }
+      }
+      return r;
+    }
     if (Date.now() >= deadline) return null;
     await new Promise((r2) => setTimeout(r2, pollMs));
   }
+}
+
+/** 清掉没人再读的旧应答（CLI 崩了/超时放弃留下的；按 mtime，默认 1 小时）。返回删除条数。 */
+export function sweepControlOut(
+  maxAgeMs = 3_600_000,
+  now: number = Date.now(),
+  dir: string = DATA_DIR,
+): number {
+  let files: string[];
+  try {
+    files = fs.readdirSync(controlOutDir(dir)).filter((f) => f.endsWith(".json"));
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const f of files) {
+    const p = path.join(controlOutDir(dir), f);
+    try {
+      if (now - fs.statSync(p).mtimeMs > maxAgeMs) {
+        fs.unlinkSync(p);
+        removed++;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return removed;
 }
 
 /** daemon 启动时清空桥目录（作废重启前的残留命令，防重放）。 */

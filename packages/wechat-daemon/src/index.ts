@@ -84,6 +84,7 @@ import {
   isControlRequestExpired,
   markBridgeReady,
   readControlInbox,
+  sweepControlOut,
   writeControlResponse,
   type ControlRequest,
 } from "./control-bridge.js";
@@ -1423,6 +1424,7 @@ let controlBusy = false; // 同时只处理一条：切换/会话恢复本来就
 /** 扫描控制桥收件箱。异步：brain.switch 要等启动新大脑（最长 ~2 分钟），期间不能再处理下一条。 */
 async function scanControlInbox(owner: string): Promise<void> {
   if (controlBusy) return;
+  sweepControlOut(3_600_000, Date.now(), DATA_DIR);
   const items = readControlInbox(DATA_DIR);
   if (!items.length) return;
   controlBusy = true;

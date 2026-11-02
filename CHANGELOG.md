@@ -22,6 +22,7 @@
 
 ### Changed
 
+- **控制桥应答不再无限堆积（2026-11-02）**：此前 `control-out/<id>.json` 只在 daemon 启动时清空，CLI 读到应答也不删——长期运行的 daemon 会持续堆积（每次 CLI 崩在读取前就多一个）。现在 CLI 读到即删；daemon 每秒扫描控制桥时顺手清掉 mtime 超过 1 小时的旧应答（`.bridge` 不参与）。
 - **控制桥删除从未使用的任务请求类型（2026-11-02）**：`control-bridge.ts` 的 `task.list`/`task.reply`/`task.stop` 自 1.2.0 加入以来没有任何 CLI 调用方——任务命令一直走 `task-inbox/` + `task-out/` 的任务桥。保留它们只会扩大控制桥的协议面；现删除这三个 kind 与只服务于它们的 `text`/`taskId` 字段，`task` 系列命令行为不变。
 - **依赖锁文件重建（2026-11-02）**：`package-lock.json` 此前大量 devDependency 条目缺 `resolved`/`integrity`（安装时无法校验 tarball），且只锁了 win32 的 rolldown 原生绑定，Linux CI 要手工补装 `@rolldown/binding-linux-x64-gnu`。现在从零重建：271 个条目全部带 `resolved`/`integrity`（仅 3 个 workspace 链接除外），含 rolldown/esbuild/oxlint/oxfmt 的全平台可选绑定；`.github/workflows/ci.yml` 删除手工安装步骤。锁内版本在 `package.json` 范围内小幅上移（TypeScript 7.0.2、Vitest 3.2.7、MCP SDK 2.4.0、Rolldown 1.2.16 等），`npm ci` + `npm run verify` 全绿（58 个测试文件、632 通过）。
 
