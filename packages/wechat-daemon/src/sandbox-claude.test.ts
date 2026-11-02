@@ -21,6 +21,9 @@ const realClaudeJson = path.join(root, ".claude.json");
 const claudeJson = {
   mcpServers: {
     wechat: { command: "wemind-mcp" },
+    // 改名后的同一条目：只按名字拦不住，必须按定义也拦（一个 token 一个消费者）
+    "my-wechat": { command: "wemind-mcp" },
+    "npx-wechat": { command: "npx", args: ["-y", "@wemind/wechat-mcp"] },
     demo: { command: "node", args: ["demo-server.js"], env: { DEMO: "1" } },
     off: { command: "x", disabled: true },
   },
@@ -82,9 +85,13 @@ describe("brain 沙箱（Claude Code）", () => {
 
     expect(catalogNames()).toContain("demo");
     expect(catalogNames()).not.toContain("wechat");
+    expect(catalogNames()).not.toContain("my-wechat");
+    expect(catalogNames()).not.toContain("npx-wechat");
     const denied = addMcp("wechat");
     expect(denied.text).toMatch(/不允许加载/);
     expect(denied.ok).toBe(false);
+    expect(addMcp("my-wechat")).toMatchObject({ ok: false, changed: false });
+    expect(addMcp("npx-wechat")).toMatchObject({ ok: false, changed: false });
     const added = addMcp("demo");
     expect(added.text).toMatch(/已加载 MCP「demo」/);
     expect(added).toMatchObject({ ok: true, changed: true });

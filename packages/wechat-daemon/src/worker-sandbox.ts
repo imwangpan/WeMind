@@ -5,7 +5,13 @@ import os from "node:os";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import type { ResolvedAgent } from "./brain-agents.js";
 import { getAgent } from "./agent-slot.js";
-import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
+import {
+  readMcpServers,
+  withMcpServers,
+  parseJsonc,
+  toAcpMcpServers,
+  isWechatMcpServer,
+} from "./agent-mcp.js";
 import { copyProfilePatch } from "./profile-model.js";
 
 /**
@@ -125,7 +131,7 @@ function applyWorkerSandbox(ag: ResolvedAgent): void {
   const ex = excludeSet();
   const servers: Record<string, unknown> = {};
   for (const [name, def] of Object.entries(cat)) {
-    if (ex.has(name)) continue;
+    if (ex.has(name) || isWechatMcpServer(def)) continue; // 名字或定义命中微信 MCP 都排除（防改名绕开）
     if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true)
       continue; // 跳过用户已禁用的
     servers[name] = def;
@@ -146,7 +152,7 @@ export function workerMcpServers(forAgent?: ResolvedAgent) {
   const ex = excludeSet();
   const picked: Record<string, unknown> = {};
   for (const [name, def] of Object.entries(cat)) {
-    if (ex.has(name)) continue;
+    if (ex.has(name) || isWechatMcpServer(def)) continue;
     if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true)
       continue;
     picked[name] = def;

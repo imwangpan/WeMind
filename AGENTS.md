@@ -119,7 +119,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 
 ## 4. 不可违背的约束（改代码前必读）
 
-1. **一个 token 一个消费者**：MCP 形态与 daemon 形态二选一；brain 的 MCP 沙箱永久禁止 `wechat`（防它把消息发回自己）。agent **自己的配置文件里**挂的微信 MCP 也在此约束内：DSH 的 `cordis.patch.yml` 复制进两个沙箱前会剔除这类条目并告警（真实文件不动，见 `stripWechatMcpEntries`）。
+1. **一个 token 一个消费者**：MCP 形态与 daemon 形态二选一；brain 的 MCP 沙箱永久禁止 `wechat`（防它把消息发回自己）；**按名字之外还按定义判**——改名的条目只要 command/args/url 里跑 `wemind-mcp` 或 `@wemind/wechat-mcp` 同样被拒（`isWechatMcpServer()`，brain 与 worker 共用）。agent **自己的配置文件里**挂的微信 MCP 也在此约束内：DSH 的 `cordis.patch.yml` 复制进两个沙箱前会剔除这类条目并告警（真实文件不动，见 `stripWechatMcpEntries`）。
 2. **ACP 是最小方法集，不是「所有 agent 都一样」**：
    - `session/load` 不是通用能力；DSH 只有 `session/resume`，缺失时会退化为 `session/new`；
    - **image / restore(load|resume) / mcpViaAcp 目前来自「agent 配置字段」，不来自 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。所以接新 agent 时必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进 `brain-agents.ts` 的 agent；不要以为代码会自动适配；

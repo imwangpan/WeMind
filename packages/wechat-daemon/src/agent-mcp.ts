@@ -12,6 +12,25 @@ function isObj(v: unknown): v is Record<string, unknown> {
 }
 
 /** 从配置对象读出 server 定义表（按格式）；缺失/异常一律返回空表。 */
+/**
+ * 一条 MCP 定义是不是微信 MCP：名字之外再看命令/参数/URL。
+ * 只按名字（`wechat`）拦不住改名后的同一条目——它仍会启动 `wemind-mcp`、拿同一个 bot token 长轮询，与 daemon 抢消息。
+ * brain 与 worker 共用（worker 的排除集同样是「按名字 + 按定义」两道）。
+ */
+export function isWechatMcpServer(entry: unknown): boolean {
+  if (!entry || typeof entry !== "object") return false;
+  const e = entry as Record<string, unknown>;
+  const parts: string[] = [];
+  const push = (v: unknown): void => {
+    if (typeof v === "string") parts.push(v);
+  };
+  push(e.command);
+  if (Array.isArray(e.command)) for (const x of e.command) push(x);
+  if (Array.isArray(e.args)) for (const x of e.args) push(x);
+  push(e.url);
+  return parts.some((p) => /wemind-mcp|@wemind\/wechat-mcp/i.test(p));
+}
+
 export function readMcpServers(obj: unknown, format: McpFormat): Record<string, unknown> {
   if (!isObj(obj)) return {};
   const servers =

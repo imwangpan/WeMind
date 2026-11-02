@@ -5,7 +5,13 @@ import os from "node:os";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import type { ResolvedAgent } from "./brain-agents.js";
 import { getAgent } from "./agent-slot.js";
-import { readMcpServers, withMcpServers, parseJsonc, toAcpMcpServers } from "./agent-mcp.js";
+import {
+  readMcpServers,
+  withMcpServers,
+  parseJsonc,
+  toAcpMcpServers,
+  isWechatMcpServer,
+} from "./agent-mcp.js";
 import { copyProfilePatch } from "./profile-model.js";
 
 /**
@@ -51,6 +57,11 @@ function catalogPath(ag: ResolvedAgent): string {
 
 /** 永不允许 brain 加载（防它把消息发回自己）。 */
 const FORBIDDEN = new Set(["wechat"]);
+
+/** 名字命中禁用集，或定义本身就是微信 MCP（改名也拦得住）。 */
+function forbiddenServer(name: string, def: unknown): boolean {
+  return FORBIDDEN.has(name) || isWechatMcpServer(def);
+}
 
 /**
  * 让 brain 继承所用 agent 真实配置目录的「知识/记忆/技能」：
@@ -191,7 +202,8 @@ function loadCatalog(ag: ResolvedAgent): Record<string, unknown> {
 /** 目录中可选的 server 名（排除禁用项）。 */
 export function catalogNames(): string[] {
   const ag = getAgent("brain");
-  return Object.keys(loadCatalog(ag)).filter((n) => !FORBIDDEN.has(n));
+  const cat = loadCatalog(ag);
+  return Object.keys(cat).filter((n) => !forbiddenServer(n, cat[n]));
 }
 
 export function loadActive(): string[] {
@@ -210,7 +222,7 @@ function saveActive(list: string[]): void {
 function applySandbox(ag: ResolvedAgent): void {
   if (ag.mcpViaAcp) return;
   const cat = loadCatalog(ag);
-  const active = loadActive().filter((n) => cat[n] && !FORBIDDEN.has(n));
+  const active = loadActive().filter((n) => cat[n] && !forbiddenServer(n, cat[n]));
   const servers: Record<string, unknown> = {};
   for (const n of active) servers[n] = cat[n];
   const file = brainMcpJson(ag);
@@ -228,7 +240,7 @@ function applySandbox(ag: ResolvedAgent): void {
  *  **必须传正在启动的那个 agent**：热切换时槽位还指着旧大脑，用默认值会把旧 agent 的 MCP 目录发给新大脑。 */
 export function activeMcpServers(ag: ResolvedAgent = getAgent("brain")) {
   const cat = loadCatalog(ag);
-  const active = loadActive().filter((n) => cat[n] && !FORBIDDEN.has(n));
+  const active = loadActive().filter((n) => cat[n] && !forbiddenServer(n, cat[n]));
   const picked: Record<string, unknown> = {};
   for (const n of active) picked[n] = cat[n];
   const { servers, skipped } = toAcpMcpServers(picked, { exclude: FORBIDDEN });
@@ -381,9 +393,9 @@ export interface McpChangeResult {
 
 export function addMcp(name: string): McpChangeResult {
   const ag = getAgent("brain");
-  if (FORBIDDEN.has(name))
-    return { ok: false, changed: false, text: `不允许加载「${name}」（防它把消息发回自己）。` };
   const cat = loadCatalog(ag);
+  if (forbiddenServer(name, cat[name]))
+    return { ok: false, changed: false, text: `不允许加载「${name}」（防它把消息发回自己）。` };
   if (!cat[name])
     return {
       ok: false,
