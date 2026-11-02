@@ -104,6 +104,21 @@ export function isOurProcess(pid: number | null | undefined, markerSets: string[
 }
 
 /**
+ * 「同账号已有另一个我们自己的进程」判定：返回那个 pid，否则 null。
+ * 排除自己（同一个 pid 写进文件时不算冲突）；陈旧 pid / pid 复用不算（交给 isOurProcess 的身份校验）。
+ * `check` 仅为单测可注入，生产路径用 `isOurProcess`。
+ */
+export function otherOurProcessPid(
+  pid: number | null | undefined,
+  selfPid: number,
+  markerSets: string[][],
+  check: (pid: number, markerSets: string[][]) => boolean = isOurProcess,
+): number | null {
+  if (pid === null || pid === undefined || pid === selfPid) return null;
+  return check(pid, markerSets) ? pid : null;
+}
+
+/**
  * 我们自己的 CLI / wrapper 进程特征：命令行里同时含 `wemind` + `cli.js`。
  *
  * 这串必须同时覆盖**四种**安装方式（少一种 → 对应场景下 stop/list/单实例判断全失效）：

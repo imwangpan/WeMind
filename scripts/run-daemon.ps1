@@ -69,6 +69,12 @@ while ($true) {
     "[wemind/wechat-daemon/wrapper] 大脑配置错误（exit 78），已停止自动重启。修好后重新登录或手动启动。$(Get-Date -Format o)" | Add-Content $log
     break
   }
+  # 退出码 75 = 同账号已有另一个 daemon 在跑（见 watchdog-runner.ts 的 DAEMON_ALREADY_RUNNING_EXIT_CODE）：
+  # 另一个实例已经在消费同一个 bot token，重拉只会每 5s 撞一次 → 停在循环外。
+  if ($code -eq 75) {
+    "[wemind/wechat-daemon/wrapper] 同账号已有 daemon 在跑（exit 75），已停止自动重启。$(Get-Date -Format o)" | Add-Content $log
+    break
+  }
   "[wemind/wechat-daemon/wrapper] daemon exited (code=$code), restart in 5s $(Get-Date -Format o)" | Add-Content $log
   Start-Sleep -Seconds 5
 }

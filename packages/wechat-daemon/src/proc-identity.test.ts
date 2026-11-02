@@ -6,6 +6,7 @@ import {
   matchesMarkers,
   commandLines,
   isOurProcess,
+  otherOurProcessPid,
   brainPidMarkers,
   CLI_PID_MARKERS,
 } from "./proc-identity.js";
@@ -94,6 +95,15 @@ describe("matchesMarkers（纯逻辑，无系统调用）", () => {
     // bin 只剩目录 / 为空 → 绝不退化成「只按 args 匹配」（否则会误伤含 acp 的无关进程）
     expect(brainPidMarkers("", ["acp"])).toEqual([]);
     expect(brainPidMarkers("/x/", ["acp"])).toEqual([]);
+  });
+});
+
+describe("otherOurProcessPid（同账号单实例判定）", () => {
+  it("null/自己/不是我们 → null；另一个我们自己的进程 → 返回它的 pid", () => {
+    expect(otherOurProcessPid(null, 1, CLI_PID_MARKERS, () => true)).toBeNull();
+    expect(otherOurProcessPid(1, 1, CLI_PID_MARKERS, () => true)).toBeNull();
+    expect(otherOurProcessPid(2, 1, CLI_PID_MARKERS, () => false)).toBeNull();
+    expect(otherOurProcessPid(2, 1, CLI_PID_MARKERS, () => true)).toBe(2);
   });
 });
 

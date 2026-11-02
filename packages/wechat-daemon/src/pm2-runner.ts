@@ -8,6 +8,7 @@ import path from "node:path";
 import { accountDir } from "@wemind/wechat-ilink-core"; // 与 daemon 自身用的是同一个根（尊重 WEMIND_HOME）
 
 import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
+import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
 
 /*
  * 统一用「单条命令字符串 + shell」调用 pm2，而不是 spawnSync(cmd, args[], { shell: true })。
@@ -64,7 +65,7 @@ export function buildAppDeclaration(
     autorestart: true,
     restart_delay: 5000, // 与 builtin 后台守护进程 / run-daemon.ps1 的 5s 重拉一致
     max_restarts: 50, // 防崩溃风暴
-    stop_exit_codes: [BRAIN_CONFIG_EXIT_CODE], // 78 = 大脑配置错误，重拉无益
+    stop_exit_codes: [BRAIN_CONFIG_EXIT_CODE, DAEMON_ALREADY_RUNNING_EXIT_CODE], // 78 = 大脑配置错误；75 = 同账号已有实例，重拉无益
     out_file: logPath,
     error_file: logPath,
     merge_logs: true,
@@ -112,7 +113,7 @@ export function pm2Start(key: string, cliPath: string): { ok: boolean; msg: stri
     ok: true,
     msg:
       `已用 pm2 启动 ${name}（日志：${log}）。\n` +
-      "  崩溃 5s 重拉、退出码 78（大脑配置错误）不再重启，与自带后台守护进程一致。\n" +
+      "  崩溃 5s 重拉、退出码 78（大脑配置错误）与 75（同账号已有实例）不再重启，与自带后台守护进程一致。\n" +
       "  开机自启（首次）：执行 `pm2 startup`——Linux/macOS 按提示操作；Windows 用计划任务跑 `pm2 resurrect`。",
   };
 }

@@ -56,6 +56,8 @@ import { agentConfigFor, loadBrainConfig } from "./brain-config.js";
 import { getAgent, seedSlots, setAgent } from "./agent-slot.js";
 import { preflightSwitch, switchBrain, switchInFlightTarget } from "./brain-switch.js";
 import { writeBrainState } from "./brain-state.js";
+import { CLI_PID_MARKERS, otherOurProcessPid } from "./proc-identity.js";
+import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
 import {
   isOwnerOnly,
   renderHelp,
@@ -1336,7 +1338,25 @@ async function scanControlInbox(owner: string): Promise<void> {
   }
 }
 
+/** 读裸 pid 文件（daemon.pid / wrapper.pid）；不存在/坏内容 → null。 */
+function readPidFile(file: string): number | null {
+  try {
+    const n = Number.parseInt(fs.readFileSync(file, "utf-8").trim(), 10);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runDaemon(): Promise<void> {
+  // 单实例：同账号只允许一个 daemon 消费同一个 bot token。
+  // `wimind start` 有 wrapper.pid 守卫；这里挡住直接 `wimind daemon` / `npm run daemon`，以及两套 runner 并存。
+  const pidFile = path.join(DATA_DIR, "daemon.pid");
+  const existing = otherOurProcessPid(readPidFile(pidFile), process.pid, CLI_PID_MARKERS);
+  if (existing) {
+    log(`another daemon is already running for this account (pid=${existing}); exit.`);
+    process.exit(DAEMON_ALREADY_RUNNING_EXIT_CODE);
+  }
   // 启动即校验大脑：早失败、说人话——避免「进程看着正常、直到第一条消息才炸」（历史上表现为反复「⏳ 响应中断了，正在自动重试…」，实为默认大脑的二进制没装）。
   // 先种槽位再校验：此后运行期一律从槽位取 agent（热切换会更新它，见 agent-slot.ts），启动期与运行期同一个来源。
   seedSlots(loadBrainConfig());
@@ -1367,7 +1387,6 @@ export async function runDaemon(): Promise<void> {
   const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId; // 登录者：始终授权（兜底校验）
   if (owner) addAllowFrom(owner, DATA_DIR); // 种入登录者白名单(自动迁移老账号)；新登录在 finalize 已配对
   // 写 PID 文件，供管理命令（logout/delete）精确定位并停止本账号的 daemon
-  const pidFile = path.join(DATA_DIR, "daemon.pid");
   try {
     fs.writeFileSync(pidFile, String(process.pid), "utf-8");
   } catch {

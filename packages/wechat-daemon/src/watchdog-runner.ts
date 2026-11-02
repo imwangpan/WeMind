@@ -8,9 +8,14 @@ import path from "node:path";
 import { DATA_DIR, accountDir } from "@wemind/wechat-ilink-core";
 import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
 import { stripVscodeDebugEnv } from "./debug-env.js";
-import { CLI_PID_MARKERS, isOurProcess } from "./proc-identity.js";
+import { CLI_PID_MARKERS, otherOurProcessPid } from "./proc-identity.js";
 
 const RESTART_DELAY_MS = 5000;
+/**
+ * daemon 发现同账号已有另一个实例在跑时用它退出。
+ * 这不是配置错误，重拉无益——另一个实例已经在消费同一个 bot token；后台守护进程/pm2 都应停止重拉。
+ */
+export const DAEMON_ALREADY_RUNNING_EXIT_CODE = 75;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function readPidFile(file: string): number | null {
@@ -26,7 +31,7 @@ function readPidFile(file: string): number | null {
 function acquireSingleton(wrapperPidFile: string): boolean {
   const old = readPidFile(wrapperPidFile);
   // 身份校验：陈旧 pid + 重启后 pid 复用时会误判「已有实例」→ 后台守护进程直接退出、daemon 静默不起。
-  if (old && isOurProcess(old, CLI_PID_MARKERS)) return false;
+  if (otherOurProcessPid(old, process.pid, CLI_PID_MARKERS)) return false;
   fs.writeFileSync(wrapperPidFile, String(process.pid), "ascii");
   return true;
 }
@@ -83,6 +88,14 @@ export async function runWatchdog(): Promise<void> {
       fs.closeSync(logFd);
     } catch {
       /* ignore */
+    }
+    if (code === DAEMON_ALREADY_RUNNING_EXIT_CODE) {
+      // 同账号已有另一个 daemon 在消费同一个 bot token：本后台守护进程再拉只会每 5s 撞一次，停在这里。
+      fs.appendFileSync(
+        log,
+        `[wimind/wechat-daemon/wrapper] 同账号已有 daemon 在跑（exit ${code}），本后台守护进程退出。${new Date().toISOString()}\n`,
+      );
+      return;
     }
     if (code === BRAIN_CONFIG_EXIT_CODE) {
       // 大脑配置错误：重拉无益（需人工修），停在后台守护进程循环外，避免每 5s 刷一条。

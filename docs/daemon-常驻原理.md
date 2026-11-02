@@ -76,6 +76,7 @@ for (;;) {
   spawn(node, [cliPath, "daemon"], { stdio: 全并入 daemon.log })
   等子进程退出 → 拿到 code
   code === 78（BRAIN_CONFIG_EXIT_CODE，大脑配置错误）? → 停止自动重启并提示人工修
+  code === 75（DAEMON_ALREADY_RUNNING_EXIT_CODE，同账号已有实例）? → 停止自动重启（另一个实例已在服务）
   否则睡 5s 后重拉
 }
 ```
@@ -83,7 +84,7 @@ for (;;) {
 要点：
 
 - **单实例**：`acquireSingleton()` 用 `wrapper.pid` + `isOurProcess()` 校验（不只看 pid 是否存活，防重启后 pid 复用误判）；
-- **退出码 78 特判**：大脑配置错误重拉无益，停在循环外，避免每 5 秒刷一条日志；
+- **退出码 78 特判**：大脑配置错误重拉无益，停在循环外，避免每 5 秒刷一条日志；**退出码 75**（同账号已有 daemon）同理——另一个实例已经在消费同一个 bot token，重拉只会每 5 秒撞一次。
 - **跨平台**：不依赖 shell / Mutex / pm2，Windows 用 `windowsHide` 防闪窗；
 - **日志**：stdout/stderr 一并写 `<数据目录>/daemon.log`，与 PowerShell 路线一致。
 

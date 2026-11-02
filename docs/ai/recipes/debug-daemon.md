@@ -11,6 +11,7 @@
 | 症状 | 先看 | 大概率原因 |
 |---|---|---|
 | `wemind start` 立刻退出 / 日志 `FATAL 大脑不可用`（exit 78） | `wemind brain` | agent 未知、二进制不在 PATH、`binWin` 写错（如只有 `dsh.cmd`） |
+| 日志 `another daemon is already running`（exit 75） | `wemind list` / `wemind stop <账号>` | 同账号已有另一个 daemon（直接 `wemind daemon`、两套 runner 并存、或旧实例还没退干净）；先停掉旧实例再启动，别让两个消费者抢同一个 bot token |
 | daemon 在跑，但微信完全没反应 | `daemon.log` 有无 `turn start` / `prompt ok` | 没登录、你（登录者）不在白名单 `allowFrom` 里（异常情况）、bot token 被另一个消费者抢走 |
 | 反复「⏳ 响应中断了，正在自动重试…」 | `daemon.log` 的 `[wemind/wechat-daemon/acp]` | agent 启动失败、`initialize` 超时、参数不对、`.cmd` 没经 shell |
 | 只试一次就回「（这次没答上来：额度/余额不足…）」 | `brain error (try 1, provider：额度/余额不足)` | provider 侧的**永久**错误（余额/密钥/计费/模型不存在）不重试，按日志里的原因把账号或模型处理好（`providerIssue()` 认；限流仍走重试）；其中**密钥/鉴权**与**模型不可用**两类若是在本机改的登录态/模型配置，还要重启一次 daemon（`wemind stop && wemind start`，或 `wemind brain switch <同名 agent>`）才生效——运行中的 daemon 不重读 `brain.json`、不重新同步凭据 |

@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { buildAppDeclaration, writeAppDeclaration } from "./pm2-runner.js";
 import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
+import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
 
 /*
  * 只测「声明怎么生成」——不调 pm2、不需要装 pm2。
@@ -41,8 +42,9 @@ describe("pm2 app 声明", () => {
     expect(d.autorestart).toBe(true);
     expect(d.restart_delay).toBe(5000); // 不是 pm2 默认的 0
     expect(d.max_restarts).toBe(50);
-    expect(d.stop_exit_codes).toEqual([BRAIN_CONFIG_EXIT_CODE]);
+    expect(d.stop_exit_codes).toEqual([BRAIN_CONFIG_EXIT_CODE, DAEMON_ALREADY_RUNNING_EXIT_CODE]);
     expect(BRAIN_CONFIG_EXIT_CODE).toBe(78);
+    expect(DAEMON_ALREADY_RUNNING_EXIT_CODE).toBe(75);
   });
 
   it("日志合并到账号 daemon.log，不监听文件", () => {
