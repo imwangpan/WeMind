@@ -84,7 +84,6 @@ import { awaitTaskAck, writeTaskCmd as writeTaskCommand } from "./task-inbox.js"
  */
 
 const BASE = process.env.WEMIND_ILINK_BASE?.trim() || "https://ilinkai.weixin.qq.com";
-const STAGING = path.join(WEMIND_ROOT, ".staging");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function readPid(dir: string, name: string): number | null {
@@ -328,17 +327,30 @@ function stopDaemon(key: string): string {
   return parts.length ? parts.join("；") : "无运行中的进程";
 }
 
-/** 把 STAGING 的登录按 botId 收进账号目录 + 登记。 */
-function finalizeStaging(label?: string): { key: string; msg: string } {
-  const acc = readAccount(STAGING);
-  if (!acc?.botId) throw new Error(`staging 无有效登录（${STAGING}）`);
+/** 旧流程的固定暂存目录：仅 `wimind finalize` 兼容命令使用；新登录走 createLoginStagingDir()。 */
+const LEGACY_STAGING = path.join(WEMIND_ROOT, ".staging");
+
+/**
+ * 每次登录一个独立暂存目录：两个 `wimind login` 并发时不能互删二维码/凭证。
+ * 用 `mkdtemp`（POSIX 0700）而不是固定 `.staging/`，也不写进任何已登记账号的数据目录。
+ * 导出仅供单测。
+ */
+export function createLoginStagingDir(): string {
+  fs.mkdirSync(WEMIND_ROOT, { recursive: true });
+  return fs.mkdtempSync(path.join(WEMIND_ROOT, ".staging-"));
+}
+
+/** 把本次登录的暂存目录按 botId 收进账号目录 + 登记。 */
+function finalizeStaging(staging: string, label?: string): { key: string; msg: string } {
+  const acc = readAccount(staging);
+  if (!acc?.botId) throw new Error(`staging 无有效登录（${staging}）`);
   const key = deriveAccountKey(acc.botId);
   const dest = accountDir(key);
   if (fs.existsSync(dest)) {
-    fs.rmSync(STAGING, { recursive: true, force: true });
+    fs.rmSync(staging, { recursive: true, force: true });
     throw new Error(`账号目录已存在: ${dest}（该微信号此前已登录过；如需重登请先 delete ${key}）`);
   }
-  fs.renameSync(STAGING, dest);
+  fs.renameSync(staging, dest);
   for (const f of [
     "qrcode.png",
     "qrcode.txt",
@@ -392,10 +404,27 @@ async function cmdLogin(
   autoStart: boolean,
   runner?: string,
 ): Promise<void> {
+  const staging = createLoginStagingDir();
+  try {
+    await loginInto(staging, label, autoStart, runner);
+  } finally {
+    // 归档成功时目录已被 rename 走（这里是空操作）；超时/Ctrl+C/失败时清掉二维码与临时凭证。
+    try {
+      fs.rmSync(staging, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function loginInto(
+  staging: string,
+  label: string | undefined,
+  autoStart: boolean,
+  runner?: string,
+): Promise<void> {
   const QRCode = await loadQrCode(); // 只有登录路径才加载 qrcode
-  fs.rmSync(STAGING, { recursive: true, force: true });
-  fs.mkdirSync(STAGING, { recursive: true });
-  const png = path.join(STAGING, "qrcode.png");
+  const png = path.join(staging, "qrcode.png");
   const overall = Date.now() + 15 * 60 * 1000;
   let code = "";
   let opened = false;
@@ -403,7 +432,10 @@ async function cmdLogin(
   const refresh = async (): Promise<void> => {
     const qr = await fetchQRCode(BASE);
     code = qr.qrcode;
-    saveQrState({ qrcode: qr.qrcode, qrcodeUrl: qr.qrcode_img_content, createdAt: Date.now() });
+    saveQrState(
+      { qrcode: qr.qrcode, qrcodeUrl: qr.qrcode_img_content, createdAt: Date.now() },
+      staging,
+    );
     await QRCode.toFile(png, qr.qrcode_img_content, { width: 480, margin: 2 });
     const term = await QRCode.toString(qr.qrcode_img_content, { type: "terminal", small: true });
     console.log("\n用要登录的微信扫下面的二维码（过期会自动刷新）：\n");
@@ -431,7 +463,7 @@ async function cmdLogin(
         throw new Error("confirmed 但数据不全");
       // 走 core 的 saveAccountTo：POSIX 600 + Windows 一次性明文告警。
       // 之前这里是裸 writeFileSync，导致「凭证受权限保护」的安全承诺在 CLI 登录路径上不成立。
-      saveAccountTo(STAGING, {
+      saveAccountTo(staging, {
         botToken: s.bot_token,
         botId: s.ilink_bot_id,
         userId: s.ilink_user_id,
@@ -442,13 +474,13 @@ async function cmdLogin(
       await notifyStart({ baseUrl: s.baseurl ?? BASE, token: s.bot_token }).catch(() => {});
       for (const f of ["qrcode.png", "qr_login.json"]) {
         try {
-          fs.unlinkSync(path.join(STAGING, f));
+          fs.unlinkSync(path.join(staging, f));
         } catch {
           /* ignore */
         }
       }
       console.log("\n登录成功，正在登记…");
-      const { key, msg } = finalizeStaging(label);
+      const { key, msg } = finalizeStaging(staging, label);
       console.log(msg);
       if (autoStart) {
         startDaemon(key, runner);
@@ -1330,7 +1362,7 @@ export async function runManage(argv: string[]): Promise<void> {
       console.log(cmdDelete(rest[0]));
       break;
     case "finalize": {
-      const { msg } = finalizeStaging(label);
+      const { msg } = finalizeStaging(LEGACY_STAGING, label);
       console.log(msg);
       break;
     } // 兼容旧流程（staging 已有登录时直接收进账号目录）

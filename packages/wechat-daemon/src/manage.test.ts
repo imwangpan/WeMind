@@ -128,6 +128,43 @@ describe("pickKey（省略账号 = 默认账号）", () => {
 });
 
 /*
+ * 并发登录隔离：每次 `wimind login` 必须拿一个独立暂存目录，不能共用固定的 `.staging/`。
+ * 同 pickKey：`WEMIND_ROOT` 在模块加载时定死，所以设好 WEMIND_HOME 后重新加载模块。
+ */
+describe("createLoginStagingDir（并发登录不共用暂存目录）", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-staging-"));
+  const prevHome = process.env.WEMIND_HOME;
+  let createStaging: typeof import("./manage.js").createLoginStagingDir;
+
+  beforeAll(async () => {
+    process.env.WEMIND_HOME = home;
+    vi.resetModules();
+    ({ createLoginStagingDir: createStaging } = await import("./manage.js"));
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.WEMIND_HOME;
+    else process.env.WEMIND_HOME = prevHome;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it("每次返回不同目录，父目录是 WEMIND_HOME，且目录已创建", () => {
+    const a = createStaging();
+    const b = createStaging();
+    try {
+      expect(a).not.toBe(b);
+      expect(path.dirname(a)).toBe(home);
+      expect(path.dirname(b)).toBe(home);
+      expect(fs.existsSync(a)).toBe(true);
+      expect(fs.existsSync(b)).toBe(true);
+    } finally {
+      fs.rmSync(a, { recursive: true, force: true });
+      fs.rmSync(b, { recursive: true, force: true });
+    }
+  });
+});
+
+/*
  * `wemind brain set --model`：模型覆盖与 `--bin` 走同一条读-改-写路径（顶层与 presets[agent 名] 各写一份）。
  * `WEMIND_HOME` 是模块加载时定死的，所以先指到临时目录、再重新加载模块（同 pickKey 那组）。
  */
