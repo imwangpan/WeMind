@@ -14,6 +14,7 @@ import {
 } from "./session-map.js";
 import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
 import { waitForFrameQuiet } from "./acp-quiet.js";
+import { handleReverseRequest } from "./acp-reverse.js";
 import { LineDecoder } from "./line-decoder.js";
 
 /**
@@ -231,27 +232,10 @@ export class WorkerConn {
   }
 
   private handleReverseRequest(f: Record<string, any>): void {
-    const method = String(f.method);
-    dlog(`${this.id} ← reverse request ${method}#${f.id}`);
-    if (method === "session/request_permission") {
-      const options = Array.isArray(f.params?.options) ? f.params.options : [];
-      const allow =
-        process.env.WEMIND_ACP_AUTO_ALLOW === "1"
-          ? options.find((o: any) => o?.kind === "allow_once" || o?.kind === "allow_always")
-          : undefined;
-      const result = allow
-        ? { outcome: { outcome: "selected", optionId: allow.optionId } }
-        : { outcome: { outcome: "cancelled" } };
-      this.write(JSON.stringify({ jsonrpc: "2.0", id: f.id, result }));
-      dlog(`permission ${allow ? "allowed" : "rejected"}`);
-      return;
-    }
-    this.write(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: f.id,
-        error: { code: -32601, message: "method not supported" },
-      }),
+    handleReverseRequest(
+      f,
+      (payload) => this.write(JSON.stringify(payload)),
+      (message) => dlog(`${this.id} ${message}`),
     );
   }
 

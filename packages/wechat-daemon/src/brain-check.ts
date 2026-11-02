@@ -7,6 +7,7 @@ import { parseJsonc } from "./agent-mcp.js";
 import { agentEnv, authHint, type ResolvedAgent } from "./brain-agents.js";
 import { copyProfilePatch } from "./profile-model.js";
 import { spawnAgent } from "./spawn-agent.js";
+import { handleReverseRequest } from "./acp-reverse.js";
 import { LineDecoder } from "./line-decoder.js";
 
 /**
@@ -85,6 +86,12 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
       try {
         frame = JSON.parse(line);
       } catch {
+        continue;
+      }
+      // 反向请求（带 method + id）必须先应答；它与我们的请求 id 分属两个空间，数值可能撞车。
+      // 以前这里只处理「响应」，agent 一发权限请求就没人回 → `brain check` 白等 60s，误报「不可用」。
+      if (frame.method && frame.id !== undefined) {
+        handleReverseRequest(frame, (payload) => proc.stdin!.write(JSON.stringify(payload) + "\n"));
         continue;
       }
       if (typeof frame.id === "number" && pending.has(frame.id)) {

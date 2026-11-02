@@ -64,6 +64,7 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 | `packages/wechat-daemon/src/index.ts` | 消息路由、回合编排、进度节流、brain/worker 分流、控制桥扫描（`scanControlInbox`） |
 | `packages/wechat-daemon/src/acp-brain.ts` | 常驻 ACP 客户端（对话大脑）；含 `resumeSession`（严格恢复）、`beginSwitch/drainTurn/warmup`、`drainLoadReplay`（gemini 的 load 后异步回放） |
 | `packages/wechat-daemon/src/acp-quiet.ts` | `waitForFrameQuiet`：恢复会话后等异步回放帧安静（200ms 静默窗口、最多 3s；brain 与 worker 共用） |
+| `packages/wechat-daemon/src/acp-reverse.ts` | 反向请求应答器（brain / worker / `brain check` 共用）：权限默认拒绝、`WEMIND_ACP_AUTO_ALLOW=1` 只选 `allow_once`/`allow_always`、未知 method 回 `-32601` |
 | `packages/wechat-daemon/src/agent-slot.ts` | brain/worker 的 **agent 槽位**（懒解析 + 记忆化；`setAgent` 供热切换用） |
 | `packages/wechat-daemon/src/brain-switch.ts` | 热切换：预检 → 等在途回合结束 → 启动新大脑 → 成功才写入磁盘；失败退回 |
 | `packages/wechat-daemon/src/worker-acp.ts` | 任务 worker 的 ACP 客户端（`class WorkerConn`，一条任务一条连接） |
@@ -124,7 +125,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 2. **ACP 是最小方法集，不是「所有 agent 都一样」**：
    - `session/load` 不是通用能力；DSH 只有 `session/resume`，缺失时会退化为 `session/new`；
    - **image / restore(load|resume) / mcpViaAcp 目前来自「agent 配置字段」，不来自 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。所以接新 agent 时必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进 `brain-agents.ts` 的 agent；不要以为代码会自动适配；
-   - agent 可能发反向请求（`session/request_permission`、`fs/*`、`terminal/*`）。`acp-brain.ts` / `worker-acp.ts` 已内置应答器：权限请求默认拒绝，未知 method 回 `-32601`；可信部署可设 `WEMIND_ACP_AUTO_ALLOW=1` 放行一次性权限。
+   - agent 可能发反向请求（`session/request_permission`、`fs/*`、`terminal/*`）。`acp-brain.ts` / `worker-acp.ts` / `brain-check.ts` 共用 `acp-reverse.ts` 的应答器：权限请求默认拒绝，未知 method 回 `-32601`；可信部署可设 `WEMIND_ACP_AUTO_ALLOW=1` 放行一次性权限。三处必须走同一份实现，否则会出现「微信能跑、`brain check` 超时」的漂移。
 3. **brain 是一个 ACP 进程、worker 是 N 个（进程池）**：协议改动要同步 `acp-brain.ts` 和 `worker-acp.ts`（后者已类化，别再把状态写在模块级）。
 4. **MCP 按 agent 分派**：kiro 读 `settings/mcp.json`；opencode 读 `opencode.json` 的 `mcp.servers`；qoder 读 `settings.json` 的 `mcpServers`；gemini 读沙箱配置目录 `<沙箱>/.gemini/settings.json` 的 `mcpServers`；cline 读沙箱 `cline/mcp.json`；pi 读沙箱根 `mcp.json`（kiro 格式）；DSH 与 Claude Code 走 ACP `session/new` 的 `mcpServers`（Claude Code 的目录是真实 `~/.claude.json`；codex 的适配器不消费 stdio MCP）。**不要让 A 读 B 的配置文件**。
 5. **微信有连发上限（约 10 条）**：进度消息会占额度；`index.ts` 的 15s 心跳在「无 activity 帧」时会持续发，接入 committed-only agent 要单独处理。

@@ -145,7 +145,7 @@ poller（长轮询，不被大脑阻塞）
 | **minimal method set** | **最小方法集** | WeMind 实际用到的 ACP 方法子集：`initialize` → `session/new` → `session/prompt` + 流式 `session/update`。缺任一即不可用。 |
 | **capability** | **能力**（保留 `agentCapabilities` 原文） | 指「这个实现支持哪些**可选特性**」（load/resume/image/mcp），**不是权限**。别译「权限」——权限是 permission，见下条。注意：本仓库当前**不消费** `initialize` 回包，能力全部来自 agent 配置字段，见事实表。 |
 | **permission** | **权限** | 与 capability 区分：`agentCapabilities` 是能力声明；`session/request_permission` 是运行时**请求授权**。 |
-| **reverse request** | **反向请求** | ACP 的反向通道：**agent → client** 的请求（`session/request_permission`、`fs/read_text_file`、`terminal/create` 等）。与正常方向（client → agent）相反，故称「反向」。<br>⚠️ 关键：**不应答会挂起**。WeMind 内置应答器：权限默认拒绝、未知方法回 `-32601`。 |
+| **reverse request** | **反向请求** | ACP 的反向通道：**agent → client** 的请求（`session/request_permission`、`fs/read_text_file`、`terminal/create` 等）。与正常方向（client → agent）相反，故称「反向」。<br>⚠️ 关键：**不应答会挂起**。WeMind 的 brain、worker、`brain check` 共用 `acp-reverse.ts`：权限默认拒绝、未知方法回 `-32601`（`WEMIND_ACP_AUTO_ALLOW=1` 才放行 agent 给出的 `allow_once`/`allow_always`）。 |
 | **streaming** | **流式** | agent 边生成边推送增量（`session/update` 的 `agent_message_chunk`），而不是一次性返回完整答案。 |
 | **handshake** | **握手** | 连接建立时的协商：`initialize` 交换版本与 `agentCapabilities`。 |
 | **session** | **会话** | 一段带上下文的多轮对话。ACP 里由 `session/new`（新建）、`session/load` / `session/resume`（恢复）管理。 |
@@ -241,6 +241,7 @@ poller（长轮询，不被大脑阻塞）
 |---|---|---|
 | 接新 ACP agent | `brain-agents.ts` | `acp-brain.ts`、`mcp-sandbox.ts`、`docs/ai/recipes/add-acp-agent.md` |
 | 改 ACP 自愈/超时 | `acp-brain.ts` | `worker-acp.ts`（同步）、`brain-check.ts` |
+| 改反向请求应答（权限 / fs / terminal） | `acp-reverse.ts` | `acp-reverse.test.ts`；brain、worker、`brain check` 三处共用 |
 | 改 MCP 挂载 | `mcp-sandbox.ts` | `agent-mcp.ts`、`worker-sandbox.ts`、`sandbox-inherit.ts`（记忆/技能继承与换 agent 清理）、`docs/ai/recipes/add-mcp.md` |
 | 改微信消息/回复 | `index.ts` | `md-reply.ts`、`image-reply.ts` |
 | 改 CLI | `cli.ts`（分派 `cli-dispatch.ts`） | `manage.ts` |

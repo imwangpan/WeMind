@@ -18,6 +18,7 @@ import {
 import { ensureEntry, markUsed, titleOf, touchEntry } from "./session-registry.js";
 import { stripHandoffPrefix } from "./handoff.js";
 import { waitForFrameQuiet } from "./acp-quiet.js";
+import { handleReverseRequest } from "./acp-reverse.js";
 import { LineDecoder } from "./line-decoder.js";
 
 /**
@@ -203,33 +204,6 @@ function saveSessionMap(m: Record<string, string>): void {
   writeSessionMap(brainSessionMapPath(DATA_DIR), m); // 原子写：半截 JSON 等于所有会话丢失
 }
 
-function handleReverseRequest(f: Record<string, any>): void {
-  const method = String(f.method);
-  dlog(`← reverse request ${method}#${f.id}`);
-  if (method === "session/request_permission") {
-    const options = Array.isArray(f.params?.options) ? f.params.options : [];
-    // 默认拒绝（安全）；可信部署可显式开启一次性放行
-    const allow =
-      process.env.WEMIND_ACP_AUTO_ALLOW === "1"
-        ? options.find((o: any) => o?.kind === "allow_once" || o?.kind === "allow_always")
-        : undefined;
-    const result = allow
-      ? { outcome: { outcome: "selected", optionId: allow.optionId } }
-      : { outcome: { outcome: "cancelled" } };
-    child?.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: f.id, result }) + "\n");
-    dlog(`permission ${allow ? "allowed" : "rejected"}`);
-    return;
-  }
-  // 未知反向请求也要回错误，否则对端会挂起
-  child?.stdin.write(
-    JSON.stringify({
-      jsonrpc: "2.0",
-      id: f.id,
-      error: { code: -32601, message: "method not supported" },
-    }) + "\n",
-  );
-}
-
 function handleFrame(f: Record<string, any>): void {
   lastFrameAt = Date.now();
   frameSeq += 1;
@@ -246,7 +220,7 @@ function handleFrame(f: Record<string, any>): void {
   }
   // agent -> client 的反向请求（带 method + id）；必须应答，否则会挂到超时
   if (f.method && f.id !== undefined) {
-    handleReverseRequest(f);
+    handleReverseRequest(f, (payload) => child?.stdin.write(JSON.stringify(payload) + "\n"), dlog);
     return;
   }
   if (f.method === "session/update") {

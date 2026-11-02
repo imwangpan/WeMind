@@ -136,7 +136,7 @@ wemind brain check
 | 探针结果 | 要改 |
 |---|---|
 | 无 `session/load`，有 `resume` | `acp-brain.ts` + `worker-acp.ts` 的 `ensureSession`：load → resume → new 兜底 |
-| 有反向请求 | `handleFrame` 应答 `session/request_permission`；未知 method 回 `-32601` |
+| 有反向请求 | 已由 `acp-reverse.ts` 统一应答（brain / worker / `brain check` 共用）：`session/request_permission` 默认拒绝、未知 method 回 `-32601`；改语义只改这一处 |
 | 首帧慢 / 无 activity 帧 | 配置里的 `firstFrameMs`；`index.ts` 心跳/`heartbeatMs` |
 | `image:false` | `index.ts` 收到图片时友好拒绝；不要让它 `-32602` 重试 |
 | `session/set_config_option` 不支持（`-32601`） | 预设加 `modelArg`（如 gemini 的 `"--model"`）：模型改为拼到启动参数，不再走 ACP 下发；`wemind brain set <名> --model …` 仍是入口 |
@@ -176,7 +176,7 @@ wemind brain check
 - **不要用 `spawn(bin, args, { shell: true })`**：用 `spawnAgent()`（DEP0190 + 引号）；Windows 上它还会设 `NoDefaultCurrentDirectoryInExePath=1`，禁止从任务 cwd 解析裸命令名（防同名 `.cmd` 劫持）。
 - **`wemind brain check` 默认 60s**：冷启动慢的 agent 仍可能误报；先看日志再判定不可用。
 - **`session/load` 不是通用能力**：没有就退 `resume`，再没有就 `new`，并在日志里说清楚。
-- **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。
+- **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。三处入口（brain / worker / `brain check`）共用 `acp-reverse.ts`，别在某一处另写一份。
 - **committed-only + 15s 心跳 = 烧连发额度**：先调心跳，再考虑首帧。
 - **密钥不要写进 agent**：daemon 进程环境提供。
 - **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-agents.ts`。
