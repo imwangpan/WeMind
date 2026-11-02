@@ -94,9 +94,15 @@ import {
   saveHandoff,
   takeHandoffFor,
 } from "./handoff.js";
-import { extractImages, resolveImageBytes } from "./image-reply.js";
+import {
+  canSendImage,
+  extractImages,
+  imageFailureNote,
+  resolveImageBytes,
+  type ImageFailure,
+} from "./image-reply.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
-import { PENDING_PUSH_MAX_TRIES, PendingPushes } from "./pending-push.js";
+import { PENDING_PUSH_MAX_TRIES, PendingPushes, shouldDeferTaskPush } from "./pending-push.js";
 import {
   dispatchTask,
   injectTask,
@@ -569,8 +575,45 @@ function flushHeldPushes(account: AccountData, to: string, token: string): void 
     );
   }
 }
+
 // 当前进行中回合（worker 串行，只有一个）：记录发往用户与所用 token（token 可被「继续」更新）。
 let activeTurn: { from: string; token: string | undefined } | null = null;
+// 大脑回合接近连发上限时，任务推送先让出最后一条额度给最终答案；回合结束后再发，发不下就转 pendingPushes 等用户下一条消息。
+const deferredTaskPushes = new Map<string, string[]>();
+function deferTaskPush(to: string, text: string): number {
+  const list = deferredTaskPushes.get(to) ?? [];
+  list.push(text);
+  deferredTaskPushes.set(to, list);
+  return list.length;
+}
+function takeDeferredTaskPushes(to: string): string[] {
+  const list = deferredTaskPushes.get(to);
+  if (!list) return [];
+  deferredTaskPushes.delete(to);
+  return list;
+}
+/** 回合结束后补发被让位的任务推送：还有额度就立刻发；没有就转挂起队列，等该用户下一条消息（额度已重置）补发。 */
+function flushDeferredTaskPushes(
+  account: AccountData,
+  to: string,
+  token: string | undefined,
+  finalSendFailed: boolean,
+): void {
+  const items = takeDeferredTaskPushes(to);
+  if (items.length === 0) return;
+  const b = budgetOf(to);
+  for (const text of items) {
+    if (!finalSendFailed && b.count < CONSEC_SEND_LIMIT) {
+      b.count += 1;
+      void sendOrdered(account, to, token, text, MessageState.FINISH, token, (e) =>
+        holdUndelivered(to, text, e),
+      );
+    } else {
+      const n = pendingPushes.push(to, text);
+      log(`任务推送让位后仍无额度 → 挂起，等该用户下一条消息补发（累计 ${n} 条，${to}）`);
+    }
+  }
+}
 // onError：「必须送达」的调用方（任务推送、指令答复）用它接管 -2 —— 没有更新的 token 时挂起，等用户下一条消息补发；不传则维持原来的「记日志就丢」。
 function sendOrdered(
   account: AccountData,
@@ -592,8 +635,48 @@ function sendOrdered(
       });
       lastSendAt = Date.now();
     })
+    // 串行链不能因为一次意外抛错而永久卡死（后续 .then 全被跳过，所有消息静默不发）
+    .catch((e) => log("send chain error:", String(e)))
     .finally(() => trackInflight(to, -1));
   return replyChain;
+}
+
+/**
+ * 发一张图片：与文本共用 `replyChain` 和最小间隔，避免图片与进度/任务推送并发乱序。
+ * 返回是否发出——图片无法像文本那样挂起补发（没有可重放的文本），失败由调用方在文字里附原链接。
+ */
+async function sendImageOrdered(
+  account: AccountData,
+  to: string,
+  ctx: string | undefined,
+  image: Buffer,
+): Promise<boolean> {
+  let ok = true;
+  trackInflight(to, 1);
+  const task = replyChain
+    .then(async () => {
+      const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
+      if (wait > 0) await sleep(wait);
+      await sendImage({
+        baseUrl: account.baseUrl,
+        token: account.botToken,
+        to,
+        image,
+        contextToken: ctx,
+      }).catch((e) => {
+        ok = false;
+        handleSendError(e, account);
+      });
+      lastSendAt = Date.now();
+    })
+    .catch((e) => {
+      ok = false;
+      log("send image chain error:", String(e));
+    })
+    .finally(() => trackInflight(to, -1));
+  replyChain = task;
+  await task;
+  return ok;
 }
 
 /**
@@ -622,14 +705,15 @@ function sendMdOrdered(
   ctx: string | undefined,
   finalText: string,
   fallbackToken?: string,
+  onError?: (e: unknown) => void,
 ): Promise<void> {
   trackInflight(to, 1);
   replyChain = replyChain
     .then(async () => {
       const wait = MIN_SEND_GAP_MS - (Date.now() - lastSendAt);
       if (wait > 0) await sleep(wait);
-      const { fileName, data } = buildMdReply(finalText);
       try {
+        const { fileName, data } = buildMdReply(finalText);
         await sendFile({
           baseUrl: account.baseUrl,
           token: account.botToken,
@@ -642,12 +726,14 @@ function sendMdOrdered(
         log(`final as md file: ${fileName} (${finalText.length} chars)`);
       } catch (e) {
         log("send md file failed, fallback to text:", String(e));
-        await reply(account, to, ctx, finalText, MessageState.FINISH, fallbackToken).catch((er) =>
-          handleSendError(er, account),
-        );
+        await reply(account, to, ctx, finalText, MessageState.FINISH, fallbackToken).catch((er) => {
+          handleSendError(er, account);
+          onError?.(er);
+        });
       }
       lastSendAt = Date.now();
     })
+    .catch((e) => log("send md chain error:", String(e)))
     .finally(() => trackInflight(to, -1));
   return replyChain;
 }
@@ -755,16 +841,16 @@ async function handleMessage(
     clearInterval(heartbeat);
     await setTyping(account, to, cx(), 2);
     budgetOf(to).count += 1;
+    const rejectText = "🖼️ 当前大脑暂不支持看图，请改用文字描述，或切换到支持图片的大脑。";
+    let sendFailed = false;
     try {
-      await sendOrdered(
-        account,
-        to,
-        cx(),
-        "🖼️ 当前大脑暂不支持看图，请改用文字描述，或切换到支持图片的大脑。",
-        MessageState.FINISH,
-      );
+      await sendOrdered(account, to, cx(), rejectText, MessageState.FINISH, undefined, (e) => {
+        sendFailed = true;
+        holdUndelivered(to, rejectText, e);
+      });
       log("image unsupported by current brain; rejected gracefully");
     } finally {
+      flushDeferredTaskPushes(account, to, latestToken ? latestToken() : cx(), sendFailed);
       activeTurn = null;
     }
     return false; // 没有答成：交接摘要不能被消费掉
@@ -840,40 +926,50 @@ async function handleMessage(
   await setTyping(account, to, cx(), 2);
   // 发图：从回复里提取图片引用（markdown ![](url/路径) 或裸图片 URL），逐个作为图片消息发出，再发剩余文本
   const { images: replyImages, text: cleaned } = extractImages(answer || "");
-  const failedImgs: string[] = [];
+  const failedImgs: ImageFailure[] = [];
   for (const im of replyImages) {
+    let buf: Buffer;
     try {
-      const buf = await resolveImageBytes(im.src);
-      await sendImage({
-        baseUrl: account.baseUrl,
-        token: account.botToken,
-        to,
-        image: buf,
-        contextToken: cx(),
-      });
-      log(`sent image: ${im.src.slice(0, 80)}`);
+      buf = await resolveImageBytes(im.src);
     } catch (e) {
-      log("send image failed:", im.src, String(e));
-      failedImgs.push(im.src);
+      log("image download failed:", im.src, String(e));
+      failedImgs.push({ src: im.src, reason: "download" });
+      continue;
+    }
+    if (!canSendImage(budgetOf(to).count, CONSEC_SEND_LIMIT)) {
+      log("image skipped (连发额度留给最终文字):", im.src);
+      failedImgs.push({ src: im.src, reason: "budget" });
+      continue;
+    }
+    budgetOf(to).count += 1; // 图片也占一条连发额度
+    if (await sendImageOrdered(account, to, cx(), buf)) {
+      log(`sent image: ${im.src.slice(0, 80)}`);
+    } else {
+      log("send image failed:", im.src);
+      failedImgs.push({ src: im.src, reason: "send" });
     }
   }
   let finalText = cleaned;
-  if (failedImgs.length) {
-    const note = `（有 ${failedImgs.length} 张图片我没能下载下来，附原链接：\n${failedImgs.join("\n")}）`;
-    finalText = finalText ? `${finalText}\n\n${note}` : note;
-  }
+  const note = imageFailureNote(failedImgs);
+  if (note) finalText = finalText ? `${finalText}\n\n${note}` : note;
   if (!finalText && !replyImages.length) finalText = "（没有内容）";
+  let finalSendFailed = false;
   if (finalText) {
     budgetOf(to).count += 1; // 最终答案占一条额度（等待段预留的最后一条）
     log(`final send: msgAge=${msgAge()} sent=${budgetOf(to).count} len=${finalText.length}`);
     const ft = latestToken ? latestToken() : undefined;
+    const onError = (e: unknown) => {
+      finalSendFailed = true;
+      holdUndelivered(to, finalText, e);
+    };
     if (finalText.length > LONG_REPLY_THRESHOLD) {
-      await sendMdOrdered(account, to, cx(), finalText, ft); // 长回复 → .md 文件（一条消息）
+      await sendMdOrdered(account, to, cx(), finalText, ft, onError); // 长回复 → .md 文件（一条消息）
     } else {
-      await sendOrdered(account, to, cx(), finalText, MessageState.FINISH, ft);
+      await sendOrdered(account, to, cx(), finalText, MessageState.FINISH, ft, onError);
     }
   }
   log(`replied to ${to} (msgAge=${msgAge()}): ${(answer || "").slice(0, 60)}`);
+  flushDeferredTaskPushes(account, to, latestToken ? latestToken() : cx(), finalSendFailed);
   activeTurn = null; // 回合结束（计数 budgetOf 不清零，留待用户下条消息重置）
   return ok;
 }
@@ -1045,7 +1141,9 @@ async function workerLoop(account: AccountData, state: ServerState, owner: strin
         sendNotice(account, from, latestToken() ?? token, text, latestToken());
       const notifyFile = (text: string) => {
         budgetOf(from).count += 1; // .md 也是一条消息，占同一份额度
-        return sendMdOrdered(account, from, latestToken() ?? token, text, latestToken());
+        return sendMdOrdered(account, from, latestToken() ?? token, text, latestToken(), (e) =>
+          holdUndelivered(from, text, e),
+        );
       };
       let r: string;
       try {
@@ -1435,7 +1533,14 @@ export async function runDaemon(): Promise<void> {
     const tok = state.contextTokens[`${account.botId}:${to}`];
     // task 推送也占用连续发送额度（与 brain 回合共用 budgetOf）：task 在后台运行，可能与 brain 回合并发，若不计数，本地 budget 会低估服务端真实连续发送数 → brain 的 sendProgress 误判「还能发」→ 撞 ret=-2 限流、结果丢失。
     // 注：task 推送是「本轮结果」（必须送达），故只累加计数、不被 awaiting 暂停（暂停只作用于可丢弃的 brain 进度提示）。
-    budgetOf(to).count += 1;
+    const b = budgetOf(to);
+    // 但大脑回合已接近上限时，最后一条额度要留给最终答案：先延后，回合结束后再发（见 flushDeferredTaskPushes）。
+    if (shouldDeferTaskPush(activeTurn?.from, to, b.count, CONSEC_SEND_LIMIT)) {
+      const n = deferTaskPush(to, text);
+      log(`任务推送遇大脑回合额度将满 → 延后到回合结束（累计 ${n} 条，${to}）`);
+      return;
+    }
+    b.count += 1;
     void sendOrdered(account, to, tok, text, MessageState.FINISH, tok, (e) =>
       holdUndelivered(to, text, e),
     );

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { extractImages } from "./image-reply.js";
+import { canSendImage, extractImages, imageFailureNote } from "./image-reply.js";
 
 describe("extractImages", () => {
   it("提取 Markdown 图片并从正文移除", () => {
@@ -50,5 +50,42 @@ describe("extractImages", () => {
     const { images, text } = extractImages("纯文本回复");
     expect(images).toEqual([]);
     expect(text).toBe("纯文本回复");
+  });
+});
+
+describe("canSendImage（给最终文字留最后一条额度）", () => {
+  it("上限 10 时，已发 8 条仍可发图（发完 9、答案 10）", () => {
+    expect(canSendImage(7, 10)).toBe(true);
+    expect(canSendImage(8, 10)).toBe(true);
+  });
+
+  it("已发 9 条时不再发图（否则最终文字没有额度）", () => {
+    expect(canSendImage(9, 10)).toBe(false);
+    expect(canSendImage(10, 10)).toBe(false);
+  });
+});
+
+describe("imageFailureNote（失败原因分开说，不把发送失败说成下载失败）", () => {
+  it("没有失败 → 空串", () => {
+    expect(imageFailureNote([])).toBe("");
+  });
+
+  it("下载失败与发送失败分别成段", () => {
+    const note = imageFailureNote([
+      { src: "https://x.com/a.png", reason: "download" },
+      { src: "https://x.com/b.png", reason: "send" },
+      { src: "https://x.com/c.png", reason: "send" },
+    ]);
+    expect(note).toContain("有 1 张图片没能下载下来");
+    expect(note).toContain("有 2 张图片没能发出去");
+    expect(note).toContain("https://x.com/a.png");
+    expect(note).toContain("https://x.com/b.png");
+    expect(note).toContain("https://x.com/c.png");
+  });
+
+  it("额度不足单独说明", () => {
+    const note = imageFailureNote([{ src: "C:/tmp/x.png", reason: "budget" }]);
+    expect(note).toContain("因接近微信连续发送上限没发");
+    expect(note).not.toContain("下载");
   });
 });

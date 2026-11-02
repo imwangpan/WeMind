@@ -11,6 +11,16 @@ export const PENDING_PUSH_MAX_TRIES = 3;
 
 export type PendingPush = { text: string; tries: number };
 
+/** 大脑回合已用到「上限-2」时，任务推送让出最后一条额度给最终答案（否则会把答案挤成 ret=-2）。 */
+export function shouldDeferTaskPush(
+  activeFrom: string | undefined,
+  to: string,
+  sentCount: number,
+  limit: number,
+): boolean {
+  return activeFrom === to && sentCount >= limit - 2;
+}
+
 export class PendingPushes {
   private readonly queues = new Map<string, PendingPush[]>();
   private readonly limit: number;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { PENDING_PUSH_LIMIT, PendingPushes } from "./pending-push.js";
+import { PENDING_PUSH_LIMIT, PendingPushes, shouldDeferTaskPush } from "./pending-push.js";
 
 /** 这个队列只为一件事实服务：重启后旧 token 期间的外发挂起、新 token 到达后按序补发。钉死顺序、按人隔离、上限丢最旧、取走即清空、补发次数计数。 */
 describe("PendingPushes", () => {
@@ -80,5 +80,24 @@ describe("PendingPushes", () => {
     const q = new PendingPushes();
     expect(q.take("nobody")).toEqual([]);
     expect(q.total()).toBe(0);
+  });
+});
+
+describe("shouldDeferTaskPush（任务推送给最终答案让额度）", () => {
+  it("没有进行中的大脑回合 → 不延后", () => {
+    expect(shouldDeferTaskPush(undefined, "u1", 9, 10)).toBe(false);
+  });
+
+  it("大脑回合属于别人 → 不延后（额度按用户分开）", () => {
+    expect(shouldDeferTaskPush("u2", "u1", 9, 10)).toBe(false);
+  });
+
+  it("同一用户且已用到上限-2 → 延后", () => {
+    expect(shouldDeferTaskPush("u1", "u1", 8, 10)).toBe(true);
+    expect(shouldDeferTaskPush("u1", "u1", 9, 10)).toBe(true);
+  });
+
+  it("同一用户但额度还宽裕 → 照常发", () => {
+    expect(shouldDeferTaskPush("u1", "u1", 7, 10)).toBe(false);
   });
 });

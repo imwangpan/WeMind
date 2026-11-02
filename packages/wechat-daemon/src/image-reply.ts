@@ -16,6 +16,38 @@ export interface ExtractedImage {
   src: string;
 }
 
+export type ImageFailureReason = "download" | "send" | "budget";
+
+export interface ImageFailure {
+  src: string;
+  reason: ImageFailureReason;
+}
+
+/** 图片也占一条连发额度；始终给最终文字留最后一条。 */
+export function canSendImage(sentCount: number, limit: number): boolean {
+  return sentCount < limit - 1;
+}
+
+/** 把发图失败按原因归类成给用户的附注（下载失败、发送失败、额度不足各说各的）；没有失败返回空串。 */
+export function imageFailureNote(failures: ImageFailure[]): string {
+  if (failures.length === 0) return "";
+  const labels: Record<ImageFailureReason, string> = {
+    download: "没能下载下来",
+    send: "没能发出去",
+    budget: "因接近微信连续发送上限没发",
+  };
+  const order: ImageFailureReason[] = ["download", "send", "budget"];
+  return order
+    .map((reason) => {
+      const items = failures.filter((f) => f.reason === reason).map((f) => f.src);
+      return items.length
+        ? `（有 ${items.length} 张图片${labels[reason]}，附原链接：\n${items.join("\n")}）`
+        : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export function extractImages(text: string): { images: ExtractedImage[]; text: string } {
   const images: ExtractedImage[] = [];
   const seen = new Set<string>();
