@@ -408,20 +408,35 @@ export function acpArgsHint(ag: ResolvedAgent): string {
 }
 
 /** agent 在该平台的「可执行文件名」（用于 PATH 探测）。 */
-function presetExe(preset: AcpAgentPreset): string {
+function presetExe(preset: Pick<AcpAgentPreset, "bin" | "binWin">): string {
   return process.platform === "win32" ? (preset.binWin ?? `${preset.bin}.exe`) : preset.bin;
 }
 
 /**
- * 该 agent 的二进制是否能在 PATH 上解析到（只判定、不启动）。
+ * 解析预设二进制的实际位置：显式覆盖（`presets[名].bin`）> PATH > 预设的 `fallbackBinPaths`。
+ * `presetAvailable` 与 `resolveAgentCore` 共用这一份判据，避免「能解析到却探测说没有」（qoder 的官方安装目录就是这种情况）。
+ * 导出仅供单测。
+ */
+export function presetBinPath(
+  preset: Pick<AcpAgentPreset, "bin" | "binWin" | "fallbackBinPaths">,
+  overrideBin?: string,
+): string | null {
+  if (overrideBin) return locateBin(overrideBin);
+  return (
+    onPath(presetExe(preset)) ??
+    (preset.fallbackBinPaths ?? []).find((p) => fs.existsSync(p)) ??
+    null
+  );
+}
+
+/**
+ * 该 agent 的二进制是否可解析（只判定、不启动）。
  * 传入 cfg 时，`presets[名].bin` 里存的绝对路径也算「可用」——否则桌面端 DSH 这种「装了但不在 PATH」的 agent，auto 探测会白白跳过它。
  */
 export function presetAvailable(key: string, cfg?: BrainConfig | null): boolean {
   const preset = ACP_AGENT_PRESETS[key];
   if (!preset) return false;
-  const ovBin = cfg?.presets?.[key.toLowerCase()]?.bin;
-  if (ovBin) return locateBin(ovBin) !== null;
-  return onPath(presetExe(preset)) !== null;
+  return presetBinPath(preset, cfg?.presets?.[key.toLowerCase()]?.bin) !== null;
 }
 
 /**
@@ -588,9 +603,7 @@ function resolveAgentCore(
     opts.ignoreEnv || preset.name !== "kiro" ? undefined : process.env.KIRO_CLI_BIN?.trim();
   const explicitBin = envBin || kiroBin || overrideCfg?.bin?.trim() || presetOv?.bin?.trim() || "";
   const exe = presetExe(preset);
-  const binPath = explicitBin
-    ? locateBin(explicitBin)
-    : (onPath(exe) ?? (preset.fallbackBinPaths ?? []).find((p) => fs.existsSync(p)) ?? null);
+  const binPath = explicitBin ? locateBin(explicitBin) : presetBinPath(preset);
   const bin =
     explicitBin ||
     (shell ? (process.platform === "win32" ? exe : preset.bin) : binPath || preset.bin);

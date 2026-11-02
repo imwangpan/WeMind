@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  ACP_AGENT_PRESETS,
   resolveAgent,
   agentProblem,
   authHint,
@@ -14,10 +15,25 @@ import {
 } from "./brain-agents.js";
 import {
   presetAvailable,
+  presetBinPath,
   presetNames,
   resolveAgentFor,
   resolvePresetByName,
 } from "./brain-agents.js";
+
+/**
+ * 模拟「一个 agent 都没装」时先关掉 `fallbackBinPaths`：本机可能真的装了 qoder（官方安装目录不在 PATH 上，
+ * 也会被兜底路径命中），否则「PATH 为空 → 探测不到」的用例会随开发机环境而红。
+ */
+function withoutFallbackBins<T>(fn: () => T): T {
+  const saved = Object.entries(ACP_AGENT_PRESETS).map(([k, p]) => [k, p.fallbackBinPaths] as const);
+  for (const p of Object.values(ACP_AGENT_PRESETS)) delete p.fallbackBinPaths;
+  try {
+    return fn();
+  } finally {
+    for (const [k, v] of saved) if (v) ACP_AGENT_PRESETS[k].fallbackBinPaths = v;
+  }
+}
 
 const VARS = [
   "WEMIND_BRAIN",
@@ -602,10 +618,12 @@ describe("resolveAgent auto 探测", () => {
   it("一个都探测不到 → available=false，并给出明确说明", () => {
     clearVars();
     process.env.PATH = emptyBin;
-    const ag = resolveAgent();
-    expect(ag.requestedKey).toBe("auto");
-    expect(ag.available).toBe(false);
-    expect(agentProblem(ag)).toMatch(/自动探测/);
+    withoutFallbackBins(() => {
+      const ag = resolveAgent();
+      expect(ag.requestedKey).toBe("auto");
+      expect(ag.available).toBe(false);
+      expect(agentProblem(ag)).toMatch(/自动探测/);
+    });
   });
 
   it("显式指定但二进制缺失 → available=false，提示安装/切换", () => {
@@ -685,9 +703,11 @@ describe("resolveAgent auto 探测", () => {
       fs.writeFileSync(path.join(onlyCline, "cline"), "");
       fs.writeFileSync(path.join(onlyCline, "cline.cmd"), "");
       process.env.PATH = onlyCline;
-      const ag = resolveAgent();
-      expect(ag.name).toBe("cline");
-      expect(ag.available).toBe(true);
+      withoutFallbackBins(() => {
+        const ag = resolveAgent();
+        expect(ag.name).toBe("cline");
+        expect(ag.available).toBe(true);
+      });
     } finally {
       fs.rmSync(onlyCline, { recursive: true, force: true });
     }
@@ -793,6 +813,18 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
     const r = resolvePresetByName("auto");
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.agent.name).toBe("opencode");
+  });
+
+  it("fallbackBinPaths 也算可用（PATH 上没有时）；显式覆盖坏了不回退", () => {
+    const hit = path.join(fakeBin, "fallback-cli.exe");
+    fs.writeFileSync(hit, "");
+    const preset = {
+      bin: "definitely-not-on-path-xyz",
+      binWin: "definitely-not-on-path-xyz.exe",
+      fallbackBinPaths: [hit],
+    };
+    expect(presetBinPath(preset)).toBe(hit);
+    expect(presetBinPath(preset, path.join(fakeBin, "missing.exe"))).toBeNull();
   });
 
   it("★ 切走再切回不丢 --bin：presets[deepseek] 里的绝对路径仍被采用", () => {
