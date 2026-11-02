@@ -32,7 +32,7 @@ packages/wechat-daemon/src/
 ├── handoff.ts          # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才消费（→ 第 6 章）
 ├── control-bridge.ts   # CLI↔daemon 控制桥（请求/应答/.bridge 凭据）（→ 第 7 章）
 ├── pid-record.ts       # brain.pid / workers.pid.json 身份记录
-├── manage.ts           # 多账号 + CLI 入口与命令分派（→ 第 8、7 章）
+├── manage.ts           # CLI 入口分派、账号与进程生命周期（命令实现见 cli-*.ts）（→ 第 8、7 章）
 ├── cli-context.ts      # CLI 共用上下文：账号选择、daemon/控制桥存活、viaBridge
 ├── cli-task.ts         # CLI 的 task* 命令（文件桥写入 + 答复文案）
 ├── cli-session.ts      # CLI 的 session* 命令（读登记表 / 写走控制桥）

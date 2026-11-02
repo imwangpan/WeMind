@@ -36,7 +36,7 @@ WeMind 把**个人微信**变成 AI agent 的输入输出通道，对外有两�
    - **会话列表/恢复/改名/删除** → `session-manager.ts` → `session-registry.ts`（登记表）+ `session-map.ts`（当前会话表）；
    - **交接** → `handoff.ts`；**CLI↔daemon 控制桥** → `control-bridge.ts`；
    - **命令解析与帮助** → `chat-commands.ts`（无副作用模块，`index.ts` 里只做薄包装）；
-   - CLI/账号 → `cli.ts`（入口分派在 `cli-dispatch.ts`）/ `manage.ts` / `brain-config.ts`。
+   - CLI/账号 → `cli.ts`（入口分派在 `cli-dispatch.ts`）/ `manage.ts`（分派与账号/进程生命周期）/ `cli-brain.ts`、`cli-login.ts`、`cli-task.ts`、`cli-session.ts` / `brain-config.ts`。
 5. 任务配方：[`docs/ai/recipes/`](docs/ai/recipes/)。
 
 ---
@@ -171,11 +171,11 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 | 改**多任务/进程池/编号** | `worker-pool.ts`（策略纯函数 `planAcquire/planReap`；`acquire` 起进程/复用前按这条任务的 agent 调 `ensureWorkerHome(ag)` 备沙箱）+ `worker-acp.ts`（`WorkerConn`）+ `task-manager.ts` + `task-store.ts` |
 | 改**会话管理** | `session-manager.ts`（操作层）+ `session-registry.ts`（登记表）；`acp-brain.ts` 的 `resumeSession` 是严格恢复 |
 | 改**交接** | `handoff.ts`（写入磁盘/带上/消费）+ `index.ts` 的 workerLoop 前缀带上 |
-| 改**CLI 与微信的对等** | `control-bridge.ts`（协议）+ `index.ts` 的 `handleControlRequest` + `manage.ts`（CLI 侧） |
+| 改**CLI 与微信的对等** | `control-bridge.ts`（协议）+ `index.ts` 的 `handleControlRequest` + `manage.ts`（分派）/ `cli-*.ts`（CLI 侧实现） |
 | 改命令/帮助 | `chat-commands.ts`（**同表驱动解析与帮助**，改一处两处都变） |
 | 加/改 MCP 挂载 | `mcp-sandbox.ts` / `agent-mcp.ts` / `worker-sandbox.ts`；按 [`docs/ai/recipes/add-mcp.md`](docs/ai/recipes/add-mcp.md) |
 | 改微信消息处理/回复 | `index.ts`、`send-pipeline.ts`、`md-reply.ts`、`image-reply.ts` |
-| 加 CLI 子命令 | `cli.ts`（注册）+ `manage.ts`（实现） |
+| 加 CLI 子命令 | `cli.ts`（注册）+ `manage.ts`（分派；实现按主题放 `cli-*.ts`） |
 | 改数据目录/账号 | `wechat-ilink-core/src/store/*`、`brain-config.ts` |
 | 排查 daemon 不回复 | [`docs/ai/recipes/debug-daemon.md`](docs/ai/recipes/debug-daemon.md) |
 | 跑端到端验收 | [`docs/ai/recipes/run-e2e.md`](docs/ai/recipes/run-e2e.md) |
