@@ -13,6 +13,7 @@ import {
   isWechatMcpServer,
 } from "./agent-mcp.js";
 import { copyProfilePatch } from "./profile-model.js";
+import { syncInherited } from "./sandbox-inherit.js";
 
 /**
  * worker 沙箱：与 brain 沙箱（mcp-sandbox.ts）并列，但 MCP 策略相反。
@@ -273,67 +274,9 @@ function syncSettings(ag: ResolvedAgent): void {
   else syncKiroSettings(ag);
 }
 
-/** 用 junction/symlink 把真实配置目录的记忆/技能/规则类子目录链入 worker 配置目录；单文件记忆直接拷。逻辑同 brain 的 mirrorRealKiro。 */
+/** 用 junction/symlink 把真实配置目录的记忆/技能/规则类子目录链入 worker 配置目录；单文件记忆直接拷。逻辑同 brain（共用 `sandbox-inherit.ts`）。 */
 function mirrorRealKiro(ag: ResolvedAgent): void {
-  if (!ag.inherit || !ag.realHome) return;
-  const dir = workerConfigDir(ag);
-  if (path.resolve(WORKER_HOME) === path.resolve(ag.realHome)) return; // 安全：别把自己链给自己
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-  } catch {
-    /* ignore */
-  }
-  for (const d of ag.inheritDirs) {
-    const target = path.join(ag.realHome, d);
-    const link = path.join(dir, d);
-    if (!fs.existsSync(target)) continue;
-    let present = false;
-    try {
-      fs.lstatSync(link);
-      present = true;
-    } catch {
-      /* 不存在 */
-    }
-    if (present) {
-      try {
-        const st = fs.lstatSync(link);
-        if (st.isSymbolicLink()) continue; // 已是链接 → 不动
-        if (st.isDirectory()) {
-          if (fs.readdirSync(link).length === 0) {
-            fs.rmdirSync(link); // 空目录 → 删掉，下面改建 junction
-          } else {
-            // 非空真实目录：补拷真实目录里缺失的文件（不删已有）
-            for (const f of fs.readdirSync(target)) {
-              const dst = path.join(link, f);
-              const src = path.join(target, f);
-              try {
-                if (!fs.existsSync(dst) && fs.statSync(src).isFile()) fs.copyFileSync(src, dst);
-              } catch {
-                /* ignore */
-              }
-            }
-            continue;
-          }
-        } else continue;
-      } catch {
-        continue;
-      }
-    }
-    try {
-      fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
-    } catch {
-      /* 权限不足等：best-effort 忽略 */
-    }
-  }
-  for (const f of ag.inheritFiles) {
-    const src = path.join(ag.realHome, f);
-    const dst = path.join(dir, f);
-    try {
-      if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
-    } catch {
-      /* ignore */
-    }
-  }
+  syncInherited(WORKER_HOME, workerConfigDir(ag), ag);
 }
 
 /**

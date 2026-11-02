@@ -13,6 +13,7 @@ import {
   isWechatMcpServer,
 } from "./agent-mcp.js";
 import { copyProfilePatch } from "./profile-model.js";
+import { syncInherited } from "./sandbox-inherit.js";
 
 /**
  * brain 的 MCP 沙箱：brain 跑在独立配置目录下，默认不加载任何 MCP。
@@ -71,67 +72,7 @@ function forbiddenServer(name: string, def: unknown): boolean {
  * **MCP（settings/opencode.json 的 mcp 段）与 brain 自有会话（sessions）不照搬**：MCP 必须走沙箱（排除 wechat，防它把消息发回自己），会话不能混。
  */
 function mirrorRealKiro(ag: ResolvedAgent): void {
-  if (!ag.inherit || !ag.realHome) return;
-  const dir = brainConfigDir(ag);
-  if (path.resolve(BRAIN_HOME) === path.resolve(ag.realHome)) return; // 安全：别把自己链给自己
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-  } catch {
-    /* ignore */
-  }
-  for (const d of ag.inheritDirs) {
-    const target = path.join(ag.realHome, d);
-    const link = path.join(dir, d);
-    if (!fs.existsSync(target)) continue;
-    let present = false;
-    try {
-      fs.lstatSync(link);
-      present = true;
-    } catch {
-      /* 不存在 */
-    }
-    if (present) {
-      // 已是链接 → 不动；是早期自建的「空」真实目录 → 删掉改建 junction；非空真实目录 → 保留不动（避免误删数据）
-      try {
-        const st = fs.lstatSync(link);
-        if (st.isSymbolicLink()) continue; // 已是链接 → 不动
-        if (st.isDirectory()) {
-          if (fs.readdirSync(link).length === 0) {
-            fs.rmdirSync(link); // 空目录 → 删掉，下面改建 junction
-          } else {
-            // 非空真实目录（如 kiro 自建 agents 脚手架）：把真实目录里「缺失」的文件补拷进来，补全继承（不删已有）
-            for (const f of fs.readdirSync(target)) {
-              const dst = path.join(link, f);
-              const src = path.join(target, f);
-              try {
-                if (!fs.existsSync(dst) && fs.statSync(src).isFile()) fs.copyFileSync(src, dst);
-              } catch {
-                /* ignore */
-              }
-            }
-            continue;
-          }
-        } else continue;
-      } catch {
-        continue;
-      }
-    }
-    try {
-      fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
-    } catch {
-      /* 权限不足等：best-effort 忽略 */
-    }
-  }
-  // 单文件式记忆（如 opencode 的 AGENTS.md）：真实目录有、沙箱没有才拷（不覆盖沙箱已有）
-  for (const f of ag.inheritFiles) {
-    const src = path.join(ag.realHome, f);
-    const dst = path.join(dir, f);
-    try {
-      if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
-    } catch {
-      /* ignore */
-    }
-  }
+  syncInherited(BRAIN_HOME, brainConfigDir(ag), ag);
 }
 
 /** 宽松读取（JSONC）：Gemini 的 settings.json 允许注释，严格 JSON.parse 会把合法配置当损坏。 */

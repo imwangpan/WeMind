@@ -80,8 +80,9 @@ scripts/                daemon wrapper、pm2、doctor、发布守卫（prepack-g
 | `packages/wechat-daemon/src/brain-state.ts` | `brain-runtime.json`：daemon 实际生效的大脑（启动/热切换写入；`list` 只在 daemon 活着时采信） |
 | `packages/wechat-daemon/src/brain-agents.ts` | `ACP_AGENT_PRESETS`（含 `model` / `modelArg` / `realProfile` / `envDefaults` / `sessionMode` / `requiresBins` / `settingsBase` / `settingsStrip` / `settingsDefaults` / `replayOnLoad` 字段）、`resolveAgent()`、`resolveAgentFor(cfg, role)`、`agentEnv()`、`agentProblem()` |
 | `packages/wechat-daemon/src/profile-model.ts` | 真实 profile 用户层三件事：`readProfileDefaultModel`（读默认模型——**优先用户自己写的 `- id: acp`**，否则 `agent-default-model`）；`acpOverrideHint`（缺 `- id: acp` 时在 `wemind brain` 里给出可粘贴的片段——**只提示，不替 agent 改配置**，§4.14）；`stripWechatMcpEntries`（复制进沙箱前剔除用户自己挂的微信 MCP 条目，防回环，§4.1） |
-| `packages/wechat-daemon/src/mcp-sandbox.ts` | brain 沙箱、MCP 激活集、记忆/技能继承 |
+| `packages/wechat-daemon/src/mcp-sandbox.ts` | brain 沙箱、MCP 激活集 |
 | `packages/wechat-daemon/src/worker-sandbox.ts` | worker 沙箱（继承全量 MCP，排除 wechat） |
+| `packages/wechat-daemon/src/sandbox-inherit.ts` | 记忆/技能继承（brain 与 worker 共用）：junction/拷贝 + `.wemind-inherited.json` 清单，换 agent 时清掉上一个 agent 留下的 `skills`/`AGENTS.md` |
 | `packages/wechat-daemon/src/spawn-agent.ts` | 统一 spawn（Windows `.cmd` 经 shell + 逐参数引号） |
 | `packages/wechat-daemon/src/brain-check.ts` | `wemind brain check` 的真 ACP 握手 |
 | `packages/wechat-daemon/src/manage.ts` | `wemind` 子命令实现（`brain switch`/`session *`/`task-*` 走控制桥） |

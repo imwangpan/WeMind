@@ -147,7 +147,7 @@ spawn 失败（cwd 不存在/权限不足）时，`WorkerConn` 把 `error` 事�
 
 > **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个配置目录（2026-10-29 一轮样本未见互踩，长期风险仍在）。
 >
-> worker 沙箱代码与 brain 沙箱有少量重复（`mirrorRealKiro`/`syncSettings`），刻意复制以隔离演进、不动已稳定的 brain 沙箱。
+> worker 沙箱的 `syncSettings` 与 brain 有少量重复（刻意复制以隔离演进）；记忆/技能继承已抽到 `sandbox-inherit.ts` 共用（含换 agent 时清掉上一个 agent 的 `skills`/`AGENTS.md`）。
 
 ## 7.4 微信入口：消息路由
 

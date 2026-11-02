@@ -155,7 +155,8 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 
 - kiro 预置继承：`steering` / `memories` / `skills` / `agents` / `powers` / `tasks` / `extensions`；
 - qoder 预置继承：`memory`（用户画像/偏好，实测存在并已验读写共享）、`skills` / `agents` / `commands` + `AGENTS.md`（1.1.78 不存在，当前空操作）；settings 走 `settingsBase` 复制而非 junction；
-- 已是链接 → 不动；空的真实目录 → 删掉改建 junction；**非空真实目录（如 kiro 自建脚手架）→ 补拷缺失文件**（不删已有）。
+- 已是链接且指向当前 agent 的真实目录 → 不动；**指向别的 agent（共用空 `configSubdir` 的 kiro / deepseek / pi 切换后）→ 重建**；空的真实目录 → 删掉改建 junction；**非空真实目录（如 kiro 自建脚手架）→ 补拷缺失文件**（不删已有）。
+- **换 agent 清理**：`sandbox-inherit.ts` 在配置目录写 `.wemind-inherited.json`（上次继承的名字 + agent），新 agent 不要的 `skills` 链接/`AGENTS.md` 会被清掉；同名单文件记忆若来自上一个 agent 则用新 agent 的真实文件覆盖（同一 agent 重跑仍保留沙箱内的编辑）。brain 与 worker 共用这段逻辑。
 
 ### settings 继承（syncSettings）
 
