@@ -122,6 +122,7 @@ afterEach(() => {
   setTaskStateSink(() => {});
   setTaskPush(() => {});
   setTaskAckSink(() => {});
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("task-manager 状态机（单任务：行为与改造前一致）", () => {

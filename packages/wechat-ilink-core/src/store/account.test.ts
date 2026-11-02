@@ -55,13 +55,15 @@ describe("saveAccountTo（按目录写凭证）", () => {
     expect(fs.existsSync(path.join(dir, "account.json"))).toBe(true);
   });
 
-  it("POSIX 下文件权限统一为 600（Windows 无 chmod 语义，跳过）", () => {
-    if (process.platform === "win32") return;
-    const dir = tmpDir();
-    saveAccountTo(dir, ACCOUNT);
-    const mode = fs.statSync(path.join(dir, "account.json")).mode & 0o777;
-    expect(mode).toBe(0o600);
-  });
+  it.skipIf(process.platform === "win32")(
+    "POSIX 下文件权限统一为 600（Windows 无 chmod 语义）",
+    () => {
+      const dir = tmpDir();
+      saveAccountTo(dir, ACCOUNT);
+      const mode = fs.statSync(path.join(dir, "account.json")).mode & 0o777;
+      expect(mode).toBe(0o600);
+    },
+  );
 
   it("重复保存是覆盖而非追加（同一目录只留最新一份凭证）", () => {
     const dir = tmpDir();
@@ -95,9 +97,8 @@ describe("saveAccountTo（按目录写凭证）", () => {
   });
 });
 
-describe("POSIX 文件权限", () => {
+describe.skipIf(process.platform === "win32")("POSIX 文件权限", () => {
   it("account.json / state.json / qr_login.json 全部收紧为 600（都含凭证类数据）", () => {
-    if (process.platform === "win32") return;
     const dir = tmpDir();
     saveAccountTo(dir, ACCOUNT);
     saveState({ updatesBuf: "b", contextTokens: { "bot:u": "ct" }, lastMessageId: 1 }, dir);

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +21,9 @@ let dir = "";
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-inbox-"));
+});
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 const files = (p: string) => (fs.existsSync(p) ? fs.readdirSync(p).sort() : []);

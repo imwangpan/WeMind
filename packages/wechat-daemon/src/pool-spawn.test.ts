@@ -128,6 +128,7 @@ afterEach(() => {
 afterAll(() => {
   if (savedNodeOptions === undefined) delete process.env.NODE_OPTIONS;
   else process.env.NODE_OPTIONS = savedNodeOptions;
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe("worker 进程池（真进程）", () => {
