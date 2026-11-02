@@ -298,7 +298,7 @@ export function sweep(limits: PoolLimits = poolLimits()): void {
 }
 
 /**
- * 杀掉池里**全部**连接——只给「daemon 退出」用（`task-manager.ts` 的 `shutdownTasks()`，由 `wemind stop` / 进程退出触发）。
+ * 杀掉池里**全部**连接——只给「daemon 退出」用（`index.ts` 的 `cleanupAll()`，`wemind stop` / 进程退出时触发）。
  * 结束单条任务**不经过这里**：那条路走 `task-manager.ts` 的「等回复的 `release()` 留着复用 / 正在跑的 `drop()` 杀一条」。
  */
 export function killAll(): void {

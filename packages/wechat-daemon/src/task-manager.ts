@@ -3,7 +3,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { getAgent } from "./agent-slot.js";
 import { agentConfigFor, loadBrainConfig } from "./brain-config.js";
 import { resolvePresetByName, type ResolvedAgent } from "./brain-agents.js";
-import { acquire, drop, release, killAll, poolSummary } from "./worker-pool.js";
+import { acquire, drop, release, poolSummary } from "./worker-pool.js";
 import type { WorkerConn, WorkerProgressEvent } from "./worker-acp.js";
 import {
   emptyTaskStore,
@@ -680,17 +680,6 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
   if (id === "all") return done(`🛑 已结束全部任务（${targets.length} 条）。`);
   const one = targets[0];
   return done(targets.length === 1 ? `🛑 任务 #${one.id} 已结束。` : "🛑 任务已结束。");
-}
-
-/** daemon 退出 / `wemind stop`：停掉一切（任务与池）。 */
-export function shutdownTasks(): void {
-  for (const t of tasks.values()) {
-    t.injectResolver?.(null);
-    t.injectResolver = undefined;
-  }
-  killAll();
-  persist(); // 表留着（下次启动会标「已中断」），进程全清
-  emitState();
 }
 
 /** 测试用：清空内存任务表与写入磁盘路径（不写入磁盘、不杀进程由调用方决定）。 */
