@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type { ResolvedAgent } from "./brain-agents.js";
+
 /**
  * Claude Code 沙箱：配置目录在 <沙箱>/claude（预设用 CLAUDE_CONFIG_DIR 指到目录本身），
  * MCP 走 ACP session/new|load 的 mcpServers（mcpViaAcp=true）——**不写** settings.json / mcp.json；
@@ -98,6 +100,22 @@ describe("brain 沙箱（Claude Code）", () => {
       },
     ]);
     expect(fs.existsSync(path.join(brainCfg, "settings", "mcp.json"))).toBe(false);
+
+    // 热切换期间槽位仍是旧大脑：显式传目标 agent 时，catalog 必须来自它，而不是 getAgent("brain")。
+    const otherHome = path.join(root, "other-home");
+    fs.mkdirSync(otherHome, { recursive: true });
+    fs.writeFileSync(
+      path.join(otherHome, ".claude.json"),
+      JSON.stringify({ mcpServers: { demo: { command: "other-server" } } }),
+    );
+    const other = {
+      realHome: otherHome,
+      catalogFile: ".claude.json",
+      mcpFormat: "kiro",
+    } as ResolvedAgent;
+    expect(activeMcpServers(other)).toEqual([
+      { name: "demo", command: "other-server", args: [], env: [] },
+    ]);
   });
 });
 

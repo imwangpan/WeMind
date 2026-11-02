@@ -224,9 +224,9 @@ function applySandbox(ag: ResolvedAgent): void {
 }
 
 /** brain 当前应挂载的 ACP mcpServers（配了 mcpViaAcp 的 agent 用）：激活集 → catalog 定义 → ACP 声明。
- *  跳过不可转换的坏条目并记日志——官方 DSH 的 session/new 遇到起不来的 MCP 会回滚整个会话。 */
-export function activeMcpServers() {
-  const ag = getAgent("brain");
+ *  跳过不可转换的坏条目并记日志——官方 DSH 的 session/new 遇到起不来的 MCP 会回滚整个会话。
+ *  **必须传正在启动的那个 agent**：热切换时槽位还指着旧大脑，用默认值会把旧 agent 的 MCP 目录发给新大脑。 */
+export function activeMcpServers(ag: ResolvedAgent = getAgent("brain")) {
   const cat = loadCatalog(ag);
   const active = loadActive().filter((n) => cat[n] && !FORBIDDEN.has(n));
   const picked: Record<string, unknown> = {};

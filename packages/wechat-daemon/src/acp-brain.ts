@@ -466,7 +466,7 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
   const existing = userSessions.get(userId);
   if (existing) return existing;
   // 配了 mcpViaAcp 的 agent（DSH）：激活集随 session 下发；其余 agent 传空（走各自沙箱配置文件）
-  const mcpServers = ag.mcpViaAcp ? activeMcpServers() : [];
+  const mcpServers = ag.mcpViaAcp ? activeMcpServers(ag) : [];
   const map = loadSessionMap(ag);
   const saved = map[keyOf(ag, userId)];
   if (saved) {
@@ -636,7 +636,7 @@ export async function resumeSession(
     const ag = getAgent("brain");
     const short = sessionId.slice(0, 8);
     await ensureProcess(ag);
-    const mcpServers = ag.mcpViaAcp ? activeMcpServers() : [];
+    const mcpServers = ag.mcpViaAcp ? activeMcpServers(ag) : [];
     const methods: Array<"load" | "resume"> =
       ag.restore === "resume" ? ["resume"] : ["load", "resume"];
     let lastErr = "";
