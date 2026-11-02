@@ -6,6 +6,7 @@ import {
   applyAcpSessionMode,
   availableAcpModes,
   beginAcpTurn,
+  drainAcpReplay,
   feedAcpStdout,
   handleAcpFrame,
   newTurnState,
@@ -148,6 +149,43 @@ describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
     expect(events.filter((e) => e === "tool")).toHaveLength(1);
     expect(turn.seenUpdateTypes.has("tool_call")).toBe(true);
   });
+
+  it("思考帧每回合只报一次 thinking；工具 purpose 从 rawInput 提取", () => {
+    const { host, turn } = fakeHost();
+    const events: Array<{ type: string; purpose?: string }> = [];
+    beginAcpTurn(turn, "s1", (ev) => events.push(ev));
+    const thought = {
+      method: "session/update",
+      params: {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "想" },
+        },
+      },
+    };
+    handleAcpFrame(thought, host);
+    handleAcpFrame(thought, host);
+    expect(events.filter((e) => e.type === "thinking")).toHaveLength(1);
+
+    handleAcpFrame(
+      {
+        method: "session/update",
+        params: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "t2",
+            title: "bash",
+            kind: "execute",
+            rawInput: { __tool_use_purpose: "跑测试" },
+          },
+        },
+      },
+      host,
+    );
+    expect(events.find((e) => e.type === "tool")?.purpose).toBe("跑测试");
+  });
 });
 
 describe("requestAcp（写帧 / 超时）", () => {
@@ -212,6 +250,27 @@ describe("promptAcp（首帧 / 空闲 / 硬上限）", () => {
     await vi.advanceTimersByTimeAsync(16_000);
     await assertion;
   });
+
+  it("持续出帧但超过硬上限 → cap（idle 不触发时唯一的止损）", async () => {
+    vi.useFakeTimers();
+    const { host, pending } = fakeHost();
+    const p = promptAcp(
+      host,
+      { sessionId: "s", prompt: [] },
+      {
+        idleMs: 20_000,
+        capMs: 10_000,
+        firstFrameMs: 5_000,
+      },
+    );
+    const assertion = expect(p).rejects.toThrow("cap timeout");
+    await vi.advanceTimersByTimeAsync(6_000);
+    handleAcpFrame({ method: "session/update", params: { sessionId: "s", update: {} } }, host);
+    handleAcpFrame({ method: "session/update", params: { sessionId: "s", update: {} } }, host);
+    await vi.advanceTimersByTimeAsync(11_000); // 17s：idle 只有 11s，但 total 已过 cap
+    await assertion;
+    expect(pending.size).toBe(0);
+  });
 });
 
 describe("模型与模式设置", () => {
@@ -248,6 +307,53 @@ describe("模型与模式设置", () => {
     handleAcpFrame({ id: 1, error: { code: -32601, message: "no" } }, host);
     await expect(p).resolves.toBeUndefined();
     expect(logs.some((l) => l.includes("session mode set failed"))).toBe(true);
+  });
+
+  it("applyAcpSessionMode：成功路径发出 set_mode；没配 sessionMode 时完全不写帧", async () => {
+    const { host, written, logs } = fakeHost();
+    const p = applyAcpSessionMode(host, fakeAgent({ sessionMode: "bypass" }), "s1", null, 1000);
+    expect(written[0]).toMatchObject({
+      method: "session/set_mode",
+      params: { sessionId: "s1", modeId: "bypass" },
+    });
+    handleAcpFrame({ id: 1, result: {} }, host);
+    await p;
+    expect(logs.some((l) => l.includes("session mode set bypass"))).toBe(true);
+
+    const second = fakeHost();
+    await applyAcpSessionMode(second.host, fakeAgent(), "s1", null, 1000);
+    expect(second.written).toEqual([]);
+  });
+});
+
+describe("drainAcpReplay（load 后等历史回放安静）", () => {
+  it("replayOnLoad=false 立即返回；true 时计数排空的帧", async () => {
+    const off = fakeHost();
+    await drainAcpReplay(off.host, fakeAgent());
+    expect(off.logs).toEqual([]);
+
+    vi.useFakeTimers();
+    const { host, state, logs } = fakeHost();
+    const p = drainAcpReplay(host, fakeAgent({ replayOnLoad: true }));
+    setTimeout(() => {
+      state.frameSeq += 1; // 回放帧到达
+    }, 100);
+    await vi.advanceTimersByTimeAsync(700);
+    await p;
+    expect(logs.some((l) => l.includes("drained 1 replay frame(s)"))).toBe(true);
+  });
+
+  it("帧一直不停 → 到封顶后返回并标 (cap)", async () => {
+    vi.useFakeTimers();
+    const { host, state, logs } = fakeHost();
+    const iv = setInterval(() => {
+      state.frameSeq += 1;
+    }, 100);
+    const p = drainAcpReplay(host, fakeAgent({ replayOnLoad: true }));
+    await vi.advanceTimersByTimeAsync(3200);
+    clearInterval(iv);
+    await p;
+    expect(logs.some((l) => l.includes("(cap)"))).toBe(true);
   });
 });
 
