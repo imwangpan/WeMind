@@ -31,7 +31,9 @@ packages/wechat-daemon/src/
 ├── handoff.ts          # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才消费（→ 第 6 章）
 ├── control-bridge.ts   # CLI↔daemon 控制桥（请求/应答/.bridge 凭据）（→ 第 7 章）
 ├── pid-record.ts       # brain.pid / workers.pid.json 身份记录
-├── manage.ts           # 多账号 + CLI（brain switch / session * / task-*）（→ 第 8、7 章）
+├── manage.ts           # 多账号 + CLI 入口与命令分派（→ 第 8、7 章）
+├── cli-context.ts      # CLI 共用上下文：账号选择、daemon/控制桥存活、viaBridge
+├── cli-task.ts         # CLI 的 task* 命令（文件桥写入 + 答复文案）
 ├── image-reply.ts      # 从大脑回复提取图片引用
 └── md-reply.ts         # 长回复转 .md 文件
 ```

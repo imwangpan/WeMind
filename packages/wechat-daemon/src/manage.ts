@@ -32,7 +32,6 @@ import {
   brainPidMarkers,
   commandLines,
   isAlive,
-  isOurProcess,
   matchesMarkers,
 } from "./proc-identity.js";
 import {
@@ -52,20 +51,35 @@ import {
   type BrainConfig,
 } from "./brain-config.js";
 import { checkAgent } from "./brain-check.js";
+import {
+  agentNameOf,
+  aliveOurs,
+  bridgeReady,
+  daemonAlive,
+  ownerOf,
+  pickKey,
+  readPid,
+  requireDaemonAlive,
+  resolveKey,
+  splitKeyArg,
+  viaBridge,
+} from "./cli-context.js";
+import {
+  cmdTask,
+  cmdTaskList,
+  cmdTaskReply,
+  cmdTaskStatus,
+  cmdTaskStop,
+  parseTaskId,
+} from "./cli-task.js";
+
+export { pickKey } from "./cli-context.js";
+export { resolveTaskCwd, taskAckOutcome } from "./cli-task.js";
 import { acpOverrideHint } from "./profile-model.js";
 import { readPidRecords, recordMarkers } from "./pid-record.js";
 import { BRAIN_RUNTIME_FILE, readBrainState, type BrainRuntime } from "./brain-state.js";
 import { CLI_VERSION, versionLine } from "./version.js";
 import { renderHelp } from "./chat-commands.js";
-import {
-  awaitControlResponse,
-  bridgePidOf,
-  controlTimeoutMs,
-  newRequestId,
-  writeControlRequest,
-  type ControlKind,
-  type ControlRequest,
-} from "./control-bridge.js";
 import {
   currentSessionIdOf,
   deleteSession,
@@ -74,7 +88,6 @@ import {
   renameSession,
 } from "./session-registry.js";
 import { clearSessionPointer, brainSessionMapPath, sessionKey } from "./session-map.js";
-import { awaitTaskAck, type TaskAck, writeTaskCmd as writeTaskCommand } from "./task-inbox.js";
 
 /**
  * WeMind 多账号管理 CLI。
@@ -85,15 +98,6 @@ import { awaitTaskAck, type TaskAck, writeTaskCmd as writeTaskCommand } from "./
 
 const BASE = process.env.WEMIND_ILINK_BASE?.trim() || "https://ilinkai.weixin.qq.com";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function readPid(dir: string, name: string): number | null {
-  try {
-    const n = parseInt(fs.readFileSync(path.join(dir, name), "utf-8").trim(), 10);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * 大脑进程的身份记录（`brain.pid` 现在是 JSON，见 pid-record.ts）：首条非 legacy 记录。
@@ -111,14 +115,6 @@ export function brainRecord(dir: string): {
   const markers = recordMarkers(rec);
   return { pid: rec.pid, markers: markers.length ? markers : null, agent: rec.agent };
 }
-/**
- * 该 pid 是否「活着**且确实是我们自己的** CLI 进程」。
- * 只判存活不够：pid 会复用（尤其重启后），陈旧 pid 文件可能指向**别人的**进程 → 会误杀/误判。
- */
-function aliveOurs(pid: number | null, markers: string[][] = CLI_PID_MARKERS): boolean {
-  return isOurProcess(pid, markers);
-}
-
 /** 阻塞式 sleep（CLI 是同步流程；Atomics.wait 不占 CPU、不比 spawn 一个进程贵）。 */
 function sleepSync(ms: number): void {
   try {
@@ -227,20 +223,6 @@ function openFile(p: string): void {
   } catch {
     /* ignore */
   }
-}
-
-/** key 或 label → key（label 唯一匹配才行）。 */
-function resolveKey(arg: string): string {
-  if (!arg) throw new Error("需要 <key 或 label>");
-  const accs = listAccounts();
-  if (accs.some((a) => a.key === arg)) return arg;
-  const byLabel = accs.filter((a) => a.label === arg);
-  if (byLabel.length === 1) return byLabel[0].key;
-  if (byLabel.length > 1)
-    throw new Error(
-      `label「${arg}」对应多个账号，请改用 key：${byLabel.map((a) => a.key).join(", ")}`,
-    );
-  throw new Error(`未找到账号：${arg}（既不是 key 也不是 label）`);
 }
 
 /** 启动某账号的 daemon（方案 a：委托 pm2 常驻，跑 `wemind daemon`，注入 WECHAT_ACCOUNT）。 */
@@ -909,37 +891,6 @@ function cmdStart(sel?: string, runner?: string): string {
   return `已启动 daemon（账号 ${key}）。用 list 查看运行状态。`;
 }
 
-// ===== 本地任务命令（文件桥）：写 task-inbox/*.json，由 daemon 扫描执行；状态读 task-state.json，结果读 task-out/*.json =====
-/** 原子写一个命令文件到收件箱（临时文件 + rename，避免 daemon 读到半截）；返回本次命令的答复编号。 */
-function writeTaskCmd(key: string, obj: Record<string, unknown>): string {
-  return writeTaskCommand(accountDir(key), obj);
-}
-
-/**
- * 把任务答复翻成 CLI 文案与成败（导出仅供单测）。
- * `ok=false` = daemon 明确拒绝/失败（达上限、「没有 #9 号任务」），文案照打，但调用方要把退出码置 1；
- * 等不到答复不算失败（老版 daemon / 刚启动），只多一句说明。
- */
-export function taskAckOutcome(
-  a: Pick<TaskAck, "ok" | "text"> | null,
-  fallback: string,
-): { text: string; failed: boolean } {
-  if (!a)
-    return {
-      text: `${fallback}\n（没等到 daemon 答复：它可能还在跑旧版本，或刚启动。用 task-list / task-status 核对实际状态。）`,
-      failed: false,
-    };
-  return { text: a.text || fallback, failed: !a.ok };
-}
-
-/**
- * 等这次命令的答复（daemon 把真实结果写进 `task-out/<id>.json`）。
- * 三种情形分得很清楚：
- *  - 有答复、有文案 → 打印 daemon 的那句话（失败原因、「没有 #9 号任务」这类只有它知道的事）；
- *  - 有答复、文案为空 → 命令成功但没有额外要说的，用调用方自己那句话（**立刻**，不干等）；
- *  - 没有答复 → 老版 daemon 不认这条通道（或它正在退出）：回退到「已发送」措辞并说明一句，
- *    不把「没等到」当成「成功了」——达上限被拒与「派发成功」在旧措辞里长得一模一样。
- */
 /** 登录成功后让**正在运行的** daemon 解除 -14 冷却（`clearSessionPause` 是进程内状态，CLI 自己清不到它）。 */
 async function unpauseIfRunning(key: string): Promise<void> {
   if (!bridgeReady(key)) return;
@@ -948,86 +899,6 @@ async function unpauseIfRunning(key: string): Promise<void> {
   } catch {
     /* 尽力而为：daemon 忙/正在退出/旧版本不认识，都不影响登录本身 */
   }
-}
-
-async function taskOutcome(
-  key: string,
-  ackId: string,
-  fallback: string,
-  timeoutMs = 5000,
-): Promise<string> {
-  const o = taskAckOutcome(await awaitTaskAck(accountDir(key), ackId, timeoutMs), fallback);
-  if (o.failed) process.exitCode = 1; // daemon 明确拒绝/失败（达上限、没有 #9 号任务）：文案照打，退出码非 0
-  return o.text;
-}
-
-/**
- * 选账号：显式 key/label 优先，否则用默认账号（`accounts.json` 的 `default`；缺失时回落第一个登记的账号，见 core 的 `getDefaultKey`）。
- * `session`/`task*` 早就是这个口径；`start`/`stop` 也走这里——所以「省略账号」= 默认账号。
- * 默认账号是可见的（`wemind list` 的 `[默认]`）、可改的（`wemind set-default`）；`logout`/`delete` 这类破坏性命令仍然必须显式指定，不走这里。
- */
-export function pickKey(sel?: string): string {
-  if (sel) return resolveKey(sel);
-  const d = getDefaultKey();
-  if (!d) throw new Error("无默认账号，请指定 <key|label> 或先 login");
-  return d;
-}
-/** 预检 daemon 存活（本地命令需 daemon 在跑才有人消费收件箱）。 */
-function requireDaemonAlive(key: string): void {
-  const pid = readPid(accountDir(key), "daemon.pid");
-  if (!aliveOurs(pid))
-    throw new Error(
-      `账号 ${key} 的 daemon 未运行。先启动：wemind start ${key}（用 wemind list 查看状态）`,
-    );
-}
-
-// ===== 控制桥（CLI → daemon → 回话）：让 CLI 与微信指令走同一段代码 =====
-/** daemon 是否活着（且确实是我们自己的进程）。读命令不需要它，写命令优先走它。 */
-function daemonAlive(key: string): boolean {
-  return aliveOurs(readPid(accountDir(key), "daemon.pid"));
-}
-
-/**
- * daemon 活着**且认识控制桥**（升级 CLI 后没重启的旧 daemon 在这里判为不可用）。
- * 决定「走桥还是走文件」都该问这个而不是 daemonAlive：对旧 daemon 发送只会白等到超时。
- */
-function bridgeReady(key: string): boolean {
-  const dir = accountDir(key);
-  return daemonAlive(key) && bridgePidOf(dir) === readPid(dir, "daemon.pid");
-}
-
-/**
- * 经控制桥让 daemon 执行一条命令并等回话。
- * 超时**如实**报「没等到回复」——桥的价值就在于「CLI 说的」和「daemon 做的」是同一件事，绝不假装成功。
- */
-async function viaBridge(key: string, req: Omit<ControlRequest, "id" | "at">): Promise<string> {
-  const dir = accountDir(key);
-  // 先验「在跑的这个 daemon 认不认识桥」：升级 CLI 后 daemon 常常还在跑旧版本，径直发送只会干等到超时。
-  // 凭据是 daemon 启动时写的 control-out/.bridge（内容 = 它自己的 pid）——pid 对上才算数。
-  const dpid = readPid(dir, "daemon.pid");
-  if (bridgePidOf(dir) !== dpid)
-    throw new Error(
-      `账号 ${key} 的 daemon 还在跑**旧版本**（不认识控制桥），换大脑/会话命令发送过去只会白等超时。\n` +
-        `重启一次即可：wemind stop ${key} && wemind start ${key}\n` +
-        `（只想改配置不动进程：wemind brain set <agent 名>，但它要等下次启动才生效。）`,
-    );
-  const timeoutMs = controlTimeoutMs(req.kind as ControlKind);
-  const now = Date.now();
-  // 带上截止时间：CLI 放弃后 daemon 不再执行（否则「CLI 说超时、daemon 照做」两边说法相反）。
-  const full: ControlRequest = {
-    id: newRequestId(now),
-    at: now,
-    ...req,
-    expiresAt: now + timeoutMs,
-  };
-  writeControlRequest(full, dir);
-  const res = await awaitControlResponse(full.id, dir, timeoutMs);
-  if (!res)
-    throw new Error(
-      `等 daemon 回复超时（${req.kind}）。它可能正忙或已退出，用 wemind list 看状态、daemon.log 看日志。`,
-    );
-  if (!res.ok) process.exitCode = 1; // ❌ 开头的答复 = 失败（脚本据此判成败）
-  return res.text;
 }
 
 /**
@@ -1049,27 +920,6 @@ async function cmdBrainSwitch(agentName: string, key: string, worker: boolean): 
   if (daemonAlive(key)) return await viaBridge(key, { kind: "brain.switch", target: agent });
   updateBrainConfig({ agent }, dir);
   return `daemon 未在运行：已把 ${key} 的大脑写进 brain.json（agent=${agent}，下次启动生效）。\n运行中换大脑：先 wemind start ${key}`;
-}
-
-/** 会话命令归属的人：登录者（与 daemon 里 owner 的定义一致）。 */
-function ownerOf(key: string): string {
-  return process.env.WECHAT_OWNER_ID?.trim() || readAccount(accountDir(key))?.userId || "";
-}
-
-/** daemon 没在跑时用来定会话归属（按 agent 分开存）的大脑名（与 daemon 启动期同一个解析来源：配置 + 环境变量 + 自动探测）。 */
-function agentNameOf(key: string): string {
-  return resolveAgent(loadBrainConfig(accountDir(key))).name;
-}
-
-/**
- * 末尾那个「长得像账号」的位置参数摘出来当账号选择（`session list 工作号`）。
- * 认不出就当普通参数——session 的名字可能跟账号别名撞脸，宁可把它当名字。
- */
-function splitKeyArg(args: string[]): { args: string[]; sel?: string } {
-  const last = args[args.length - 1];
-  if (args.length && last && listAccounts().some((a) => a.key === last || a.label === last))
-    return { args: args.slice(0, -1), sel: last };
-  return { args };
 }
 
 /**
@@ -1198,151 +1048,6 @@ function cmdSessionCurrent(key: string): string {
 }
 
 /** `task --cwd` 的相对路径按**用户当前目录**解析（daemon 的 cwd 可能不同），并要求目录确实存在。 */
-export function resolveTaskCwd(cwd: string | undefined, base: string = process.cwd()): string {
-  const p = path.resolve(base, cwd || ".");
-  let st: fs.Stats;
-  try {
-    st = fs.statSync(p);
-  } catch {
-    throw new Error(`工作目录不存在：${p}`);
-  }
-  if (!st.isDirectory()) throw new Error(`--cwd 不是目录：${p}`);
-  return p;
-}
-
-async function cmdTask(
-  text: string,
-  cwd: string | undefined,
-  sel?: string,
-  agentKey?: string,
-): Promise<string> {
-  if (!text) throw new Error('用法: task "<任务描述>" [--cwd 目录] [--agent <名字>] [<key|label>]');
-  const key = pickKey(sel);
-  requireDaemonAlive(key);
-  const useCwd = resolveTaskCwd(cwd);
-  // 答复等 daemon：**起进程有结果之后**它才发（达上限/agent 起不来是那时才知道的），
-  // 所以这里不能自己编「已派发」——旧写法轮询 task-state.json 的 active，会把「达上限被拒」和
-  // 甚至上一条任务的编号报成成功。
-  const ackId = writeTaskCmd(key, {
-    kind: "dispatch",
-    text,
-    cwd: useCwd,
-    ...(agentKey ? { agent: agentKey } : {}),
-  });
-  return await taskOutcome(
-    key,
-    ackId,
-    `已发送任务（cwd=${useCwd}）。看进展用 task-list。`,
-    // 派发的答复要等「起进程有结果」：冷启动一个 agent 可能要几十秒，等得久一点好过说假话
-    30_000,
-  );
-}
-/** 任务编号必须是正整数：0/负数以前被当成「没给编号」，会落到唯一那条任务上（发错目标）。 */
-function parseTaskId(raw: string): number {
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1) throw new Error(`任务编号必须是正整数：${raw}`);
-  return n;
-}
-
-async function cmdTaskReply(text: string, sel?: string, id?: number): Promise<string> {
-  if (!text) throw new Error('用法: task-reply ["#编号"] "<内容>" [<key|label>]');
-  const key = pickKey(sel);
-  requireDaemonAlive(key);
-  const ackId = writeTaskCmd(key, { kind: "reply", text, ...(id ? { id } : {}) });
-  return await taskOutcome(key, ackId, `已发送给任务${id ? ` #${id}` : ""}：${text.slice(0, 40)}`);
-}
-async function cmdTaskStop(sel?: string, id?: number | "all"): Promise<string> {
-  const key = pickKey(sel);
-  requireDaemonAlive(key);
-  const ackId = writeTaskCmd(key, { kind: "stop", ...(id ? { id } : {}) });
-  const fallback =
-    id === "all" ? "已发送「结束全部任务」指令。" : `已发送「结束任务${id ? ` ${id}` : ""}」指令。`;
-  return await taskOutcome(key, ackId, fallback);
-}
-
-type WmTaskRow = {
-  id: number;
-  userId: string;
-  agent: string;
-  status: string;
-  turns: number;
-  startedAt: number;
-  lastOutput?: string;
-  cwd?: string;
-};
-const STATUS_ZH: Record<string, string> = {
-  running: "运行中",
-  waiting: "等回复",
-  interrupted: "已中断",
-};
-
-/**
- * 读任务表（daemon 没跑也能读：文件就是唯一真相）。
- * 先看 `tasks.json`——那是任务表的**持久**副本（重启后也在，编号跨重启不归零）；
- * 老版本只写过 `task-state.json`（状态记录），仍兼容读它。
- */
-function readTaskRows(key: string): WmTaskRow[] | null {
-  const dir = accountDir(key);
-  for (const name of ["tasks.json", "task-state.json"]) {
-    try {
-      const s = JSON.parse(fs.readFileSync(path.join(dir, name), "utf-8")) as {
-        tasks?: WmTaskRow[];
-      };
-      if (Array.isArray(s.tasks)) return s.tasks;
-    } catch {
-      /* 换下一个 */
-    }
-  }
-  return null;
-}
-
-function cmdTaskList(sel?: string): string {
-  const key = pickKey(sel);
-  const rows = readTaskRows(key);
-  if (!rows)
-    return `账号 ${key}：无任务表（tasks.json / task-state.json 都不存在，daemon 未跑过多任务）。`;
-  // 任务表是 daemon 的活状态：它没在跑（或还在跑旧版）时，表里的「运行中」只是上次留下的，别当成现在时。
-  const stale = daemonAlive(key)
-    ? ""
-    : "\n（daemon 未运行：以下状态是它上次留下的记录；未完成的任务会在下次启动时标为「已中断」，回「继续」可续跑。）";
-  if (!rows.length) return `账号 ${key}：当前没有任务。${stale}`;
-  const lines = [`账号 ${key} 任务（${rows.length} 条）：`];
-  for (const t of rows) {
-    const age = t.startedAt ? `${Math.round((Date.now() - t.startedAt) / 1000)}s` : "?";
-    lines.push(
-      `  #${t.id} [${t.agent}] ${STATUS_ZH[t.status] ?? t.status} · ${t.turns} 轮 · ${age}${t.cwd ? ` · cwd=${t.cwd}` : ""}`,
-    );
-    if (t.lastOutput) lines.push(`      ${t.lastOutput.replace(/\n/g, " ").slice(0, 140)}`);
-  }
-  return lines.join("\n") + stale;
-}
-
-function cmdTaskStatus(sel?: string): string {
-  const key = pickKey(sel);
-  const rows = readTaskRows(key);
-  if (rows && rows.length) return cmdTaskList(sel);
-  const stateFile = path.join(accountDir(key), "task-state.json");
-  let s: {
-    active?: boolean;
-    status?: string;
-    turns?: number;
-    startedAt?: number;
-    lastOutput?: string;
-  };
-  try {
-    s = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
-  } catch {
-    return `账号 ${key}：无任务状态（task-state.json 不存在，daemon 可能未跑过任务）。`;
-  }
-  if (!s.active) return `账号 ${key}：当前无活跃任务（idle）。`;
-  const since = s.startedAt ? `${Math.round((Date.now() - s.startedAt) / 1000)}s` : "?";
-  return [
-    `账号 ${key} 任务状态：`,
-    `  状态：${s.status}  轮次：${s.turns ?? 0}  已运行：${since}`,
-    `  最近输出：${s.lastOutput ? s.lastOutput.slice(0, 300) : "（无）"}`,
-  ].join("\n");
-}
-
 export async function runManage(argv: string[]): Promise<void> {
   const cmd = argv.shift();
   const rest = [...argv];
