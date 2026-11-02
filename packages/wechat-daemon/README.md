@@ -48,7 +48,7 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 | `wemind task "<描述>" [--agent 名] [--cwd 目录]` | 派发任务给 worker（多任务并行、按编号回话；`--cwd` 相对路径按当前终端目录解析） |
 | `wemind task-list / task-reply <编号> "…" / task-stop [编号\|全部]` | 任务列表、回话续跑（`task-reply 继续`）、结束（在等回复的进程回池复用） |
 | `wemind allow / revoke / allowlist` | 授权管理（谁能驱动这个 bot） |
-| `wemind logout / delete / label / set-default` | 账号运维 |
+| `wemind logout / delete / label / set-default` | 账号运维（`delete` 停不掉 daemon 时会拒绝删目录，先 `stop`） |
 | `wemind version` / `wemind help` | 版本、完整帮助 |
 
 `key` = 由微信 botId 派生的目录名；`label` = 人类可读别名，多数命令两者都能用。

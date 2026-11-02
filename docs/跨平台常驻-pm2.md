@@ -101,7 +101,7 @@ pm2 save                       # 保存当前列表（改动后记得存，否�
   pm2 start ecosystem.config.cjs    # 会为新账号补起 app（已在跑的不受影响）
   pm2 save
   ```
-- **移除账号**：`pm2 delete wemind-<key>` + `pm2 save`，再按需 `wemind delete <key>` 清数据目录。
+- **移除账号**：`pm2 delete wemind-<key>` + `pm2 save`，再按需 `wemind delete <key>` 清数据目录。顺序别反：`wemind delete` 停不掉仍在运行的 daemon 时会拒绝删目录。
 
 ---
 

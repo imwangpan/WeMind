@@ -879,9 +879,21 @@ async function cmdLogout(sel: string): Promise<string> {
   return `账号 ${key} 已登出（${stopMsg}）。目录与会话保留，可重新登录。`;
 }
 
+/**
+ * `delete` 前的最后一道闸：stop 失败/被跳过时 daemon 可能还活着，此时删目录等于删它正在用的文件。
+ * 导出仅供单测。
+ */
+export function deleteGuard(key: string, alive: boolean): string | null {
+  return alive
+    ? `账号 ${key} 的 daemon 仍在运行（stop 未成功），为避免删掉它正在使用的文件，本次**没有删除目录**。\n先确认并结束它：wemind stop ${key}（或看 wemind list / 进程管理器），再执行 delete。`
+    : null;
+}
+
 function cmdDelete(sel: string): string {
   const key = resolveKey(sel);
   const stopMsg = stopDaemon(key);
+  const blocked = deleteGuard(key, daemonAlive(key));
+  if (blocked) throw new Error(blocked);
   try {
     fs.rmSync(accountDir(key), { recursive: true, force: true });
   } catch (e) {

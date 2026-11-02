@@ -11,6 +11,7 @@ import {
   resolveTaskCwd,
   runManage,
   taskAckOutcome,
+  deleteGuard,
 } from "./manage.js";
 import { isAlive } from "./proc-identity.js";
 
@@ -69,6 +70,18 @@ describe("resolveTaskCwd（--cwd 相对路径按用户当前目录解析）", ()
     expect(() => resolveTaskCwd("nope", base)).toThrow(/工作目录不存在/);
     fs.writeFileSync(path.join(base, "file.txt"), "x");
     expect(() => resolveTaskCwd("file.txt", base)).toThrow(/不是目录/);
+  });
+});
+
+describe("deleteGuard（daemon 没停干净不删目录）", () => {
+  it("daemon 还活着 → 拒绝并给出下一步", () => {
+    const msg = deleteGuard("abc", true);
+    expect(msg).toMatch(/仍在运行/);
+    expect(msg).toMatch(/wemind stop abc/);
+  });
+
+  it("已停止 → 放行", () => {
+    expect(deleteGuard("abc", false)).toBeNull();
   });
 });
 

@@ -233,7 +233,7 @@ foreach ($key in $accounts) {
 | `start <key\|label> [--runner builtin\|pm2]` | 起该账号的后台守护进程（默认 builtin detached `_watchdog`；`pm2` 则生成 `pm2.app.json` 交给 pm2，重拉/78 语义与 builtin 一致） |
 | `list` | 列出各账号状态（读 daemon/brain pid，并**核对命令行身份**后判断「运行中」） |
 | `logout <key>` | 停整条链（后台守护进程→daemon→brain/worker）+ iLink 下线 + 清凭证，**保留目录** |
-| `delete <key>` | 停整条链 + 删数据目录 + 注销注册表 |
+| `delete <key>` | 停整条链 + 删数据目录 + 注销注册表；**停完仍发现 daemon 活着就不删目录**（避免删掉它正在用的文件），提示先 `stop` |
 
 停止由 `stopDaemon()` 一次完成（不再需要手工分步）：先 `pm2Stop` 兜底，再读 `wrapper/daemon/brain/worker` 四个 pid 文件、**逐个核验命令行身份**，通过校验的进程一次性交给 `killProcessTrees()`——Windows 用 `taskkill /T /F` 连带子树；POSIX 先收集后代再 SIGTERM→SIGKILL。最后清掉全部 pid 文件。
 
