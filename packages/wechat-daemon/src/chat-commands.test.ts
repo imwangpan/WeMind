@@ -42,6 +42,22 @@ describe("会话指令", () => {
       ref: "项目A",
       name: "项目B",
     });
+    // 旧名字带空格：引号（ASCII / 中文 / 「」）括起来，才能和后面的新名字分开
+    expect(parseChatCommand('重命名会话 "我的 周报" 新的 周报')).toEqual({
+      kind: "rename",
+      ref: "我的 周报",
+      name: "新的 周报",
+    });
+    expect(parseChatCommand("重命名会话 “我的 周报” 新的 周报")).toEqual({
+      kind: "rename",
+      ref: "我的 周报",
+      name: "新的 周报",
+    });
+    expect(parseChatCommand("重命名会话 「我的 周报」 新的 周报")).toEqual({
+      kind: "rename",
+      ref: "我的 周报",
+      name: "新的 周报",
+    });
     expect(parseChatCommand("删除会话 3")).toEqual({ kind: "delete", ref: "3" });
     expect(parseChatCommand("/delete 旧会话")).toEqual({ kind: "delete", ref: "旧会话" });
   });

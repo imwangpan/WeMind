@@ -69,7 +69,7 @@ graph TD
 
 - **每用户一个 ACP session**，映射持久化到 `brain-sessions.json`（键 `<agent>:<userId>`，按大脑分开存：切换 agent 后各自的会话互不覆盖，切回去仍能恢复），跨进程重建保上下文。这张**当前会话表是「当前是哪个会话」的唯一权威**。
 - 另有**会话登记表** `session-registry.json`（`session-registry.ts`）：每个成功回合记录 `turns+1` 与首条用户消息的标题（`titleOf`，剥掉交接前缀）、`lastUsedAt` 刷新；每 (agent,userId) 上限 50 条，淘汰**未命名**最旧、**绝不淘汰当前会话记录当前指向的那条**；daemon **启动时**按当前会话表回填一次（`syncFromPointerMap`，把功能上线前就存在的老会话补齐——运行中删掉它不会自动重建，下次启动才补）。它只是**派生元数据**——坏了最多导致「列表空」，写失败只记日志（不拖垮回合）。
-- 会话管理指令（微信与 CLI 同源，实现层 `session-manager.ts`）：`新会话 [名字]` / `会话列表 [页]` / `恢复会话 <序号|名字|id前缀>` / `重命名会话 <序号> <名字>` / `删除会话 <序号>`；CLI 为 `wemind session new|list|resume|rename|delete`。
+- 会话管理指令（微信与 CLI 同源，实现层 `session-manager.ts`）：`新会话 [名字]` / `会话列表 [页]` / `恢复会话 <序号|名字|id前缀>` / `重命名会话 <序号|名字> <新名字>`（旧名字带空格时用引号括起来） / `删除会话 <序号>`；CLI 为 `wemind session new|list|resume|rename|delete`。
 - **`恢复会话` 是严格恢复**：`resumeSession(userId, sessionId)` 按该 agent 支持的方式试 `session/load` → `session/resume`，**都失败就如实报错、不回退 `session/new`、不改当前会话记录**（宁可报错，也不要「假恢复」）；成功才写当前会话记录 + 刷新登记表。**恢复成功后的模型设置（`session/set_config_option`）失败只记日志，不算恢复失败**——否则会白丢刚恢复的上下文。目标已是当前会话时直接回「当前就在这条会话上」（省一次往返）。
 - `会话列表` 只列**本人 + 当前大脑**的会话，末尾提示「另有 N 条属于其它大脑的会话，切回该大脑后可恢复」。
 - `删除会话` 只删 WeMind 的登记（若是当前会话则同时清当前会话记录，下条消息自然开新的）；回复会写明「agent 自己那份历史记录不在 WeMind 手里」——`session/delete` 不是 ACP 通用能力（2026-10-29 实测：opencode/qoder 有、DSH 无 `-32601`；实现仍不依赖它）。

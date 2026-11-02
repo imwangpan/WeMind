@@ -165,13 +165,19 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
   {
     id: "session.rename",
     section: "session",
-    zh: "重命名会话 <序号|名字> <新名字>",
+    zh: '重命名会话 <序号|名字|"带空格的名字"> <新名字>',
     slash: "/rename <同上>",
     cli: "wemind session rename <ref> <名字>",
-    brief: "给会话起名字（命名后不会被淘汰）",
+    brief: "给会话起名字（命名后不会被淘汰；旧名字带空格时用引号括起来）",
     match: (t) => {
-      const m = t.match(/^(?:重命名会话|会话重命名|会话改名|\/rename)\s+(\S+)\s+([\s\S]+)$/i);
-      return m ? { kind: "rename", ref: m[1], name: m[2].trim() } : null;
+      // 旧名字可能含空格：用 "" / “” / 「」 括起来才能和后面的新名字分开（§F81）。序号、单段名字照旧不用引号。
+      const m = t.match(
+        /^(?:重命名会话|会话重命名|会话改名|\/rename)\s+(?:"([^"]+)"|“([^”]+)”|「([^」]+)」|(\S+))\s+([\s\S]+)$/i,
+      );
+      if (!m) return null;
+      const ref = (m[1] ?? m[2] ?? m[3] ?? m[4]).trim();
+      const name = m[5].trim();
+      return ref && name ? { kind: "rename", ref, name } : null;
     },
   },
   {
