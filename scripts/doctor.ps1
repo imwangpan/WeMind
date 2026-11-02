@@ -24,6 +24,29 @@ function Item([string]$name, [string]$value) {
 }
 function YesNo([bool]$ok) { if ($ok) { "OK" } else { "--" } }
 
+# brain.json 的 args 可能直接带着密钥（--api-key sk-… / TOKEN=…），而本脚本承诺不打印 token / API key。
+# 只打码「看起来像凭证」的值，保留 --acp / --yolo 这类诊断有用的开关。
+function Redact-Args($values) {
+  $out = @()
+  $hideNext = $false
+  foreach ($v in @($values)) {
+    $s = [string]$v
+    if ($hideNext) { $out += "***"; $hideNext = $false; continue }
+    if ($s -match '^--?(?:api[-_]?key|key|token|secret|password|passwd|auth|bearer|access[-_]?token)$') {
+      $out += $s
+      $hideNext = $true
+      continue
+    }
+    if ($s -match '(?i)^[^=]*(?:api[-_]?key|token|secret|password|passwd|auth|bearer)[^=]*=') {
+      $out += ($s -replace '=.*$', '=***')
+      continue
+    }
+    if ($s -match '(?i)^Bearer\s+') { $out += 'Bearer ***'; continue }
+    $out += $s
+  }
+  return ($out -join ' ')
+}
+
 $repo = Split-Path -Parent $PSScriptRoot
 if (-not $DataRoot) {
   # 根目录与 core 一致：WEMIND_HOME > ~/.wemind。WECHAT_DATA_DIR 只是单账号覆盖，不是根目录。
@@ -90,7 +113,7 @@ if (Test-Path -LiteralPath $DataRoot) {
         $b = Get-Content -LiteralPath $brainCfg -Raw -ErrorAction Stop | ConvertFrom-Json
         $desc = "agent=$($b.agent)"
         if ($b.bin) { $desc += " bin=$($b.bin)" }
-        if ($b.args) { $desc += " args=[$($b.args -join ' ')]" }
+        if ($b.args) { $desc += " args=[$(Redact-Args $b.args)]" }
         if ($null -ne $b.shell) { $desc += " shell=$($b.shell)" }
         if ($b.homeEnvVar) { $desc += " home_env=$($b.homeEnvVar)" }
         Item "  brain.json" $desc
