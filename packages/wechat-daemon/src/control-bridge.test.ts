@@ -10,6 +10,7 @@ import {
   controlInboxDir,
   controlOutDir,
   controlTimeoutMs,
+  isControlRequestExpired,
   markBridgeReady,
   newRequestId,
   parseControlRequest,
@@ -84,6 +85,25 @@ describe("parseControlRequest（唯一入口校验）", () => {
     expect(r).not.toHaveProperty("args");
     expect(r).not.toHaveProperty("shell");
     expect(JSON.stringify(r)).not.toContain("cmd.exe");
+  });
+
+  it("expiresAt：合法数值保留，非法值丢弃（旧 CLI 不传 = 不设截止）", () => {
+    expect(parseControlRequest({ id: "x", kind: "session.new", expiresAt: 12345 })!.expiresAt).toBe(
+      12345,
+    );
+    expect(
+      parseControlRequest({ id: "x", kind: "session.new", expiresAt: "soon" })!.expiresAt,
+    ).toBeUndefined();
+    expect(
+      parseControlRequest({ id: "x", kind: "session.new", expiresAt: Number.NaN })!.expiresAt,
+    ).toBeUndefined();
+  });
+
+  it("isControlRequestExpired：没有截止 → 不过期；到点才过期", () => {
+    expect(isControlRequestExpired({}, 1000)).toBe(false);
+    expect(isControlRequestExpired({ expiresAt: 2000 }, 1000)).toBe(false);
+    expect(isControlRequestExpired({ expiresAt: 1000 }, 1000)).toBe(false); // 恰好到点仍执行
+    expect(isControlRequestExpired({ expiresAt: 999 }, 1000)).toBe(true);
   });
 
   it("非法数值/超长文本被规整（taskId 只收正整数或 all；文本截断）", () => {
@@ -169,6 +189,22 @@ describe("controlTimeoutMs", () => {
         WEMIND_CONTROL_TIMEOUT_MS: "600000",
         WEMIND_SWITCH_TIMEOUT_MS: "1000",
         WEMIND_SWITCH_DRAIN_MS: "1000",
+      }),
+    ).toBe(600_000); // 显式配得更长就听用户的
+  });
+
+  it("brain.handoff 要跑一整个模型回合：默认不能停在 30s", () => {
+    expect(controlTimeoutMs("brain.handoff", {})).toBeGreaterThan(30_000);
+    expect(
+      controlTimeoutMs("brain.handoff", {
+        WEMIND_CONTROL_TIMEOUT_MS: "1000",
+        WECHAT_BRAIN_CAP_MS: "5000",
+      }),
+    ).toBe(20_000);
+    expect(
+      controlTimeoutMs("brain.handoff", {
+        WEMIND_CONTROL_TIMEOUT_MS: "600000",
+        WECHAT_BRAIN_CAP_MS: "5000",
       }),
     ).toBe(600_000); // 显式配得更长就听用户的
   });

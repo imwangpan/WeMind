@@ -79,6 +79,7 @@ import { syncFromPointerMap, currentSessionIdOf } from "./session-registry.js";
 import {
   clearControlDirs,
   controlInboxDir,
+  isControlRequestExpired,
   markBridgeReady,
   readControlInbox,
   writeControlResponse,
@@ -339,7 +340,7 @@ type ControlCtx = {
  * `交接`：让当前大脑把上下文写成摘要，写入磁盘 + 回复给用户（长则另发 .md）。
  * 先回一条「在做」的提示：写摘要要走一整个模型回合（可能一两分钟），没有进度提示会让人以为卡死。
  */
-async function runHandoff(userId: string, ctx: ControlCtx): Promise<string> {
+async function runHandoff(userId: string, ctx: ControlCtx, deadline?: number): Promise<string> {
   const from = getAgent("brain").name;
   if (!currentSessionIdOf(from, userId, DATA_DIR))
     return "ℹ️ 当前大脑还没有和你的对话记录，没什么可交接的。先聊几句再来交接。";
@@ -348,7 +349,7 @@ async function runHandoff(userId: string, ctx: ControlCtx): Promise<string> {
     .catch(() => {});
   let text: string;
   try {
-    text = (await askBrain(userId, HANDOFF_PROMPT)).trim();
+    text = (await askBrain(userId, HANDOFF_PROMPT, undefined, undefined, { deadline })).trim();
   } catch (e) {
     return `❌ 生成交接摘要失败：${String(e)}`;
   }
@@ -1368,14 +1369,24 @@ async function handleControlRequest(req: ControlRequest, owner: string): Promise
         return `当前默认任务大脑：${agentLine(getAgent("worker"))}。切换用 \`wemind brain switch <agent 名> --worker\`。`;
       return setTaskBrain(req.target);
     case "brain.handoff":
-      return await runHandoff(owner, { owner, notify: async () => {} });
+      return await runHandoff(owner, { owner, notify: async () => {} }, req.expiresAt);
     case "session.new":
-      return await newSessionCmd({ ...sc(), name: req.name, create: newSession });
+      return await newSessionCmd({
+        ...sc(),
+        name: req.name,
+        create: (uid) => newSession(uid, { deadline: req.expiresAt }),
+      });
     case "session.list":
       return sessionsCmd({ ...sc(), page: req.page });
     case "session.resume":
       if (!req.ref) return "❌ 用法：session resume <序号|名字|id前缀>";
-      return await resumeSessionCmd({ ...sc(), resume: resumeSession }, req.ref);
+      return await resumeSessionCmd(
+        {
+          ...sc(),
+          resume: (uid, sid) => resumeSession(uid, sid, { deadline: req.expiresAt }),
+        },
+        req.ref,
+      );
     case "session.rename":
       if (!req.ref || !req.name) return "❌ 用法：session rename <序号|名字> <新名字>";
       return renameSessionCmd(sc(), req.ref, req.name);
@@ -1416,6 +1427,20 @@ async function scanControlInbox(owner: string): Promise<void> {
       } // 先删，避免重复处理
       if (!req) {
         log("control: 非法请求（未知 kind / 坏 JSON），已丢弃:", file);
+        continue;
+      }
+      // CLI 已经等到超时并放弃：不要再执行（否则「CLI 说没等到、daemon 却照做」）。
+      if (isControlRequestExpired(req)) {
+        log("control: 请求已超时，跳过执行:", req.kind, file);
+        writeControlResponse(
+          {
+            id: req.id,
+            at: Date.now(),
+            ok: false,
+            text: "❌ 请求已超时（CLI 已不再等待），本次未执行。",
+          },
+          DATA_DIR,
+        );
         continue;
       }
       log("control(cli):", req.kind, JSON.stringify({ target: req.target, ref: req.ref }));

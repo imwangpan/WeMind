@@ -76,6 +76,7 @@ poller（长轮询，不被大脑阻塞）
 - **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`（键 `<agent>:<userId>`，换大脑不丢各自上下文）——**这张当前会话表是「当前是哪个会话」的唯一权威**；`session-registry.json` 只是展示用的登记表（名字/标题/轮次），坏了不影响恢复；
 - **worker 是 N 个独立 ACP 进程**（进程池，一条任务一条连接），任务会话在 `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`）；任务表另存 `tasks.json` 供**重启后续跑**（未完成的标「已中断」，回「继续」才续跑）；
 - **切换大脑是进程内的**（`brain-switch.ts`）：预检 → 等回合结束 → 启动新大脑 → **成功才写 `brain.json`**；失败退回、槽位留旧大脑；
+- **控制桥与微信回合串行**：`askBrain` / `newSession` / `resumeSession` 共用 `acp-brain.ts` 的操作队列；控制桥请求带 `expiresAt`，过期请求 daemon 不执行（排队中的会话操作拿到执行权后再查一次）；
 - **自愈**：prompt 超时/失败 → `reset()` 杀进程树 → 下条消息重建并尝试恢复会话；
 - **进度**：`tool_call` → 「步骤 N」；`agent_message_chunk` → 「正在整理回复」；任意 `session/update` → 刷新心跳基线；
 - **连发上限**：iLink 约 10 条；`index.ts` 预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」；图片也计一条并走同一条串行链，额度不够时改附原链接；大脑回合接近上限时任务推送先让位、回合结束后再发。**多任务与对话大脑共享同一份额度**（按用户计）。

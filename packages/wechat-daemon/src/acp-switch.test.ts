@@ -23,7 +23,7 @@ const savedNodeOptions = process.env.NODE_OPTIONS;
 process.env.NODE_OPTIONS = ""; // 子进程会继承它；调试器注入会让假 agent 卡在握手（同 spawn-agent.test.ts）
 
 const { switchBrain, preflightSwitch, switchInFlightTarget } = await import("./brain-switch.js");
-const { askBrain, resumeSession, restart } = await import("./acp-brain.js");
+const { askBrain, newSession, resumeSession, restart } = await import("./acp-brain.js");
 const { getAgent, resetSlotsForTest, seedSlots, setAgent } = await import("./agent-slot.js");
 const { loadBrainConfig, saveBrainConfig } = await import("./brain-config.js");
 const { readPidRecords } = await import("./pid-record.js");
@@ -408,6 +408,39 @@ describe("会话（ACP 侧写入 + 严格恢复）", () => {
     setAgent("brain", { ...getAgent("brain"), sessionMode: "bypassPermissions" });
     expect(await askBrain("u1", "你好")).toContain("答:");
     expect(methods().some((m) => m.startsWith("session/set_mode"))).toBe(false);
+  });
+});
+
+describe("ACP 操作串行门（控制桥 vs 微信回合）", () => {
+  it("控制侧 newSession 与在途回合串行：等 prompt 结束才开新会话", async () => {
+    setup("slow-prompt"); // 假 agent 700ms 后才回 prompt
+    const t0 = Date.now();
+    const turn = askBrain("u1", "慢问题");
+    await new Promise((r) => setTimeout(r, 100)); // 确保 prompt 已经发出
+    await newSession("u1");
+    const waited = Date.now() - t0;
+    expect(waited).toBeGreaterThanOrEqual(500); // 没有串行门时 newSession 会立刻跑完
+    expect(await turn).toContain("答:");
+    const ms = methods();
+    const promptIdx = ms.findIndex((m) => m.startsWith("session/prompt"));
+    const newIdx = ms.findIndex((m, i) => i > promptIdx && m.startsWith("session/new"));
+    expect(promptIdx).toBeGreaterThanOrEqual(0);
+    expect(newIdx).toBeGreaterThan(promptIdx); // 新会话排在提问之后
+  });
+
+  it("控制请求过期：排队后不再执行（不建新会话）", async () => {
+    setup("slow-prompt");
+    const turn = askBrain("u1", "慢问题");
+    // 等这一轮真的把 prompt 发出去（Windows 上 spawn 可能 >100ms，不能只 sleep 固定时间）
+    for (let i = 0; i < 100 && !methods().some((m) => m.startsWith("session/prompt")); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const before = methods().filter((m) => m.startsWith("session/new")).length;
+    expect(before).toBe(1); // 回合自己建了一条会话
+    await expect(newSession("u1", { deadline: Date.now() - 1 })).rejects.toThrow(/已超时/);
+    await turn;
+    const after = methods().filter((m) => m.startsWith("session/new")).length;
+    expect(after).toBe(before); // 过期请求没有真的开新会话
   });
 });
 

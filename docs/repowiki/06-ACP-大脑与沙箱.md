@@ -72,6 +72,7 @@ graph TD
 - `会话列表` 只列**本人 + 当前大脑**的会话，末尾提示「另有 N 条属于其它大脑的会话，切回该大脑后可恢复」。
 - `删除会话` 只删 WeMind 的登记（若是当前会话则同时清当前会话记录，下条消息自然开新的）；回复会写明「agent 自己那份历史记录不在 WeMind 手里」——`session/delete` 不是 ACP 通用能力（2026-10-29 实测：opencode/qoder 有、DSH 无 `-32601`；实现仍不依赖它）。
 - `newSession(userId)`：丢弃旧 session（含磁盘映射），重建全新会话（对应微信指令「新会话」）。
+- **ACP 操作串行**：`askBrain` / `newSession` / `resumeSession` 共用一条操作队列（同一时刻只有一个在跑）。微信回合与控制桥是两条独立入口，没有这道门时 `session/new` 会插进 `session/prompt` 中间；切脑的 `drainTurn` 把排队中的操作也计入在途。
 - `restart()`：重启 ACP 进程（MCP 激活集变更后调用，重建后 `load`/`resume` 恢复）。
 
 ### 运行时换大脑（brain-switch.ts）

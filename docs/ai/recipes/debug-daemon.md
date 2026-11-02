@@ -235,7 +235,7 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 3. **daemon 是手跑的老 dist**：`wemind list` 靠命令行特征认进程（`proc-identity.ts`）。用**相对路径**起 daemon（`node packages/wechat-daemon/dist/cli.js daemon`）在旧 dist 里会被判成「不是我们的进程」→ 显示「未运行」且桥拒绝。修法：`npm run build` 后重启（1.2.0 已补相对路径的特征，见 `AGENTS.md` §6）。
 4. **真没跑**：`wemind start [<key|label>]`（省略 = 默认账号）；纯读命令（`session list`、`task-list`）不需要 daemon。
 
-现场证据：`control-inbox/` 若堆着请求文件 = daemon 没在扫（没跑/不认桥）；排空后 `control-out/<id>.json` 会给出 `ok` 与 `text`。
+现场证据：`control-inbox/` 若堆着请求文件 = daemon 没在扫（没跑/不认桥）；排空后 `control-out/<id>.json` 会给出 `ok` 与 `text`。请求带 `expiresAt`（CLI 等待截止）：过期请求只回「已超时、未执行」，不会在 CLI 放弃后照做；`session.new`/`resume` 排队拿到执行权后还会再查一次截止。
 
 ### 3.10 任务侧症状（多任务 / 进程池，1.2.0）
 

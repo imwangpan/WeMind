@@ -53,6 +53,8 @@ export type ControlRequest = {
   id: string;
   kind: ControlKind;
   at: number;
+  /** CLI 的等待截止时间（epoch ms）：daemon 超过它就不再执行（CLI 已放弃，执行了也看不到结果）。旧 CLI 不传 = 不设截止。 */
+  expiresAt?: number;
   /** agent 名（brain.switch / brain.worker）。 */
   target?: string;
   /** 会话引用：序号 / 名字 / id 前缀（session.resume / rename / delete）。 */
@@ -133,6 +135,9 @@ export function parseControlRequest(raw: unknown): ControlRequest | null {
     kind: kind as ControlKind,
     at: typeof o.at === "number" && Number.isFinite(o.at) ? o.at : Date.now(),
   };
+  if (typeof o.expiresAt === "number" && Number.isFinite(o.expiresAt)) {
+    req.expiresAt = o.expiresAt;
+  }
   const target = str(o.target);
   if (target) req.target = target;
   const ref = str(o.ref);
@@ -174,6 +179,14 @@ export function readControlResponse(id: string, dir: string = DATA_DIR): Control
 
 /** 普通命令的等待上限（30s；`WEMIND_CONTROL_TIMEOUT_MS` 可调）。 */
 export const CONTROL_TIMEOUT_DEFAULT_MS = Number(process.env.WEMIND_CONTROL_TIMEOUT_MS) || 30_000;
+
+/** 请求是否已超过 CLI 的等待上限：超过就不再执行（否则 CLI 报超时、daemon 却照做，两边说法相反）。 */
+export function isControlRequestExpired(
+  req: Pick<ControlRequest, "expiresAt">,
+  now: number = Date.now(),
+): boolean {
+  return typeof req.expiresAt === "number" && Number.isFinite(req.expiresAt) && now > req.expiresAt;
+}
 
 /** 短轮询等应答；超时返回 null（CLI 据此如实说「没等到回复」而不是假装成功）。 */
 export async function awaitControlResponse(
@@ -243,8 +256,15 @@ export function bridgePidOf(dir: string = DATA_DIR): number | null {
  */
 export function controlTimeoutMs(kind: ControlKind, env: NodeJS.ProcessEnv = process.env): number {
   const base = Number(env.WEMIND_CONTROL_TIMEOUT_MS) || CONTROL_TIMEOUT_DEFAULT_MS;
-  if (kind !== "brain.switch") return base;
-  const warm = Number(env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000;
-  const drain = Number(env.WEMIND_SWITCH_DRAIN_MS) || 30_000;
-  return Math.max(base, warm + drain + 15_000);
+  if (kind === "brain.switch") {
+    const warm = Number(env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000;
+    const drain = Number(env.WEMIND_SWITCH_DRAIN_MS) || 30_000;
+    return Math.max(base, warm + drain + 15_000);
+  }
+  if (kind === "brain.handoff") {
+    // 交接要跑一整个模型回合，默认上限 30s 必然误报超时；用回合硬上限 + 余量。
+    const cap = Number(env.WECHAT_BRAIN_CAP_MS) || 900_000;
+    return Math.max(base, cap + 15_000);
+  }
+  return base;
 }

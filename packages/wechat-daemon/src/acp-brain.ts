@@ -80,13 +80,38 @@ const hintedSessions = new Set<string>(); // 已带上「可发图」约定提�
 // ---- 并发门（切脑用）----
 // 一回合是一段长异步（可能几分钟）：热切换必须先**等在跑的回合结束**，绝不在整回合上持锁。
 // 反过来，切换期间新回合要在门口等（有界），否则会与启动新大脑时**双起进程**（后台守护进程/重试也走这条路）。
-let turnInFlight = false; // 有回合正在跑（askBrain / newSession 全程）
+let turnDepth = 0; // 已入队/正在跑的 ACP 操作数（提问 / 新建会话 / 恢复会话）
+let opChain: Promise<void> = Promise.resolve(); // ACP 操作串行链：同一时刻只有一个操作在碰进程
 let switching = false; // 正在切换大脑
 const SWITCH_WAIT_MS = Number(process.env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000; // 回合等切换的上限，与切换自身的启动新大脑的上限一致
 
 export function isTurnInFlight(): boolean {
-  return turnInFlight;
+  return turnDepth > 0;
 }
+
+/**
+ * 所有会碰 ACP 进程的操作（提问 / 新建 / 恢复）都从这里排队：同一时刻只有一个在跑。
+ * 微信回合与控制桥是两条独立入口，没有这道门时 `session/new` 会插进 `session/prompt` 中间，
+ * 或在恢复会话时把正在跑的回合的 `userSessions` 改掉。
+ * `turnDepth` 在**入队时**就加：切脑的 `drainTurn` 要连排队中的操作一起等，不能只看正在跑的那个。
+ */
+function withBrainOp<T>(fn: () => Promise<T>): Promise<T> {
+  turnDepth += 1;
+  const run = opChain.then(fn, fn).finally(() => {
+    turnDepth -= 1;
+  });
+  opChain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+/** 控制桥请求的等待上限：CLI 已经放弃后，排队中的操作不再执行（见 control-bridge.ts 的 expiresAt）。 */
+function expired(deadline?: number): boolean {
+  return deadline !== undefined && Date.now() > deadline;
+}
+const EXPIRED_MSG = "请求已超时（CLI 已不再等待），本次未执行";
 
 /** 切换流程开始时调用：此后新回合在门口等，直到 `endSwitch()`。 */
 export function beginSwitch(): void {
@@ -100,7 +125,7 @@ export function endSwitch(): void {
 /** 切换流程用：等在跑的回合结束（诚实失败——超时说明情况让用户重试，绝不半路砍掉回合）。 */
 export async function drainTurn(timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while (turnInFlight) {
+  while (isTurnInFlight()) {
     if (Date.now() > deadline) return false;
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -500,15 +525,14 @@ export async function askBrain(
   message: string,
   onProgress?: (ev: ProgressEvent) => void,
   images?: Array<{ data: string; mimeType: string }>,
+  opts: { deadline?: number } = {},
 ): Promise<string> {
   await waitWhileSwitching(); // 切换进行中就先在门口等（有界）：绝不在启动新大脑时双起进程
-  const ag = getAgent("brain"); // 等完之后才取槽位——拿到的是切换后的新大脑；此后全程用它，过程内不再读槽位
-  turnInFlight = true; // 从这一刻起，切脑会等本回合结束（drainTurn）
-  try {
+  return withBrainOp(async () => {
+    if (expired(opts.deadline)) throw new Error(EXPIRED_MSG);
+    const ag = getAgent("brain"); // 排队期间可能刚切过脑——轮到本操作时才取槽位
     return await runTurn(ag, userId, message, onProgress, images);
-  } finally {
-    turnInFlight = false;
-  }
+  });
 }
 
 async function runTurn(
@@ -571,20 +595,18 @@ async function runTurn(
 }
 
 /** 用户主动开新会话：丢弃旧 session（含磁盘映射），重建一个全新 session。 */
-export async function newSession(userId: string): Promise<void> {
+export async function newSession(userId: string, opts: { deadline?: number } = {}): Promise<void> {
   await waitWhileSwitching();
-  const ag = getAgent("brain");
-  turnInFlight = true; // 与 askBrain 共用「有回合在碰 ACP 进程」这一事实（切脑据此等待）
-  try {
+  await withBrainOp(async () => {
+    if (expired(opts.deadline)) throw new Error(EXPIRED_MSG);
+    const ag = getAgent("brain");
     const map = loadSessionMap(ag);
     delete map[keyOf(ag, userId)]; // 只清当前 agent 的；换大脑前那个 agent 的上下文仍保留
     saveSessionMap(map);
     userSessions.delete(userId);
     await ensureProcess(ag);
     await ensureSession(ag, userId);
-  } finally {
-    turnInFlight = false;
-  }
+  });
 }
 
 /**
@@ -596,12 +618,13 @@ export async function newSession(userId: string): Promise<void> {
 export async function resumeSession(
   userId: string,
   sessionId: string,
+  opts: { deadline?: number } = {},
 ): Promise<{ ok: true } | { ok: false; problem: string }> {
   await waitWhileSwitching();
-  const ag = getAgent("brain");
-  turnInFlight = true; // 与 askBrain 共用「有回合在碰 ACP 进程」这一事实（切脑据此等待）
-  const short = sessionId.slice(0, 8);
-  try {
+  return withBrainOp(async () => {
+    if (expired(opts.deadline)) throw new Error(EXPIRED_MSG);
+    const ag = getAgent("brain");
+    const short = sessionId.slice(0, 8);
     await ensureProcess(ag);
     const mcpServers = ag.mcpViaAcp ? activeMcpServers() : [];
     const methods: Array<"load" | "resume"> =
@@ -632,9 +655,7 @@ export async function resumeSession(
       ok: false,
       problem: `接不上会话 ${short}（该 agent 不支持恢复，或这条会话已被它自己清理）。当前会话没变，可以继续用；要开新的就发「新会话」。${lastErr ? `\n（原因：${lastErr.slice(0, 120)}）` : ""}`,
     };
-  } finally {
-    turnInFlight = false;
-  }
+  });
 }
 
 /**

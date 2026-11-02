@@ -954,9 +954,17 @@ async function viaBridge(key: string, req: Omit<ControlRequest, "id" | "at">): P
         `重启一次即可：wemind stop ${key} && wemind start ${key}\n` +
         `（只想改配置不动进程：wemind brain set <agent 名>，但它要等下次启动才生效。）`,
     );
-  const full: ControlRequest = { id: newRequestId(), at: Date.now(), ...req };
+  const timeoutMs = controlTimeoutMs(req.kind as ControlKind);
+  const now = Date.now();
+  // 带上截止时间：CLI 放弃后 daemon 不再执行（否则「CLI 说超时、daemon 照做」两边说法相反）。
+  const full: ControlRequest = {
+    id: newRequestId(now),
+    at: now,
+    ...req,
+    expiresAt: now + timeoutMs,
+  };
   writeControlRequest(full, dir);
-  const res = await awaitControlResponse(full.id, dir, controlTimeoutMs(req.kind as ControlKind));
+  const res = await awaitControlResponse(full.id, dir, timeoutMs);
   if (!res)
     throw new Error(
       `等 daemon 回复超时（${req.kind}）。它可能正忙或已退出，用 wemind list 看状态、daemon.log 看日志。`,
