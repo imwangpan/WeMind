@@ -75,6 +75,8 @@ while true:
 
 poller 对每条消息**先鉴权再处理**，并把所有最新 token 实时写进 `state.contextTokens`，这样即使大脑在处理旧消息，新消息的 token 也不会丢。
 
+一批消息的收尾走 `poller-batch.ts` 的 `finishPollBatch()`：**先唤醒 worker，再 `saveState`**。顺序刻意如此——磁盘满/权限错误让持久化抛错时，只记一行 `save state failed`，已经入队的消息照常处理；反过来的话 worker 会一直睡到用户下一条消息。
+
 ### workerLoop —— 串行喂大脑
 
 ```

@@ -104,6 +104,7 @@ import {
 } from "./image-reply.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
 import { PENDING_PUSH_MAX_TRIES, PendingPushes, shouldDeferTaskPush } from "./pending-push.js";
+import { finishPollBatch } from "./poller-batch.js";
 import {
   dispatchTask,
   injectTask,
@@ -1096,8 +1097,12 @@ async function pollerLoop(account: AccountData, owner: string, state: ServerStat
         const fresh = state.contextTokens[`${account.botId}:${from}`];
         if (fresh) flushHeldPushes(account, from, fresh);
       }
-      saveState(state);
-      if (enq) notifyWorker();
+      const saveErr = finishPollBatch(enq, () => saveState(state), notifyWorker);
+      if (saveErr)
+        log(
+          "save state failed:",
+          saveErr instanceof Error ? saveErr.stack || saveErr.message : String(saveErr),
+        );
     } catch (e) {
       log("poller error:", e instanceof Error ? e.stack || e.message : String(e));
     }
