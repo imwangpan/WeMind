@@ -253,11 +253,23 @@ export function release(conn: WorkerConn, limits: PoolLimits = poolLimits()): vo
   writeRecords();
 }
 
-/** 定时清扫（index.ts 起 interval）：清掉已死的空壳 + 处理「空闲过期/超编」，不动 busy。 */
+/**
+ * 定时清扫该摘掉哪些连接：只收「空闲且已死」的空壳。
+ * **busy 的死连接必须保留**：任务可能还会 `ask()`，`WorkerConn` 会在原连接里复活进程；池里若已没有它的 entry，
+ * `onSpawn` 就写不了 pid 记录、`release` 也找不到它——复活进程会脱离池管理，上限失效且永久泄漏。
+ * busy 的死连接由任务结束时的 `release`（进程已死 → 摘除）或 `drop`（杀 + 摘除）负责。
+ */
+export function planSweep(conns: Array<ConnInfo & { alive: boolean }>): string[] {
+  return conns.filter((c) => c.state === "idle" && !c.alive).map((c) => c.id);
+}
+
+/** 定时清扫（index.ts 起 interval）：清掉已死的空闲空壳 + 处理「空闲过期/超编」，不动 busy。 */
 export function sweep(limits: PoolLimits = poolLimits()): void {
   let changed = false;
-  for (const [id, e] of entries) {
-    if (e.conn.isAlive()) continue;
+  const dead = planSweep(
+    [...entries.values()].map((e) => ({ ...info(e), alive: e.conn.isAlive() })),
+  );
+  for (const id of dead) {
     entries.delete(id);
     changed = true;
   }

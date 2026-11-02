@@ -106,7 +106,7 @@ stateDiagram-v2
 
 ### worker-pool.ts —— 进程池
 
-策略与 IO 分离：`planAcquire(poolState, agent, limits, now)` / `planReap(...)` 是**纯函数**（单独测），`acquire/release/drop/sweep/killAll/killIdle/poolSummary` 负责 IO。
+策略与 IO 分离：`planAcquire(poolState, agent, limits, now)` / `planReap(...)` / `planSweep(...)` 是**纯函数**（单独测），`acquire/release/drop/sweep/killAll/killIdle/poolSummary` 负责 IO。`planSweep` 只收「空闲且已死」的空壳；**busy 的死连接保留**——任务可能还会在原连接里复活进程，池里若先删了 entry，复活进程就脱离池管理（`release` 找不到它、pid 记录也写不了），由 `release`/`drop` 在任务结束时摘除。
 
 取用顺序：**同 agent 的空闲命中** → **回收最旧空闲腾位** → spawn。三把闸：
 

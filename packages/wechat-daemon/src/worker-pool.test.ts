@@ -4,6 +4,7 @@ import {
   agentKey,
   planAcquire,
   planReap,
+  planSweep,
   poolLimits,
   type ConnInfo,
   type PoolLimits,
@@ -130,5 +131,17 @@ describe("planReap", () => {
   it("空池/全忙 → 什么都不收", () => {
     expect(planReap([], LIM, T)).toEqual([]);
     expect(planReap([conn("a", K, "busy")], LIM, T)).toEqual([]);
+  });
+});
+
+describe("planSweep", () => {
+  it("只收空闲且已死的空壳；busy 的死连接保留（复活进程仍归池管理）", () => {
+    const conns = [
+      { ...conn("idleDead", K, "idle"), alive: false },
+      { ...conn("busyDead", K, "busy"), alive: false },
+      { ...conn("idleAlive", K, "idle"), alive: true },
+      { ...conn("busyAlive", K, "busy"), alive: true },
+    ];
+    expect(planSweep(conns)).toEqual(["idleDead"]);
   });
 });
