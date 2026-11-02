@@ -91,4 +91,47 @@ describe("账号注册表（默认账号 / 别名）", () => {
     api.unregisterAccount("aaa");
     expect(api.getDefaultKey()).toBeUndefined();
   });
+
+  it("陈旧锁文件（>10s）会被清理，写入继续", () => {
+    const lock = path.join(home, "accounts.json.lock");
+    fs.writeFileSync(lock, "stale", "utf-8");
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(lock, old, old);
+    api.registerAccount({
+      key: "ccc",
+      botId: "c@x",
+      userId: "u3",
+      baseUrl: "https://x",
+      label: "第三个",
+    });
+    expect(api.listAccounts().some((a) => a.key === "ccc")).toBe(true);
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+});
+
+/*
+ * 非 ENOENT 的读错误（权限/路径损坏）绝不能当空表：否则紧接的 save 会把整张注册表覆盖掉。
+ * 用「accounts.json 是个目录」制造可移植的 EISDIR。
+ */
+describe("账号注册表（读错误不降级为空表）", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-accounts-readerr-"));
+  const prevHome = process.env.WEMIND_HOME;
+  let api: typeof import("./accounts.js");
+
+  beforeAll(async () => {
+    process.env.WEMIND_HOME = home;
+    vi.resetModules();
+    api = await import("./accounts.js");
+    fs.mkdirSync(path.join(home, "accounts.json"));
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.WEMIND_HOME;
+    else process.env.WEMIND_HOME = prevHome;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it("accounts.json 不可读时抛错，而不是返回空表", () => {
+    expect(() => api.loadRegistry()).toThrow(/无法读取账号注册表/);
+  });
 });
