@@ -63,6 +63,8 @@ graph TD
 
 失败即 `reset()`（按 PID 杀进程树：Windows 用 `taskkill /T /F`），下条消息重建并尝试 `session/load` / `session/resume` 恢复上下文 —— 大脑这层有自己的「崩了重建且尽量不丢历史」。
 
+**stdout 增量解码**：brain / worker / `brain check` 三个 ACP 客户端共用 `line-decoder.ts` 的 `LineDecoder`（`StringDecoder` + 行缓冲），不直接用 `Buffer.toString()` 拼字符串——UTF-8 多字节字符跨 chunk 时后者会插入 U+FFFD，中文回复被静默损坏。进程重建时 `reset()` 丢弃半截行与未完成的多字节序列。
+
 ### 会话管理
 
 - **每用户一个 ACP session**，映射持久化到 `brain-sessions.json`（键 `<agent>:<userId>`，按大脑分开存：切换 agent 后各自的会话互不覆盖，切回去仍能恢复），跨进程重建保上下文。这张**当前会话表是「当前是哪个会话」的唯一权威**。

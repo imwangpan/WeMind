@@ -14,6 +14,7 @@ import {
 } from "./session-map.js";
 import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
 import { waitForFrameQuiet } from "./acp-quiet.js";
+import { LineDecoder } from "./line-decoder.js";
 
 /**
  * worker ACP 连接：**一条连接＝一个 ACP agent 进程**，约 70% 复制自 acp-brain.ts，差异：
@@ -94,7 +95,7 @@ export class WorkerConn {
   private pending = new Map<number, Pending>();
   private sessions = new Map<string, string>(); // sessionKey -> sessionId
   private assembling = new Map<string, string[]>(); // sessionId -> 当前轮文本块
-  private stdoutBuf = "";
+  private stdoutLines = new LineDecoder();
   private lastFrameAt = 0;
   private frameSeq = 0;
   private currentOnProgress: ((ev: WorkerProgressEvent) => void) | null = null;
@@ -156,7 +157,7 @@ export class WorkerConn {
     this.pending.clear();
     this.sessions.clear();
     this.assembling.clear();
-    this.stdoutBuf = "";
+    this.stdoutLines.reset();
     dlog(`${this.id}(${this.agent.name}) killed`);
   }
 
@@ -315,12 +316,7 @@ export class WorkerConn {
   }
 
   private onStdout(d: Buffer): void {
-    this.stdoutBuf += d.toString();
-    let i: number;
-    while ((i = this.stdoutBuf.indexOf("\n")) >= 0) {
-      const line = this.stdoutBuf.slice(0, i).trim();
-      this.stdoutBuf = this.stdoutBuf.slice(i + 1);
-      if (!line) continue;
+    for (const line of this.stdoutLines.push(d)) {
       let f: Record<string, any>;
       try {
         f = JSON.parse(line);

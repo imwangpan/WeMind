@@ -7,6 +7,7 @@ import { parseJsonc } from "./agent-mcp.js";
 import { agentEnv, authHint, type ResolvedAgent } from "./brain-agents.js";
 import { copyProfilePatch } from "./profile-model.js";
 import { spawnAgent } from "./spawn-agent.js";
+import { LineDecoder } from "./line-decoder.js";
 
 /**
  * 「大脑连通性自检」：真正起一个 ACP agent 进程并跑完 initialize / session/new 握手，用来证明「这个大脑不只是找得到，而且能说 ACP」——比单纯「文件存在」更硬的证据。
@@ -68,7 +69,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
 
   const proc = spawnAgent(ag, { cwd: home, env });
 
-  let buf = "";
+  const stdoutLines = new LineDecoder();
   let seq = 0;
   const pending = new Map<number, (frame: any) => void>();
   const settleAll = (msg: string): void => {
@@ -79,12 +80,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
   };
 
   proc.stdout!.on("data", (d) => {
-    buf += d.toString();
-    let i: number;
-    while ((i = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, i).trim();
-      buf = buf.slice(i + 1);
-      if (!line) continue;
+    for (const line of stdoutLines.push(d)) {
       let frame: any;
       try {
         frame = JSON.parse(line);

@@ -18,6 +18,7 @@ import {
 import { ensureEntry, markUsed, titleOf, touchEntry } from "./session-registry.js";
 import { stripHandoffPrefix } from "./handoff.js";
 import { waitForFrameQuiet } from "./acp-quiet.js";
+import { LineDecoder } from "./line-decoder.js";
 
 /**
  * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。
@@ -61,7 +62,7 @@ let idCounter = 0;
 const pending = new Map<number, Pending>();
 const userSessions = new Map<string, string>(); // 本进程已建立的 session
 const assembling = new Map<string, string[]>(); // sessionId -> 当前回合文本块
-let stdoutBuf = "";
+const stdoutLines = new LineDecoder();
 let lastFrameAt = 0; // 最近一次收到任何 stdout 帧的时间
 let frameSeq = 0; // 收到帧的累计序号（用于判定本回合是否出过帧）
 type ProgressEvent =
@@ -176,7 +177,7 @@ function reset(): void {
   pending.clear();
   userSessions.clear();
   assembling.clear();
-  stdoutBuf = "";
+  stdoutLines.reset();
 }
 
 // ---- 磁盘 session 映射（`<agent>:<userId>` -> sessionId），跨进程重建保上下文 ----
@@ -301,12 +302,7 @@ function handleFrame(f: Record<string, any>): void {
 }
 
 function onStdout(d: Buffer): void {
-  stdoutBuf += d.toString();
-  let i: number;
-  while ((i = stdoutBuf.indexOf("\n")) >= 0) {
-    const line = stdoutBuf.slice(0, i).trim();
-    stdoutBuf = stdoutBuf.slice(i + 1);
-    if (!line) continue;
+  for (const line of stdoutLines.push(d)) {
     let f: Record<string, any>;
     try {
       f = JSON.parse(line);
