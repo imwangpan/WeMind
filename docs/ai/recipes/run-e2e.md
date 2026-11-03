@@ -35,6 +35,10 @@ $env:ACP_MODEL = '["deepseek-account","deepseek-flash"]'   # 桌面登录必须�
 node scripts/acp-probe.mjs
 ```
 
+> **2026-11-03 两个回归点**（改 kiro/DSH 相关代码后重跑）：
+> - **kiro v3**：临时 `KIRO_HOME` 的 `settings/cli.json` 写 `{"acp.agentEngine":"v3"}`，`wemind brain check` 应通过；看沙箱 `brain-home/settings/permissions.yaml` 是 allow-all，且解析出的 args 已没有 `--trust-all-tools`（多了 `--agent-engine v3`）。真实设置已有 `permissions.yaml` 时不得被覆盖。
+> - **DSH 会话隔离**：看 `<账号目录>/agent-sessions/deepseek/session-root-{brain,worker}.patch.yml` 与两个 root 目录；要复现旧故障，先在 `brain-home/sessions/` 放一个平铺会话文件再跑 `wemind brain check`（修复后 DSH 不再读那个目录）。模型过期用 `wemind brain` 看是否给出 `no configured model` 的替换提示。
+
 Claude Code 的 L3 示例（需要先 `npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；用临时 `CLAUDE_CONFIG_DIR`，别碰真实 `~/.claude`）：
 
 ```powershell

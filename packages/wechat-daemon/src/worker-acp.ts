@@ -12,7 +12,7 @@ import {
   readSessionMapStrict,
   sessionKey,
 } from "./session-map.js";
-import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
+import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "./brain-agents.js";
 import {
   applyAcpModel,
   applyAcpSessionMode,
@@ -251,6 +251,7 @@ export class WorkerConn {
     const kept: string[] = [];
     const env = agentEnv(this.agent, WORKER_HOME, kept); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
     if (kept.length) dlog(`${this.id} env defaults kept from parent: ${kept.join(",")}`);
+    prepareAgent(this.agent); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
     const cwd = this.effectiveCwd();
     const proc = spawnAgent(this.agent, {
       cwd, // 任务工作目录（本地派发可指定，否则默认 WORKER_CWD），区别于沙箱

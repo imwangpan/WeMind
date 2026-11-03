@@ -18,6 +18,7 @@
 //   ACP_TEST_TOOL=1      send a tool-forcing prompt (writes a marker file) and record whether the agent asked for permission first — drift check for "no per-tool approval" assumptions
 //   ACP_TOOL_PROMPT="…"  override the tool-forcing prompt (default writes drift-check.txt in CWD)
 //   ACP_TEST_MCP='[{"name":"fake","command":"...","args":[],"env":[]}]'  pass mcpServers to session/new（stdio 的 env 是 ACP schema 必填；省略时探针补 []）
+//   ACP_SESSION_META='{"kiro":{"policyPreset":["allow-all"]}}'  pass _meta to session/new|load|resume（通用探针选项；kiro v3 的免审批**不是**这里——policyPreset 实测无效，v3 用 settings/permissions.yaml）
 //   ACP_KEEP=1           keep ACP_HOME (contains sessions) after the run
 //   ACP_HARD_KILL=1      skip session/close; kill the process (simulates WeMind self-heal)
 //   ACP_TIMEOUT_MS=180000
@@ -52,6 +53,8 @@ const TEST_MCP = (process.env.ACP_TEST_MCP ? JSON.parse(process.env.ACP_TEST_MCP
 );
 const MODEL = process.env.ACP_MODEL || "";
 const REASONING = process.env.ACP_REASONING || "";
+const SESSION_META = process.env.ACP_SESSION_META ? JSON.parse(process.env.ACP_SESSION_META) : null;
+const AUTO_ALLOW = process.env.ACP_AUTO_ALLOW === "1";
 const KEEP = process.env.ACP_KEEP === "1";
 const HARD_KILL = process.env.ACP_HARD_KILL === "1";
 const TIMEOUT_MS = Number(process.env.ACP_TIMEOUT_MS || 180_000);
@@ -137,7 +140,14 @@ class Client {
       log(`${this.label} >>> REVERSE:`, f.method, short(f.params, 300));
       let result;
       if (f.method === "session/request_permission") {
-        result = { outcome: { outcome: "cancelled" } };
+        const options = Array.isArray(f.params?.options) ? f.params.options : [];
+        const allow = AUTO_ALLOW
+          ? options.find((o) => o?.kind === "allow_once" || o?.kind === "allow_always")
+          : undefined;
+        result = allow
+          ? { outcome: { outcome: "selected", optionId: allow.optionId } }
+          : { outcome: { outcome: "cancelled" } };
+        log(`${this.label} permission ${allow ? "allowed" : "rejected"}`, allow?.kind ?? "");
       }
       const msg = result
         ? { jsonrpc: "2.0", id: f.id, result }
@@ -218,7 +228,9 @@ class Client {
   }
 
   async newSession(mcpServers = TEST_MCP) {
-    const r = await this.request("session/new", { cwd: CWD, mcpServers });
+    const params = { cwd: CWD, mcpServers };
+    if (SESSION_META) params._meta = SESSION_META;
+    const r = await this.request("session/new", params);
     this.sid = r?.sessionId;
     return r;
   }
@@ -363,6 +375,7 @@ const png1x1 =
         sessionId: first.sid,
         cwd: CWD,
         mcpServers: TEST_MCP,
+        ...(SESSION_META ? { _meta: SESSION_META } : {}),
       });
     } catch (e) {
       summary.load = { error: e.message };
@@ -378,6 +391,7 @@ const png1x1 =
           sessionId: first.sid,
           cwd: CWD,
           mcpServers: TEST_MCP,
+          ...(SESSION_META ? { _meta: SESSION_META } : {}),
         });
         second.sid = first.sid;
       } catch (e) {

@@ -2,7 +2,7 @@
 
 本文件记录本 Fork 相对上游 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server) 的改动。
 
-## [1.4.0] 新增 pi / Gemini 预设 · 任务消息显式寻址（未发布，2026-11-02）
+## [1.4.0] 新增 pi / Gemini 预设 · 任务消息显式寻址（未发布，2026-11-03）
 
 ### Added
 
@@ -16,6 +16,8 @@
 
 ### Fixed
 
+- **kiro CLI v3 无法启动（2026-11-03）**：kiro ACP 的 v3 引擎**拒绝** v2 专属的 `--trust-all-tools` / `-a` / `--trust-tools`，带上会连 `initialize` 都不回（表现为握手超时），而预设一直固定带 `--trust-all-tools`。预设新增 `kiroEngine`：按启动参数 `--agent-engine` → 真实 `settings/cli.json` 的 `acp.agentEngine` → `kiro-cli --version` 主版本 ≥3 → 其余 v2 判定（`acp --help`：两者都没设时默认 v2；CLI ≥3 默认 v3 为假设/待实测）；v3 时剔除 v2 参数、补 `--agent-engine v3`，并在 brain/worker 沙箱写 `settings/permissions.yaml` 的 `rules: - capability: all / effect: allow`（等价 v2 的整会话信任；真实设置已有则原样同步、不覆盖用户规则）。`session/new` 的 `_meta.kiro.policyPreset` 实测**无效**（多种写法仍逐次审批/拒绝写入），不要使用。测试：`brain-agents.test.ts`（引擎判定/参数清洗）、`sandbox-kiro.test.ts`（两个沙箱的 permissions.yaml、用户规则保留、v2 不写）。
+- **DeepSeek 无法起会话 / 模型过期（2026-11-03，DSH 0.2.1-rc.3）**：① DSH 的会话库默认在共用沙箱根的 `sessions/`，kiro/pi 也会往同一目录写，DSH 把别人的平铺文件当成自己的会话库，直接报 `unsupported flat-file layout`。预设新增 `isolateSessions`：启动前 `prepareAgent()` 落盘 `<数据目录>/agent-sessions/deepseek/session-root-<brain|worker>.patch.yml`，用 DSH 自己的 `--patch` 把 `session-persistence-jsonl.root` 指到 `agent-sessions/deepseek/<role>`；用户 `--args` 自带 `--patch` 时尊重用户、不追加。② 桌面端升级会重写 `llm-pi-ai` 的模型目录，用户自己补的 `- id: acp` 不会被迁移，模型不在目录里时 ACP 报 `no configured model`。`profile-model.ts` 新增 `acpModelHint()`（`wemind brain` 输出）：给出原因与可粘贴的替换片段（优先建议 `agent-default-model` 的值），**只提示、不替用户改真实 profile**。测试：`brain-agents.test.ts`（`--patch` 生成/角色隔离/用户自带 `--patch`）、`profile-model.test.ts`（过期模型/正常/缺 provider）。
 - **重新扫码可并入现有账号（2026-11-02）**：`wemind login` 原先把本次登录的暂存目录 `rename` 到账号目录，目标已存在就直接报错——会话过期想重登、换设备重登都被挡住，只能手工删账号目录（连带丢会话与白名单）。现在目标已存在时按目录合并（`cpSync` 覆盖同名文件），保留原 `brain-sessions.json` / `allowFrom` / `label`，只有目标路径不是目录才拒绝。**高级登录态**（`need_verifycode` / `verify_code_blocked` / `scaned_but_redirect` / `binded_redirect`）原先静默轮询到 15 分钟超时；现在立即失败并给出明确原因。补 `cli-login.test.ts` 5 条（首次登录、重登合并、非目录拒绝、提示文案）。
 - **停止进程失败时保留 pid 记录并拒绝删账号目录（2026-11-02）**：`stopDaemon` 原先不论进程是否真的退出都删 `brain.pid` / `workers.pid.json`，残留进程从此失去身份记录；`wemind delete` 也只看 `daemonAlive`，仍可能删掉活着的进程正在用的数据目录。现在按实际存活进程判定成败：有残留就保留记录，并把未停止的进程列给用户；`delete` 遇到残留直接拒绝并提示先处理。`stopSummary()` / `deleteGuard()` 补单测。
 - **登录者白名单的读-改-写加跨进程锁（2026-11-02）**：`addAllowFrom` / `removeAllowFrom` 原先无锁，MCP 登录与 CLI 并发修改会丢条目。锁实现与账号注册表共用 `file-lock.ts`（`wx` 锁文件、陈旧锁清理、超时提示），补白名单并发/陈旧锁用例。

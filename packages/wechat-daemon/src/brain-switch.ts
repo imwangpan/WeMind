@@ -119,7 +119,7 @@ function sameAgent(a: ResolvedAgent, b: ResolvedAgent): boolean {
 export function preflightSwitch(target: string, dir: string = DATA_DIR): PreflightResult {
   const key = (target ?? "").trim().toLowerCase();
   if (!key) return { ok: false, problem: "需要指定 agent 名（或 `auto` 重新自动探测）。" };
-  const r = resolvePresetByName(key, loadBrainConfig(dir));
+  const r = resolvePresetByName(key, loadBrainConfig(dir), dir);
   if (!r.ok) return { ok: false, problem: r.problem };
   const current = getAgent("brain");
   return { ok: true, key, agent: r.agent, current, already: sameAgent(current, r.agent) };

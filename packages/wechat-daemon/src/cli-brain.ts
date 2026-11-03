@@ -16,7 +16,7 @@ import {
   type BrainConfig,
 } from "./brain-config.js";
 import { checkAgent } from "./brain-check.js";
-import { acpOverrideHint } from "./profile-model.js";
+import { acpModelHint, acpOverrideHint } from "./profile-model.js";
 import {
   aliveOurs,
   bridgeReady,
@@ -61,7 +61,7 @@ export function agentLabel(dir: string, runtime: BrainRuntime | null = null): st
 function describeBrain(key: string): string {
   const dir = accountDir(key);
   const cfg = loadBrainConfig(dir);
-  const ag = resolveAgent(cfg);
+  const ag = resolveAgent(cfg, dir);
   const problem = agentProblem(ag);
   const cfgLine = cfg
     ? `brain.json → agent=${cfg.agent}${cfg.bin ? ` bin=${cfg.bin}` : ""}${cfg.args ? ` args=[${cfg.args.join(" ")}]` : ""}${cfg.extraArgs ? ` extra_args=[${cfg.extraArgs.join(" ")}]` : ""}${cfg.shell !== undefined ? ` shell=${cfg.shell}` : ""}${cfg.model ? ` model=${cfg.model}` : ""}`
@@ -78,10 +78,10 @@ function describeBrain(key: string): string {
   // D：整段替换 args 后漏了 ACP 模式参数时提醒（只是提醒；运行时另有握手失败的诊断提示）
   const argsWarn = acpArgsWarning(ag.name, ag.args, ag.binOverridden);
   if (argsWarn) lines.push(`  ⚠️ ${argsWarn}`);
-  // 用户层 profile 缺 `- id: acp` 时给出「你自己补上」的提示（WeMind 只原样同步配置，不替 agent 合成）
+  // 用户层 profile 缺 `- id: acp`（或它的 model 已被桌面端模型目录淘汰）时给出「你自己改」的提示（WeMind 只读，不替 agent 合成）
   const hint =
     ag.realProfile && ag.realHome && ag.inherit
-      ? acpOverrideHint(ag.realHome, ag.realProfile)
+      ? (acpOverrideHint(ag.realHome, ag.realProfile) ?? acpModelHint(ag.realHome, ag.realProfile))
       : null;
   if (hint) lines.push("", hint);
   return lines.join("\n");
@@ -204,7 +204,8 @@ function cmdBrainUnset(key: string): string {
 
 /** `wemind brain check`：真起一个进程跑 ACP 握手，验证大脑「不仅找得到、而且能说 ACP」。 */
 async function cmdBrainCheck(key: string): Promise<string> {
-  const ag = resolveAgent(loadBrainConfig(accountDir(key)));
+  const dir = accountDir(key);
+  const ag = resolveAgent(loadBrainConfig(dir), dir);
   const problem = agentProblem(ag);
   if (problem) {
     process.exitCode = 1; // 自检失败必须让脚本/CI 看得见（以前只打印 ❌，退出码仍是 0）

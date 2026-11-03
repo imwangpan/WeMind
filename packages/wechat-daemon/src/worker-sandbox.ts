@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import type { ResolvedAgent } from "./brain-agents.js";
+import { ensureKiroV3Permissions, type ResolvedAgent } from "./brain-agents.js";
 import { getAgent } from "./agent-slot.js";
 import {
   readMcpServers,
@@ -168,7 +168,6 @@ export function workerMcpServers(forAgent?: ResolvedAgent) {
 function syncKiroSettings(ag: ResolvedAgent): void {
   const realSettings = path.join(ag.realHome!, "settings");
   const workerSettings = path.join(workerConfigDir(ag), "settings");
-  if (!fs.existsSync(realSettings)) return;
   try {
     fs.mkdirSync(workerSettings, { recursive: true });
   } catch {
@@ -178,7 +177,7 @@ function syncKiroSettings(ag: ResolvedAgent): void {
   try {
     names = fs.readdirSync(realSettings);
   } catch {
-    return;
+    /* 真实配置目录不存在：v3 仍需要沙箱里的默认 permissions.yaml */
   }
   for (const f of names) {
     if (f === "mcp.json") continue; // MCP 用 worker curated 版本（applyWorkerSandbox 全量除排除集）
@@ -189,6 +188,7 @@ function syncKiroSettings(ag: ResolvedAgent): void {
       /* best-effort */
     }
   }
+  ensureKiroV3Permissions(ag, workerSettings);
 }
 
 /** opencode：把用户全局 opencode.json(c)（去 mcp 段）作基底写入 worker 沙箱，继承 model 等；mcp 由 applyWorkerSandbox 覆盖。 */

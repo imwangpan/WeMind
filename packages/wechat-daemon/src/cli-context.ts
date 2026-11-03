@@ -130,7 +130,7 @@ export function ownerOf(key: string): string {
 
 /** daemon 没在跑时用来定会话归属（按 agent 分开存）的大脑名（与 daemon 启动期同一个解析来源：配置 + 环境变量 + 自动探测）。 */
 export function agentNameOf(key: string): string {
-  return resolveAgent(loadBrainConfig(accountDir(key))).name;
+  return resolveAgent(loadBrainConfig(accountDir(key)), accountDir(key)).name;
 }
 
 /**

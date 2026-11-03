@@ -4,7 +4,7 @@ import path from "node:path";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME, activeMcpServers } from "./mcp-sandbox.js";
 import { getAgent } from "./agent-slot.js";
-import { acpArgsHint, agentEnv, type ResolvedAgent } from "./brain-agents.js";
+import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "./brain-agents.js";
 import { pidRecordOf, writePidRecords } from "./pid-record.js";
 import { spawnAgent } from "./spawn-agent.js";
 import {
@@ -224,6 +224,7 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   const kept: string[] = [];
   const env = agentEnv(ag, BRAIN_HOME, kept); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
   if (kept.length) dlog(`env defaults kept from parent: ${kept.join(",")}`); // 部署方显式设置的审批类开关
+  prepareAgent(ag); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
   const proc = spawnAgent(ag, { cwd: BRAIN_HOME, env });
   child = proc;
   dlog(`spawn ${ag.name} acp pid=${proc.pid} bin=${ag.bin} args=[${ag.args.join(" ")}]`);

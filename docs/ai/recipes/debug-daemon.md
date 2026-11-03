@@ -164,7 +164,7 @@ wemind brain
 
 - agent 不支持 `session/load` → 需要 `session/resume` 兜底；DSH 属此类；
 - `resume` 失败 → 检查 `cwd`、`mcpServers`、会话是否已持久化；
-- 想彻底重来 → 微信「新会话」，或删 `brain-sessions.json` + `brain-home/sessions/`。
+- 想彻底重来 → 微信「新会话」，或删 `brain-sessions.json` + `brain-home/sessions/`（DSH 的会话库在 `agent-sessions/deepseek/`，要一并删）。
 
 ### 3.5 连发上限 / 进度刷屏
 

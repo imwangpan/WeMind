@@ -203,7 +203,7 @@ export function stopSummary(stopped: string[], skipped: string[], survivors: str
 function stopDaemon(key: string): StopResult {
   pm2Stop(key); // best-effort：停掉 pm2 托管的 app（若有）
   const dir = accountDir(key);
-  const ag = resolveAgent(loadBrainConfig(dir));
+  const ag = resolveAgent(loadBrainConfig(dir), dir);
   // brain：优先用身份记录里「起进程时真实用的」bin/args 算特征串；没有记录（旧账号/未起过）才回退配置。
   const brec = brainRecord(dir);
   const brainMarkers = brec.markers ?? brainPidMarkers(ag.bin, ag.args);
@@ -282,7 +282,7 @@ function cmdList(): string {
   // 先收集各账号的 pid + 大脑特征，再**一次性**批量查命令行（Windows 下每次查询较慢）；只凭「pid 活着」显示状态会在重启后 pid 复用时骗人，所以要带身份校验。
   const entries = accs.map((a) => {
     const dir = accountDir(a.key);
-    const ag = resolveAgent(loadBrainConfig(dir));
+    const ag = resolveAgent(loadBrainConfig(dir), dir);
     const brec = brainRecord(dir);
     return {
       a,

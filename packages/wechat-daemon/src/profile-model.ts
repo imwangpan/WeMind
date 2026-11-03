@@ -122,6 +122,70 @@ export function acpOverrideHint(realHome: string, profile: string): string | nul
   return lines.join("\n");
 }
 
+/**
+ * 已有 `- id: acp`、但它写的 model 不在该 provider 的模型目录里时的提示。
+ *
+ * 为什么会发生：桌面端升级会重写 `llm-pi-ai` 的 provider 目录（模型下架/改名），而用户自己补的 `- id: acp`
+ * 是独立的一条、不会被桌面端自动迁移。DSH 的 ACP 桥按 model 找路由，找不到就在 `session/new` 报
+ * `no configured model`——单看错误码很像 agent 坏了，实际只是这一行过期。
+ * 与 `acpOverrideHint` 一样：**只读、只提示**，不替用户改真实 profile。
+ */
+export function acpModelHint(realHome: string, profile: string): string | null {
+  if (!realHome || !profile) return null;
+  const file = path.join(realHome, "profiles", profile, "cordis.patch.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf-8");
+  } catch {
+    return null;
+  }
+  const acp = entryConfig(text, /^\s*-\s+id:\s*acp\s*(#.*)?$/);
+  if (!acp) return null; // 缺 `- id: acp` 由 acpOverrideHint 负责
+  const [provider, model] = JSON.parse(acp) as [string, string];
+  const models = modelsForProvider(text, provider);
+  if (!models.includes(model)) {
+    const def = entryConfig(text, /^\s*-\s+id:\s*agent-default-model\s*(#.*)?$/);
+    const defPair = def ? (JSON.parse(def) as [string, string]) : null;
+    const pool = defPair?.[0] === provider ? [defPair[1], ...models] : models;
+    const suggestions = [...new Set(pool.filter((m) => models.includes(m)))].slice(0, 3);
+    const lines = [
+      `提示：${file} 的 - id: acp 用的是 provider=${provider} model=${JSON.stringify(model)}，但这份 profile 的 provider 目录里找不到这个模型（桌面端更新模型列表后会这样，ACP 会话会报 no configured model）。`,
+      suggestions.length
+        ? `把 config.model 换成目录里现有的（例如 ${suggestions.map((m) => JSON.stringify(m)).join(" / ")}），或按你日常 dsh 正在用的模型重写这一条：`
+        : `把 config.model 换成这个 provider 目录里现有的模型，或按你日常 dsh 正在用的模型重写这一条：`,
+      `- id: acp`,
+      `  config:`,
+      `    provider: ${JSON.stringify(provider)}`,
+      `    model: ${JSON.stringify(suggestions[0] ?? "<model>")}`,
+    ];
+    return lines.join("\n");
+  }
+  return null;
+}
+
+/** 从 provider 目录里取该 provider 下 `models:` 的 `- id:` 清单（块式 YAML；provider 找不到就空）。 */
+function modelsForProvider(text: string, provider: string): string[] {
+  const lines = text.split(/\r?\n/);
+  const esc = provider.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const head = new RegExp(`^(\\s*)["']?${esc}["']?\\s*:\\s*(#.*)?$`);
+  for (let i = 0; i < lines.length; i++) {
+    const m = head.exec(lines[i]);
+    if (!m) continue;
+    const indent = m[1].length;
+    const out: string[] = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (!line.trim() || /^\s*#/.test(line)) continue;
+      const lineIndent = (line.match(/^\s*/) ?? [""])[0].length;
+      if (lineIndent <= indent) break;
+      const id = /^\s*-\s+id:\s*(.+?)\s*(?:#.*)?$/.exec(line);
+      if (id) out.push(id[1].replace(/^["']|["']$/g, ""));
+    }
+    return out;
+  }
+  return [];
+}
+
 /** 读某个 patch 条目（按起始行正则定位）的 config.provider/model；缺一个就 null。 */
 function entryConfig(text: string, head: RegExp): string | null {
   let inside = false;
