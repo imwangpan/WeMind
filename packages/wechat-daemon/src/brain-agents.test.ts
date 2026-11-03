@@ -12,6 +12,8 @@ import {
   acpArgsWarning,
   acpModeTokens,
   agentEnv,
+  prepareAgent,
+  ensureKiroV3Permissions,
 } from "./brain-agents.js";
 import {
   presetAvailable,
@@ -76,6 +78,14 @@ const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-empty-"));
 // 伪造一份真实 dsh home：profiles/acp 的用户层带 agent-default-model（与桌面端写进去的形状一致）
 const profileHome = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-profile-"));
 const clineHome = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-cline-home-"));
+const kiroV3Home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-kiro-v3-"));
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-scratch-"));
+fs.mkdirSync(path.join(kiroV3Home, "settings"), { recursive: true });
+fs.writeFileSync(
+  path.join(kiroV3Home, "settings", "cli.json"),
+  JSON.stringify({ "chat.agentEngine": "v3", "acp.agentEngine": "v3" }),
+  "utf-8",
+);
 fs.mkdirSync(path.join(profileHome, "profiles", "acp"), { recursive: true });
 fs.mkdirSync(path.join(clineHome, "data", "settings"), { recursive: true });
 fs.writeFileSync(
@@ -107,6 +117,8 @@ afterAll(() => {
   fs.rmSync(emptyRealHome, { recursive: true, force: true });
   fs.rmSync(profileHome, { recursive: true, force: true });
   fs.rmSync(clineHome, { recursive: true, force: true });
+  fs.rmSync(kiroV3Home, { recursive: true, force: true });
+  fs.rmSync(scratch, { recursive: true, force: true });
   if (saved.WEMIND_BRAIN_REAL_HOME === undefined) delete process.env.WEMIND_BRAIN_REAL_HOME;
 });
 
@@ -151,6 +163,45 @@ describe("resolveAgent agent", () => {
     expect(ag.requestedKey).toBe("kiro");
     expect(ag.source).toBe("env");
     expect(ag.known).toBe(true);
+  });
+
+  it("kiro v3：acp.agentEngine=v3 → 去掉 v2 的 --trust-all-tools，显式声明引擎", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "kiro";
+    process.env.WEMIND_BRAIN_REAL_HOME = kiroV3Home;
+    const ag = resolveAgent();
+    expect(ag.kiroV3).toBe(true);
+    expect(ag.args).toEqual(["acp", "--agent-engine", "v3"]);
+    // 用户自己的 --agent-engine v3 也认；v2 专属信任参数一并清掉，且不重复追加
+    const explicit = resolveAgent({
+      agent: "kiro",
+      args: ["acp", "--trust-all-tools", "--agent-engine", "v3"],
+    });
+    expect(explicit.kiroV3).toBe(true);
+    expect(explicit.args).toEqual(["acp", "--agent-engine", "v3"]);
+    // 显式 v2 优先于设置里的 v3（用户可临时回退）
+    const v2 = resolveAgent({
+      agent: "kiro",
+      args: ["acp", "--trust-all-tools", "--agent-engine", "v2"],
+    });
+    expect(v2.kiroV3).toBe(false);
+    expect(v2.args).toEqual(["acp", "--trust-all-tools", "--agent-engine", "v2"]);
+  });
+
+  it("kiro v3 的免审批：沙箱 settings/permissions.yaml 缺失时补 allow-all；已有用户规则不覆盖", () => {
+    const ag = { ...resolveAgent({ agent: "kiro" }), kiroV3: true };
+    const settings = path.join(scratch, "kiro-v3-settings");
+    ensureKiroV3Permissions(ag, settings);
+    expect(fs.readFileSync(path.join(settings, "permissions.yaml"), "utf-8")).toBe(
+      "rules:\n  - capability: all\n    effect: allow\n",
+    );
+    fs.writeFileSync(path.join(settings, "permissions.yaml"), "rules: []\n", "utf-8");
+    ensureKiroV3Permissions(ag, settings);
+    expect(fs.readFileSync(path.join(settings, "permissions.yaml"), "utf-8")).toBe("rules: []\n");
+    // v2 不写这个文件（免审批仍由 --trust-all-tools 承担）
+    const v2Settings = path.join(scratch, "kiro-v2-settings");
+    ensureKiroV3Permissions({ ...ag, kiroV3: false }, v2Settings);
+    expect(fs.existsSync(path.join(v2Settings, "permissions.yaml"))).toBe(false);
   });
 
   it("opencode：XDG_CONFIG_HOME 隔离 + opencode.json / mcp.servers + 目录与单文件继承", () => {
@@ -202,7 +253,11 @@ describe("resolveAgent agent", () => {
     const ag = resolveAgent();
     expect(ag.name).toBe("deepseek");
     expect(ag.bin).toBe(process.platform === "win32" ? "dsh.cmd" : "dsh");
-    expect(ag.args).toEqual(["--profile", "acp"]);
+    expect(ag.args.slice(0, 2)).toEqual(["--profile", "acp"]);
+    expect(ag.sessionPatch).toBeDefined();
+    expect(ag.args).toEqual(["--profile", "acp", "--patch", ag.sessionPatch!.file]);
+    expect(ag.sessionPatch!.file).toMatch(/session-root-brain\.patch\.yml$/);
+    expect(ag.sessionPatch!.root).toMatch(/agent-sessions[\\/]deepseek[\\/]brain$/);
     expect(ag.shell).toBe(true);
     expect(ag.homeEnvVar).toBe("DSH_HOME");
     expect(ag.restore).toBe("resume");
@@ -215,6 +270,33 @@ describe("resolveAgent agent", () => {
     // 免审批默认：DSH 没有 flag 也没有会话级权限配置项，靠官方 bundle 读的 DSH_PERMISSION_MODE
     expect(ag.envDefaults).toEqual({ DSH_PERMISSION_MODE: "danger-full-access" });
     expect(ag.env).toEqual({}); // envDefaults 不是强制 env：父进程设了同名变量就以父进程为准
+  });
+
+  it("deepseek 会话目录隔离：prepareAgent 落盘 --patch，root 按 brain/worker 分开；用户自己的 --patch 不覆盖", () => {
+    clearVars();
+    const fake = {
+      sessionPatch: {
+        file: path.join(scratch, "dsh-sessions", "session-root-brain.patch.yml"),
+        root: path.join(scratch, "dsh-sessions", "brain"),
+      },
+    } as unknown as Parameters<typeof prepareAgent>[0];
+    prepareAgent(fake);
+    expect(fs.readFileSync(fake.sessionPatch!.file, "utf-8")).toBe(
+      `- id: session-persistence-jsonl\n  config:\n    root: ${JSON.stringify(fake.sessionPatch!.root)}\n`,
+    );
+    expect(fs.existsSync(fake.sessionPatch!.root)).toBe(true);
+    // 用户显式给 --patch：尊重用户，不再追加第二个
+    const own = resolveAgent({ agent: "deepseek", args: ["--profile", "acp", "--patch", "x.yml"] });
+    expect(own.args).toEqual(["--profile", "acp", "--patch", "x.yml"]);
+    expect(own.sessionPatch).toBeUndefined();
+    // worker 角色用另一份 root / 文件
+    const w = resolveAgentFor({ agent: "deepseek" }, "worker");
+    expect(w.sessionPatch!.file).toMatch(/session-root-worker\.patch\.yml$/);
+    expect(w.sessionPatch!.root).toMatch(/agent-sessions[\\/]deepseek[\\/]worker$/);
+    // CLI 处理非默认账号：显式 dataDir 必须决定 patch 路径（否则会写到默认账号目录，进程特征串也对不上）
+    const other = path.join(scratch, "account-other");
+    const o = resolveAgent({ agent: "deepseek" }, other);
+    expect(o.sessionPatch!.root).toBe(path.join(other, "agent-sessions", "deepseek", "brain"));
   });
 
   it("免审批默认：各预设用自己 agent 的机制（flag / env / 会话模式），不是统一开关", () => {

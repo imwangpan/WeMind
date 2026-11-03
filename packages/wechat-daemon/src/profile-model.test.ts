@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   readProfileDefaultModel,
   acpOverrideHint,
+  acpModelHint,
   stripWechatMcpEntries,
 } from "./profile-model.js";
 
@@ -196,6 +197,70 @@ describe("用户层自己有 - id: acp 时（Agent 自己的配置优先）", ()
     expect(hint).toContain('provider: "<provider>"');
     expect(hint).toContain('model: "<model>"');
     expect(hint).toContain("占位符");
+  });
+});
+
+describe("acpModelHint（- id: acp 的模型已被桌面端模型目录淘汰）", () => {
+  const profileWith = (acpModel: string, catalog = ["auto/dfmodel", "auto/hy3"]) =>
+    writeProfile(
+      `acp-model-${acpModel.replace(/\W/g, "-")}-${catalog.join("-").replace(/\W/g, "-")}`,
+      [
+        "- id: llm-pi-ai # magpie",
+        "  config:",
+        "    providers:",
+        "      magpie:",
+        "        models:",
+        ...catalog.flatMap((m) => [`          - id: ${m}`, `            name: ${m}`]),
+        "- id: agent-default-model # magpie",
+        "  config:",
+        "    provider: magpie",
+        `    model: "${catalog[0] ?? "auto/dfmodel"}"`,
+        "- id: acp # 用户自己补的 ACP 模型",
+        "  config:",
+        "    provider: magpie",
+        `    model: "${acpModel}"`,
+        "",
+      ].join("\n"),
+    );
+
+  it("model 不在该 provider 目录里 → 给出原因与可粘贴替换（优先建议 agent-default-model）", () => {
+    const hint = acpModelHint(profileWith("auto/removed"), "acp")!;
+    expect(hint).toContain("找不到这个模型");
+    expect(hint).toContain("no configured model");
+    expect(hint).toContain("auto/removed");
+    expect(hint).toContain("auto/dfmodel");
+    expect(hint).toContain(
+      '- id: acp\n  config:\n    provider: "magpie"\n    model: "auto/dfmodel"',
+    );
+  });
+
+  it("model 在目录里 / 缺 - id: acp → null（后者由 acpOverrideHint 负责）", () => {
+    expect(acpModelHint(profileWith("auto/hy3"), "acp")).toBeNull();
+    const missing = writeProfile(
+      "acp-model-missing",
+      ["- id: llm-pi-ai", "  config:", "    providers:", "      magpie: {}", ""].join("\n"),
+    );
+    expect(acpModelHint(missing, "acp")).toBeNull();
+  });
+
+  it("provider 目录找不到 → 仍提示，但只给占位符（不瞎猜别的 provider 的模型）", () => {
+    const home = writeProfile(
+      "acp-model-no-provider",
+      [
+        "- id: agent-default-model",
+        "  config:",
+        "    provider: magpie",
+        "    model: auto/x",
+        "- id: acp",
+        "  config:",
+        "    provider: missing-provider",
+        "    model: old/model",
+        "",
+      ].join("\n"),
+    );
+    const hint = acpModelHint(home, "acp")!;
+    expect(hint).toContain("missing-provider");
+    expect(hint).toContain('model: "<model>"');
   });
 });
 

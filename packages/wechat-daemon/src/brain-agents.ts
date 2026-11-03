@@ -1,7 +1,9 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { spawnSync } from "node:child_process";
 
+import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config.js";
 import { clineCredentialEnv } from "./cline-credentials.js";
 import { readProfileDefaultModel } from "./profile-model.js";
@@ -74,6 +76,8 @@ export type AcpAgentPreset = {
   realProfile?: string; // 真实 home 里该 agent 的 profile 名（`profiles/<名>/cordis.patch.yml` 是用户/桌面端维护的用户层：沙箱**原样复制**、不追加条目，默认模型从它读——优先 `- id: acp`，否则 `agent-default-model`）；如 DSH 的 "acp"
   mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
   sessionMode?: string; // 会话建立/恢复后经 `session/set_mode` 切到的模式 id（agent 自己的 ACP 接口）；用于「免审批」模式：claude-code 的 bypassPermissions、codex 的 agent-full-access。留空=不调用
+  kiroEngine?: boolean; // kiro：`acp` 的 v2 / v3 引擎启动参数与免审批方式不同（v2 `--trust-all-tools`；v3 用沙箱 settings/permissions.yaml 的 allow-all）
+  isolateSessions?: boolean; // 会话持久化 root 用 agent 自己的 `--patch` 指到账号数据目录下（DSH：与同沙箱其他 agent 的会话文件分开，见 docs/接入-DeepSeek.md）
 };
 
 /** settingsBase 的默认剥离清单：MCP 必须由沙箱权威决定（防 wechat 回环）；插件/自定义供应商可能自带 MCP 或明文密钥；model 可能指向已剥离的供应商。 */
@@ -95,6 +99,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     homeEnvVar: "KIRO_HOME",
     realHome: path.join(os.homedir(), ".kiro"),
     inheritDirs: ["steering", "memories", "skills", "agents", "powers", "tasks", "extensions"],
+    kiroEngine: true,
   },
   // Gemini CLI（原生 ACP，0.66.0 已实测）。`--acp` 取代已弃用的 `--experimental-acp`；`--approval-mode yolo` 自动批准所有工具调用（与 `--yolo` 互斥，二选一）；`--skip-trust` 信任当前工作区——**未信任的目录会把 yolo 静默降回 default，并且连 MCP 都不加载**（用户级 server 也被抑制），所以必须带上（或用 GEMINI_CLI_TRUST_WORKSPACE=true）。
   // - 沙箱：`GEMINI_CLI_HOME` 指向沙箱根，但 Gemini 的配置目录是 `<它>/.gemini`（实测），故 configSubdir=".gemini"；`~/.gemini` 的 skills/ 与 GEMINI.md 是它的全局技能与记忆。
@@ -180,6 +185,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     realProfile: "acp",
     model: '["deepseek-account","deepseek-flash"]',
     mcpViaAcp: true, // 不写 mcp.json；激活集转成 ACP mcpServers 传给 session/new|resume
+    isolateSessions: true, // `--patch` 把 session-persistence-jsonl.root 指到账号数据目录（见 docs/接入-DeepSeek.md）
     // 免审批：DSH 没有启动 flag，也没有会话级权限配置项；`DSH_PERMISSION_MODE` 是官方 bundle 读的默认值来源
     // （文档正文未收录，升级后若失效见 docs/接入-DeepSeek.md），取值 danger-full-access = 绕过文件沙箱、不产生提权请求。
     // 注意 `approval.policy: never` 是「不问并拒绝」，不能单独拿来放行——这里只用 danger-full-access。
@@ -501,6 +507,10 @@ export type ResolvedAgent = {
   mcpViaAcp: boolean;
   /** 会话建立/恢复后切到的模式 id（`session/set_mode`）；「免审批」用，留空=不调用。 */
   sessionMode?: string;
+  /** kiro 是否跑在 v3 引擎（决定启动参数与能否用 v3 的 permissions.yaml 免审批）。 */
+  kiroV3?: boolean;
+  /** 启动前要落盘的 session-root patch（DSH：`--patch` 指向该文件，root 指向账号数据目录）。 */
+  sessionPatch?: { file: string; root: string };
   /** 请求的原始值（来自 env / brain.json / 缺省 `auto`）。 */
   requestedKey: string;
   /** `requestedKey` 的来源。 */
@@ -556,6 +566,122 @@ function isDefaultModel(v: string): boolean {
 }
 
 /**
+ * kiro 的 ACP 引擎：启动参数里的 `--agent-engine` → 真实 `settings/cli.json` 的 `acp.agentEngine` → CLI 主版本 ≥3 的默认 v3 → 其余 v2。
+ * 2.37.1 的 `kiro-cli acp --help` 写明「v2 when neither is set」；「CLI ≥3 默认 v3」是**假设/待实测**，只作兜底（防未来大版本把默认切到 v3 后仍带 v2 专属参数 → 握手超时）。
+ * `--agent-engine` 还接受 `v1`，未验证，按 v2 处理（保留 v2 参数）；`chat.agentEngine` **不影响** acp（官方文档原话），不能拿它推断。
+ * v2 与 v3 的免审批方式不同：v2 是 `--trust-all-tools`（v3 会拒绝这个参数），v3 走 `settings/permissions.yaml` 的 allow-all 规则。
+ */
+function kiroEngineFromArgs(args: readonly string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith("--agent-engine=")) return args[i].split("=")[1];
+    if (args[i] === "--agent-engine") return args[i + 1];
+  }
+  return undefined;
+}
+
+function kiroEngineFromSettings(realHome: string | undefined): string | undefined {
+  if (!realHome) return undefined;
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(realHome, "settings", "cli.json"), "utf-8"));
+    const v = j?.["acp.agentEngine"];
+    return typeof v === "string" ? v.toLowerCase() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const kiroMajorCache = new Map<string, number | null>();
+/** `kiro-cli --version` 的主版本（只探一次；找不到/超时/解析失败都按 null，调用方回退 v2）。 */
+function kiroCliMajor(binPath: string | null): number | null {
+  if (!binPath) return null;
+  if (kiroMajorCache.has(binPath)) return kiroMajorCache.get(binPath) ?? null;
+  let major: number | null = null;
+  try {
+    const r = spawnSync(binPath, ["--version"], {
+      encoding: "utf-8",
+      timeout: 5_000,
+      windowsHide: true,
+    });
+    const m = /(?:^|\s)(\d+)\.\d+\.\d+/.exec(`${r.stdout ?? ""}\n${r.stderr ?? ""}`);
+    if (m) major = Number(m[1]);
+  } catch {
+    /* 找不到/超时：按未知处理 */
+  }
+  kiroMajorCache.set(binPath, major);
+  return major;
+}
+
+function resolveKiroV3(
+  args: readonly string[],
+  realHome: string | undefined,
+  binPath: string | null,
+): boolean {
+  const fromArgs = kiroEngineFromArgs(args);
+  if (fromArgs) return fromArgs.toLowerCase() === "v3";
+  const fromSettings = kiroEngineFromSettings(realHome);
+  if (fromSettings) return fromSettings === "v3";
+  return (kiroCliMajor(binPath) ?? 0) >= 3;
+}
+
+/** v3 拒绝 v2 专属的整会话信任参数；v3 的免审批改由沙箱 `settings/permissions.yaml` 承担。 */
+function stripKiroV2TrustArgs(args: readonly string[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--trust-all-tools" || a === "-a") continue;
+    if (a === "--trust-tools") {
+      i++;
+      continue;
+    }
+    if (a.startsWith("--trust-tools=")) continue;
+    kept.push(a);
+  }
+  return kept;
+}
+
+/** DSH 会话持久化目录（账号数据目录内，按角色分开；与 kiro/pi 共用的沙箱根隔离开）。
+ *  `dataDir` 允许调用方显式指定账号目录：CLI 进程里的 `DATA_DIR` 是**默认账号**的目录，不能拿来替别的账号解析（`brain check`/`list`/`stop` 会用到）。 */
+function dshSessionPatchFor(role: AgentRole, dataDir: string): { file: string; root: string } {
+  const dir = path.join(dataDir, "agent-sessions", "deepseek");
+  return {
+    file: path.join(dir, `session-root-${role}.patch.yml`),
+    root: path.join(dir, role),
+  };
+}
+
+/**
+ * 启动前落盘 agent 需要的派生配置文件（DSH 的 session-root patch）。
+ * 与沙箱准备分开：`ensureBrainHome` 只在启动/换脑时调，`brain check` 和 worker 每次起进程也要有这份文件。
+ */
+export function prepareAgent(ag: ResolvedAgent): void {
+  const patch = ag.sessionPatch;
+  if (!patch) return;
+  try {
+    fs.mkdirSync(patch.root, { recursive: true });
+    fs.mkdirSync(path.dirname(patch.file), { recursive: true });
+    // DSH 的 patch 是 YAML 列表；JSON.stringify 给双引号字符串，Windows 反斜杠也能正确转义。
+    const body = `- id: session-persistence-jsonl\n  config:\n    root: ${JSON.stringify(patch.root)}\n`;
+    if (!fs.existsSync(patch.file) || fs.readFileSync(patch.file, "utf-8") !== body)
+      fs.writeFileSync(patch.file, body, "utf-8");
+  } catch {
+    /* best-effort：写不了就让 agent 自己报错（缺 --patch 文件比静默换目录更容易诊断） */
+  }
+}
+
+/** kiro v3 的免审批默认（等价于 v2 的 `--trust-all-tools`）：沙箱 settings/permissions.yaml 缺失时补上。 */
+export function ensureKiroV3Permissions(ag: ResolvedAgent, settingsDir: string): void {
+  if (!ag.kiroV3) return;
+  try {
+    const dst = path.join(settingsDir, "permissions.yaml");
+    if (fs.existsSync(dst)) return; // 真实配置里已有（已同步进沙箱）就尊重用户的规则
+    fs.mkdirSync(settingsDir, { recursive: true });
+    fs.writeFileSync(dst, "rules:\n  - capability: all\n    effect: allow\n", "utf-8");
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
  * 解析某角色要用的 ACP agent（核心实现，见文件头注释的三级优先级）。
  * 覆盖优先级：环境变量 > 本角色那段自带 > `presets[<agent 名>]` > 内置默认。
  * `ignoreEnv`：命令驱动的切换（`resolvePresetByName`）必须绕开 `WEMIND_BRAIN*`，否则会出现「点了切换、env 却压着它」的假成功。
@@ -563,7 +689,7 @@ function isDefaultModel(v: string): boolean {
 function resolveAgentCore(
   role: AgentRole,
   cfg: BrainConfig | null,
-  opts: { ignoreEnv?: boolean } = {},
+  opts: { ignoreEnv?: boolean; dataDir?: string } = {},
 ): ResolvedAgent {
   const envKey = opts.ignoreEnv ? undefined : envKeyFor(role);
   const roleCfg = agentConfigFor(cfg, role);
@@ -609,6 +735,15 @@ function resolveAgentCore(
     (shell ? (process.platform === "win32" ? exe : preset.bin) : binPath || preset.bin);
   const available = known && binPath !== null;
 
+  // 继承「记忆/规则/技能」：来源目录与子目录清单按 agent 而异（下沉到 agent），env 可覆盖。
+  // 放在 args 之前：kiro 的引擎选择与 v3 的信任参数清洗都要用它。
+  const inherit =
+    (process.env.WEMIND_BRAIN_INHERIT ?? process.env.WECHAT_BRAIN_INHERIT ?? "1") !== "0";
+  const realHome =
+    process.env.WEMIND_BRAIN_REAL_HOME?.trim() ||
+    process.env.WECHAT_REAL_KIRO_HOME?.trim() ||
+    preset.realHome;
+
   const argsOverride = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_ARGS?.trim();
   const baseArgs = argsOverride
     ? argsOverride.split(/\s+/)
@@ -627,21 +762,28 @@ function resolveAgentCore(
       : presetOv?.extraArgs && presetOv.extraArgs.length
         ? presetOv.extraArgs
         : [];
-  const args = [...baseArgs, ...extraArgs];
+  let args = [...baseArgs, ...extraArgs];
+
+  // kiro：v3 删掉 v2 专属信任参数并显式声明引擎；v2 保持原样（`--trust-all-tools`）。
+  const kiroV3 = preset.kiroEngine ? resolveKiroV3(args, realHome, binPath) : false;
+  if (kiroV3) {
+    args = stripKiroV2TrustArgs(args);
+    if (!kiroEngineFromArgs(args)) args.push("--agent-engine", "v3");
+  }
+
+  // 会话目录隔离：agent 的 `--patch` 指向账号数据目录下的 per-role 文件（DSH）。
+  // 用户自己显式给了 `--patch` 就尊重用户，不追加第二个。
+  let sessionPatch: ResolvedAgent["sessionPatch"];
+  if (preset.isolateSessions && !args.includes("--patch")) {
+    sessionPatch = dshSessionPatchFor(role, opts.dataDir ?? DATA_DIR);
+    args.push("--patch", sessionPatch.file);
+  }
 
   const homeEnvVar =
     (opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_HOME_ENV?.trim()) ||
     overrideCfg?.homeEnvVar?.trim() ||
     presetOv?.homeEnvVar?.trim() ||
     preset.homeEnvVar;
-
-  // 继承「记忆/规则/技能」：来源目录与子目录清单按 agent 而异（下沉到 agent），env 可覆盖
-  const inherit =
-    (process.env.WEMIND_BRAIN_INHERIT ?? process.env.WECHAT_BRAIN_INHERIT ?? "1") !== "0";
-  const realHome =
-    process.env.WEMIND_BRAIN_REAL_HOME?.trim() ||
-    process.env.WECHAT_REAL_KIRO_HOME?.trim() ||
-    preset.realHome;
 
   // 模型：显式覆盖（本段 > presets[agent 名]）优先；`auto`/`default` 或没写 = 跟随默认——
   // 配了 realProfile 的 agent（DSH）从用户真实 profile 读（优先 `- id: acp`，否则 `agent-default-model`；WeMind 只读不写，缺 `- id: acp` 由 `wemind brain` 提示用户补）；
@@ -699,6 +841,8 @@ function resolveAgentCore(
     realProfile: preset.realProfile,
     mcpViaAcp: preset.mcpViaAcp ?? false,
     sessionMode,
+    kiroV3,
+    sessionPatch,
     requestedKey,
     source,
     known,
@@ -709,17 +853,19 @@ function resolveAgentCore(
   };
 }
 
-/** 解析当前要用的**对话大脑**：环境变量 > 账号 brain.json 顶层 > auto。 */
-export function resolveAgent(cfg?: BrainConfig | null): ResolvedAgent {
-  return resolveAgentCore("brain", cfg ?? null);
+/** 解析当前要用的**对话大脑**：环境变量 > 账号 brain.json 顶层 > auto。
+ *  `dataDir` 只影响 DSH 的 `--patch` 路径；daemon 内默认就是本账号目录，CLI 处理别的账号时由调用方传入 `accountDir(key)`。 */
+export function resolveAgent(cfg?: BrainConfig | null, dataDir?: string): ResolvedAgent {
+  return resolveAgentCore("brain", cfg ?? null, dataDir ? { dataDir } : {});
 }
 
 /** 解析某**角色**要用的 ACP agent：`brain` = 对话大脑（同 resolveAgent），`worker` = 任务 worker（`worker` 段 > 顶层）。 */
 export function resolveAgentFor(
   cfg: BrainConfig | null | undefined,
   role: AgentRole,
+  dataDir?: string,
 ): ResolvedAgent {
-  return resolveAgentCore(role, cfg ?? null);
+  return resolveAgentCore(role, cfg ?? null, dataDir ? { dataDir } : {});
 }
 
 /** 全部 agent 名（`auto` 不在其中：它只是「自动探测」的开关）。 */
@@ -739,6 +885,7 @@ export function presetNames(): string[] {
 export function resolvePresetByName(
   name: string,
   cfg?: BrainConfig | null,
+  dataDir?: string,
 ): { ok: true; agent: ResolvedAgent } | { ok: false; problem: string } {
   const key = (name ?? "").trim().toLowerCase();
   if (!key) return { ok: false, problem: "需要指定 agent 名（或 `auto` 重新自动探测）。" };
@@ -752,7 +899,10 @@ export function resolvePresetByName(
     if (cfg.homeEnvVar) base.homeEnvVar = cfg.homeEnvVar;
     if (cfg.model) base.model = cfg.model;
   }
-  const agent = resolveAgentCore("brain", base, { ignoreEnv: true });
+  const agent = resolveAgentCore("brain", base, {
+    ignoreEnv: true,
+    ...(dataDir ? { dataDir } : {}),
+  });
   const problem = agentProblem(agent);
   return problem ? { ok: false, problem } : { ok: true, agent };
 }

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { parseJsonc } from "./agent-mcp.js";
-import { agentEnv, authHint, type ResolvedAgent } from "./brain-agents.js";
+import { agentEnv, authHint, prepareAgent, type ResolvedAgent } from "./brain-agents.js";
 import { copyProfilePatch } from "./profile-model.js";
 import { spawnAgent } from "./spawn-agent.js";
 import { handleReverseRequest } from "./acp-reverse.js";
@@ -68,6 +68,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
     }
   }
 
+  prepareAgent(ag); // 与 daemon 对齐：DSH 的 session-root patch 必须在 spawn 前存在
   const proc = spawnAgent(ag, { cwd: home, env });
 
   const stdoutLines = new LineDecoder();

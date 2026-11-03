@@ -235,7 +235,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 
 **多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<名>` 切换（→ `~/.wemind/<名>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。
 
-> **重置**：删 `account.json`+`state.json` = 退出登录重新扫码；删 `brain-sessions.json`+`brain-home/sessions/` = 清空对话记忆。
+> **重置**：删 `account.json`+`state.json` = 退出登录重新扫码；删 `brain-sessions.json`+`brain-home/sessions/` = 清空对话记忆（用 DeepSeek 时它的会话库在 `agent-sessions/deepseek/`，要一并删）。
 
 > 📄 **速查**：改数据目录 / 迁移数据 / 环境变量用法（`WEMIND_HOME`、`WECHAT_DATA_DIR` 等，含初次运行指定路径与运行后迁移） → [docs/速查-数据目录与环境变量.md](docs/速查-数据目录与环境变量.md)。
 
@@ -285,7 +285,7 @@ npm run build
 npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 ```
 
-> ⚠️ **安全（务必读）**：**内置的 9 个 agent 预设默认都免审批**（kiro `--trust-all-tools`、gemini `--approval-mode yolo`、qoder `--yolo`、opencode 沙箱配置 `permission: allow`、DSH `DSH_PERMISSION_MODE=danger-full-access`、cline `--auto-approve true`、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`、pi 默认就不逐次审批），意味着**消息一旦被 daemon 接受，就能让 AI 在运行 daemon 的电脑上执行任意工具（含 shell / 写文件）**。这是「微信里发一句话就能远程干活」的前提，代价是该 AI 在本机近乎全权。
+> ⚠️ **安全（务必读）**：**内置的 9 个 agent 预设默认都免审批**（kiro v2 `--trust-all-tools`，v3 用沙箱 `settings/permissions.yaml` 的 allow-all（引擎自动识别；真实设置已有则原样保留）；gemini `--approval-mode yolo`、qoder `--yolo`、opencode 沙箱配置 `permission: allow`、DSH `DSH_PERMISSION_MODE=danger-full-access`、cline `--auto-approve true`、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`、pi 默认就不逐次审批），意味着**消息一旦被 daemon 接受，就能让 AI 在运行 daemon 的电脑上执行任意工具（含 shell / 写文件）**。这是「微信里发一句话就能远程干活」的前提，代价是该 AI 在本机近乎全权。
 > **微信平台只把发给这个 bot 的消息发送给登录者本人**（= 扫码登录它的那个微信号，也就是你），所以实际上只有你能驱动它。代码里另有一道**登录者白名单**（`allowFrom`，**默认拒绝**、登录时自动写入登录者）作为**兜底**：万一发送范围变化、或 daemon 被接到别的入口，清单外的发件人一律忽略（`daemon.log` 记 `ignore unauthorized sender`）。**不要关掉它。**
 >
 > **配对授权**：登录者白名单存于每账号的 `~/.wemind/<account>/allowFrom.json`（`finalize`/`adopt` 时自动写入扫码者；daemon 启动也会把登录者种入，老账号自动迁移），通常**无需任何手动配置**。管理命令（兜底用）：`allowlist <key|label>` 查看、`allow <key|label> <userId>` 加入、`revoke <key|label> <userId>` 移除（增删即时生效，无需重启 daemon）。鉴权 = 登录者（`WECHAT_OWNER_ID` 可覆盖）或 在白名单中。

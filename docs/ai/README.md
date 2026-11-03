@@ -125,6 +125,7 @@ poller（长轮询，不被大脑阻塞）
 | **curated MCP** | 沙箱里由 WeMind 写入的 MCP 配置；`wechat` 永久禁止 |
 | **session/load** | 按 sessionId 恢复会话；**不是所有 agent 都支持** |
 | **session/resume** | DSH 的恢复方法；恢复持久会话，但不回放旧更新 |
+| **agent-sessions** | `<数据目录>/agent-sessions/<agent>/`：agent 自己的会话库/派生配置。目前只有 DSH：`deepseek/{brain,worker}` + `session-root-<role>.patch.yml`（启动前由 `prepareAgent()` 生成，用 `--patch` 把会话 root 指进去，避免与共用沙箱根的 kiro/pi 互踩） |
 | **反向请求** | agent 发给 client 的请求（`session/request_permission`、`fs/*`、`terminal/*`）；不应答会挂起 |
 | **committed-only** | agent 只在消息提交后发正文（非逐 token），如 DSH 官方 ACP |
 | **brain.json** | 账号级大脑选择，`<数据目录>/brain.json`；`wemind brain set` 写入 |
@@ -198,14 +199,15 @@ poller（长轮询，不被大脑阻塞）
 | 事实 | 状态 | 证据/备注 |
 |---|---|---|
 | 默认大脑是 `auto`，不是固定 kiro | ✅ 代码 | `brain-agents.ts` `resolveAgent()` |
-| kiro agent 可用 | ✅ 实测 | 现有 daemon；`docs/接入其它-ACP-Agent.md` §5 |
+| kiro agent 可用 | ✅ 实测 | 现有 daemon（v2 2.37.1 真机；v3 探针级）；`docs/接入其它-ACP-Agent.md` §5 |
+| kiro 只有 v2 一套启动方式 | ⚪ **不成立（2026-11-03）** | v3 拒绝 `--trust-all-tools`/`-a`/`--trust-tools`（会连 `initialize` 都不回）；预设 `kiroEngine: true` 按 `--agent-engine` → 真实 `settings/cli.json` 的 `acp.agentEngine` → CLI 主版本 ≥3 判定（`acp --help`：两者都没设时默认 v2；CLI ≥3 默认 v3 为假设/待实测），v3 时剔除 v2 参数、补 `--agent-engine v3`，免审批改沙箱 `settings/permissions.yaml` 的 allow-all 规则（真实已有则原样保留）。`session/new` 的 `_meta.kiro.policyPreset` 实测无效 |
 | opencode agent 可用（`session/load`、无反向请求） | ✅ 实测 | `docs/接入-OpenCode.md` §3.3 |
 | 任意兼容 ACP 的 agent 都「无需改代码」 | ⚪ **不成立** | 需要 load/resume、反向请求、首帧/心跳、image 能力适配 |
 | `session/load` 是 ACP 通用能力 | ⚪ **不成立** | DSH 只有 `session/resume`；`load` 返回 `-32601` |
 | 代码按 `initialize` 回包自动适配能力 | ⚪ **不成立** | `acp-brain.ts` / `worker-acp.ts` 发出 `initialize` 后只置 `initialized = true`，**不解析** `agentCapabilities`；image/restore/mcpViaAcp 全部来自 `brain-agents.ts` agent 配置字段 |
 | 仓库存在 `Brain` 接口 | ⚪ **不存在** | `acp-brain.ts` 直接导出 `askBrain`/`newSession`/`restart`/`restartForMcpChange` |
 | `wemind brain check` 默认 60s | ✅ 代码 | 冷启动慢的 agent 仍可能误报 |
-| `deepseek` agent 已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验 |
+| `deepseek` agent 已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验。**2026-11-03（rc.3）**：预设 `isolateSessions: true`，`prepareAgent()` 落盘 `--patch` 把会话 root 指到 `<账号目录>/agent-sessions/deepseek/<brain\|worker>`（共用沙箱根的 `sessions/` 被 kiro/pi 写过会让 DSH 报 `unsupported flat-file layout`）；`- id: acp` 的 model 被桌面端目录淘汰时 `wemind brain` 用 `acpModelHint` 给替换提示（只提示不代改） |
 | `qoder` agent 已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0–M3 全部已验：发图、动态 MCP、冷重启 `session/load`、worker 中断续跑、`memory/` junction 继承 |
 | `cline` agent 已内置 | ✅ 代码/实测（3.0.74） | `cline --acp --auto-approve true` + `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 沙箱（`configSubdir: "cline"`）；`providers.json` 同步；`models.json` 模型目录同步（缺它会回退 gpt-4o）；**自定义 provider 由 `credentialEnv`（`clineCredentialEnv()`）从 `providers.json` 自动派生 `CLINE_PROVIDER`+`CLINE_API_KEY`，父进程显式值优先**；`loadSession`/硬杀后 `session/load` 已验证；**图片 ❌**（广告 `image:true` 但 ACP `prompt` 只保留 text → `images:false`）；ACP `mcpServers` 不生效→文件式 MCP；`session/close` 无 |
 | `gemini` 预设已内置 | ✅ 代码/探针级实测 + 真机 E2E（0.66.0，2026-11-01） | `gemini --acp --approval-mode yolo --skip-trust`；`GEMINI_CLI_HOME` 指向沙箱根、配置目录 `<它>/.gemini`（`configSubdir: ".gemini"`）；MCP 走配置目录 `settings.json` 的 `mcpServers`（探针实测 `probe_ping` 可调用）；`settingsBase` 只剥 `mcpServers`（保留 model/security，按 JSONC 解析）+ `.env` / `oauth_creds.json` / `google_accounts.json` 凭据同步 + `skills/`/`GEMINI.md` 继承；`loadSession: true`、图片 ✅、工具调用 0 反向请求；**`load` 返回后会异步回放历史** → `replayOnLoad` 先等帧安静；`session/set_config_option` ❌（`--model` 走 `modelArg`）；在 `AUTO_PROBE_ORDER` 第 3 位。见 [接入-Gemini.md](../接入-Gemini.md) |
@@ -217,12 +219,14 @@ poller（长轮询，不被大脑阻塞）
 | Qoder 用户记忆落点 | ✅ 实测 | `~/.qoder/memory/`；已 junction 进沙箱（写入回流真实目录）。`skills/agents/commands`/`AGENTS.md` 在 1.1.78 不存在 |
 | Qoder Desktop 的 MCP 都在 `settings.json` | ⚪ **不一定** | 本机有 `~/.qoder/mcp-router.json`（本地路由）；只登记在路由里的 MCP 不会出现在 `列出 MCP` |
 | `onPath()` 会补试 `.cmd` | ⚪ **不会** | 只有 `dsh.cmd` 时 `binWin` 必须写 `dsh.cmd` |
-| DSH `0.2.1-rc.2` 有 resume/list/close | ✅ 实测 | `docs/接入-DeepSeek.md` 附录 |
+| DSH `0.2.1-rc.2` / `rc.3` 有 resume/list/close | ✅ 实测 | `docs/接入-DeepSeek.md` 附录；rc.3 于 2026-11-03 复测 |
+| DSH 会话库可以和别的 agent 共用沙箱根 | ⚪ **不成立（2026-11-03，rc.3）** | kiro/pi 写进 `<沙箱>/sessions/` 的平铺文件会让 DSH 报 `unsupported flat-file layout`；用 DSH 自己的 `--patch` 把 `session-persistence-jsonl.root` 指到账号数据目录下（用户自带 `--patch` 则尊重用户） |
+| 用户 `- id: acp` 的 model 会一直有效 | ⚪ **不成立（2026-11-03，rc.3）** | 桌面端升级会重写 `llm-pi-ai` 的模型目录，独立一条的 `- id: acp` 不会被迁移；`session/new` 报 `no configured model`。`wemind brain` 检查并给出可粘贴替换（优先 `agent-default-model` 的值），**不自动改真实 profile** |
 | DSH `0.2.1-rc.2` 有 `session/load` | ❌ 实测 | `-32601 Method not found` |
 | DSH `0.2.1-rc.2` 接受图片 | ❌ 实测 | `image:false`；带图 `-32602` |
 | DSH `0.2.1-rc.2` 接受 stdio/HTTP MCP | ✅ 实测 | stdio：假 MCP 在 `session/new`/`resume` 均被模型真实调用（两个方法各调用 2 次）；HTTP 能力已广告、未实测 |
 | DSH 能保留多轮上下文（resume 后） | ✅ 实测 | PINEAPPLE：close + 强杀 + resume 后答出 |
-| DSH 默认模型路由可直接用 | ⚪ **不成立** | 默认 `deepseek-official/deepseek-v4-flash` 需 `DEEPSEEK_API_KEY`（2026-10-29 用 `acp-probe` 在 `0.2.1-rc.3` 复测，空 home 与桌面登录态下默认值都是它）——根因是桥插件的 bundle patch 写死了 `- id: acp` 的 `provider/model`，用户 profile 只覆盖 `agent-default-model`（另一个服务的键），`- id: acp` 要用户自己写（插件 README 写明的覆盖点）。WeMind 侧**原样复制** `profiles/acp/cordis.patch.yml`、不追加条目（复制前剔除用户自己挂的微信 MCP 条目——跑 `wemind-mcp` 的或 `serverName: wechat` 的 mcp-client，防沙箱里的 agent 抢同一个 bot token）；读默认模型时优先 `- id: acp`、否则 `agent-default-model`（典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端在运行），会话建立后按它发 `set_config_option`（agent 自己的接口）；缺 `- id: acp` 时 `wemind brain` 给可粘贴的片段、由用户补到真实 profile；读不到才回退 `deepseek-account/deepseek-flash`；显式覆盖 `wemind brain set deepseek --model …`，`--model auto` = 跟随真实 profile 的默认 |
+| DSH 默认模型路由可直接用 | ⚪ **不成立** | 默认 `deepseek-official/deepseek-v4-flash` 需 `DEEPSEEK_API_KEY`（2026-10-29 用 `acp-probe` 在 `0.2.1-rc.3` 复测，空 home 与桌面登录态下默认值都是它）——根因是桥插件的 bundle patch 写死了 `- id: acp` 的 `provider/model`，用户 profile 只覆盖 `agent-default-model`（另一个服务的键），`- id: acp` 要用户自己写（插件 README 写明的覆盖点）。WeMind 侧**原样复制** `profiles/acp/cordis.patch.yml`、不追加条目（复制前剔除用户自己挂的微信 MCP 条目——跑 `wemind-mcp` 的或 `serverName: wechat` 的 mcp-client，防沙箱里的 agent 抢同一个 bot token）；读默认模型时优先 `- id: acp`、否则 `agent-default-model`（典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端在运行；这个值被桌面端目录淘汰时 `wemind brain` 会提示换成目录里现有的，如 `auto/dfmodel`），会话建立后按它发 `set_config_option`（agent 自己的接口）；缺 `- id: acp` 时 `wemind brain` 给可粘贴的片段、由用户补到真实 profile；读不到才回退 `deepseek-account/deepseek-flash`；显式覆盖 `wemind brain set deepseek --model …`，`--model auto` = 跟随真实 profile 的默认 |
 | DSH 首帧很慢 | ⚪ **不成立**（短任务） | 实测 1.0–2.3s；长任务仍可能静默 |
 | DSH 会发 thought/tool/usage 帧 | ✅ 实测 | `agent_thought_chunk` / `tool_call` / `usage_update` |
 | 微信连发上限约 10 条 | ✅ 实测/代码 | `CONSEC_SEND_LIMIT=10`，预留最后一条 |
