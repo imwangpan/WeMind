@@ -25,33 +25,16 @@ export function shouldShowAck(progressSent: boolean): boolean {
   return !progressSent;
 }
 
-/** 第 10s 的第二条：最终答案未发出、正文整理提示尚未发过，且距上一条非确认进度至少 5s（确认本身不算，否则它会挡住第二条）。 */
+/** 第 10s 的第二条：最终答案未发出，且距上一条非确认进度至少 5s（确认本身不算，否则它会挡住第二条）。 */
 export function shouldShowSecondNotice(
   elapsedMs: number,
   finalStarted: boolean,
   sinceNonAckProgressMs: number,
-  answerNoticeSent = false,
 ): boolean {
   return (
     !finalStarted &&
-    !answerNoticeSent &&
     elapsedMs >= PROGRESS_SECOND_NOTICE_MS &&
     sinceNonAckProgressMs >= PROGRESS_NOTICE_GAP_MS
-  );
-}
-
-/** 正文开始时的「整理回复」：只在慢回合、且距上一条可见进度至少 5s 时补发一次（方案 B 的精确措辞）。 */
-export function shouldShowAnswerNotice(
-  elapsedMs: number,
-  finalStarted: boolean,
-  sinceLastProgressMs: number,
-  answerNoticeSent: boolean,
-): boolean {
-  return (
-    !finalStarted &&
-    !answerNoticeSent &&
-    elapsedMs >= PROGRESS_SECOND_NOTICE_MS &&
-    sinceLastProgressMs >= PROGRESS_NOTICE_GAP_MS
   );
 }
 

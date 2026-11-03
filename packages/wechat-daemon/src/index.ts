@@ -99,7 +99,6 @@ import {
   secondNoticeText,
   shouldResumeInBrainQueue,
   shouldShowAck,
-  shouldShowAnswerNotice,
   shouldShowSecondNotice,
   toolIcon,
   toolSummary,
@@ -287,13 +286,11 @@ async function handleMessage(
 
   const t0 = Date.now();
   let lastProgressAt = t0; // 心跳基线：任意帧（含思考/工具活动）都会刷新
-  let lastVisibleProgressAt = t0; // 上一条真正发到微信的进度（含 5s 确认）
   let lastNonAckProgressAt = t0; // 上一条除 5s 确认以外的可见进度
   let visibleProgressSent = false;
   let finalStarted = false;
   let answerStarted = false;
   let secondNoticeSent = false;
-  let answerNoticeSent = false;
   // 三档进度：<5s 只发最终答案；5–10s 第 5s 发确认；≥10s 第 10s 再发第二条。
   // 固定提示让位于已有进度（工具/心跳/图片/重试），避免叠加；「正在输入」由 keepAlive 每 5s 续发。
   let ackTimer: NodeJS.Timeout | undefined;
@@ -322,7 +319,6 @@ async function handleMessage(
     const b = sends.budgetOf(to);
     if (b.awaiting) return; // 等待「继续」期间不发任何进度
     const now = Date.now();
-    lastVisibleProgressAt = now;
     visibleProgressSent = true;
     if (!opts?.ackOnly) lastNonAckProgressAt = now; // 5s 确认不能挡住 10s 的第二条
     // 发出一条文本会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，否则接下来的等待窗口看不到指示。
@@ -359,13 +355,10 @@ async function handleMessage(
     secondTimer = undefined;
     const now = Date.now();
     if (secondNoticeSent || finalStarted) return;
-    if (
-      !shouldShowSecondNotice(now - t0, finalStarted, now - lastNonAckProgressAt, answerNoticeSent)
-    ) {
+    if (!shouldShowSecondNotice(now - t0, finalStarted, now - lastNonAckProgressAt)) {
       return;
     }
     secondNoticeSent = true;
-    if (answerStarted) answerNoticeSent = true;
     sendProgress(secondNoticeText(answerStarted));
   }, PROGRESS_SECOND_NOTICE_MS);
   secondTimer.unref?.();
@@ -443,19 +436,7 @@ async function handleMessage(
         } else if (ev.type === "thinking") {
           lastProgressAt = Date.now();
         } else if (ev.type === "answer") {
-          answerStarted = true;
-          const now = Date.now();
-          if (
-            shouldShowAnswerNotice(
-              now - t0,
-              finalStarted,
-              now - lastVisibleProgressAt,
-              answerNoticeSent,
-            )
-          ) {
-            answerNoticeSent = true;
-            sendProgress("✍️ 正在整理回复…");
-          }
+          answerStarted = true; // 只用于第 10s 第二条选词；不再额外补发「整理回复」
         } else {
           // activity：brain 产出任意帧 → 静默刷新心跳基线，避免流式输出期间误报"仍在处理"
           lastProgressAt = Date.now();

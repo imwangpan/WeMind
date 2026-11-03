@@ -8,7 +8,6 @@ import {
   PROGRESS_SECOND_NOTICE_MS,
   secondNoticeText,
   shouldShowAck,
-  shouldShowAnswerNotice,
   shouldShowSecondNotice,
   toolIcon,
   toolSummary,
@@ -85,21 +84,12 @@ describe("三档进度提示（快 / 中 / 慢）", () => {
     expect(shouldShowAck(true)).toBe(false);
   });
 
-  it("10s 第二条要求最终答案未开始、正文整理提示未发过、且距上一条非确认进度 ≥5s", () => {
+  it("10s 第二条要求最终答案未开始、且距上一条非确认进度 ≥5s", () => {
     expect(shouldShowSecondNotice(9_999, false, 10_000)).toBe(false);
     expect(shouldShowSecondNotice(10_000, false, 4_999)).toBe(false);
     expect(shouldShowSecondNotice(10_000, false, 5_000)).toBe(true);
     expect(shouldShowSecondNotice(10_000, true, 10_000)).toBe(false);
-    expect(shouldShowSecondNotice(10_000, false, 10_000, true)).toBe(false);
     expect(shouldShowSecondNotice(30_000, false, 20_000)).toBe(true);
-  });
-
-  it("正文整理提示只在 ≥10s、距上一条可见进度 ≥5s、且未发过时补一条", () => {
-    expect(shouldShowAnswerNotice(9_999, false, 10_000, false)).toBe(false);
-    expect(shouldShowAnswerNotice(10_000, false, 4_999, false)).toBe(false);
-    expect(shouldShowAnswerNotice(10_000, false, 5_000, false)).toBe(true);
-    expect(shouldShowAnswerNotice(10_000, false, 5_000, true)).toBe(false);
-    expect(shouldShowAnswerNotice(10_000, true, 5_000, false)).toBe(false);
   });
 
   it("第 10s 第二条的措辞随正文是否开始切换", () => {
