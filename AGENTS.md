@@ -158,7 +158,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
       - AI 上下文：本文件 `AGENTS.md`、`docs/ai/README.md`、`docs/ai/recipes/*`——**命令 / 参数 / 环境变量 / 数据文件 / 目录结构 / 新增模块的变化，AGENTS.md 与 `docs/ai/README.md` 是硬性同步项**（它们标注的「适用版本 / 最后核对」也要跟着改）。
     - **自检**：`npm run verify`（= `npm run lint` + `npm run format:check` + `npm run typecheck` + `npm run build` + `npm run check:version` + 两个发布包的 `npm pack --dry-run` + `npm test` + `pwsh -NoProfile -File scripts/check-docs.ps1`，与 CI 同口径；相对链接不许断）。`npm install` 会通过 `prepare` 启用 `.githooks/pre-commit`，commit 前再跑一次 `format:check`（只读，不改工作区）。
     - 反例（都按缺陷处理）：改了命令参数没更新 `--help`/README；新增环境变量只写在代码注释里；改了优先级规则但 `docs/接入其它-ACP-Agent.md` 的表还是旧的；改了行为却没有一条能覆盖它的测试；本地只跑 lint/test 漏 `format:check`，推送后 CI 格式红灯。
-16. **worktree 一律放仓库根 `.worktrees/`**：每个分支一个子目录（如 `.worktrees/gemini`），不要建在 `.agents/worktrees/` 或其它位置（`.gitignore` 已忽略 `.worktrees/`）。分支合并或放弃后及时 `git worktree remove <路径>` + `git branch -d <分支>`，别留残留目录。历史遗留的 `.agents/worktrees/feat/pi-brain` 已清理；远端 `feat/pi-brain-v2` 尚未合并，需要时按上面的位置新建 worktree。
+16. **worktree 一律放仓库根 `.worktrees/`**：每个分支一个子目录（如 `.worktrees/gemini`），不要建在 `.agents/worktrees/` 或其它位置（`.gitignore` 已忽略 `.worktrees/`）。分支合并或放弃后及时 `git worktree remove <路径>` + `git branch -d <分支>`，别留残留目录。历史遗留的 `.agents/worktrees/feat/pi-brain` 已清理；远端 `feat/pi-brain-v2` 的提交已全部包含在 `main` 历史中（分支可清理，远端删除前先确认）。
 
 ---
 
