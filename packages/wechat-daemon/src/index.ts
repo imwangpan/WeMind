@@ -94,7 +94,9 @@ import {
   parseBrainEscape,
   parseControl,
   parseTaskControl,
+  PROGRESS_ACK_DELAY_MS,
   shouldResumeInBrainQueue,
+  shouldShowAnswerNotice,
   toolIcon,
   zhTool,
   type TaskFacts,
@@ -281,6 +283,16 @@ async function handleMessage(
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
+  // 快回合不刷屏：即时确认延迟 5s；期间只要发出任何进度（工具/心跳/整理）或回合结束，就不再补发。
+  // 「正在输入」由 keepAlive 每 5s 续发，延迟期间一直有指示，不依赖这条文本。
+  let ackTimer: NodeJS.Timeout | undefined;
+  let ackSent = false;
+  const cancelAck = () => {
+    if (ackTimer) {
+      clearTimeout(ackTimer);
+      ackTimer = undefined;
+    }
+  };
   // 心跳间隔**每回合**取一次：热切换大脑后新 agent 的心跳覆盖要立刻生效（改造前是 import 期定死的常量，
   // 切到 DSH（heartbeatMs=60s）却还按旧大脑的 15s 发心跳，白占微信连发额度）。
   const heartbeatMsValue =
@@ -288,6 +300,7 @@ async function handleMessage(
   // iLink 限制 bot 在用户回复前连续发送的消息数（实测约 10，超出被 ret=-2 拒）。计数按用户跨回合维护(budgetOf)。
   // 当已发到「上限-2」(默认第8条)后，下一条进度改为「即将达上限」提示并进入等待，把最后一条额度留给最终答案；用户回复「继续」(或发任何消息)会重置计数恢复发送（见 poller）。
   const sendProgress = (msg: string) => {
+    cancelAck(); // 任何进度都顶替待发的即时确认
     lastProgressAt = Date.now();
     const b = sends.budgetOf(to);
     if (b.awaiting) return; // 等待「继续」期间不发任何进度
@@ -309,12 +322,16 @@ async function handleMessage(
     b.count += 1;
     sendWithTyping(msg);
   };
-  // 即时答复：收到即给一条友好提示，保证用户看到的第一条文本不是 15s 兜底心跳。
-  // （有图片时，下面的"🖼️ 收到 N 张图片…"已充当即时答复，不再重复发）
+  // 即时确认：延迟 5s；简单回合在此之前已经答完，不会多一条文本。有图片时图片提示即确认，不再重复发。
   if (imageItems.length === 0) {
     const t = cx();
     log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
-    sendProgress("🤖 收到，正在处理…");
+    ackTimer = setTimeout(() => {
+      ackTimer = undefined;
+      ackSent = true;
+      sendProgress("🤖 收到，正在处理…");
+    }, PROGRESS_ACK_DELAY_MS);
+    ackTimer.unref?.();
   }
   // 心跳：仅当 brain 真正静默(无任何帧)超过心跳间隔才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
@@ -349,6 +366,7 @@ async function handleMessage(
   if (plan.kind === "reject") {
     clearInterval(keepAlive);
     clearInterval(heartbeat);
+    cancelAck();
     await setTyping(account, to, cx(), 2);
     sends.budgetOf(to).count += 1;
     let sendFailed = false;
@@ -387,7 +405,7 @@ async function handleMessage(
         } else if (ev.type === "thinking") {
           lastProgressAt = Date.now();
         } else if (ev.type === "answer") {
-          if (!answerNoticeSent) {
+          if (!answerNoticeSent && shouldShowAnswerNotice(Date.now() - t0, ackSent)) {
             answerNoticeSent = true;
             sendProgress("✍️ 正在整理回复…");
           }
@@ -434,6 +452,7 @@ async function handleMessage(
   } finally {
     clearInterval(keepAlive);
     clearInterval(heartbeat);
+    cancelAck();
   }
   await setTyping(account, to, cx(), 2);
   // 发图：从回复里提取图片引用（markdown ![](url/路径) 或裸图片 URL），逐个作为图片消息发出，再发剩余文本

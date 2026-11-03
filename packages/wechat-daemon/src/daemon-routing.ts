@@ -9,6 +9,15 @@ import {
 } from "./chat-commands.js";
 import { providerIssue, shouldResumeTask } from "./task-manager.js";
 
+/** 快回合的进度抑制阈值：即时确认延迟到 5s；「正在整理回复」只在回合满 5s 且尚未发过即时确认时发。 */
+export const PROGRESS_ACK_DELAY_MS = 5_000;
+export const PROGRESS_ANSWER_MIN_MS = 5_000;
+
+/** 是否值得为这一回合再发「正在整理回复」：简单短回合只留最终答案，避免多占一条连发额度。 */
+export function shouldShowAnswerNotice(elapsedMs: number, ackSent: boolean): boolean {
+  return !ackSent && elapsedMs >= PROGRESS_ANSWER_MIN_MS;
+}
+
 /** 分类大脑错误：backend=模型后端瞬时错误(可多重试)；timeout=超时/卡死；other=其它。 */
 function classifyBrainError(e: unknown): "timeout" | "backend" | "other" {
   const s = String(e instanceof Error ? e.message : e);

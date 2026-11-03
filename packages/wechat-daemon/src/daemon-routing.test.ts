@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MessageItemType, type WeixinMessage } from "@wemind/wechat-ilink-core";
 
-import { extractText, toolIcon, zhTool } from "./daemon-routing.js";
+import { extractText, shouldShowAnswerNotice, toolIcon, zhTool } from "./daemon-routing.js";
 
 const msg = (items: unknown[] | undefined) => ({ item_list: items }) as unknown as WeixinMessage;
 
@@ -53,5 +53,19 @@ describe("zhTool / toolIcon（进度文案）", () => {
     expect(toolIcon("delete")).toBe("🗑️");
     expect(toolIcon("other")).toBe("🔧");
     expect(toolIcon()).toBe("🔧");
+  });
+});
+
+describe("shouldShowAnswerNotice（快回合不刷整理提示）", () => {
+  it("回合未满 5s 不发；满 5s 且尚未发过即时确认才发", () => {
+    expect(shouldShowAnswerNotice(4_999, false)).toBe(false);
+    expect(shouldShowAnswerNotice(4_999, true)).toBe(false);
+    expect(shouldShowAnswerNotice(5_000, false)).toBe(true);
+    expect(shouldShowAnswerNotice(8_000, false)).toBe(true);
+  });
+
+  it("已经发过即时确认就不再发整理提示", () => {
+    expect(shouldShowAnswerNotice(5_000, true)).toBe(false);
+    expect(shouldShowAnswerNotice(30_000, true)).toBe(false);
   });
 });

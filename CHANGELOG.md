@@ -6,7 +6,7 @@
 
 ### Added
 
-- **ACP 协议层 brain/worker 共用（2026-11-02）**：帧分类（响应/反向请求/`session/update` 的进度与文本拼接）、请求超时、`session/prompt` 的首帧/空闲/硬上限、`session/set_config_option` / `session/set_mode`、`load` 后回放静默统一到 `acp-connection.ts`。`acp-brain.ts`（679→512 行）只保留常驻单例、按用户会话映射与切脑门；`worker-acp.ts`（543→374 行）只保留每任务连接、`worker-sessions.json` 与进程池协作。协议改动不再需要「记得同步两份」；新增 `acp-connection.test.ts`（13 条）。行为不变，`npm test` 73 文件 / 784 通过。
+- **ACP 协议层 brain/worker 共用（2026-11-02）**：帧分类（响应/反向请求/`session/update` 的进度与文本拼接）、请求超时、`session/prompt` 的首帧/空闲/硬上限、`session/set_config_option` / `session/set_mode`、`load` 后回放静默统一到 `acp-connection.ts`。`acp-brain.ts`（679→512 行）只保留常驻单例、按用户会话映射与切脑门；`worker-acp.ts`（543→374 行）只保留每任务连接、`worker-sessions.json` 与进程池协作。协议改动不再需要「记得同步两份」；新增 `acp-connection.test.ts`（13 条）。行为不变，`npm test` 73 文件 / 786 通过。
 - **daemon 控制指令分派拆出 `index.ts`（2026-11-02）**：微信控制指令（MCP/会话/切脑/任务大脑/交接/`AI` 总览/帮助）与控制桥请求统一到 `daemon-control.ts`，两个入口继续共用同一批实现；`index.ts` 从约 1314 行降到约 1054 行，入口只保留消息/轮询/回合编排。新增 `daemon-control.test.ts`（帮助文案按登录者裁剪、未接通指令有明确提示）。
 - **多账号自启的全局 worker 预算（2026-11-02）**：`WEMIND_MAX_WORKERS` 一直是每个 daemon 各自计，N 个账号合计可达 N × 值。新增 `WEMIND_MAX_WORKERS_TOTAL`（仅 `scripts/run-all-daemons.ps1` 读取）：脚本按账号数均分（至少 1）后给每个子进程注入 `WEMIND_MAX_WORKERS`，已在运行的 daemon 需重启才生效；单独 `wemind start` 的账号仍各按自己的值。README / 速查 / repowiki 09 写明作用范围，避免误以为 daemon 有跨进程全局锁。
 - **统一自检与提交前格式钩子（2026-11-02）**：新增 `npm run verify`，一次跑齐 lint + format:check + typecheck + build + test + 文档链接检查，与 CI 同口径；`npm install` 的 `prepare` 自动把 `core.hooksPath` 指到 `.githooks/`，pre-commit 在提交前跑 `format:check`（只读，不改工作区）。此前本地自检清单漏了 `format:check`，会出现「本地全绿、Actions 格式红灯」。
@@ -35,6 +35,7 @@
 
 ### Changed
 
+- **简单回合不再连发两条进度提示（2026-11-02）**：`🤖 收到，正在处理…` 改为延迟 5s，期间已有工具/心跳/整理进度或回合结束就不再发；`✍️ 正在整理回复…` 只在回合满 5s 且尚未发过即时确认时发。快回合（通常 <5s）只发最终答案，少占两条连发额度；「正在输入中」仍每 5s 续发，延迟/等待期间一直有指示。`daemon-routing.ts` 新增 `shouldShowAnswerNotice()` 与阈值常量并补边界用例；README、repowiki 05、AGENTS、docs/ai 同步。
 - **CLI 的任务命令与共享上下文拆出 `manage.ts`（2026-11-02）**：`manage.ts` 原本 1500 行，账号选择、daemon/控制桥存活判断、`viaBridge` 与 `task*` 命令全挤在一起。现在共享部分到 `cli-context.ts`，任务命令到 `cli-task.ts`（`resolveTaskCwd`/`taskAckOutcome` 仍从 `manage.ts` 再导出，既有调用方与测试不变），`manage.ts` 只保留入口、账号生命周期与账号命令（约 560 行）。会话命令拆到 `cli-session.ts`、brain 命令拆到 `cli-brain.ts`（`--restart` 的重启回调由入口注入，避免反向依赖）、扫码登录拆到 `cli-login.ts`（`--start` 同样注入）。`index.ts` 的纯路由判定也拆到 `daemon-routing.ts`（快车道/「继续」归属、指令解析、错误分类与提示），入口从约 1435 行降到约 1314 行。行为不变；`manage.test.ts` / `brain-record.test.ts` / `index.test.ts` 全绿。
 - **收件箱与鉴权编排抽成可测模块（2026-11-02）**：`index.ts` 里的 `scanTaskInbox` / `scanControlInbox` 与发件人鉴权分别抽到 `task-inbox-runner.ts`、`control-inbox-runner.ts`（`ControlInboxRunner`）、`access.ts`，`index.ts` 只负责注入 task-manager / `handleControlRequest` / `isAllowed`。新增 15 条用例：任务收件箱（时间序、先删后做、坏文件、未知 kind、执行出错继续）、控制桥（过期不执行但写应答、❌ 与抛错的 ok 判定、坏文件不影响后续、busy 串行门）、鉴权（登录者/白名单/空发件人），以及大脑队列的路由判定（带图片与普通消息永远走大脑）。行为不变。
 - **外发管线抽成可测的 `SendPipeline`（2026-11-02）**：串行链、最小间隔、按用户连发预算、旧 token 挂起/补发、任务推送让位原先散在 `index.ts` 的模块级变量与函数里，没有自动化测试；现在集中到 `send-pipeline.ts`，`index.ts` 只负责把真实发送函数与账号接进去。新增 `send-pipeline.test.ts` 12 条用例（顺序与间隔、发送失败不卡链、`sendNotice` 计额度、旧 token 挂起/新 token 补发、批量与额度双重限制、补发重挂与放弃、让位补发、图片失败、`.md` 回退）。行为不变。
