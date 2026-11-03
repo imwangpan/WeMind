@@ -9,13 +9,55 @@ import {
 } from "./chat-commands.js";
 import { providerIssue, shouldResumeTask } from "./task-manager.js";
 
-/** 快回合的进度抑制阈值：即时确认延迟到 8s；「正在整理回复」在回合满 5s、且尚未发过确认时发。确认延迟必须大于整理阈值，否则确认先发会让整理永远没机会——两者互斥，中等回合只发一条进度。 */
-export const PROGRESS_ACK_DELAY_MS = 8_000;
-export const PROGRESS_ANSWER_MIN_MS = 5_000;
+/**
+ * 三档进度（按最终答案到达时间）：
+ * - <5s：只发最终答案；
+ * - 5–10s：第 5s 发「收到」；
+ * - ≥10s：第 5s 发「收到」，第 10s 再发第二条（正文已开始→「整理回复」，否则→「还在处理中」）。
+ * 固定提示让位于已有进度：5s 时已发过工具/心跳/图片/重试提示就不再发确认；10s 的第二条要求距上一条非确认进度 ≥5s。
+ */
+export const PROGRESS_ACK_DELAY_MS = 5_000;
+export const PROGRESS_SECOND_NOTICE_MS = 10_000;
+export const PROGRESS_NOTICE_GAP_MS = 5_000;
 
-/** 是否值得为这一回合再发「正在整理回复」：简单短回合只留最终答案，避免多占一条连发额度。 */
-export function shouldShowAnswerNotice(elapsedMs: number, ackSent: boolean): boolean {
-  return !ackSent && elapsedMs >= PROGRESS_ANSWER_MIN_MS;
+/** 第 5s 的即时确认：只在还没有任何可见进度时发（有进度就顶替它）。 */
+export function shouldShowAck(progressSent: boolean): boolean {
+  return !progressSent;
+}
+
+/** 第 10s 的第二条：最终答案未发出、正文整理提示尚未发过，且距上一条非确认进度至少 5s（确认本身不算，否则它会挡住第二条）。 */
+export function shouldShowSecondNotice(
+  elapsedMs: number,
+  finalStarted: boolean,
+  sinceNonAckProgressMs: number,
+  answerNoticeSent = false,
+): boolean {
+  return (
+    !finalStarted &&
+    !answerNoticeSent &&
+    elapsedMs >= PROGRESS_SECOND_NOTICE_MS &&
+    sinceNonAckProgressMs >= PROGRESS_NOTICE_GAP_MS
+  );
+}
+
+/** 正文开始时的「整理回复」：只在慢回合、且距上一条可见进度至少 5s 时补发一次（方案 B 的精确措辞）。 */
+export function shouldShowAnswerNotice(
+  elapsedMs: number,
+  finalStarted: boolean,
+  sinceLastProgressMs: number,
+  answerNoticeSent: boolean,
+): boolean {
+  return (
+    !finalStarted &&
+    !answerNoticeSent &&
+    elapsedMs >= PROGRESS_SECOND_NOTICE_MS &&
+    sinceLastProgressMs >= PROGRESS_NOTICE_GAP_MS
+  );
+}
+
+/** 第 10s 第二条的措辞：正文已开始 → 整理回复；还在思考/跑工具 → 还在处理中。 */
+export function secondNoticeText(answerStarted: boolean): string {
+  return answerStarted ? "✍️ 正在整理回复…" : "⏳ 还在处理中…";
 }
 
 /** 分类大脑错误：backend=模型后端瞬时错误(可多重试)；timeout=超时/卡死；other=其它。 */

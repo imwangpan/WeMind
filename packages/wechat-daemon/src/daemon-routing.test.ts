@@ -4,8 +4,12 @@ import { MessageItemType, type WeixinMessage } from "@wemind/wechat-ilink-core";
 import {
   extractText,
   PROGRESS_ACK_DELAY_MS,
-  PROGRESS_ANSWER_MIN_MS,
+  PROGRESS_NOTICE_GAP_MS,
+  PROGRESS_SECOND_NOTICE_MS,
+  secondNoticeText,
+  shouldShowAck,
   shouldShowAnswerNotice,
+  shouldShowSecondNotice,
   toolIcon,
   toolSummary,
   zhTool,
@@ -75,20 +79,39 @@ describe("toolSummary（步骤文案可读性）", () => {
   });
 });
 
-describe("shouldShowAnswerNotice（快回合不刷整理提示）", () => {
-  it("回合未满 5s 不发；满 5s 且尚未发过即时确认才发", () => {
-    expect(shouldShowAnswerNotice(4_999, false)).toBe(false);
-    expect(shouldShowAnswerNotice(4_999, true)).toBe(false);
-    expect(shouldShowAnswerNotice(5_000, false)).toBe(true);
-    expect(shouldShowAnswerNotice(8_000, false)).toBe(true);
+describe("三档进度提示（快 / 中 / 慢）", () => {
+  it("5s 确认只在还没有任何可见进度时发", () => {
+    expect(shouldShowAck(false)).toBe(true);
+    expect(shouldShowAck(true)).toBe(false);
   });
 
-  it("已经发过即时确认就不再发整理提示", () => {
-    expect(shouldShowAnswerNotice(5_000, true)).toBe(false);
-    expect(shouldShowAnswerNotice(30_000, true)).toBe(false);
+  it("10s 第二条要求最终答案未开始、正文整理提示未发过、且距上一条非确认进度 ≥5s", () => {
+    expect(shouldShowSecondNotice(9_999, false, 10_000)).toBe(false);
+    expect(shouldShowSecondNotice(10_000, false, 4_999)).toBe(false);
+    expect(shouldShowSecondNotice(10_000, false, 5_000)).toBe(true);
+    expect(shouldShowSecondNotice(10_000, true, 10_000)).toBe(false);
+    expect(shouldShowSecondNotice(10_000, false, 10_000, true)).toBe(false);
+    expect(shouldShowSecondNotice(30_000, false, 20_000)).toBe(true);
   });
 
-  it("确认延迟必须晚于整理阈值，保证两条进度互斥", () => {
-    expect(PROGRESS_ACK_DELAY_MS).toBeGreaterThan(PROGRESS_ANSWER_MIN_MS);
+  it("正文整理提示只在 ≥10s、距上一条可见进度 ≥5s、且未发过时补一条", () => {
+    expect(shouldShowAnswerNotice(9_999, false, 10_000, false)).toBe(false);
+    expect(shouldShowAnswerNotice(10_000, false, 4_999, false)).toBe(false);
+    expect(shouldShowAnswerNotice(10_000, false, 5_000, false)).toBe(true);
+    expect(shouldShowAnswerNotice(10_000, false, 5_000, true)).toBe(false);
+    expect(shouldShowAnswerNotice(10_000, true, 5_000, false)).toBe(false);
+  });
+
+  it("第 10s 第二条的措辞随正文是否开始切换", () => {
+    expect(secondNoticeText(false)).toBe("⏳ 还在处理中…");
+    expect(secondNoticeText(true)).toBe("✍️ 正在整理回复…");
+  });
+
+  it("阈值：确认 5s、第二条 10s；确认本身不能挡住 10s 的第二条", () => {
+    expect(PROGRESS_ACK_DELAY_MS).toBe(5_000);
+    expect(PROGRESS_SECOND_NOTICE_MS).toBe(10_000);
+    expect(PROGRESS_NOTICE_GAP_MS).toBeLessThanOrEqual(
+      PROGRESS_SECOND_NOTICE_MS - PROGRESS_ACK_DELAY_MS,
+    );
   });
 });

@@ -95,8 +95,12 @@ import {
   parseControl,
   parseTaskControl,
   PROGRESS_ACK_DELAY_MS,
+  PROGRESS_SECOND_NOTICE_MS,
+  secondNoticeText,
   shouldResumeInBrainQueue,
+  shouldShowAck,
   shouldShowAnswerNotice,
+  shouldShowSecondNotice,
   toolIcon,
   toolSummary,
   type TaskFacts,
@@ -282,15 +286,28 @@ async function handleMessage(
   }, 5000);
 
   const t0 = Date.now();
-  let lastProgressAt = Date.now();
-  // 快回合不刷屏：即时确认延迟 8s；期间只要发出任何进度（工具/心跳/整理）或回合结束，就不再补发。
-  // 「正在输入」由 keepAlive 每 5s 续发，延迟期间一直有指示，不依赖这条文本。
+  let lastProgressAt = t0; // 心跳基线：任意帧（含思考/工具活动）都会刷新
+  let lastVisibleProgressAt = t0; // 上一条真正发到微信的进度（含 5s 确认）
+  let lastNonAckProgressAt = t0; // 上一条除 5s 确认以外的可见进度
+  let visibleProgressSent = false;
+  let finalStarted = false;
+  let answerStarted = false;
+  let secondNoticeSent = false;
+  let answerNoticeSent = false;
+  // 三档进度：<5s 只发最终答案；5–10s 第 5s 发确认；≥10s 第 10s 再发第二条。
+  // 固定提示让位于已有进度（工具/心跳/图片/重试），避免叠加；「正在输入」由 keepAlive 每 5s 续发。
   let ackTimer: NodeJS.Timeout | undefined;
-  let ackSent = false;
+  let secondTimer: NodeJS.Timeout | undefined;
   const cancelAck = () => {
     if (ackTimer) {
       clearTimeout(ackTimer);
       ackTimer = undefined;
+    }
+  };
+  const cancelSecond = () => {
+    if (secondTimer) {
+      clearTimeout(secondTimer);
+      secondTimer = undefined;
     }
   };
   // 心跳间隔**每回合**取一次：热切换大脑后新 agent 的心跳覆盖要立刻生效（改造前是 import 期定死的常量，
@@ -299,12 +316,16 @@ async function handleMessage(
     Number(process.env.WECHAT_BRAIN_HEARTBEAT_MS) || heartbeatMs() || HEARTBEAT_DEFAULT_MS;
   // iLink 限制 bot 在用户回复前连续发送的消息数（实测约 10，超出被 ret=-2 拒）。计数按用户跨回合维护(budgetOf)。
   // 当已发到「上限-2」(默认第8条)后，下一条进度改为「即将达上限」提示并进入等待，把最后一条额度留给最终答案；用户回复「继续」(或发任何消息)会重置计数恢复发送（见 poller）。
-  const sendProgress = (msg: string) => {
+  const sendProgress = (msg: string, opts?: { ackOnly?: boolean }) => {
     cancelAck(); // 任何进度都顶替待发的即时确认
     lastProgressAt = Date.now();
     const b = sends.budgetOf(to);
     if (b.awaiting) return; // 等待「继续」期间不发任何进度
-    // 发出一条文本会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，否则快回合（回复 < 旧 8s 续发间隔）全程看不到指示。
+    const now = Date.now();
+    lastVisibleProgressAt = now;
+    visibleProgressSent = true;
+    if (!opts?.ackOnly) lastNonAckProgressAt = now; // 5s 确认不能挡住 10s 的第二条
+    // 发出一条文本会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，否则接下来的等待窗口看不到指示。
     const sendWithTyping = (text: string) => {
       void sends
         .sendOrdered(to, cx(), text, MessageState.GENERATING)
@@ -322,20 +343,34 @@ async function handleMessage(
     b.count += 1;
     sendWithTyping(msg);
   };
-  // 即时确认：延迟 8s；简单回合在此之前已经答完，不会多一条文本。5–8s 的回合由「正在整理回复」覆盖；有图片时图片提示即确认，不再重复发。
+  // 第 5s 的即时确认：只在之前没有任何可见进度时发（工具/心跳/图片提示都会顶替它）。有图片时图片提示即确认，不再重复发。
   if (imageItems.length === 0) {
     const t = cx();
     log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
     ackTimer = setTimeout(() => {
       ackTimer = undefined;
-      ackSent = true;
-      sendProgress("🤖 收到，正在处理…");
+      if (finalStarted || !shouldShowAck(visibleProgressSent)) return;
+      sendProgress("🤖 收到，正在处理…", { ackOnly: true });
     }, PROGRESS_ACK_DELAY_MS);
     ackTimer.unref?.();
   }
+  // 第 10s 的第二条：正文已开始→「整理回复」，否则→「还在处理中」；距上一条非确认进度不足 5s 就跳过（工具/心跳刚提示过）。
+  secondTimer = setTimeout(() => {
+    secondTimer = undefined;
+    const now = Date.now();
+    if (secondNoticeSent || finalStarted) return;
+    if (
+      !shouldShowSecondNotice(now - t0, finalStarted, now - lastNonAckProgressAt, answerNoticeSent)
+    ) {
+      return;
+    }
+    secondNoticeSent = true;
+    if (answerStarted) answerNoticeSent = true;
+    sendProgress(secondNoticeText(answerStarted));
+  }, PROGRESS_SECOND_NOTICE_MS);
+  secondTimer.unref?.();
   // 心跳：仅当 brain 真正静默(无任何帧)超过心跳间隔才提示——首条用友好措辞，后续才带计时
   let hbCount = 0;
-  let answerNoticeSent = false; // "正在整理回复"只发一次
   const heartbeat = setInterval(() => {
     if (Date.now() - lastProgressAt >= heartbeatMsValue) {
       hbCount += 1;
@@ -366,7 +401,9 @@ async function handleMessage(
   if (plan.kind === "reject") {
     clearInterval(keepAlive);
     clearInterval(heartbeat);
+    finalStarted = true;
     cancelAck();
+    cancelSecond();
     await setTyping(account, to, cx(), 2);
     sends.budgetOf(to).count += 1;
     let sendFailed = false;
@@ -387,6 +424,7 @@ async function handleMessage(
 
   // 一次尝试：带进度（步骤编号每次尝试重置）。进度消息节流：避免一回合刷十几条触发 iLink 发送限流（疑似 ret=-2 主因）
   const attempt = (promptText: string, imgs: typeof images): Promise<string> => {
+    answerStarted = false; // 每次重试重新判断本轮正文是否开始，避免上一轮失败尝试的残留
     let step = 0;
     let lastToolProgressAt = 0;
     return askBrain(
@@ -405,7 +443,16 @@ async function handleMessage(
         } else if (ev.type === "thinking") {
           lastProgressAt = Date.now();
         } else if (ev.type === "answer") {
-          if (!answerNoticeSent && shouldShowAnswerNotice(Date.now() - t0, ackSent)) {
+          answerStarted = true;
+          const now = Date.now();
+          if (
+            shouldShowAnswerNotice(
+              now - t0,
+              finalStarted,
+              now - lastVisibleProgressAt,
+              answerNoticeSent,
+            )
+          ) {
             answerNoticeSent = true;
             sendProgress("✍️ 正在整理回复…");
           }
@@ -452,7 +499,9 @@ async function handleMessage(
   } finally {
     clearInterval(keepAlive);
     clearInterval(heartbeat);
+    finalStarted = true;
     cancelAck();
+    cancelSecond();
   }
   await setTyping(account, to, cx(), 2);
   // 发图：从回复里提取图片引用（markdown ![](url/路径) 或裸图片 URL），逐个作为图片消息发出，再发剩余文本
