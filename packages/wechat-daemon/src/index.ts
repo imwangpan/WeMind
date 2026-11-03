@@ -98,7 +98,7 @@ import {
   shouldResumeInBrainQueue,
   shouldShowAnswerNotice,
   toolIcon,
-  zhTool,
+  toolSummary,
   type TaskFacts,
 } from "./daemon-routing.js";
 
@@ -283,7 +283,7 @@ async function handleMessage(
 
   const t0 = Date.now();
   let lastProgressAt = Date.now();
-  // 快回合不刷屏：即时确认延迟 5s；期间只要发出任何进度（工具/心跳/整理）或回合结束，就不再补发。
+  // 快回合不刷屏：即时确认延迟 8s；期间只要发出任何进度（工具/心跳/整理）或回合结束，就不再补发。
   // 「正在输入」由 keepAlive 每 5s 续发，延迟期间一直有指示，不依赖这条文本。
   let ackTimer: NodeJS.Timeout | undefined;
   let ackSent = false;
@@ -322,7 +322,7 @@ async function handleMessage(
     b.count += 1;
     sendWithTyping(msg);
   };
-  // 即时确认：延迟 5s；简单回合在此之前已经答完，不会多一条文本。有图片时图片提示即确认，不再重复发。
+  // 即时确认：延迟 8s；简单回合在此之前已经答完，不会多一条文本。5–8s 的回合由「正在整理回复」覆盖；有图片时图片提示即确认，不再重复发。
   if (imageItems.length === 0) {
     const t = cx();
     log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
@@ -399,7 +399,7 @@ async function handleMessage(
           if (Date.now() - lastToolProgressAt >= 15000) {
             lastToolProgressAt = Date.now();
             step += 1; // 只在真正发出时递增，保证步骤号连续（不因节流跳号）
-            const desc = ev.purpose || (ev.title ? zhTool(ev.title) : "") || "调用工具";
+            const desc = toolSummary(ev.kind, ev.title, ev.purpose, ev.detail);
             sendProgress(`${toolIcon(ev.kind)} 步骤 ${step}：${desc}`);
           }
         } else if (ev.type === "thinking") {

@@ -221,7 +221,7 @@ npm run build; npm run daemon
 | 4 | 权限语义 | OpenCode 自动批准 ≈ `--trust-all-tools` | 保留 daemon 的 `allowFrom` 登录者白名单（兜底校验，默认只放行登录者，勿关） |
 | 5 | 共享后台服务 | 多实例/生命周期 | 观察 `opencode acp` 是否复用全局 background server；必要时评估 `--standalone` |
 | 6 | 冷启动时延 | 首帧超时 | OpenCode 冷启动可能偏慢，按需放宽 `WECHAT_BRAIN_FIRST_FRAME_MS` |
-| 7 | Code Mode 工具命名 | 微信"步骤 N"文案 | 实测 `tool_call.title` 文案，必要时在 `zhTool()` 增加 OpenCode 风格映射 |
+| 7 | Code Mode 工具命名 | 微信"步骤 N"文案 | 实测 `tool_call.title` 文案，必要时在 `toolSummary()` / `zhTool()` 增加 OpenCode 风格映射 |
 
 ### 3.6 里程碑与工作量
 

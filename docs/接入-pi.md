@@ -1,6 +1,6 @@
 # 接入 pi coding agent（经 pi-acp 适配器，探针 + 真机 E2E）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-03 ｜ **实测环境**：Windows 11 + Node 24 + `pi-acp@0.0.34` + pi `1.4.0`
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ **实测环境**：Windows 11 + Node 24 + `pi-acp@0.0.34` + pi `1.4.0`
 >
 > **状态**：✅ 内置预设、ACP 探针全绿（`initialize` / `session/new` / prompt / 图片 / 强杀后 `session/load` / 工具调用 0 反向请求）；**微信真机 E2E 已通过（2026-11-01：brain 单轮、热切换 pi↔codex、微信「任务 pi：…」派发）**。
 >
@@ -31,7 +31,7 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 | 启动横幅 | `settingsDefaults: { quietStartup: true }` | pi-acp 把 pi 的启动信息（`## Context` / `## Skills` …）当 `agent_message_chunk` 发出来；用 pi 自己的 `quietStartup`（官方 settings.md）关掉。只补缺失键：用户显式设过就保留用户的值，真实配置不动 |
 | 模型 | 预设不带 `model` → 跟随用户 pi 的默认（`settings.json` 的 `defaultProvider`/`defaultModel`） | 覆盖：`wemind brain set pi --model "<provider>/<model>"`（走 `session/set_config_option`，pi-acp 的 configId 就叫 `model`） |
 | 恢复 | 默认 `load`（pi-acp `loadSession: true`） | 会话映射表在**真实 home** 的 `~/.pi/pi-acp/session-map.json`（适配器写死 `homedir()`，不随沙箱走）；会话文件本体仍在各自沙箱的 `sessions/` 下 |
-| 自动探测 | **在 `AUTO_PROBE_ORDER` 第一位** | 用户指定首选 pi；适配器 `pi-acp` 与 pi 本体都在 PATH 上才入选（`requiresBins`）。探测阶段无法判断登录态——装好但没配好模型时会选中 pi 并在握手时报错，此时用 `wemind brain set\|switch <其它 agent>` 显式指定 |
+| 自动探测 | **不在 `AUTO_PROBE_ORDER`** | 适配器类不参与 auto（装好适配器 ≠ 已登录/配好模型）；用 `wemind brain set\|switch pi`、一次性 `WEMIND_BRAIN=pi`，或微信「切换大脑 pi」显式选用 |
 | MCP | `<沙箱根>/mcp.json`（kiro 格式 `{mcpServers:{名:{command,args,env}}}`），`mcpViaAcp: false` | `pi mcp list` 实测读 `<PI_CODING_AGENT_DIR>/mcp.json`（不是 `settings/mcp.json`）；pi-acp 只把 `session/new` 的 `mcpServers` 存进会话、从不读取，所以 WeMind 的动态 MCP 走配置文件 |
 
 ## 3. 探针实测结论（`scripts/acp-probe.mjs`，2026-10-30）
@@ -73,6 +73,6 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 ## 6. 验证记录
 
 - 探针：§3 全绿（含强杀恢复、图片与漂移检测工具调用）。2026-11-01 本机复跑（`pi-acp@0.0.34` + pi 1.4.0）：`ok=true`、`contextKept=true`、图片无报错、`toolTest.ok=true`（3 次工具调用 / 0 权限请求 / 标记文件落盘）、反向请求为空。
-- `wemind brain` / `wemind brain check`：2026-11-01 本机实测——`生效：name=pi bin=pi-acp.cmd args=[] shell=true home_env=PI_CODING_AGENT_DIR model=(agent 默认) session_mode=(无)`，`可选 agent` 含 pi，自动探测顺序以 `pi` 开头（`pi → kiro → …`）；`brain check` 握手成功（initialize + session/new，~2.1s）。
-- 单测：`brain-agents.test.ts` 覆盖预设字段、`requiresBins`（pi-acp 已装但 pi 缺失时 auto 跳过）、安装提示、`AUTO_PROBE_ORDER` 第一位与 auto 优先选中 pi；`sandbox-pi.test.ts` 覆盖 settings/auth/models 同步、`quietStartup` 默认值与用户值保留、MCP 排除 `wechat`/disabled；`pool-spawn.test.ts` 覆盖「按这条任务的 agent 备 worker 沙箱」。
+- `wemind brain` / `wemind brain check`：2026-11-01 本机实测——`生效：name=pi bin=pi-acp.cmd args=[] shell=true home_env=PI_CODING_AGENT_DIR model=(agent 默认) session_mode=(无)`，`可选 agent` 含 pi，自动探测顺序仍不含 pi；`brain check` 握手成功（initialize + session/new，~2.1s）。
+- 单测：`brain-agents.test.ts` 覆盖预设字段、`requiresBins`（pi-acp 已装但 pi 缺失）、安装提示、`AUTO_PROBE_ORDER` 不含 pi；`sandbox-pi.test.ts` 覆盖 settings/auth/models 同步、`quietStartup` 默认值与用户值保留、MCP 排除 `wechat`/disabled；`pool-spawn.test.ts` 覆盖「按这条任务的 agent 备 worker 沙箱」。
 - 真机（2026-11-01）：worker 通道 `wemind task "只回复数字 2" --agent pi` → `prompt ok 7857ms` → 回复「2」；删掉 worker-home 里 pi 的 `settings.json`/`models.json` 后再次派发，`acquire` 按任务 agent 自动重建（`quietStartup: true`）。brain 通道：微信消息 → `session/load` → `prompt ok 9705ms` → 回复送达（启动横幅未混入回复）。热切换：`brain switch codex`（1.1s）→ `brain switch pi`（1.0s），daemon pid 不变，两个方向都 `session/load` 接回各自会话；未知 agent 被拒、`brain.json` 不变。热切换后微信再问一句 → `prompt ok 5006ms` → 回复「4」。微信「任务 pi：…」→ 任务 #27 → `prompt ok 6945ms` → 回复「3」。

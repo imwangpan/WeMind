@@ -668,7 +668,7 @@ describe("resolveAgent auto 探测", () => {
     expect(problem).toMatch(/@earendil-works\/pi-coding-agent/);
   });
 
-  it("pi-acp 已装但 pi 本体缺失 → 提前报运行时缺失（不等 session/new），auto 探测也跳过", () => {
+  it("pi-acp 已装但 pi 本体缺失 → 提前报运行时缺失（不等 session/new）", () => {
     clearVars();
     const onlyAdapter = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-pi-acp-"));
     try {
@@ -681,34 +681,47 @@ describe("resolveAgent auto 探测", () => {
       const problem = agentProblem(ag) ?? "";
       expect(problem).toMatch(/运行时「pi」/);
       expect(problem).toMatch(/@earendil-works\/pi-coding-agent/);
-      expect(presetAvailable("pi")).toBe(false);
     } finally {
       fs.rmSync(onlyAdapter, { recursive: true, force: true });
     }
   });
 
-  it("pi 排在 auto 探测第一位；其余预设保持原相对顺序（cline 最后）", () => {
-    expect(AUTO_PROBE_ORDER[0]).toBe("pi");
-    expect(AUTO_PROBE_ORDER[AUTO_PROBE_ORDER.length - 1]).toBe("cline");
-    expect(AUTO_PROBE_ORDER.indexOf("cline")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("qoder"));
-    expect(AUTO_PROBE_ORDER.indexOf("qoder")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("deepseek"));
+  it("auto 只探测原生 ACP，按实测启动耗时排序（kiro/deepseek 暂排最后）", () => {
+    expect(AUTO_PROBE_ORDER).toEqual(["opencode", "cline", "qoder", "gemini", "deepseek", "kiro"]);
+    expect(AUTO_PROBE_ORDER).not.toContain("pi");
   });
 
-  it("auto 在 pi 适配器与 pi 本体都在时优先选中 pi", () => {
+  it("auto 同时有 opencode 与 kiro 时优先选更快的 opencode", () => {
     clearVars();
-    const onlyPi = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-pi-"));
+    const both = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-both-"));
     try {
-      for (const f of ["pi-acp", "pi-acp.cmd", "pi", "pi.cmd"])
-        fs.writeFileSync(path.join(onlyPi, f), "");
-      process.env.PATH = onlyPi;
+      for (const f of ["opencode", "kiro-cli", "kiro-cli.exe"])
+        fs.writeFileSync(path.join(both, f), "");
+      process.env.PATH = both;
       withoutFallbackBins(() => {
         const ag = resolveAgent();
-        expect(ag.requestedKey).toBe("auto");
-        expect(ag.name).toBe("pi");
+        expect(ag.name).toBe("opencode");
         expect(ag.available).toBe(true);
       });
     } finally {
-      fs.rmSync(onlyPi, { recursive: true, force: true });
+      fs.rmSync(both, { recursive: true, force: true });
+    }
+  });
+
+  it("pi 即使适配器与本体都在，也不参与 auto；有原生 agent 时选原生", () => {
+    clearVars();
+    const piAndOpencode = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-pi-auto-"));
+    try {
+      for (const f of ["pi-acp", "pi-acp.cmd", "pi", "pi.cmd", "opencode"])
+        fs.writeFileSync(path.join(piAndOpencode, f), "");
+      process.env.PATH = piAndOpencode;
+      withoutFallbackBins(() => {
+        const ag = resolveAgent();
+        expect(ag.name).toBe("opencode");
+        expect(ag.requestedKey).toBe("auto");
+      });
+    } finally {
+      fs.rmSync(piAndOpencode, { recursive: true, force: true });
     }
   });
 

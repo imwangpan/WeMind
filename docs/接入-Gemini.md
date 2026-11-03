@@ -1,6 +1,6 @@
 # 接入 Gemini CLI（原生 ACP，探针 + 真机实测）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-03 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
 >
 > **状态**：✅ 内置预设、ACP 探针全部通过（`initialize` / `session/new` / prompt / 图片 / 工具调用 0 反向请求 / 强杀后 `session/load`）；MCP 与沙箱已实测；`wemind brain check` 握手通过（约 3.0s）；**微信真机 E2E 已通过（2026-11-01：单轮、杀 daemon 后 `session/load`、热切换、worker 任务）**。
 >
@@ -40,7 +40,7 @@ WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / 
 | 历史回放 | `replayOnLoad: true` | `loadSession` 返回后它还会**异步回放历史**（源码 `session.streamHistory(messages)` 不 await）；恢复会话后先等帧流安静（`acp-quiet.ts`：200ms 静默窗口、最多 3s）再提问，否则旧回复会被拼进本轮答复 |
 | 免审批 | `--approval-mode yolo`（会话模式）；不设 `sessionMode` | `session/new` 回包的 `modes` 里 `currentModeId` 就是 `yolo`；`session/set_mode` 不是必需 |
 | 恢复 | 默认 `load`（`loadSession: true`） | 强杀后 `session/load` 能接回上下文（探针 PINEAPPLE） |
-| 自动探测 | **在 `AUTO_PROBE_ORDER` 第 4 位** | 原生 ACP，`pi → kiro → opencode → gemini → deepseek → qoder → cline` |
+| 自动探测 | **在 `AUTO_PROBE_ORDER` 第 4 位** | 原生 ACP，`opencode → cline → qoder → gemini → deepseek → kiro` |
 
 ## 3. 探针实测结论（`scripts/acp-probe.mjs`，2026-11-01）
 

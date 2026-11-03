@@ -9,8 +9,8 @@ import {
 } from "./chat-commands.js";
 import { providerIssue, shouldResumeTask } from "./task-manager.js";
 
-/** 快回合的进度抑制阈值：即时确认延迟到 5s；「正在整理回复」只在回合满 5s 且尚未发过即时确认时发。 */
-export const PROGRESS_ACK_DELAY_MS = 5_000;
+/** 快回合的进度抑制阈值：即时确认延迟到 8s；「正在整理回复」在回合满 5s、且尚未发过确认时发。确认延迟必须大于整理阈值，否则确认先发会让整理永远没机会——两者互斥，中等回合只发一条进度。 */
+export const PROGRESS_ACK_DELAY_MS = 8_000;
 export const PROGRESS_ANSWER_MIN_MS = 5_000;
 
 /** 是否值得为这一回合再发「正在整理回复」：简单短回合只留最终答案，避免多占一条连发额度。 */
@@ -88,6 +88,38 @@ export function zhTool(t: string): string {
     .replace(/^Reading\s+/i, "读取 ")
     .replace(/^Writing\s+/i, "写入 ")
     .replace(/^Finding\s+/i, "查找 ");
+}
+
+/** 工具类型 → 中文动词（有 detail 时拼成「动词 参数」；没有 detail 则回退到标题）。 */
+const TOOL_VERB: Record<string, string> = {
+  read: "读取",
+  edit: "修改",
+  write: "写入",
+  execute: "执行",
+  search: "搜索",
+  fetch: "访问",
+  delete: "删除",
+};
+
+/**
+ * 工具步骤的可读文案：优先 agent 自己给的人话 purpose，其次从 rawInput 取出的短参数（command/路径/query…），
+ * 最后才用工具标题。长命令由协议层截断，这里只负责语义化，避免微信里出现整段原始参数。
+ */
+export function toolSummary(
+  kind?: string,
+  title?: string,
+  purpose?: string,
+  detail?: string,
+): string {
+  const p = purpose?.trim();
+  if (p) return zhTool(p);
+  const d = detail?.trim();
+  if (d) {
+    const verb = TOOL_VERB[kind ?? ""];
+    return verb ? `${verb} ${d}` : d;
+  }
+  if (title?.trim()) return zhTool(title.trim());
+  return "调用工具";
 }
 
 /** 按工具类型给图标。 */

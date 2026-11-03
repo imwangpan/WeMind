@@ -264,7 +264,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // - MCP：pi 读 <PI_CODING_AGENT_DIR>/mcp.json（`pi mcp list` 实测；不是 settings/mcp.json），格式与 kiro 相同 {mcpServers:{名:{command,args,env}}}；不设 mcpViaAcp（pi-acp 只把 mcpServers 存进会话、从不读取）；
   // - 适配器只是桥：真正进程是 PATH 上的 pi 本体（requiresBins 会在缺 pi 时提前报错，而不是等 session/new 才炸）。
   // - 适配器的会话映射表固定写在真实 home 的 ~/.pi/pi-acp/session-map.json（不随沙箱走）：跨账号共享的只是 id→会话文件的映射，会话本体仍在各自沙箱的 sessions/ 下。
-  // - **auto 探测的第一优先**（用户明确指定）：适配器与 pi 本体都在 PATH 上才会被选中（`requiresBins`）；但仍无法在探测阶段判断登录态——装了但没配好模型的机器会选中 pi 并在握手时报错，此时用 `wemind brain set|switch` 显式指定其它 agent。
+  // - 适配器类不参与 auto 探测（装好适配器 ≠ 已登录/配好模型），用 `wemind brain set|switch pi` 显式选用。
   pi: {
     name: "pi",
     bin: "pi-acp",
@@ -358,16 +358,15 @@ function onPathAny(exe: string): string | null {
 }
 
 /**
- * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的 agent。**`pi` 排第一**（用户明确指定：首选 pi）：它是适配器，只有适配器与 pi 本体都在 PATH 上才算可用（`requiresBins`）；探测阶段无法判断登录态，装了但没配好模型的机器会选中 pi 并在握手时报错——此时用 `wemind brain set|switch` 显式指定其它 agent。其余适配器（`claude-code` / `codex`）仍不参与自动探测：独立安装、各有认证，误选中会让「装了但没登录」的机器静默换脑。除 pi 外的新 agent 一律追加在末尾：老机器上已装的前几个仍按原顺序被选中，不改变既有用户的默认大脑。
+ * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的 agent。只收纳**原生 ACP 且二进制可直接判定**的 agent——适配器类（`claude-code` 走 `claude-agent-acp`、`codex` 走 `codex-acp`、`pi` 走 `pi-acp`）不参与自动探测：它们是独立安装的桥接进程、各有自己的认证，误选中会让「装了但没登录」的机器静默换脑；显式选用（`wemind brain set|switch <名>`）更安全。顺序按本机实测的启动耗时排（暖启动：opencode ~1.7s、cline ~2.0s、qoder ~2.5s、gemini ~4.3s）；kiro 与 deepseek 在该轮实测中未握手成功（kiro `session/new` 超时、deepseek 旧会话 artifact 布局错误），暂排最后，修复后可再前移。
  */
 export const AUTO_PROBE_ORDER = [
-  "pi",
-  "kiro",
   "opencode",
+  "cline",
+  "qoder",
   "gemini",
   "deepseek",
-  "qoder",
-  "cline",
+  "kiro",
 ] as const;
 
 /**
@@ -428,13 +427,13 @@ export function presetBinPath(
 }
 
 /**
- * 该 agent 的二进制与运行时是否都可解析（只判定、不启动）。传入 cfg 时，`presets[名].bin` 里存的绝对路径也算「可用」——否则桌面端 DSH 这种「装了但不在 PATH」的 agent，auto 探测会白白跳过它。`requiresBins` 必须一起满足：pi 的适配器 `pi-acp` 与本体 `pi` 缺一不可，只装适配器就参与 auto 探测会在启动后才炸。
+ * 该 agent 的二进制是否可解析（只判定、不启动）。
+ * 传入 cfg 时，`presets[名].bin` 里存的绝对路径也算「可用」——否则桌面端 DSH 这种「装了但不在 PATH」的 agent，auto 探测会白白跳过它。
  */
 export function presetAvailable(key: string, cfg?: BrainConfig | null): boolean {
   const preset = ACP_AGENT_PRESETS[key];
   if (!preset) return false;
-  if (presetBinPath(preset, cfg?.presets?.[key.toLowerCase()]?.bin) === null) return false;
-  return (preset.requiresBins ?? []).every((b) => onPathAny(b) !== null);
+  return presetBinPath(preset, cfg?.presets?.[key.toLowerCase()]?.bin) !== null;
 }
 
 /**

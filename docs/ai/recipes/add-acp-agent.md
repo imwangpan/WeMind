@@ -1,6 +1,6 @@
 # 配方：接入一个新的 ACP Agent
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-03
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
 >
 > 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)。
 
@@ -98,7 +98,7 @@ acme: {
 
 同时：
 
-- **原生 ACP** 才把该 agent 追加到 `AUTO_PROBE_ORDER` 末尾（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；**适配器类默认不要加**（各自独立安装、各有认证，装好不等于登录过，参与探测会让「装了但没登录」的机器静默换脑）——`claude-code` / `codex` 都不在探测顺序里。**唯一例外是 `pi`**：按用户指定排在第一位，且 `presetAvailable()` 会同时检查 `requiresBins`（适配器与 `pi` 本体都在 PATH 上才入选）；登录态仍无法探测，需在文档里写清；
+- **原生 ACP** 才把该 agent 追加到 `AUTO_PROBE_ORDER` 末尾（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；**适配器类不要加**（各自独立安装、各有认证，装好不等于登录过，参与探测会让「装了但没登录」的机器静默换脑）——`claude-code` / `codex` / `pi` 都不在探测顺序里；
 - `AcpAgentPreset` / `ResolvedAgent` 透传新字段；
 - `brain-agents.test.ts` 加断言；
 - `docs/接入其它-ACP-Agent.md` §5 agent 表加一行。

@@ -150,9 +150,9 @@ describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
     expect(turn.seenUpdateTypes.has("tool_call")).toBe(true);
   });
 
-  it("思考帧每回合只报一次 thinking；工具 purpose 从 rawInput 提取", () => {
+  it("思考帧每回合只报一次 thinking；工具 purpose/detail 从 rawInput 提取", () => {
     const { host, turn } = fakeHost();
-    const events: Array<{ type: string; purpose?: string }> = [];
+    const events: Array<{ type: string; purpose?: string; detail?: string }> = [];
     beginAcpTurn(turn, "s1", (ev) => events.push(ev));
     const thought = {
       method: "session/update",
@@ -185,6 +185,24 @@ describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
       host,
     );
     expect(events.find((e) => e.type === "tool")?.purpose).toBe("跑测试");
+
+    handleAcpFrame(
+      {
+        method: "session/update",
+        params: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "t3",
+            title: "bash",
+            kind: "execute",
+            rawInput: { command: "npm test\n--watch" },
+          },
+        },
+      },
+      host,
+    );
+    expect(events.filter((e) => e.type === "tool").at(-1)?.detail).toBe("npm test --watch");
   });
 });
 

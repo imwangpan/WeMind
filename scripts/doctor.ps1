@@ -121,7 +121,7 @@ if (Test-Path -LiteralPath $DataRoot) {
         Item "  brain.json" "存在但无法解析：$brainCfg"
       }
     } else {
-      Item "  brain.json" "未设置（走 auto：kiro → opencode → gemini → deepseek → qoder → cline）"
+      Item "  brain.json" "未设置（走 auto：opencode → cline → qoder → gemini → deepseek → kiro）"
     }
     $sess = Join-Path $a.FullName "brain-sessions.json"
     if (Test-Path -LiteralPath $sess) {

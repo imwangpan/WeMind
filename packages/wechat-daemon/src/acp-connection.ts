@@ -12,10 +12,43 @@ import { LineDecoder } from "./line-decoder.js";
  */
 
 export type AcpProgressEvent =
-  | { type: "tool"; kind?: string; purpose?: string; title?: string }
+  | { type: "tool"; kind?: string; purpose?: string; title?: string; detail?: string }
   | { type: "answer" }
   | { type: "thinking" }
   | { type: "activity" };
+
+/** 工具调用里能直接读懂的短参数：不同 agent 的 rawInput 形状不统一，按常见键取第一个。 */
+const TOOL_DETAIL_KEYS = [
+  "command",
+  "cmd",
+  "path",
+  "file_path",
+  "filePath",
+  "query",
+  "pattern",
+  "url",
+  "description",
+] as const;
+
+/** 进度里的工具描述要短：折行压成空格，超过 60 字截断，避免把整段命令/JSON 塞进微信。 */
+function clipDetail(s: string): string | undefined {
+  const text = s.replace(/\s+/g, " ").trim();
+  if (!text) return undefined;
+  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
+}
+
+function toolDetail(rawInput: unknown): string | undefined {
+  if (!rawInput || typeof rawInput !== "object") return undefined;
+  const rec = rawInput as Record<string, unknown>;
+  for (const key of TOOL_DETAIL_KEYS) {
+    const v = rec[key];
+    if (typeof v === "string") {
+      const detail = clipDetail(v);
+      if (detail) return detail;
+    }
+  }
+  return undefined;
+}
 
 export type AcpPending = {
   resolve: (v: unknown) => void;
@@ -177,10 +210,16 @@ export function handleAcpFrame(f: Record<string, any>, host: AcpHost): void {
         turn.seenTools.add(tid);
         const purpose =
           typeof u.rawInput?.__tool_use_purpose === "string"
-            ? u.rawInput.__tool_use_purpose
+            ? clipDetail(u.rawInput.__tool_use_purpose)
             : undefined;
         try {
-          turn.currentOnProgress({ type: "tool", kind: u.kind, purpose, title: u.title });
+          turn.currentOnProgress({
+            type: "tool",
+            kind: u.kind,
+            purpose,
+            title: u.title,
+            detail: toolDetail(u.rawInput),
+          });
         } catch {
           /* ignore */
         }
