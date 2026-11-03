@@ -58,7 +58,7 @@
 ### 2.2 agent 与沙箱
 
 - agent 表：`packages/wechat-daemon/src/brain-agents.ts` 的 `ACP_AGENT_PRESETS`。
-- 选择优先级：`WEMIND_BRAIN`（env）> `<数据目录>/brain.json` > `auto`（`kiro → opencode → gemini → deepseek → qoder → cline`）。
+- 选择优先级：`WEMIND_BRAIN`（env）> `<数据目录>/brain.json` > `auto`（`pi → kiro → opencode → gemini → deepseek → qoder → cline`；pi 需适配器与本体都在 PATH 上）。
 - 沙箱：`BRAIN_HOME`（默认 `<数据目录>/brain-home`），通过 agent 的 `homeEnvVar` 指向 agent 的配置目录；`configSubdir` 决定配置目录在沙箱内的相对位置。
 - MCP：brain 默认空；微信指令「加载/卸载」改激活集，重启 ACP 生效；`wechat` 永久禁止（防它把消息发回自己）。**传输方式按 agent 分派**：kiro/opencode 写各自的配置文件；DSH 走 ACP `session/new` 的 `mcpServers`；catalog 也按 agent 各自的约定读取（详见 §5.3 M3）。
 - 记忆继承：`mirrorRealKiro()` 把 `realHome` 下的 `inheritDirs` 目录 junction 进沙箱，`inheritFiles` 单文件拷入。
@@ -308,7 +308,7 @@ deepseek: {
 - **不要**把 `DEEPSEEK_API_KEY` 写进 agent 的 `env`（会把密钥固化进源码/构建产物）；daemon 继承进程环境即可。
 - `configSubdir` 留空：`DSH_HOME` 本身就是 home。
 - MCP 走 `mcpViaAcp: true`：**不写任何 MCP 配置文件**，激活集由 `toAcpMcpServers()` 转成 `session/new|resume` 的 `mcpServers` 下发（见 M3）。每个 agent 只读自己的 MCP 配置；DSH 的 catalog 用 `WEMIND_MCP_CATALOG` 指向中立文件。
-- `AUTO_PROBE_ORDER` 末尾追加 `"deepseek"`（不要插到 kiro/opencode 前面，避免老用户装了就悄悄换大脑）；`auto` 仍优先 kiro/opencode。
+- `AUTO_PROBE_ORDER` 末尾追加 `"deepseek"`（不要插到 kiro/opencode 前面，避免老用户装了就悄悄换大脑）；当前顺序为 `pi → kiro → opencode → gemini → deepseek → qoder → cline`（pi 为用户指定的首选）。
 - 文档标注 **Node ≥22**；`agentProblem` 对 deepseek 找不到二进制时提示 `--bin`。
 - **图片**：`image:false`，`index.ts` 在 `askBrain` 前拦截微信图片，不会以 `-32602` 失败重试。纯图片消息回一句「当前大脑暂不支持看图……」；**带文字的消息只按文字回答**，答复前注明图片被忽略（不会连文字一起丢）。
 

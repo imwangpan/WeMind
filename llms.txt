@@ -70,7 +70,7 @@
 - Package name ≠ command name: `@wemind/cli` installs the `wemind` binary. `npx` must use the package name.
 - Process identity uses three marker sets (`proc-identity.ts`): `wemind` + `cli.js` (npm install and absolute repo path), `wechat-daemon` + `dist` + `cli.js` (running from the repo root with a relative path), and `run-daemon.ps1` (source-checkout wrapper). `wechat-daemon` alone is never sufficient — the published package directory is `@wemind/cli`.
 
-- Default brain selection is `auto`: `kiro → opencode → gemini → deepseek → qoder → cline`; persisted in `<data>/brain.json`. Adapter presets (`claude-code`, `codex`, `pi`) are never auto-probed — select them explicitly.
+- Default brain selection is `auto`: `pi → kiro → opencode → gemini → deepseek → qoder → cline`; persisted in `<data>/brain.json`. `pi` is preferred first but is only auto-probed when both `pi-acp` and the `pi` runtime are on PATH; `claude-code` and `codex` are never auto-probed — select them explicitly.
 - `session/load` is not universal. DSH 0.2.1-rc.2 returns `-32601`; it has `session/resume` instead.
 - Session maps are namespaced per brain: `brain-sessions.json` keyed `<agent>:<userId>`, `worker-sessions.json` keyed `<agent>:task-<编号>@<userId>` (one session per task, so a restarted task keeps its own context); legacy bare keys migrate to the current brain on first read (`session-map.ts`).
 - DSH 0.2.1-rc.2 advertises `promptCapabilities.image:false`; image prompts fail with `-32602`.

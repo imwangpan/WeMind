@@ -2,7 +2,7 @@
 
 > 上一页：[5. daemon](05-daemon.md) ｜ 下一页：[7. 远程任务 Worker](07-远程任务-Worker.md)
 >
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ 代码以当前 `main` 为准。
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-03 ｜ 代码以当前 `main` 为准。
 
 daemon 的「大脑」是一个常驻的 AI agent 子进程，通过 ACP 协议驱动。本章讲清大脑的进程生命周期、会话管理、MCP 沙箱与记忆继承，以及如何换成别的 agent。
 
@@ -26,7 +26,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 
 ## 6.2 常驻 ACP 客户端（acp-brain.ts）
 
-`acp-brain.ts` 维护一个常驻的 ACP agent 进程，是当前大脑（未配置时 `auto` 探测 kiro/opencode/gemini/deepseek/qoder）。相比每条消息 spawn 一次，它的优势：原生多轮记忆、暖进程（约 3s vs 冷启动约 6s）、回复从 `agent_message_chunk` 拼接（天然无 ANSI、无工具旁白；committed-only agent 只发一段）。
+`acp-brain.ts` 维护一个常驻的 ACP agent 进程，是当前大脑（未配置时 `auto` 探测 pi/kiro/opencode/gemini/deepseek/qoder/cline）。相比每条消息 spawn 一次，它的优势：原生多轮记忆、暖进程（约 3s vs 冷启动约 6s）、回复从 `agent_message_chunk` 拼接（天然无 ANSI、无工具旁白；committed-only agent 只发一段）。
 
 **「当前是哪个 agent」来自槽位，不是模块常量**（1.2.0 起）：`agent-slot.ts` 的 `getAgent("brain")` 懒解析 + 记忆化，`setAgent` 供热切换改写；`acp-brain.ts` 的每个过程**显式接收** `ag`（`ensureProcess(ag)` / `ensureSession(ag, userId)`；模型与 prompt 超时分别调用共用协议层的 `applyAcpModel(host, ag, sid)` / `promptAcp(host, params, timeouts)`）——入口取一次、过程内不再读槽位，所以「握手中途换 agent」在结构上不可能发生。心跳与首帧超时也改为**每回合现算**（`firstFrameMs(ag)`、回合内的 `heartbeatMsValue`），此前它们 import 期定死，切到 DSH 会继续用旧值。
 
@@ -184,7 +184,7 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 
 ## 6.4 可配置的 agent（brain-agents.ts）
 
-大脑通过 ACP 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini → deepseek → qoder → cline` 探测已安装者）。**多数原生 ACP agent 可以零代码接入**（加 agent/环境变量）；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 §6.6）。
+大脑通过 ACP 驱动，未配置时默认 `auto`（按 `pi → kiro → opencode → gemini → deepseek → qoder → cline` 探测已安装者；pi 需适配器与 pi 本体都在 PATH 上）。**多数原生 ACP agent 可以零代码接入**（加 agent/环境变量）；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 §6.6）。
 
 ### AcpAgentPreset 与解析
 
@@ -204,7 +204,7 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 | `codex` | OpenAI Codex | 需适配器（官方维护） | ✅ 已内置/已实测（探针级 + 真机 E2E：worker 与 brain 通道均通；load/图片/set_mode/set_config_option ✅、stdio MCP ❌） | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**全局安装**；Windows 上是 `codex-acp.cmd`；免审批 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`，见 [接入-Codex](../接入-Codex.md)） |
 | `pi` | pi coding agent | 需适配器（社区 `pi-acp`） | ✅ 已内置/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务）；load/图片/工具调用 ✅、0 反向请求 | `pi-acp`（`npm i -g pi-acp`）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent` 并先登录）；`PI_CODING_AGENT_DIR` 沙箱、MCP 走 `<沙箱根>/mcp.json`、免审批无需开关；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动横幅（用户显式设过则保留），见 [接入-pi](../接入-pi.md) |
 
-两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不说 ACP，要起一个桥接进程）。`auto` 只在 6 个原生预设中探测（`kiro → opencode → gemini → deepseek → qoder → cline`）；三个适配器（`claude-code` / `codex` / `pi`）不参与（各自独立安装、各有认证，装在机器上不代表登录过，误选会让「装了但没登录」的机器静默换脑），只能显式选用。
+两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不说 ACP，要起一个桥接进程）。`auto` 探测 `pi → kiro → opencode → gemini → deepseek → qoder → cline`：`pi` 按用户指定排第一，但适配器 `pi-acp` 与 pi 本体都在 PATH 上才入选（探测阶段无法判断登录态）；另两个适配器（`claude-code` / `codex`）不参与（各自独立安装、各有认证，装在机器上不代表登录过，误选会让「装了但没登录」的机器静默换脑），只能显式选用。
 
 **内置预设默认免审批**（2026-10-30 起，各用自己官方的机制）：kiro `--trust-all-tools`、gemini `--approval-mode yolo --skip-trust`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`）、DSH `DSH_PERMISSION_MODE=danger-full-access`（`envDefaults`：daemon 进程同名变量优先，可收紧）、claude-code / codex 会话建立后 `session/set_mode`（`bypassPermissions` / `agent-full-access`；`WEMIND_ACP_SESSION_MODE=0` 关闭，会话回包的 `availableModes` 不含目标值时会跳过）、pi 无需任何开关（官方默认不逐次审批，没有要切的 `session/set_mode`）。宿主应答器仍默认**拒绝** `session/request_permission`（边缘 ask 规则才会触发；`WEMIND_ACP_AUTO_ALLOW=1` 逐次放行）。
 
@@ -216,7 +216,7 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 |----|------|------|
 | 环境变量 | `WEMIND_BRAIN` / `_BIN` / `_ARGS` / `_HOME_ENV` / `_SHELL` / `_INHERIT` / `_REAL_HOME` / `_INHERIT_DIRS` / `KIRO_CLI_BIN`；worker 侧 `WEMIND_WORKER_BRAIN` | 一次性覆盖（临时试别的 agent，别写进 profile） |
 | 账号配置 | `<数据目录>/brain.json`：`{ agent, bin?, args?, shell?, homeEnvVar?, model?, worker?: {…}, presets?: { <agent 名>: {…} } }` | **持久选择**，任何入口重启都复现 |
-| `auto` | 未配置时按 `kiro → opencode → gemini → deepseek → qoder → cline` 探测第一个可用 agent | 缺省兜底 |
+| `auto` | 未配置时按 `pi → kiro → opencode → gemini → deepseek → qoder → cline` 探测第一个可用 agent（pi 需适配器与本体都在 PATH 上） | 缺省兜底 |
 
 - **`presets` 段（1.2.0 新增）**：按**agent 名**保存启动覆盖（`--bin`/`--args`/`--shell`/`homeEnvVar`/`model`）。因为顶层那几个字段是「当前 agent 的覆盖」，切走再切回就会丢（典型：DSH 的 `--bin <绝对路径>`）——换 agent 时旧覆盖自动迁进 `presets[旧 agent]`，同一 agent 再次 `set` 时沿用未给出的字段。
 - **`worker` 段**：默认任务大脑（`{agent, bin?, args?, shell?, homeEnvVar?, model?}`，与顶层同字段；`model` 同样在会话建立/恢复后经 `session/set_config_option` 下发）。它也带 `presets` 查找上下文——`agentConfigFor("worker")` 会把顶层的 `presets` 带进 worker 段，否则「有 `worker.agent` 时 `presets[agent]` 查不到」、`--bin` 之类覆盖会静默失效。

@@ -1,6 +1,6 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-> **适用版本**：WeMind 1.3.0（`@wemind/cli` 1.3.0 已发布）｜ **最后核对**：2026-11-02 ｜ **状态**：内置 9 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**。
+> **适用版本**：WeMind 1.3.0（`@wemind/cli` 1.3.0 已发布）｜ **最后核对**：2026-11-03 ｜ **状态**：内置 9 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**。
 >
 > 本文说明如何把 WeMind daemon 的「大脑」从默认的 `auto`（优先 kiro）换成另一个 ACP agent。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 
@@ -100,7 +100,7 @@ agent：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
 追加：   WEMIND_BRAIN_EXTRA_ARGS  >  brain.json 的 extraArgs  >  presets[agent 名].extraArgs（拼在「参数」结果之后）
 ```
 
-- **`auto`（未配置时的默认）**：按 `kiro → opencode → gemini → deepseek → qoder → cline` 取第一个**二进制在 PATH 上可解析**的 agent；适配器类（`claude-code`/`codex`/`pi`）不参与（独立安装、各有认证，误选中会让「装了但没登录」的机器静默换脑；显式选用更安全）。
+- **`auto`（未配置时的默认）**：按 `pi → kiro → opencode → gemini → deepseek → qoder → cline` 取第一个**二进制在 PATH 上可解析**的 agent；`pi` 按用户指定排第一，适配器 `pi-acp` 与 pi 本体都在 PATH 上才入选（探测阶段无法判断登录态）；另两个适配器（`claude-code`/`codex`）不参与（独立安装、各有认证，误选中会让「装了但没登录」的机器静默换脑；显式选用更安全）。
 - 一个都没装 → daemon **启动即失败并说人话**（不再「跑起来、第一条消息才炸」），提示安装或 `wemind brain set`。
 
 ### 3.2 环境变量（一次性覆盖，优先级最高）
@@ -166,7 +166,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
 };
 ```
 
-> **适配器类不要加进 `AUTO_PROBE_ORDER`**：`claude-code` / `codex` / `pi` 都是显式选用（装好适配器 ≠ 已登录，参与探测会让「装了但没登录」的机器静默换脑）。原生 ACP 才追加到探测顺序末尾。
+> **适配器类默认不要加进 `AUTO_PROBE_ORDER`**：`claude-code` / `codex` 都是显式选用（装好适配器 ≠ 已登录，参与探测会让「装了但没登录」的机器静默换脑）。原生 ACP 才追加到探测顺序末尾。**唯一例外是 `pi`**：按用户指定排在第一位，`presetAvailable()` 同时检查适配器与 pi 本体都在 PATH 上；登录态仍无法在探测阶段判断。
 
 然后构建并选用（推荐写入磁盘持久）：
 
@@ -233,7 +233,7 @@ ACP agent 分两类，接入方式不同：
 
 > ⚠️ 9 个内置预设**都至少过了探针级实测**，但包名/参数/ACP 能力会随上游版本变化：**升级 agent 后按 §8 复验**，不要拿旧结论当当前事实。逐项：`kiro`/`opencode`/`deepseek`/`qoder`/`cline` 已真机长期使用；`gemini` 已过**探针级实测 + 真机 E2E**（0.66.0，2026-11-01：load/图片/MCP/yolo；brain 单轮、重启 `session/load`、热切换、worker；见 [接入-Gemini.md](接入-Gemini.md)）；`claude-code` 已过**探针级实测 + 真机微信单轮 E2E**（2026-10-31；重启续聊 / MCP / 任务待复测）；`codex` 已过**探针级实测 + 真机 E2E**（2026-11-01：worker 与 brain 通道均通、切脑回切已验；发图 / 冷重启待复测）；`pi` 已过**探针级实测 + 真机 E2E**（2026-11-01：brain 单轮、热切换、微信「任务 pi：…」派发）。
 >
-> `auto` 只探测 6 个原生预设（`kiro → opencode → gemini → deepseek → qoder → cline`）；三个适配器（`claude-code` / `codex` / `pi`）**不参与**（独立安装、各有认证，误选中会让「装了但没登录」的机器静默换脑），要显式指定：`wemind brain set|switch <agent 名>`、一次性的 `WEMIND_BRAIN=<agent 名>`，或微信「切换大脑 <agent 名>」。
+> `auto` 按 `pi → kiro → opencode → gemini → deepseek → qoder → cline` 探测；`pi` 排第一但适配器与本体都在 PATH 上才入选（登录态探测不出来）；另两个适配器（`claude-code` / `codex`）**不参与**（独立安装、各有认证，误选中会让「装了但没登录」的机器静默换脑），要显式指定：`wemind brain set|switch <agent 名>`、一次性的 `WEMIND_BRAIN=<agent 名>`，或微信「切换大脑 <agent 名>」。
 
 **适配器类的准备工作**：
 
@@ -354,7 +354,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 选择大脑（推荐，写入磁盘持久）：
   wemind brain set <agent 名|auto> [--bin X] [--args "…"] [--shell|--no-shell] [--model X|auto] [--restart]   # 写入 <数据目录>/brain.json
   wemind brain / wemind brain check                                 # 查看 / 真机自检
-  （未配置时默认 auto：按 kiro → opencode → gemini → deepseek → qoder → cline 探测已安装者）
+  （未配置时默认 auto：按 pi → kiro → opencode → gemini → deepseek → qoder → cline 探测已安装者；pi 需适配器与本体都在 PATH 上）
 
 一次性覆盖（仅本次启动的进程）：
   WEMIND_BRAIN_BIN=<二进制>

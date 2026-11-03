@@ -23,7 +23,7 @@ wemind list                          # 查看运行状态
 
 ### AI 大脑：能接什么 agent
 
-常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **9 个 agent 预设**：原生 ACP 的 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder` / `cline`（**未配置时按此顺序自动探测**；6 个都至少过了探针级实测（gemini 已通过真机 E2E，2026-11-01），kiro / opencode / deepseek / qoder / cline 另有长期真机使用），以及三个需适配器的 `claude-code` / `codex` / `pi`（`claude-code` 已探针级实测并跑通真机微信单轮、`codex` 已探针级实测 + 真机 E2E、`pi` 已探针级实测 + 真机 E2E（2026-11-01：brain、热切换、worker/微信任务）；只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
+常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **9 个 agent 预设**：需适配器的 `pi`（**未配置时第一优先探测**；适配器 `pi-acp` 与 pi 本体都在 PATH 上才入选，探测阶段无法判断登录态；已探针级实测 + 真机 E2E，2026-11-01：brain、热切换、worker/微信任务），原生 ACP 的 `kiro` / `opencode` / `gemini` / `deepseek`（DSH）/ `qoder` / `cline`（按此顺序接在 pi 之后；6 个都至少过了探针级实测（gemini 已通过真机 E2E，2026-11-01），kiro / opencode / deepseek / qoder / cline 另有长期真机使用），以及两个需适配器的 `claude-code` / `codex`（`claude-code` 已探针级实测并跑通真机微信单轮、`codex` 已探针级实测 + 真机 E2E；只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
 
 | 必要条件 | 说明 | 不满足怎么办 |
 | --- | --- | --- |
@@ -269,7 +269,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 mcp-server（可选）
 > 📦 **作为 `wemind` CLI 使用**：本 daemon 已发布为 **`@wemind/cli`**，装完得到 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`；常驻默认用自带后台守护进程，也可 `--runner pm2`）。`npm i -g @wemind/cli` 后即可全局使用；包名与命令名不同，`npx` 请写 `npx -y @wemind/cli`。发布与版本约定见 [`docs/发布-wemind-npm.md`](docs/发布-wemind-npm.md)；也可以按下文从源码运行。面向最终用户的一步步指引见 **[新手教程](docs/新手教程.md)**。
 
 `packages/wechat-daemon/` 提供一个独立 daemon：自己长轮询 iLink 收消息 →
-调 **常驻 ACP agent**（JSON-RPC over stdio；未配置时 `auto` 探测 kiro/opencode/gemini/deepseek/qoder/cline）当大脑生成回复 → 自动回发。
+调 **常驻 ACP agent**（JSON-RPC over stdio；未配置时 `auto` 按 pi → kiro → opencode → gemini → deepseek → qoder → cline 探测）当大脑生成回复 → 自动回发。
 进程常驻、原生多轮记忆，回复从 `agent_message_chunk` 流式拼接（天然无 ANSI/工具旁白）；
 带**存活检测**（进程不在自动重启）。运行时只依赖第三方 `qrcode`（登录画码时才加载），内核 `@wemind/wechat-ilink-core` 已内联进产物，不碰 MCP 那层，是一个完全独立、可单独运行的包。
 
@@ -428,7 +428,7 @@ brain 跑在独立的 `KIRO_HOME` 沙箱（`WECHAT_BRAIN_HOME`）里，**默认�
 
 ### 切换大脑 Agent（通用化）
 
-daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准输入输出）** 驱动，未配置时默认 `auto`（按 `kiro → opencode → gemini → deepseek → qoder → cline` 探测已安装者）。
+daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准输入输出）** 驱动，未配置时默认 `auto`（按 `pi → kiro → opencode → gemini → deepseek → qoder → cline` 探测已安装者；pi 需适配器与 pi 本体都在 PATH 上）。
 
 **能不能接：四个必要条件**（详见 [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md) §0）
 
@@ -467,7 +467,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 >
 > **Cline 已内置 agent（原生 ACP，3.0.74 实测）**：装 `npm i -g cline` 后 `wemind brain set cline` 即用 `cline --acp --auto-approve true` 当大脑；`providers.json` 登录态同步、`models.json` 模型目录同步（缺它会回退 `gpt-4o`）、`mcp.json` 文件式 MCP。**认证**：ACP 只自动恢复 `cline` / `cline-pass` / `openai-codex`；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER` + `CLINE_API_KEY`（父进程显式设了就不接管），通常无需手工配置。实测与限制见 **[docs/接入-Cline.md](docs/接入-Cline.md)**。
 >
-> **pi 已内置（探针级实测 + 真机 E2E，2026-11-01）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，Node ≥22）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 隔离沙箱（`settings.json` / `auth.json` / `models*.json` 原样同步，`skills/` junction、`AGENTS.md` 复制）；MCP 走 pi 自己的 `<沙箱根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动横幅用 pi 自己的 `quietStartup` 在沙箱里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入-pi.md](docs/接入-pi.md)**。
+> **pi 已内置（探针级实测 + 真机 E2E，2026-11-01）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，Node ≥22）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 隔离沙箱（`settings.json` / `auth.json` / `models*.json` 原样同步，`skills/` junction、`AGENTS.md` 复制）；MCP 走 pi 自己的 `<沙箱根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动横幅用 pi 自己的 `quietStartup` 在沙箱里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**在自动探测中排第一**（适配器与 pi 本体都在 PATH 上才入选）；探测阶段无法判断登录态，装好但没配好时请显式指定其它 agent。详见 **[docs/接入-pi.md](docs/接入-pi.md)**。
 
 ### 收发图片
 
@@ -607,4 +607,4 @@ daemon 的**内置预设默认免审批**（每个 agent 用自己官方的开�
 
 ---
 
-> **文档版本**：WeMind 1.3.0（`@wemind/cli` 1.3.0 已发布 / 1.2.0 上一版）｜ **最后核对**：2026-11-02 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。
+> **文档版本**：WeMind 1.3.0（`@wemind/cli` 1.3.0 已发布 / 1.2.0 上一版）｜ **最后核对**：2026-11-03 ｜ 代码以当前 `main` 为准；接入类结论请看对应文档的「实测/假设」标注。

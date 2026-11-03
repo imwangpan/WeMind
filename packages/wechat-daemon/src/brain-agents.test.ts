@@ -668,7 +668,7 @@ describe("resolveAgent auto 探测", () => {
     expect(problem).toMatch(/@earendil-works\/pi-coding-agent/);
   });
 
-  it("pi-acp 已装但 pi 本体缺失 → 提前报运行时缺失（不等 session/new）", () => {
+  it("pi-acp 已装但 pi 本体缺失 → 提前报运行时缺失（不等 session/new），auto 探测也跳过", () => {
     clearVars();
     const onlyAdapter = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-pi-acp-"));
     try {
@@ -681,19 +681,35 @@ describe("resolveAgent auto 探测", () => {
       const problem = agentProblem(ag) ?? "";
       expect(problem).toMatch(/运行时「pi」/);
       expect(problem).toMatch(/@earendil-works\/pi-coding-agent/);
+      expect(presetAvailable("pi")).toBe(false);
     } finally {
       fs.rmSync(onlyAdapter, { recursive: true, force: true });
     }
   });
 
-  it("auto 探测把新 agent 追加在末尾（当前 cline 最后），不影响老用户", () => {
+  it("pi 排在 auto 探测第一位；其余预设保持原相对顺序（cline 最后）", () => {
+    expect(AUTO_PROBE_ORDER[0]).toBe("pi");
     expect(AUTO_PROBE_ORDER[AUTO_PROBE_ORDER.length - 1]).toBe("cline");
     expect(AUTO_PROBE_ORDER.indexOf("cline")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("qoder"));
     expect(AUTO_PROBE_ORDER.indexOf("qoder")).toBeGreaterThan(AUTO_PROBE_ORDER.indexOf("deepseek"));
   });
 
-  it("pi 是适配器，不参与 auto 探测（装好适配器 ≠ 已登录）", () => {
-    expect(AUTO_PROBE_ORDER).not.toContain("pi");
+  it("auto 在 pi 适配器与 pi 本体都在时优先选中 pi", () => {
+    clearVars();
+    const onlyPi = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-pi-"));
+    try {
+      for (const f of ["pi-acp", "pi-acp.cmd", "pi", "pi.cmd"])
+        fs.writeFileSync(path.join(onlyPi, f), "");
+      process.env.PATH = onlyPi;
+      withoutFallbackBins(() => {
+        const ag = resolveAgent();
+        expect(ag.requestedKey).toBe("auto");
+        expect(ag.name).toBe("pi");
+        expect(ag.available).toBe(true);
+      });
+    } finally {
+      fs.rmSync(onlyPi, { recursive: true, force: true });
+    }
   });
 
   it("auto 只有一个 cline 时也能选中它", () => {

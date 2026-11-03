@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02（`@wemind/cli@1.3.0` 已发布；`@wemind/wechat-mcp@1.0.5` 已发布）
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-03（`@wemind/cli@1.3.0` 已发布；`@wemind/wechat-mcp@1.0.5` 已发布）
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -128,7 +128,7 @@ poller（长轮询，不被大脑阻塞）
 | **反向请求** | agent 发给 client 的请求（`session/request_permission`、`fs/*`、`terminal/*`）；不应答会挂起 |
 | **committed-only** | agent 只在消息提交后发正文（非逐 token），如 DSH 官方 ACP |
 | **brain.json** | 账号级大脑选择，`<数据目录>/brain.json`；`wemind brain set` 写入 |
-| **auto** | 未配置时的探测顺序：`kiro → opencode → gemini → deepseek → qoder → cline` |
+| **auto** | 未配置时的探测顺序：`pi → kiro → opencode → gemini → deepseek → qoder → cline`（pi 需适配器与本体都在 PATH 上） |
 
 ### 4.1 中英术语对照（写作口径）
 
@@ -208,10 +208,10 @@ poller（长轮询，不被大脑阻塞）
 | `deepseek` agent 已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验 |
 | `qoder` agent 已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0–M3 全部已验：发图、动态 MCP、冷重启 `session/load`、worker 中断续跑、`memory/` junction 继承 |
 | `cline` agent 已内置 | ✅ 代码/实测（3.0.74） | `cline --acp --auto-approve true` + `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 沙箱（`configSubdir: "cline"`）；`providers.json` 同步；`models.json` 模型目录同步（缺它会回退 gpt-4o）；**自定义 provider 由 `credentialEnv`（`clineCredentialEnv()`）从 `providers.json` 自动派生 `CLINE_PROVIDER`+`CLINE_API_KEY`，父进程显式值优先**；`loadSession`/硬杀后 `session/load` 已验证；**图片 ❌**（广告 `image:true` 但 ACP `prompt` 只保留 text → `images:false`）；ACP `mcpServers` 不生效→文件式 MCP；`session/close` 无 |
-| `gemini` 预设已内置 | ✅ 代码/探针级实测 + 真机 E2E（0.66.0，2026-11-01） | `gemini --acp --approval-mode yolo --skip-trust`；`GEMINI_CLI_HOME` 指向沙箱根、配置目录 `<它>/.gemini`（`configSubdir: ".gemini"`）；MCP 走配置目录 `settings.json` 的 `mcpServers`（探针实测 `probe_ping` 可调用）；`settingsBase` 只剥 `mcpServers`（保留 model/security，按 JSONC 解析）+ `.env` / `oauth_creds.json` / `google_accounts.json` 凭据同步 + `skills/`/`GEMINI.md` 继承；`loadSession: true`、图片 ✅、工具调用 0 反向请求；**`load` 返回后会异步回放历史** → `replayOnLoad` 先等帧安静；`session/set_config_option` ❌（`--model` 走 `modelArg`）；在 `AUTO_PROBE_ORDER` 第 3 位。见 [接入-Gemini.md](../接入-Gemini.md) |
+| `gemini` 预设已内置 | ✅ 代码/探针级实测 + 真机 E2E（0.66.0，2026-11-01） | `gemini --acp --approval-mode yolo --skip-trust`；`GEMINI_CLI_HOME` 指向沙箱根、配置目录 `<它>/.gemini`（`configSubdir: ".gemini"`）；MCP 走配置目录 `settings.json` 的 `mcpServers`（探针实测 `probe_ping` 可调用）；`settingsBase` 只剥 `mcpServers`（保留 model/security，按 JSONC 解析）+ `.env` / `oauth_creds.json` / `google_accounts.json` 凭据同步 + `skills/`/`GEMINI.md` 继承；`loadSession: true`、图片 ✅、工具调用 0 反向请求；**`load` 返回后会异步回放历史** → `replayOnLoad` 先等帧安静；`session/set_config_option` ❌（`--model` 走 `modelArg`）；在 `AUTO_PROBE_ORDER` 第 4 位（pi 第一）。见 [接入-Gemini.md](../接入-Gemini.md) |
 | `claude-code` 预设已内置（探针级实测 + 真机微信单轮 E2E） | ✅ 探针级实测 + 真机微信单轮 E2E 已通过（2026-10-31；重启续聊 / MCP / 任务待复测） | 全局 `npm i -g @agentclientprotocol/claude-agent-acp`（Node ≥22；`binWin=claude-agent-acp.cmd` + `shell: true`）+ `CLAUDE_CONFIG_DIR` 沙箱（`~/.claude.json` 一并隔离）+ `mcpViaAcp`（目录 `~/.claude.json`；`initialize` 只声明 http/sse，**stdio 实测可用**）+ `sessionMode bypassPermissions`（适配器不解析 CLI flag）；`loadSession: true`、`sessionCapabilities.resume/close/delete/fork/list`；**不在** `AUTO_PROBE_ORDER`（独立安装、各有认证），只能显式选用。见 `docs/接入-ClaudeCode.md` |
 | `codex` 预设存在且已实测 | ✅ 代码/实测（探针 + 真机 E2E） | 适配器 `@agentclientprotocol/codex-acp` 2.5.0（**全局安装**，口径同 claude-code）：`load`/图片/`set_mode`/`set_config_option(model)` ✅、工具调用 0 反向请求；**stdio MCP ❌**（`mcpCapabilities.acp=false`）→ 不开 `mcpViaAcp`；心跳 60s；**没有沙箱配置目录**（只有 cwd 指向沙箱根）；**不在** `AUTO_PROBE_ORDER`，只能显式选用；真机 E2E：worker 与 brain 通道均通过（见 [接入-Codex.md](../接入-Codex.md)） |
-| `pi` 预设已内置 | ✅ 代码/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务） | 社区适配器 `pi-acp`（**全局安装**）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent`，先登录/配好模型；只装适配器会被 `agentProblem()` 提前拒绝）；`PI_CODING_AGENT_DIR` 沙箱根、`settings.json`/`auth.json`/`models*.json` 同步、`skills/` junction + `AGENTS.md` 复制；MCP 走 `<沙箱根>/mcp.json`（kiro 格式，`pi mcp list` 实测）、`mcpViaAcp: false`（pi-acp 只存不读）；免审批无需开关；`loadSession: true`/图片 ✅/0 反向请求；**不在** `AUTO_PROBE_ORDER`；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动横幅（`## Context` / `## Skills`，用户显式设过则保留）；worker 沙箱在每次派发前按该任务的 agent 重备（`worker-pool.acquire` → `ensureWorkerHome(ag)`，否则派到非默认 agent 时拿空配置跑）；沙箱隔离不完整（pi-acp 从真实 `homedir()` 读 session-map/prompts/skills）。见 [接入-pi.md](../接入-pi.md) |
+| `pi` 预设已内置 | ✅ 代码/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务） | 社区适配器 `pi-acp`（**全局安装**）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent`，先登录/配好模型；只装适配器会被 `agentProblem()` 提前拒绝）；`PI_CODING_AGENT_DIR` 沙箱根、`settings.json`/`auth.json`/`models*.json` 同步、`skills/` junction + `AGENTS.md` 复制；MCP 走 `<沙箱根>/mcp.json`（kiro 格式，`pi mcp list` 实测）、`mcpViaAcp: false`（pi-acp 只存不读）；免审批无需开关；`loadSession: true`/图片 ✅/0 反向请求；**在** `AUTO_PROBE_ORDER` **第一位**（适配器与 pi 本体都在 PATH 上才入选；探测阶段无法判断登录态）；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动横幅（`## Context` / `## Skills`，用户显式设过则保留）；worker 沙箱在每次派发前按该任务的 agent 重备（`worker-pool.acquire` → `ensureWorkerHome(ag)`，否则派到非默认 agent 时拿空配置跑）；沙箱隔离不完整（pi-acp 从真实 `homedir()` 读 session-map/prompts/skills）。见 [接入-pi.md](../接入-pi.md) |
 | Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |
 | Qoder 可免 `--bin` 绝对路径 | ✅ 代码 | `fallbackBinPaths` 兜底 `~/.qoder/bin/qodercli/qodercli.exe`；auto 探测仍只看 PATH |
 | Qoder 用户记忆落点 | ✅ 实测 | `~/.qoder/memory/`；已 junction 进沙箱（写入回流真实目录）。`skills/agents/commands`/`AGENTS.md` 在 1.1.78 不存在 |

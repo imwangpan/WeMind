@@ -1,6 +1,6 @@
 # 接入 OpenAI Codex（设计文档）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / `session/load` 恢复 / 图片 / `set_mode` / `set_config_option(model)`）；**真机 E2E 已通过**（2026-11-01：worker 通道任务 #21 + brain 通道微信单轮，回复均送达）。
+> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-03 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / `session/load` 恢复 / 图片 / `set_mode` / `set_config_option(model)`）；**真机 E2E 已通过**（2026-11-01：worker 通道任务 #21 + brain 通道微信单轮，回复均送达）。
 >
 > 实测环境：Windows 11、Node 24.21.0、`@agentclientprotocol/codex-acp` **2.5.0**（官方维护）、Codex CLI 0.165–0.166。适配器还在 2.x，升级后请按 §2 重新跑探针。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](ai/recipes/add-acp-agent.md) · [接入-Qoder.md](接入-Qoder.md)（原生 ACP 样板）
@@ -90,7 +90,7 @@ codex: {
 }
 ```
 
-- **不在 `AUTO_PROBE_ORDER`**：适配器类一律不参与自动探测（`npx` 几乎总在 PATH 上，会被误选）。要用得显式：`wemind brain set|switch codex`、一次性 `WEMIND_BRAIN=codex`，或微信「切换大脑 codex」。
+- **不在 `AUTO_PROBE_ORDER`**：适配器类默认不参与自动探测（`npx` 几乎总在 PATH 上，会被误选）；`pi` 是唯一例外（排第一，且要求本体也在 PATH 上）。要用得显式：`wemind brain set|switch codex`、一次性 `WEMIND_BRAIN=codex`，或微信「切换大脑 codex」。
 - 沙箱：适配器不读 `KIRO_HOME` 之类，故无 `homeEnvVar`；WeMind 只把 **cwd** 指到 `BRAIN_HOME`（隔离工作目录），Codex 自己的 `~/.codex` 照常使用（用户日常配置原样生效）。**凭据不同步进沙箱**——Codex 的登录态在 `~/.codex`，适配器直接用（§4.9 的密钥纪律：WeMind 不碰用户的 auth.json）。
 - **免审批的两道保险**：`envDefaults.INITIAL_AGENT_MODE`（适配器建会话时的初始模式）与 `session/set_mode {modeId:"agent-full-access"}`（会话建立/恢复后补切）。`applySessionMode` 会核对会话回包的 `modes.availableModes`——codex 的回包含 `agent-full-access`（实测），所以会真的切；想关掉设 `WEMIND_ACP_SESSION_MODE=0/false/off`。
 
