@@ -1,12 +1,14 @@
 # WeMind CLI 化设计（可发布的 `wemind` 命令）
 
-> 状态：设计定稿（2026-06-24）；**已实现**（2026-10 复核：`wemind login/start/stop/list/task/daemon`、自带后台守护进程与 pm2 双 runner 均已落地）。唯一未落地项：`wemind service install` 自动化（见 §10 阶段 2，按需排期）。
+> **历史文档（2026-11-04 标注）**：本文记录当时的方案设计与实施过程，**不作为现行实现的说明**；现行行为以 [README.md](../../README.md)、[发布-wemind-npm.md](../发布与变更记录/发布-wemind-npm.md) 与源码为准。文中与现行不一致之处已在正文标注。
+
+> 状态：设计定稿（2026-06-24）；**已实现**（2026-10 复核：`wemind login/start/stop/list/task/daemon`、自带后台守护进程与 pm2 双 runner 均已落地）。唯一未落地项（截至设计定稿时；后续状态见 README 与发布文档）：`wemind service install` 自动化（见 §10 阶段 2，按需排期）。
 >
-> **命名更新（2026-10-26）**：发布包名定为 **`@wemind/cli`**（收进已注册的 `@wemind` scope），**命令名仍为 `wemind`**；因此 `npx` 需写全包名 `npx -y @wemind/cli`，`npm i -g` 后命令不变。详见 [`docs/发布-wemind-npm.md`](发布-wemind-npm.md)。
+> **命名更新（2026-10-26）**：发布包名定为 **`@wemind/cli`**（收进已注册的 `@wemind` scope），**命令名仍为 `wemind`**；因此 `npx` 需写全包名 `npx -y @wemind/cli`，`npm i -g` 后命令不变。详见 [`docs/发布与变更记录/发布-wemind-npm.md`](../发布与变更记录/发布-wemind-npm.md)。
 
 ## 1. 目标
 
-把「完整应用」（原 `@wemind/wechat-daemon` 包）做成**可发布的 `wemind` 命令**（npm 包名 `@wemind/cli`）：用户 `npm i -g @wemind/cli` 即可使用，**全程不碰源码、三平台通用**。
+把「完整应用」（原 `@wemind/wechat-daemon` 包，当时的包名，现为 `@wemind/cli`）做成**可发布的 `wemind` 命令**（npm 包名 `@wemind/cli`）：用户 `npm i -g @wemind/cli` 即可使用，**全程不碰源码、三平台通用**。
 
 对外形成**两个发布入口**：
 

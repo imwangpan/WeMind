@@ -1,9 +1,10 @@
 # 接入 Cline CLI（原生 ACP 实测）
 
-> **状态**：M0 能力探针 **已完成 ✅** ｜ M1 agent + 沙箱 **已完成 ✅** ｜ M2 协议层 **无改动** ｜ M3 真机 E2E **部分完成**（ACP 侧已验；微信收发待真机）。
+> **状态**：M0 能力探针 **已完成 ✅** ｜ M1 agent + 沙箱 **已完成 ✅** ｜ M2 协议层 **无改动** ｜ M3 **已完成 ✅**（含微信真机 E2E，2026-10-31）。
+> **实测范围**：Cline CLI 3.0.74（M0 探针 + 微信真机 E2E，2026-10-31，见 §2 / §5）｜ **最后核对**：2026-11-04（本次仅修硬错误）。
 > **实测环境**：Windows 11 / Node 24 / **Cline CLI 3.0.74（npm 全局安装）** / WeMind 1.3.0。
-> **最后核对**：2026-10-30 ｜ **分支**：`feat/cline-acp` ｜ 结论**仅适用于 cline 3.0.74**。
-> **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](ai/recipes/add-acp-agent.md) · [接入-Qoder.md](接入-Qoder.md)（同款「配置目录指到子目录」样板） · [接入-OpenCode.md](接入-OpenCode.md)（文件式 MCP 样板）
+> **最后核对**：2026-10-31 ｜ **分支**：`feat/cline-acp`（当时的特性分支，功能已并入 main）｜ 结论**仅适用于 cline 3.0.74**。
+> **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](../ai/recipes/add-acp-agent.md) · [接入-Qoder.md](接入-Qoder.md)（同款「配置目录指到子目录」样板） · [接入-OpenCode.md](接入-OpenCode.md)（文件式 MCP 样板）
 
 ---
 
@@ -175,7 +176,7 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 任务 cline：把这个仓库的 README 里过期的版本号找出来
 ```
 
-- **brain**：`CLINE_DIR=<账号>/brain-home/cline`，默认 MCP 空，`加载 <名>` 后写 `cline/mcp.json` 并重启 ACP 进程。
+- **brain**：`CLINE_DIR=<账号>/brain-home/cline`，默认 MCP 空，`加载 <名>` 后写 `cline/mcp.json`，**激活集真变了才重启 ACP 进程**（`daemon-control.ts` 只在 `changed` 时调 `restartForMcpChange()`）。
 - **worker**：`CLINE_DIR=<账号>/worker-home/cline`，全量 MCP（除 `wechat`/`disabled`），同样走 `mcp.json`。
 - **热切换**：`wemind brain switch cline` 会启动新 ACP 进程并等 `session/new` 成功后才写 `brain.json`；失败退回旧大脑。
 

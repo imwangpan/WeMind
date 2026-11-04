@@ -1,9 +1,10 @@
-# 接入 OpenCode（设计文档）
+# 接入 OpenCode（设计与实测）
 
-> **状态**：M1 冒烟验证 **已完成 ✅** · M2（agent + 沙箱）**已实现 ✅**；M3+ 见 §3.6。
+> **状态**：M1 冒烟验证 **已完成 ✅** · M2（agent + 沙箱）**已实现 ✅**；M3+ 见 §3.6。（**当时 M1/M2 计划口径**；后续里程碑已全部落地，详见 §3.6 里程碑表。）
+> **实测范围**：OpenCode v2.0.29（M1 探针；2.0.32 复测 `session/delete` / `load` 回放 / 并行任务；M2–M4 实现见 §3.4 / §3.6）｜ **最后核对**：2026-11-04（本次仅修硬错误）。
 > **实测环境**：Windows 11 / Node ≥20 / OpenCode **v2.0.29** / WeMind 1.0.1。
-> **最后核对**：2026-10-30 ｜ 本文结论**基于 OpenCode v2.0.29**；2026-10-29 在 2.0.32 上复测了 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](ai/recipes/run-e2e.md)）；其它 agent 的能力（load/image/MCP）可能不同。
-> **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](repowiki/06-ACP-大脑与沙箱.md)。
+> **最后核对**：2026-10-30 ｜ 本文结论**基于 OpenCode v2.0.29**；2026-10-29 在 2.0.32 上复测了 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）；其它 agent 的能力（load/image/MCP）可能不同。
+> **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](../repowiki/06-ACP-大脑与沙箱.md)。
 
 ---
 
@@ -11,7 +12,7 @@
 
 - WeMind 有**两种接入形态**：① `@wemind/wechat-mcp`（OpenCode 当 MCP 客户端消费微信工具）；② daemon（OpenCode 当**常驻 ACP 大脑**）。
 - 本文重点做 **形态②**：用 `wemind brain set opencode`（或一次性 `WEMIND_BRAIN=opencode`）把 daemon 的大脑换成 `opencode acp`。
-- **M1 已实测**：`initialize` / `session/new` / `session/prompt` / `session/load`（自愈）/ 工具调用全部可用，且 **OpenCode 全程不向客户端发反向请求**（无 `fs/*`、无 `session/request_permission`）——现有 `acp-brain.ts` 协议层**不需要改动**。
+- **M1 已实测**：`initialize` / `session/new` / `session/prompt` / `session/load`（自愈）/ 工具调用全部可用，且 **OpenCode 全程不向客户端发反向请求**（无 `fs/*`、无 `session/request_permission`）——协议层（`acp-connection.ts`）**不需要改动**（帧/超时/模型与模式已统一到该模块，brain 与 worker 共用）。
 - 剩余工作量集中在 **agent + 沙箱**：OpenCode 的配置目录环境变量、配置文件名与 **MCP 配置格式**都与 kiro 不同，需要按 agent 适配。
 - 预计 M2（agent + brain 沙箱）为主工作量；M3（记忆继承 + worker）顺势复用。
 
@@ -230,7 +231,7 @@ npm run build; npm run daemon
 | M1 | 冒烟：`opencode acp` 可被现有 ACP 客户端驱动，确认无反向请求 | ✅ 完成 |
 | M2 | Step 1–3：agent + 多 env 注入 + 沙箱 strategy（brain 默认空、动态 MCP） | ✅ 完成 |
 | M3 | Step 4–6：记忆/技能继承 + worker 改造 + 模型注入 | ✅ 完成 |
-| M4 | Step 7–8 + 文档：Windows 兼容、验证脚本、更新 [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) 与 README 的 OpenCode 片段 | ✅ 文档/脚本就绪；**worker 侧**任务结果推送已于 2026-10-29 实测（见 [run-e2e §7.3](ai/recipes/run-e2e.md)）；**对话大脑**的微信端到端待跑 |
+| M4 | Step 7–8 + 文档：Windows 兼容、验证脚本、更新 [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) 与 README 的 OpenCode 片段 | ✅ 文档/脚本就绪；**worker 侧**任务结果推送已于 2026-10-29 实测（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）；**对话大脑**的微信端到端待跑 |
 
 **实现清单（本次改动）**：
 
@@ -243,7 +244,7 @@ npm run build; npm run daemon
 | `packages/wechat-daemon/src/acp-brain.ts` / `worker-acp.ts` | 注入配置里的 `env`（`%HOME%` → 沙箱） |
 | `packages/wechat-daemon/src/agent-mcp.test.ts` / `brain-agents.test.ts`（新） | 单测 |
 | `scripts/acp-probe.mjs` | M1 回归 harness（当时的 `acp-smoke.mjs`/`acp-smoke2.mjs` 只硬编码 `opencode acp`，已并入通用探针后删除） |
-| `README.md` / `docs/接入其它-ACP-Agent.md` | 文档更新 |
+| `README.md` / `docs/接入方案/接入其它-ACP-Agent.md` | 文档更新 |
 
 ---
 

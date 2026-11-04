@@ -16,7 +16,7 @@
 | 命令 | `wemind`（`bin: { "wemind": "dist/cli.js" }`） |
 | 首发版本 / 时间 | `1.0.0` / 2026-10-26 |
 | 发布方式 | 首次：本地 `npm publish` + 浏览器二次确认（EOTP）；后续：**GitHub Actions Trusted Publishing** |
-| CI 工作流 | [`.github/workflows/wemind-publish.yml`](../.github/workflows/wemind-publish.yml)（`imwangpan/WeMind`，`push main` 触发，包已存在版本则跳过） |
+| CI 工作流 | [`.github/workflows/wemind-publish.yml`](../../.github/workflows/wemind-publish.yml)（`imwangpan/WeMind`，`push main` 触发，包已存在版本则跳过） |
 | 包内容 | 5 个文件：`dist/cli.js`、`dist/cli.js.map`、`README.md`、`package.json`、`LICENSE` |
 | 安装包体积 | 解包后 ~1.0 MB（tarball 332 kB） |
 | 运行时依赖 | 仅 `qrcode@^1.5.4`（**懒加载**，只有 `wemind login` 会加载）；内核已内联 |
@@ -139,6 +139,8 @@ git push main（CI）                  → 一次发布 = 构建产物 + prepack
 export const CLI_PID_MARKERS: string[][] = [["wemind", "cli.js"], ["run-daemon.ps1"]];
 ```
 
+（当时值；现为三组，见 AGENTS.md §6）
+
 覆盖三种安装方式（注释里写清）：
 
 | 场景 | 命令行 | 命中原因 |
@@ -212,7 +214,7 @@ check-version（包名+版本一致性）→ npm ci → lint → format:check �
 2. **版本号单一来源**：版本号只存在于 `packages/wechat-daemon/package.json`（`src/version.ts` 运行时读它）。升版本用 `npm run release:patch|minor|major`，`check-version` 会校验 lock 同步、并阻止源码回退成硬编码。
 3. **包名与命令名解耦，且都要守**：包名 `@wemind/cli`、命令 `wemind`。改任何一处都要同时看 README、`npx` 示例、CI 的 workspace 参数、`check-version.mjs`、`version.test.ts`。
 4. **内核改动要重新发布 `@wemind/cli`**：内核是内联的，`packages/wechat-ilink-core/**` 变更会触发本 workflow（paths 已包含）。
-5. **`engines.node: ">=20"`** 是承诺：构建 target 也是 `node20`；DSH CLI 这类大脑需要 node ≥22，那是**用户侧大脑**的要求，不写进本包 `engines`。
+5. **`engines.node: ">=20.19.0"`** 是承诺：构建 target 也是 `node20`；DSH CLI 这类大脑需要 node ≥22，那是**用户侧大脑**的要求，不写进本包 `engines`。
 6. **`@wemind/wechat-mcp` 与 `@wemind/cli` 各自独立版本**，互不引用。
 7. **sourcemap 必须随包**：`tsdown` 开了 `sourcemap: true`，`prepack` 守卫会检查 `.map` 存在且被 `files` 覆盖。
 
@@ -293,12 +295,12 @@ npx -y @wemind/cli list                   # 验证「npx 写全包名」这条�
 
 已装用户升级：`npm i -g @wemind/cli@latest`，然后 `wemind stop <账号> && wemind start <账号>`——**正在运行的 daemon 不会自动换代码**。
 
-### 6.7 发布成功后：同步「版本声明」与 CHANGELOG 日期
+### 6.7 发布成功后：同步「最后核对」日期、发布状态与 CHANGELOG 日期
 
-这一步不在 npm 包里、也没有任何自动检查会拦，但漏了会立刻变成事实错误（「1.2.0 待发布」而它已经发了）。逐个改：
+这一步不在 npm 包里、也没有任何自动检查会拦，但漏了会立刻变成事实错误（文档与发布版本对不上）。逐个改：
 
-- `AGENTS.md` 头部「适用版本 / 待发布」与文档索引那一行；`docs/ai/README.md`、`docs/repowiki/01-项目概览.md` 的版本状态；
-- `README.md` 页脚「文档版本」；本文件头部「当前线上版本」与 §0 速查（版本、包内容文件数、体积、日期）；
+- `AGENTS.md` 头部与 `README.md` 页脚的「最后核对」日期；`docs/ai/README.md` 的「最后核对」；
+- 本文件头部「当前线上版本」与 §0 速查（版本、包内容文件数、体积、日期）；`docs/repowiki/01-项目概览.md` 的已发布版本状态；
 - `CHANGELOG.md` 的段头日期用**实际发布日**（写这一节时可能还没发）。
 
 ---

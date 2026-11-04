@@ -6,7 +6,9 @@
 
 ## 接入
 
-无需全局安装，在 MCP 客户端配置里用 `npx` 即可：
+在 MCP 客户端配置里，让客户端通过 `npx -y @wemind/wechat-mcp` 按需拉起即可（MCP 生态惯例，下方两份配置即此写法）：无需预先安装，`npx` 由客户端在自己的环境里解析包；不带版本号时会解析 `latest`，要固定版本可在包名后写 `@版本号`。
+
+若想**先安装**到全局（固定版本、离线运行或在终端里直接敲），执行 `npm i -g @wemind/wechat-mcp` 得到 `wemind-mcp` 命令（Windows 为 `wemind-mcp.cmd`）；对应的配置改法见本节末尾。
 
 **Claude Desktop / Cursor / 其它**
 
@@ -33,6 +35,8 @@
 }
 ```
 
+> **想用全局安装后的命令**：先 `npm i -g @wemind/wechat-mcp`，再把上面两份配置里的 `command` 换成 `wemind-mcp`（Windows 写 `wemind-mcp.cmd`）。GUI 客户端（Claude Desktop 等）启动时的 PATH 常不含 npm 全局 bin 目录，若报 `spawn ENOENT`，用 `npm root -g` 查出全局根、把 `command` 写成该 bin 的**绝对路径**即可；也可以继续用默认的 `npx` 写法。
+
 ## 工具
 
 | 工具                  | 说明                                                      | 代码 description（简要转述，非逐字原文）                                                                                                                                                                |
@@ -45,6 +49,8 @@
 | `send_typing`         | 打字状态（`typing` 显示 / `cancel` 取消）                 | Show or cancel the "typing..." indicator for a WeChat user. … Re-send status `typing` every 15-20 seconds while still working, because the indicator expires on its own.                                |
 
 > 上表为 description 的**简写转述**（`…` 表示省略），不是逐字原文；完整、准确的原文见 `src/index.ts`。工具说明**一律英文**（MCP 生态惯例 + 模型对 `MUST` / `wait=true` 这类强制约束的英文原文遵循度更高）；用户能看到的提示文案在 `tools/*.ts` 的 `message` 字段，均为中文。
+>
+> 表中 `check_qrcode_status` 的 description 里 `npx -y @wemind/cli login` 是源码 description 的原文——不安装、临时运行 CLI 时这样写；全局安装后等价的命令是 `wemind login`。
 
 ## 使用流程
 
@@ -147,7 +153,8 @@ git push origin main
 
 ```powershell
 npm view @wemind/wechat-mcp version           # 应显示新版本号
-npx -y @wemind/wechat-mcp                    # 应打印 Connected / Not logged in 后挂在 stdio（Ctrl+C 退出）
+wemind-mcp                                   # 全局安装后的命令；应打印 Connected / Not logged in 后挂在 stdio（Ctrl+C 退出）
+npx -y @wemind/wechat-mcp                    # 等价的 npx 写法，不安装直接运行
 ```
 
 ### 常见坑

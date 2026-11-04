@@ -1,6 +1,6 @@
 # 接入 Claude Code（ACP 适配器）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / 强杀后 `session/load` / stdio MCP / `bypassPermissions`）；**真机微信单轮 E2E 已通过**（2026-10-31）；重启续聊 / MCP 加载 / 任务派发待真机复测。
+> **最后核对**：2026-11-02 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / 强杀后 `session/load` / stdio MCP / `bypassPermissions`）；**真机微信单轮 E2E 已通过**（2026-10-31）；重启续聊 / MCP 加载 / 任务派发待真机复测。
 >
 > 实测环境：Windows 11、Node 24.21.0、`@agentclientprotocol/claude-agent-acp` **0.99.1**、Claude Code **2.1.314**。适配器是 pre-1.0，升级后请按 §8 重新跑探针。
 
@@ -112,7 +112,7 @@ claude-agent-acp --version     # 0.99.1
 
 ## 4. 探针实测（2026-10-30/31，claude-agent-acp 0.99.1）
 
-用 [`scripts/acp-probe.mjs`](../scripts/acp-probe.mjs)（另起一个临时 `CLAUDE_CONFIG_DIR`，不碰真实配置）：
+用 [`scripts/acp-probe.mjs`](../../scripts/acp-probe.mjs)（另起一个临时 `CLAUDE_CONFIG_DIR`，不碰真实配置）：
 
 | 项目 | 结果 |
 |---|---|
@@ -207,13 +207,13 @@ node scripts/acp-probe.mjs
 - 强杀后 `session/load` 是否还能答出 `PINEAPPLE`；
 - 有 MCP 需求时用 `ACP_TEST_MCP='[{"name":"probe","command":"node","args":["<最小 MCP server>"],"env":[]}]'` 验证 stdio。
 
-结论有变化时，同一次提交更新 `brain-agents.ts` 的预设注释、`docs/接入其它-ACP-Agent.md` §5 与本文。
+结论有变化时，同一次提交更新 `brain-agents.ts` 的预设注释、`docs/接入方案/接入其它-ACP-Agent.md` §5 与本文。
 
 ---
 
 ## 9. 参考
 
 - 适配器：[`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)（旧包 `@zed-industries/claude-code-acp` 已弃用）
-- 通用 ACP 指南：[`docs/接入其它-ACP-Agent.md`](接入其它-ACP-Agent.md)
-- 探针：[`scripts/acp-probe.mjs`](../scripts/acp-probe.mjs)
-- 配方：[`docs/ai/recipes/add-acp-agent.md`](ai/recipes/add-acp-agent.md)
+- 通用 ACP 指南：[`docs/接入方案/接入其它-ACP-Agent.md`](接入其它-ACP-Agent.md)
+- 探针：[`scripts/acp-probe.mjs`](../../scripts/acp-probe.mjs)
+- 配方：[`docs/ai/recipes/add-acp-agent.md`](../ai/recipes/add-acp-agent.md)

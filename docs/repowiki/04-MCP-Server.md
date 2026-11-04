@@ -2,7 +2,7 @@
 
 > 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. daemon](05-daemon.md)
 
-MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `@wemind/cli`（命令 `wemind`），见 [`docs/发布-wemind-npm.md`](../发布-wemind-npm.md)）。
+MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `@wemind/cli`（命令 `wemind`），见 [`docs/发布与变更记录/发布-wemind-npm.md`](../发布与变更记录/发布-wemind-npm.md)）。
 
 ## 4.1 模块结构
 
@@ -113,7 +113,9 @@ sequenceDiagram
 
 ## 4.7 接入示例
 
-该子包已发布到 npm，直接用 `npx`（无需 clone / 构建）：
+该子包已发布到 npm。在 MCP 客户端配置里默认用 `npx -y @wemind/wechat-mcp` 按需拉起（无需 clone / 构建，下面的配置即此写法）；若想**先安装**到全局，用 `npm i -g @wemind/wechat-mcp`，得到 `wemind-mcp` 命令（Windows 为 `wemind-mcp.cmd`）。
+
+GUI 客户端（Claude Desktop / Cursor 等）的 PATH 常不含 npm 全局 bin，Windows 上全局 bin 是 `.cmd`，直接写 `wemind-mcp` 反而容易 `spawn ENOENT`，所以下面的配置用 `npx` 写法。若已全局安装且客户端能找到全局 bin，也可以把 `command` 改成 `wemind-mcp`；PATH 找不到时用 `npm root -g` 定位写绝对路径，或直接沿用 `npx` 写法。
 
 ```json
 // Claude Desktop / Cursor: claude_desktop_config.json / ~/.cursor/mcp.json
@@ -144,7 +146,7 @@ sequenceDiagram
 }
 ```
 
-> 设计意图：`@wemind/wechat-mcp` 是独立发布的**自包含子包**（tsdown 单文件、内核已内联），已于 2026-10 发布到公共 registry（`@wemind/wechat-mcp`，最新版本见 npm）——`npx -y @wemind/wechat-mcp` 即可接入（该包只有一个 bin `wemind-mcp`，npx 按「唯一 bin」规则自动解析）。
+> 设计意图：`@wemind/wechat-mcp` 是独立发布的**自包含子包**（tsdown 单文件、内核已内联），已于 2026-10 发布到公共 registry（`@wemind/wechat-mcp`，最新版本见 npm）——`npx -y @wemind/wechat-mcp` 即可接入（该包只有一个 bin `wemind-mcp`，npx 按「唯一 bin」规则自动解析）；也可先 `npm i -g @wemind/wechat-mcp` 安装成 `wemind-mcp` 命令（Windows 为 `wemind-mcp.cmd`）再在配置里指向它。不带版本号时解析 latest，首次或版本更新时需联网；要固定版本/离线可先全局安装，或写 `@版本号`。客户端 PATH 找不到全局 bin 时用 `npm root -g` 定位写绝对路径，或直接沿用 `npx` 写法。
 
 ## 4.8 打包发布（tsdown.config.ts）
 

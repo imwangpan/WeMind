@@ -1,16 +1,16 @@
 # 使用指南：远程任务（worker）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
+> **最后核对**：2026-11-02
 >
 > 让**漫长任务在后台受控运行**，在它「需要你决策」（列了方案让你选）或「中断」时通知你，你回一句它就接着干。可以**同时开多条**（默认上限 3，各自一个独立进程）。
 > 两个入口管同一批任务：**微信**（人离开电脑时）＋ **本地终端**（人在电脑前时）。
-> 背后原理见 [方案C-MVP-远程human-in-the-loop.md](方案C-MVP-远程human-in-the-loop.md)、[方案C-受控ACP工作机设计.md](方案C-受控ACP工作机设计.md)、[本地双入口-命令派发与查看回复.md](本地双入口-命令派发与查看回复.md)。
+> 背后原理见 [方案C-MVP-远程human-in-the-loop.md](../设计文档/方案C-MVP-远程human-in-the-loop.md)、[方案C-受控ACP工作机设计.md](../设计文档/方案C-受控ACP工作机设计.md)、[本地双入口-命令派发与查看回复.md](../机制与协议说明/本地双入口-命令派发与查看回复.md)。
 
 ---
 
 ## 0. 前提
 
-> `wemind` 是已发布的命令（`npm i -g @wemind/cli`，包名与命令名不同，临时用写 `npx -y @wemind/cli …`）；仍从源码跑时，把下文所有 `wemind` 替换为 `node packages/wechat-daemon/dist/cli.js`（如 `node packages/wechat-daemon/dist/cli.js list`）。
+> `wemind` 是已发布的命令（`npm i -g @wemind/cli`，包名与命令名不同；不想全局安装时也可临时运行 `npx -y @wemind/cli …`，必须写全包名）；仍从源码跑时，把下文所有 `wemind` 替换为 `node packages/wechat-daemon/dist/cli.js`（如 `node packages/wechat-daemon/dist/cli.js list`）。
 
 - daemon 正在运行（且已扫码登录某账号）。检查：
   ```bash

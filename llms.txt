@@ -22,15 +22,15 @@
 
 ## Agent integration
 
-- [docs/接入其它-ACP-Agent.md](docs/接入其它-ACP-Agent.md): generic ACP brain guide.
-- [docs/接入-OpenCode.md](docs/接入-OpenCode.md): OpenCode integration, with real M1 measurements.
-- [docs/接入-DeepSeek.md](docs/接入-DeepSeek.md): DeepSeek/DSH evaluation, 0.2.1-rc.2 measurements, plan.
-- [docs/接入-Qoder.md](docs/接入-Qoder.md): Qoder CLI integration — preset, sandbox `settingsBase`, `.auth` credential sync, M0–M3 measurements (images, dynamic MCP, worker interrupt/resume, memory inheritance).
-- [docs/接入-Cline.md](docs/接入-Cline.md): Cline CLI integration — native `cline --acp`, sandbox `CLINE_DIR`/`CLINE_MCP_SETTINGS_PATH`, providers.json sync, custom-provider auth (`CLINE_PROVIDER`+`CLINE_API_KEY`), 3.0.74 measurements.
-- [docs/接入-ClaudeCode.md](docs/接入-ClaudeCode.md): Claude Code via `@agentclientprotocol/claude-agent-acp` (global install, Node ≥22) — `CLAUDE_CONFIG_DIR` sandbox, `mcpViaAcp`, `bypassPermissions`, probe results plus a real WeChat single-turn E2E (2026-10-31); restart-continuity/MCP/task re-checks pending.
-- [docs/接入-Codex.md](docs/接入-Codex.md): OpenAI Codex via the official `@agentclientprotocol/codex-acp` adapter — probe results plus real E2E on both worker and brain channels (2026-11-01); stdio MCP unsupported, no sandbox config dir (cwd only).
-- [docs/接入-Gemini.md](docs/接入-Gemini.md): Gemini CLI native ACP (`--acp --approval-mode yolo --skip-trust`, 0.66.0) — `.gemini` sandbox, settings-based MCP, `replayOnLoad`, `--model` startup arg; probe + real E2E (single turn, restart `session/load`, hot switch, worker) on 2026-11-01.
-- [docs/接入-pi.md](docs/接入-pi.md): pi coding agent via the community `pi-acp` adapter (plus the `pi` runtime) — `PI_CODING_AGENT_DIR` sandbox, `mcp.json` MCP, `quietStartup`; probe + real E2E (brain, hot switch, WeChat task) on 2026-11-01.
+- [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md): generic ACP brain guide.
+- [docs/接入方案/接入-OpenCode.md](docs/接入方案/接入-OpenCode.md): OpenCode integration, with real M1 measurements.
+- [docs/接入方案/接入-DeepSeek.md](docs/接入方案/接入-DeepSeek.md): DeepSeek/DSH evaluation, 0.2.1-rc.2 measurements, plan.
+- [docs/接入方案/接入-Qoder.md](docs/接入方案/接入-Qoder.md): Qoder CLI integration — preset, sandbox `settingsBase`, `.auth` credential sync, M0–M3 measurements (images, dynamic MCP, worker interrupt/resume, memory inheritance).
+- [docs/接入方案/接入-Cline.md](docs/接入方案/接入-Cline.md): Cline CLI integration — native `cline --acp`, sandbox `CLINE_DIR`/`CLINE_MCP_SETTINGS_PATH`, providers.json sync, custom-provider auth (`CLINE_PROVIDER`+`CLINE_API_KEY`), 3.0.74 measurements.
+- [docs/接入方案/接入-ClaudeCode.md](docs/接入方案/接入-ClaudeCode.md): Claude Code via `@agentclientprotocol/claude-agent-acp` (global install, Node ≥22) — `CLAUDE_CONFIG_DIR` sandbox, `mcpViaAcp`, `bypassPermissions`, probe results plus a real WeChat single-turn E2E (2026-10-31); restart-continuity/MCP/task re-checks pending.
+- [docs/接入方案/接入-Codex.md](docs/接入方案/接入-Codex.md): OpenAI Codex via the official `@agentclientprotocol/codex-acp` adapter — probe results plus real E2E on both worker and brain channels (2026-11-01); stdio MCP unsupported, no sandbox config dir (cwd only).
+- [docs/接入方案/接入-Gemini.md](docs/接入方案/接入-Gemini.md): Gemini CLI native ACP (`--acp --approval-mode yolo --skip-trust`, 0.66.0) — `.gemini` sandbox, settings-based MCP, `replayOnLoad`, `--model` startup arg; probe + real E2E (single turn, restart `session/load`, hot switch, worker) on 2026-11-01.
+- [docs/接入方案/接入-pi.md](docs/接入方案/接入-pi.md): pi coding agent via the community `pi-acp` adapter (plus the `pi` runtime) — `PI_CODING_AGENT_DIR` sandbox, `mcp.json` MCP, `quietStartup`; probe + real E2E (brain, hot switch, WeChat task) on 2026-11-01.
 - [docs/ai/recipes/add-acp-agent.md](docs/ai/recipes/add-acp-agent.md): add a preset + capability adaptations.
 - [docs/ai/recipes/add-mcp.md](docs/ai/recipes/add-mcp.md): MCP catalog/activation/transport.
 - [docs/ai/recipes/debug-daemon.md](docs/ai/recipes/debug-daemon.md): triage daemon/brain failures.
@@ -39,9 +39,9 @@
 ## Install
 
 - `npm i -g @wemind/cli` → command `wemind` (package name ≠ command name).
-- `npx -y @wemind/wechat-mcp` → MCP server (binary `wemind-mcp`).
-- `npx -y @wemind/cli <cmd>` works too; plain `npx wemind` does NOT (name mismatch).
-- Release process: [docs/发布-wemind-npm.md](docs/发布-wemind-npm.md).
+- `npx -y @wemind/wechat-mcp` → MCP server (binary `wemind-mcp`); the usual MCP setup, the client launches it on demand. Alternatively `npm i -g @wemind/wechat-mcp` and use the global `wemind-mcp` binary.
+- `npx -y @wemind/cli <cmd>` runs the CLI once without installing (without a version pin it resolves `latest`); plain `npx wemind` does NOT (name mismatch).
+- Release process: [docs/发布与变更记录/发布-wemind-npm.md](docs/发布与变更记录/发布-wemind-npm.md).
 
 ## Code map
 
@@ -64,7 +64,7 @@
 - `pwsh -NoProfile -File scripts/check-docs.ps1`
 - `node scripts/acp-probe.mjs` (env: `ACP_BIN`, `ACP_ARGS`, `ACP_SHELL`, `ACP_HOME_ENV`, `ACP_HOME`, `ACP_MODEL`)
 
-## Hard facts (2026-11-02)
+## Hard facts (2026-11-03)
 
 - Published: `@wemind/wechat-mcp` and `@wemind/cli`. Never publish `@wemind/wechat-ilink-core` (private, inlined).
 - Package name ≠ command name: `@wemind/cli` installs the `wemind` binary. `npx` must use the package name.
@@ -77,13 +77,16 @@
 - Qoder CLI 1.1.78 has load/resume/images/MCP and needs `.auth/user` + `.auth/machine_id` synced into the sandbox; its sandbox MCP lives in `settings.json.mcpServers`.
 - Cline CLI 3.0.74 has native ACP (`cline --acp`), `loadSession` (context survives a hard kill via `session/load`), but **no image input** (it advertises `image:true` yet ACP `prompt` keeps only text blocks, so the preset is `images:false`). Its ACP auth only restores `cline`/`cline-pass`/`openai-codex`; custom providers require `CLINE_PROVIDER`+`CLINE_API_KEY`. It ignores ACP `session/new.mcpServers` — MCP goes through `CLINE_MCP_SETTINGS_PATH` (`{mcpServers}`), and `session/close` is not implemented.
 - Claude Code needs the official adapter `@agentclientprotocol/claude-agent-acp` (global install, Node ≥22; Windows `claude-agent-acp.cmd`). Its sandbox uses `CLAUDE_CONFIG_DIR` (also isolates `~/.claude.json`), MCP goes via ACP `mcpServers`, and approvals are bypassed with `session/set_mode bypassPermissions`. Probe-verified plus a real WeChat single-turn E2E; restart-continuity/MCP/task re-checks pending.
-- Codex needs the official adapter `@agentclientprotocol/codex-acp` (global install; Windows `codex-acp.cmd`). It has no sandbox config dir — only cwd points at the sandbox root; `load`, images, `set_mode`, and `set_config_option(model)` work, but stdio MCP does not (`mcpCapabilities.acp=false`), so the preset keeps `mcpViaAcp: false`. Probe-verified plus real E2E on both worker and brain channels (2026-11-01); image / cold-restart / switch-back re-checks pending.
+- Codex needs the official adapter `@agentclientprotocol/codex-acp` (global install; Windows `codex-acp.cmd`). It has no sandbox config dir — only cwd points at the sandbox root; `load`, images, `set_mode`, and `set_config_option(model)` work, but stdio MCP does not (`mcpCapabilities.acp=false`), so the preset keeps `mcpViaAcp: false`. Probe-verified plus real E2E on both worker and brain channels (2026-11-01); image / cold-restart re-checks pending.
 - Gemini is a native ACP preset (`gemini --acp --approval-mode yolo --skip-trust`, 0.66.0). Sandbox is `GEMINI_CLI_HOME` with config under `<sandbox>/.gemini`; MCP lives in that `settings.json` (`settingsBase` strips only `mcpServers`), and credentials mirror `.env` plus Google OAuth files. `session/set_config_option` is unsupported (`modelArg: "--model"`); `session/load` returns before it finishes replaying history, so `replayOnLoad` waits for frame quiet. Probe + real E2E (single turn, restart `session/load` without history leak, hot switch, worker) passed 2026-11-01.
 - pi needs both `npm i -g pi-acp` and `npm i -g @earendil-works/pi-coding-agent` (the preset's `requiresBins: ["pi"]` reports a missing runtime early). Sandbox is `PI_CODING_AGENT_DIR` at the sandbox root; MCP is pi's own `<sandbox>/mcp.json` (kiro shape, `mcpViaAcp: false`); no approval switch needed. Probe + real E2E (brain single turn, hot switch both ways, WeChat `任务 pi：…`) passed 2026-11-01. `pi-acp` still reads `~/.pi/pi-acp/session-map.json`, `~/.pi/agent/prompts`, `~/.agents/skills` from the real home.
 - Qoder's user memory lives in `~/.qoder/memory/` and is junctioned into the sandbox (brain writes land in the real dir); `skills/agents/commands/AGENTS.md` do not exist in 1.1.78. Qoder Desktop may register MCPs in `~/.qoder/mcp-router.json` instead of `settings.json`, so those are intentionally invisible to `列出 MCP`.
 - The repo has no `Brain` interface; `acp-brain.ts` exports `askBrain`/`newSession`/`restart`.
 - iLink consecutive send limit is ~10; progress messages consume it.
 - Windows `.cmd`/`.bat` agents must be launched through a shell; `binWin` must match the real filename (e.g. `dsh.cmd`).
+- kiro's ACP engine (v2/v3) is auto-detected: for v3 WeMind drops the v2-only `--trust-all-tools`/`-a`/`--trust-tools` flags, adds `--agent-engine v3`, and writes allow-all rules to sandbox `settings/permissions.yaml`; `_meta.kiro.policyPreset` was probed and does not work.
+- DSH `isolateSessions` writes a `--patch` file pointing the session root to `agent-sessions/deepseek/<role>`, keeping its session store away from kiro/pi flat files (avoids `unsupported flat-file layout`).
+- `wemind brain` uses `acpModelHint()` to warn when `- id: acp`'s model is no longer in the provider catalog (hint only; the real profile is never modified).
 
 ## License
 

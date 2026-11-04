@@ -1,6 +1,6 @@
 # 接入 Gemini CLI（原生 ACP，探针 + 真机实测）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
+> **最后核对**：2026-11-02 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
 >
 > **状态**：✅ 内置预设、ACP 探针全部通过（`initialize` / `session/new` / prompt / 图片 / 工具调用 0 反向请求 / 强杀后 `session/load`）；MCP 与沙箱已实测；`wemind brain check` 握手通过（约 3.0s）；**微信真机 E2E 已通过（2026-11-01：单轮、杀 daemon 后 `session/load`、热切换、worker 任务）**。
 >

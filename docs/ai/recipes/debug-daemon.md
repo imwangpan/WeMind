@@ -1,6 +1,6 @@
 # 配方：排查 daemon 不回复 / 大脑异常
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
+> **最后核对**：2026-11-02
 >
 > 先跑 [`scripts/doctor.ps1`](../../../scripts/doctor.ps1) 收集环境事实，再按症状定位。不要一上来改代码。
 
@@ -141,7 +141,7 @@ wemind brain check
 ### 3.3 ACP 启动/握手失败
 
 ```powershell
-# 手动起一次，确认它能说 ACP
+# 手动起一次，确认它能实现 ACP
 wemind brain check
 
 # 或直接看 spawn 参数
@@ -298,6 +298,6 @@ wemind start <key>
 - [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)（槽位 / 热切换 / 会话管理 / 进程身份）
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md)（进程池 / 任务表）
 - [`docs/repowiki/10-部署与运维.md`](../../repowiki/10-部署与运维.md)
-- [`docs/本地双入口-命令派发与查看回复.md`](../../本地双入口-命令派发与查看回复.md)（控制桥协议）
+- [`docs/机制与协议说明/本地双入口-命令派发与查看回复.md`](../../机制与协议说明/本地双入口-命令派发与查看回复.md)（控制桥协议）
 - [`docs/ai/recipes/run-e2e.md`](run-e2e.md)（验收与待实测清单）
-- [`docs/daemon-常驻原理.md`](../../daemon-常驻原理.md)
+- [`docs/部署与运维/daemon-常驻原理.md`](../../部署与运维/daemon-常驻原理.md)

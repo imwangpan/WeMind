@@ -1,6 +1,6 @@
 # 接入 pi coding agent（经 pi-acp 适配器，探针 + 真机 E2E）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02 ｜ **实测环境**：Windows 11 + Node 24 + `pi-acp@0.0.34` + pi `1.4.0`
+> **最后核对**：2026-11-02 ｜ **实测环境**：Windows 11 + Node 24 + `pi-acp@0.0.34` + pi `1.4.0`
 >
 > **状态**：✅ 内置预设、ACP 探针全绿（`initialize` / `session/new` / prompt / 图片 / 强杀后 `session/load` / 工具调用 0 反向请求）；**微信真机 E2E 已通过（2026-11-01：brain 单轮、热切换 pi↔codex、微信「任务 pi：…」派发）**。
 >

@@ -1,6 +1,6 @@
 # 配方：端到端验收
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
+> **最后核对**：2026-11-02
 >
 > 目标：用最短路径证明「微信 → daemon → ACP 大脑 → 微信」真的通，而不是只看编译通过。
 > 前置：已构建、已登录一个 bot、`allowFrom` 包含你的微信（登录时自动写入，通常无需手动加）、至少一个 ACP agent 可用。
@@ -12,7 +12,7 @@
 | 层 | 命令 | 证明什么 |
 |---|---|---|
 | L1 编译/单测 | `npm run build && npm run typecheck && npm test` | 代码不崩 |
-| L2 大脑可用 | `node .../cli.js brain check <key>` | 二进制存在 + 能说 ACP（initialize/session-new） |
+| L2 大脑可用 | `node .../cli.js brain check <key>` | 二进制存在 + 能实现 ACP（initialize/session-new） |
 | L3 ACP 冒烟 | `node scripts/acp-probe.mjs`（env 指定 agent） | prompt / update / load|resume / 反向请求 |
 | L4 微信单轮 | 发一条消息，看 `prompt ok` + 收到回复 | iLink + daemon + brain 全链路 |
 | L5 多轮/自愈 | 杀 daemon → 再起 → 追问上一轮 | session 恢复 |
@@ -250,7 +250,7 @@ MCP
 
 **④ 任务上限**：把 `WEMIND_MAX_WORKERS` 调成 2，派第三条。
 
-期望：**派发时**即被拒并提示上限（不是静默排队）；已跑的两条不受影响。**CLI 的答复必须是那句拒绝原因**（`⚠️ 任务 #3 没起得来：…上限…`），不能报「已派发」——这条答复由 daemon 在 `acquire` 之后写进 `task-out/<命令 id>.json`（1.2.0 补的回结果通道，见 `docs/本地双入口-命令派发与查看回复.md` §3.1b）；`task-reply 9 "…"` 回复一个不存在的编号时同理，应回「没有 #9 号任务」而不是「已发送」。若 daemon 是**旧版本**（不写答复），CLI 会退回「已发送…」并附一句「没等到 daemon 答复」——这也是预期行为，不是故障。
+期望：**派发时**即被拒并提示上限（不是静默排队）；已跑的两条不受影响。**CLI 的答复必须是那句拒绝原因**（`⚠️ 任务 #3 没起得来：…上限…`），不能报「已派发」——这条答复由 daemon 在 `acquire` 之后写进 `task-out/<命令 id>.json`（1.2.0 补的回结果通道，见 `docs/机制与协议说明/本地双入口-命令派发与查看回复.md` §3.1b）；`task-reply 9 "…"` 回复一个不存在的编号时同理，应回「没有 #9 号任务」而不是「已发送」。若 daemon 是**旧版本**（不写答复），CLI 会退回「已发送…」并附一句「没等到 daemon 答复」——这也是预期行为，不是故障。
 
 **⑤ 任务中断续跑**：派一条长任务 → 跑到一半 `taskkill /PID <daemon> /T /F`（或 `wemind stop <key>`）→ 重启 daemon。
 
@@ -298,7 +298,7 @@ MCP
 | 4 | **多任务并行推送到微信**：opencode + qoder 两条任务并行、结果都送达，**没有观察到限流型 `ret=-2`**。真机上出现的 `-2` 全部属于「daemon 重启后、用户下一条消息之前」的旧 `context_token`（见下方 7.4）——那条已修。 |
 | 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 wrapper+daemon+worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
 | 6 | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。 |
-| 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑已实测（2026-10-27，1.1.78：`session/load ok`，STEP-A/STEP-B 产物齐全，见 `docs/接入-Qoder.md` M3-3）。 |
+| 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑已实测（2026-10-27，1.1.78：`session/load ok`，STEP-A/STEP-B 产物齐全，见 `docs/接入方案/接入-Qoder.md` M3-3）。 |
 | 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 广告 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**广告 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 预设 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进沙箱（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
 
 ### 7.4 真机踩到的坑：重启后旧 `context_token`（2026-10-29 已修）
@@ -375,11 +375,11 @@ wemind brain set kiro --restart <key>   # 老写法：写入磁盘 + 重启 daem
 
 ## 9. 参考
 
-- [`docs/新手教程.md`](../../新手教程.md)
-- [`docs/使用指南-远程任务（worker）.md`](../../使用指南-远程任务（worker）.md)（多任务、编号、续跑）
+- [`docs/使用指南/新手教程.md`](../../使用指南/新手教程.md)
+- [`docs/使用指南/使用指南-远程任务（worker）.md`](../../使用指南/使用指南-远程任务（worker）.md)（多任务、编号、续跑）
 - [`docs/repowiki/05-daemon.md`](../../repowiki/05-daemon.md)
 - [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)（槽位 / 热切换 / 会话管理 / 进程身份）
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md)（进程池 / 任务编号）
-- [`docs/本地双入口-命令派发与查看回复.md`](../../本地双入口-命令派发与查看回复.md)（控制桥）
+- [`docs/机制与协议说明/本地双入口-命令派发与查看回复.md`](../../机制与协议说明/本地双入口-命令派发与查看回复.md)（控制桥）
 - [`docs/ai/recipes/debug-daemon.md`](debug-daemon.md)
 - [`scripts/acp-probe.mjs`](../../../scripts/acp-probe.mjs)

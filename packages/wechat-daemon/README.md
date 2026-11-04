@@ -11,10 +11,10 @@
 ```bash
 npm i -g @wemind/cli     # 安装后得到 wemind 命令
 wemind version           # → wemind 1.3.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
-
-# 不安装、一次性运行（注意是包名 @wemind/cli，不是 wemind）
-npx -y @wemind/cli list
+wemind list              # 查看账号与运行状态
 ```
+
+不想全局安装、只想临时跑一次时：因为包名 ≠ 命令名，必须写全包名 `npx -y @wemind/cli <子命令>`（如 `npx -y @wemind/cli list`）。
 
 要求：**Node.js >= 20.19**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / `gemini` / 桌面端 `dsh` / `qodercli` / `cline` 等；未配置时自动探测 `opencode → cline → qoder → gemini → deepseek → kiro`；适配器类 `claude-code` / `codex` / `pi` 不参与探测，要显式 `wemind brain set|switch`）。Gemini CLI 用 `GEMINI_CLI_HOME` 指向沙箱根（它的配置目录是 `<沙箱>/.gemini`），MCP 与设置同在 `settings.json`，凭据会随沙箱同步（API key 用户的 `.env`，Google 登录用户的 `oauth_creds.json` / `google_accounts.json`）。kiro CLI 的 v2 / v3 引擎会自动识别（`--agent-engine` → `settings/cli.json` 的 `acp.agentEngine` → CLI 主版本 ≥3，最后一项是假设/待实测；`acp --help` 说明两者都没设时默认 v2）；v3 不需要也不能带 `--trust-all-tools`，免审批由沙箱 `settings/permissions.yaml` 承担（真实设置已有则原样保留）。
 
@@ -30,7 +30,7 @@ wemind stop <账号> && wemind start <账号>   # 已在运行的 daemon 不会�
 ```bash
 wemind login --label 工作号 --start   # ① 终端里出二维码，微信扫码 → 自动归档 + 启动常驻
 wemind list                          # ② 看账号与运行状态
-wemind brain check                   # ③ 验证大脑能说 ACP（initialize + session/new 握手；失败退出码 1）
+wemind brain check                   # ③ 验证大脑能实现 ACP（initialize + session/new 握手；失败退出码 1）
 ```
 
 之后在微信里随便发一句话，就该收到回复。日志在 `~/.wemind/<账号>/daemon.log`。
@@ -90,12 +90,12 @@ wemind brain check                   # ③ 验证大脑能说 ACP（initialize +
 ## 文档
 
 - 完整文档：<https://github.com/imwangpan/WeMind>
-- 新手一步步教程：[docs/新手教程.md](https://github.com/imwangpan/WeMind/blob/main/docs/新手教程.md)
-- 发布与版本规则：[docs/发布-wemind-npm.md](https://github.com/imwangpan/WeMind/blob/main/docs/发布-wemind-npm.md)
-- AI 协作者入口：[AGENTS.md](https://github.com/imwangpan/WeMind/blob/main/AGENTS.md)
-- 接入其它 ACP agent：[docs/接入其它-ACP-Agent.md](https://github.com/imwangpan/WeMind/blob/main/docs/接入其它-ACP-Agent.md)
-- Qoder 接入：[docs/接入-Qoder.md](https://github.com/imwangpan/WeMind/blob/main/docs/接入-Qoder.md)
-- Daemon 常驻原理：[docs/repowiki/10-部署与运维.md](https://github.com/imwangpan/WeMind/blob/main/docs/repowiki/10-部署与运维.md)
+- 新手一步步教程：[docs/使用指南/新手教程.md](../../docs/使用指南/新手教程.md)
+- 发布与版本规则：[docs/发布与变更记录/发布-wemind-npm.md](../../docs/发布与变更记录/发布-wemind-npm.md)
+- AI 协作者入口：[AGENTS.md](../../AGENTS.md)
+- 接入其它 ACP agent：[docs/接入方案/接入其它-ACP-Agent.md](../../docs/接入方案/接入其它-ACP-Agent.md)
+- Qoder 接入：[docs/接入方案/接入-Qoder.md](../../docs/接入方案/接入-Qoder.md)
+- Daemon 常驻原理：[docs/repowiki/10-部署与运维.md](../../docs/repowiki/10-部署与运维.md)
 
 ## 维护者：发布新版本
 

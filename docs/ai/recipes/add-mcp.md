@@ -1,6 +1,6 @@
 # 配方：新增 / 调试 MCP 挂载
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
+> **最后核对**：2026-11-02
 >
 > 目标：让 brain 能在微信里通过「加载/卸载 MCP」动态获得工具，同时不破坏隔离、不引入 `wechat` 回环。
 
@@ -119,7 +119,7 @@ MCP                 # 列出可选与已激活
 
 看 `~/.wemind/<账号>/daemon.log`：
 
-- `applySandbox` 后应出现 ACP 重启：`acp exited` → `spawn ...` → `initialized` → `session/load|resume`；
+- 仅当回复里 `changed=true`（激活集真变了）时，`applySandbox` 后才出现 ACP 重启：`acp exited` → `spawn ...` → `initialized` → `session/load|resume`；重复加载已激活项或卸载未激活项都不重启；
 - 如果 MCP 启动失败，kiro/opencode 通常在下一次 ACP 启动时报错；DSH 的 `session/new` 会回滚整个会话。
 
 ---
@@ -139,7 +139,7 @@ MCP                 # 列出可选与已激活
 
 ## 4. 安全
 
-- brain 默认免审批（内置预设各用自己 agent 的机制，见 `brain-agents.ts` 与 `docs/接入其它-ACP-Agent.md` §5）；**加载一个 MCP = 对登录者（唯一能发消息的人）开放该工具的全部能力**。
+- brain 默认免审批（内置预设各用自己 agent 的机制，见 `brain-agents.ts` 与 `docs/接入方案/接入其它-ACP-Agent.md` §5）；**加载一个 MCP = 对登录者（唯一能发消息的人）开放该工具的全部能力**。
 - `allowFrom` 是**兜底**发件人闸门（默认拒绝，正常只含登录者一个 userId），不要为了省事关掉；平台本身只投递登录者的消息，这个白名单防的是发送范围变化/别的入口。
 - worker 继承全量 MCP，风险更高；不要把 worker 的 cwd 指到敏感目录。
 - `wechat` 永久禁止：同一 token 长轮询会与 daemon 抢消息/回环。
@@ -160,5 +160,5 @@ MCP                 # 列出可选与已激活
 ## 6. 参考
 
 - [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md) §6.3
-- [`docs/接入-OpenCode.md`](../../接入-OpenCode.md) §3.4 Step 3
-- [`docs/接入-DeepSeek.md`](../../接入-DeepSeek.md) §5.3 M3
+- [`docs/接入方案/接入-OpenCode.md`](../../接入方案/接入-OpenCode.md) §3.4 Step 3
+- [`docs/接入方案/接入-DeepSeek.md`](../../接入方案/接入-DeepSeek.md) §5.3 M3

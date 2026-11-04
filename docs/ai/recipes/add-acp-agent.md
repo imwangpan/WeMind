@@ -1,6 +1,6 @@
 # 配方：接入一个新的 ACP Agent
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
+> **最后核对**：2026-11-02
 >
 > 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)。
 
@@ -59,7 +59,7 @@ node scripts/acp-probe.mjs
 
 > 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
 >
-> **适配器类 agent（CLI 本身不说 ACP）**：第 1 项填适配器的**全局安装**产物（`npm i -g <适配器包>`，如 `claude-agent-acp` / `codex-acp` / `pi-acp`），**不要**把 `npx -y <包>` 写进预设——daemon 常驻、每条 worker 任务都起进程，npx 每次要问 registry/冷缓存现下（离线不可用）、版本随 latest 漂移。同时把安装命令加进 `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`，让「找不到适配器」的报错直接给出可粘贴的命令。**适配器还依赖其它运行时**（如 `pi-acp` 内部 spawn `pi`）时，给预设加 `requiresBins: ["pi"]`——`agentProblem()` 会提前报「运行时缺失」，不要等 `session/new` 抛适配器内部错误。样板见 [`docs/接入-ClaudeCode.md`](../../接入-ClaudeCode.md) 与 [`docs/接入-pi.md`](../../接入-pi.md)。
+> **适配器类 agent（CLI 本身不实现 ACP）**：第 1 项填适配器的**全局安装**产物（`npm i -g <适配器包>`，如 `claude-agent-acp` / `codex-acp` / `pi-acp`），**不要**把 `npx -y <包>` 写进预设——daemon 常驻、每条 worker 任务都起进程，npx 每次要问 registry/冷缓存现下（离线不可用）、版本随 latest 漂移。同时把安装命令加进 `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`，让「找不到适配器」的报错直接给出可粘贴的命令。**适配器还依赖其它运行时**（如 `pi-acp` 内部 spawn `pi`）时，给预设加 `requiresBins: ["pi"]`——`agentProblem()` 会提前报「运行时缺失」，不要等 `session/new` 抛适配器内部错误。样板见 [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) 与 [`docs/接入方案/接入-pi.md`](../../接入方案/接入-pi.md)。
 
 ---
 
@@ -98,10 +98,10 @@ acme: {
 
 同时：
 
-- **原生 ACP** 才把该 agent 追加到 `AUTO_PROBE_ORDER` 末尾（不要插到 kiro/opencode 前面，避免老用户被动换大脑）；**适配器类不要加**（各自独立安装、各有认证，装好不等于登录过，参与探测会让「装了但没登录」的机器静默换脑）——`claude-code` / `codex` / `pi` 都不在探测顺序里；
+- **原生 ACP** 才按实测启动耗时把新原生 agent 插入 `AUTO_PROBE_ORDER` 的合适位置；**适配器类不要加**（各自独立安装、各有认证，装好不等于登录过，参与探测会让「装了但没登录」的机器静默换脑）——`claude-code` / `codex` / `pi` 都不在探测顺序里；
 - `AcpAgentPreset` / `ResolvedAgent` 透传新字段；
 - `brain-agents.test.ts` 加断言；
-- `docs/接入其它-ACP-Agent.md` §5 agent 表加一行。
+- `docs/接入方案/接入其它-ACP-Agent.md` §5 agent 表加一行。
 
 > **1.2.0 起，加 agent 不必再"挑角色"**：同一个 agent 同时可用于对话大脑与任务 worker（`resolveAgentFor(cfg, role)`），加完立刻可以
 > `wemind brain switch acme` 热切换、也可以在微信里 `任务 acme：…` 指定它干活——两者都不需要改代码、不需要重启。
@@ -143,7 +143,7 @@ wemind brain check
 | `session/load\|resume` 返回后仍异步回放历史 | 预设加 `replayOnLoad: true`：恢复后先等帧流安静（`acp-quiet.ts`，200ms 静默窗口、最多 3s）再提问，否则旧历史会被拼进本轮答复 |
 | MCP 走 ACP | `session/new` / `session/resume` 传 `mcpServers`（`mcpViaAcp`）；catalog 按 agent 自己的来源 |
 
-> `acp-brain.ts` 与 `worker-acp.ts` 是两份独立实现；**协议改动必须两边同步**，否则 brain 能跑、worker 挂。
+> `acp-brain.ts` 与 `worker-acp.ts` 的协议层统一在 `acp-connection.ts`，改一处 brain 与 worker 两边生效；进程生命周期与会话持久化仍各自实现。
 
 ---
 
@@ -189,11 +189,11 @@ wemind brain check
 
 ## 7. 参考
 
-- [`docs/接入-OpenCode.md`](../../接入-OpenCode.md) — 原生 ACP 的实测样板
-- [`docs/接入-DeepSeek.md`](../../接入-DeepSeek.md) — 缺 load、`image:false`、committed-only 的反例
-- [`docs/接入-ClaudeCode.md`](../../接入-ClaudeCode.md) — 需适配器的样板（全局安装、`CLAUDE_CONFIG_DIR` 沙箱、`mcpViaAcp`、`sessionMode`）
-- [`docs/接入-pi.md`](../../接入-pi.md) — 适配器 + 运行时依赖（`requiresBins`）、文件式 MCP（`mcp.json`）、无审批开关的样板
-- [`docs/接入其它-ACP-Agent.md`](../../接入其它-ACP-Agent.md) — 通用 ACP 指南
+- [`docs/接入方案/接入-OpenCode.md`](../../接入方案/接入-OpenCode.md) — 原生 ACP 的实测样板
+- [`docs/接入方案/接入-DeepSeek.md`](../../接入方案/接入-DeepSeek.md) — 缺 load、`image:false`、committed-only 的反例
+- [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) — 需适配器的样板（全局安装、`CLAUDE_CONFIG_DIR` 沙箱、`mcpViaAcp`、`sessionMode`）
+- [`docs/接入方案/接入-pi.md`](../../接入方案/接入-pi.md) — 适配器 + 运行时依赖（`requiresBins`）、文件式 MCP（`mcp.json`）、无审批开关的样板
+- [`docs/接入方案/接入其它-ACP-Agent.md`](../../接入方案/接入其它-ACP-Agent.md) — 通用 ACP 指南
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md) — worker 侧（进程池、任务表）对新 agent 的要求
 - [`docs/ai/recipes/run-e2e.md`](run-e2e.md) — 验收分层与待实测清单
 - [`scripts/acp-probe.mjs`](../../../scripts/acp-probe.mjs) — 能力探针

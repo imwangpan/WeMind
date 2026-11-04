@@ -1,6 +1,6 @@
 # Daemon 后台常驻原理（详解）
 
-> **适用版本**：WeMind 1.3.0 ｜ **最后核对**：2026-11-02
+> **最后核对**：2026-11-02
 >
 > ⚠️ **两套常驻方案，默认不是本文的 PowerShell wrapper**：
 > - **发布版（`npm i -g @wemind/cli`）默认 builtin runner**：`wemind start` → detached `cli.js _watchdog`（Node 写的后台守护进程）→ 循环跑 `cli.js daemon`。零依赖、跨平台。见 §2'。
@@ -91,7 +91,7 @@ for (;;) {
 - **日志**：stdout/stderr 经管道由 `RotatingLog` 逐块追加进 `<数据目录>/daemon.log`，与 PowerShell 路线一致；运行中按 `WEMIND_LOG_MAX_MB`（默认 10MB）轮转、保留 `WEMIND_LOG_KEEP`（默认 3）份。
 
 > pm2 也是第①层的一种实现，与 builtin 后台守护进程**行为对齐**（`pm2-runner.ts`）：app 名 `wemind-<key>`、
-> `restart_delay: 5000`、`max_restarts: 50`、`stop_exit_codes: [78]`、日志合并到账号 `daemon.log`。
+> `restart_delay: 5000`、`max_restarts: 50`、`stop_exit_codes: [78, 75]`（75 = 同账号已有实例，重拉无益）、日志合并到账号 `daemon.log`。
 > 声明写在账号目录的 `pm2.app.json` 里（不是把参数堆在 `pm2 start` 命令行上——`--stop-exit-codes`
 > 是变参，还要和 `--` 分隔符挤在一起，只能靠真机试；JSON 声明没有这层解析）。
 >
@@ -174,7 +174,7 @@ if (-not $createdNew) { 记日志「已有实例在跑」; exit 0 }   # 抢不�
 
 ## 5. 第③层：大脑（ACP 子进程）的生命周期
 
-大脑不是随 daemon 一起起的，而是**懒启动**：第一条消息到来、worker 调用 `askBrain` 时才 `spawn` 一个 ACP agent 进程（用哪个 agent 由账号 `brain.json` / `WEMIND_BRAIN` 决定，未配置则 `auto` 探测；见 [`接入其它-ACP-Agent.md`](接入其它-ACP-Agent.md)），之后**常驻复用**（每用户一个 ACP session，原生多轮记忆）。
+大脑不是随 daemon 一起起的，而是**懒启动**：第一条消息到来、worker 调用 `askBrain` 时才 `spawn` 一个 ACP agent 进程（用哪个 agent 由账号 `brain.json` / `WEMIND_BRAIN` 决定，未配置则 `auto` 探测；见 [`接入其它-ACP-Agent.md`](../接入方案/接入其它-ACP-Agent.md)），之后**常驻复用**（每用户一个 ACP session，原生多轮记忆）。
 
 自愈：`session/prompt` 超时或失败 → 杀掉可能假死的 agent 进程 → 下一条消息重建，并用 `session/load`（不支持时 `session/resume`）按持久化的 sessionId 恢复上下文。agent 两者都不支持时只能新建会话；这不是「模型记性差」，是能力缺口。
 
