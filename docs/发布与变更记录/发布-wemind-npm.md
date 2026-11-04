@@ -1,6 +1,6 @@
 # @wemind/cli（命令 `wemind`）发布方案与运维手册
 
-> 包：**`@wemind/cli`**（源码 `packages/wechat-daemon/`，命令 `wemind`）｜ 当前线上版本：**1.3.0**（2026-11-01 发布）｜ 状态：**✅ 已发布**
+> 包：**`@wemind/cli`**（源码 `packages/wechat-daemon/`，命令 `wemind`）｜ 当前线上版本：**1.4.0**（2026-11-04 发布）｜ 状态：**✅ 已发布**
 >
 > <https://www.npmjs.com/package/@wemind/cli>
 >
@@ -18,12 +18,12 @@
 | 发布方式 | 首次：本地 `npm publish` + 浏览器二次确认（EOTP）；后续：**GitHub Actions Trusted Publishing** |
 | CI 工作流 | [`.github/workflows/wemind-publish.yml`](../../.github/workflows/wemind-publish.yml)（`imwangpan/WeMind`，`push main` 触发，包已存在版本则跳过） |
 | 包内容 | 5 个文件：`dist/cli.js`、`dist/cli.js.map`、`README.md`、`package.json`、`LICENSE` |
-| 安装包体积 | 解包后 ~1.0 MB（tarball 332 kB） |
+| 安装包体积 | 解包后 ~1.3 MB（tarball ~404 kB） |
 | 运行时依赖 | 仅 `qrcode@^1.5.4`（**懒加载**，只有 `wemind login` 会加载）；内核已内联 |
 
 ```bash
 npm i -g @wemind/cli     # 安装后得到 wemind 命令
-wemind version           # → wemind 1.3.0 (@wemind/cli, node …, <platform>-<arch>)
+wemind version           # → wemind 1.4.0 (@wemind/cli, node …, <platform>-<arch>)
 npx -y @wemind/cli list  # 不安装临时用：必须写全包名
 ```
 

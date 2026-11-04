@@ -2,7 +2,7 @@
 
 本文件记录本 Fork 相对上游 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server) 的改动。
 
-## [1.4.0] 新增 pi / Gemini 预设 · 任务消息显式寻址（未发布，2026-11-03）
+## [1.4.0] 新增 pi / Gemini 预设 · 任务消息显式寻址（2026-11-04）
 
 ### Added
 
@@ -51,6 +51,7 @@
 - 新增 `docs/接入方案/接入-pi.md`（安装三步、预设逐项、探针结论、已知限制、审批漂移预案、验证记录）；新增 `docs/接入方案/接入-Gemini.md`（预设表、探针结论含 load 回放时序、`--skip-trust` / 模型名 / 自动更新等坑、验证记录）；同步 `README.md`、`docs/使用指南/新手教程.md`、`packages/wechat-daemon/README.md`、`docs/接入方案/接入其它-ACP-Agent.md`、`docs/接入方案/接入-Cline.md`、`docs/使用指南/使用指南-远程任务（worker）.md`、`docs/使用指南/速查-数据目录与环境变量.md`、`docs/repowiki/{06,09,README}`、`docs/ai/README.md`、`docs/ai/recipes/{add-acp-agent,run-e2e}.md`、`AGENTS.md`、`scripts/doctor.ps1`、`llms.txt`。
 - **CLI 帮助与文档补齐账号选择（2026-11-02）**：`wemind help` 里会话五条与任务四条的写法原先漏了可选的 `[<key|label>]`（`task` 还漏了 `--cwd`），多账号时容易以为只能操作默认账号、或反过来漏看账号参数。`chat-commands.ts` 的 CLI 列已补全，README / 随包 README / 使用指南 / repowiki 07 同步，并补 `renderHelp` 断言。
 - **写明环境变量的进程级作用域（2026-11-02）**：`WEMIND_BRAIN`、API key、`WEMIND_MAX_WORKERS` 等由启动 daemon 的 shell 提供，同一 shell 启动的 N 个账号会一起继承（`WEMIND_BRAIN` 会同时压过每个账号的 `brain.json`；worker 上限是每个 daemon 各自计，合计可到 N × 值）。README「多账号管理」、速查 §3、repowiki 09 已写清「要按账号不同就分环境启动，持久选择用 `wemind brain set`」。
+- **全库文档审计与按主题归档（2026-11-04）**：修正现行文档与代码不一致 / 硬错误 / 术语（core 内联两个包、MCP 仅激活集变化才重启、`auto` 探测顺序、会话键、`.bridge` JSON、`engines >=20.19.0` 等）；14 篇历史文档按 6 类主题归档并加存档声明、删除已完成的 M3–M5 待办；`docs/` 根 9 篇现行文档归入 `接入方案 / 使用指南 / 部署与运维`；全库链接与文字路径同步（随包 README 的 6 条链接改为相对路径）；去掉「适用版本」字段，约定文档描述当前分支最新代码。新增 `docs/历史文档清单-2026-11-04.md`。
 
 ## [1.3.0] 新增 Cline / Claude Code 预设 · 默认免审批（2026-11-01）
 
