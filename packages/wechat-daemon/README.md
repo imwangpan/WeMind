@@ -16,7 +16,7 @@ wemind list              # 查看账号与运行状态
 
 不想全局安装、只想临时跑一次时：因为包名 ≠ 命令名，必须写全包名 `npx -y @wemind/cli <子命令>`（如 `npx -y @wemind/cli list`）。
 
-要求：**Node.js >= 20.19**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / `gemini` / 桌面端 `dsh` / `qodercli` / `cline` 等；未配置时自动探测 `opencode → cline → qoder → gemini → deepseek → kiro`；适配器类 `claude-code` / `codex` / `pi` 不参与探测，要显式 `wemind brain set|switch`）。Gemini CLI 用 `GEMINI_CLI_HOME` 指向沙箱根（它的配置目录是 `<沙箱>/.gemini`），MCP 与设置同在 `settings.json`，凭据会随沙箱同步（API key 用户的 `.env`，Google 登录用户的 `oauth_creds.json` / `google_accounts.json`）。kiro CLI 的 v2 / v3 引擎会自动识别（`--agent-engine` → `settings/cli.json` 的 `acp.agentEngine` → CLI 主版本 ≥3，最后一项是假设/待实测；`acp --help` 说明两者都没设时默认 v2）；v3 不需要也不能带 `--trust-all-tools`，免审批由沙箱 `settings/permissions.yaml` 承担（真实设置已有则原样保留）。
+要求：**Node.js >= 20.19**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / `gemini` / 桌面端 `dsh` / `qodercli` / `cline` 等；未配置时自动探测 `opencode → cline → qoder → gemini → deepseek → kiro`；适配器类 `claude-code` / `codex` / `pi` 不参与探测，要显式 `wemind brain set|switch`）。各 agent 的沙箱、凭据与免审批配置见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 
 ## 升级
 
@@ -55,15 +55,15 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 
 ## 常驻怎么跑
 
-`wemind start` 默认用**自带的跨平台后台守护进程**（builtin）：detached 拉起 `wemind _watchdog`，它循环执行 `wemind daemon`，进程退出 5 秒后自动重拉（连续短暂崩溃超过 `WEMIND_MAX_RESTARTS`，默认 50，就停止重拉并提示看日志）；单实例靠 `wrapper.pid` + 进程身份校验。也可以用 `--runner pm2`（或 `WEMIND_RUNNER=pm2`）交给 pm2——`wemind` 会在账号目录生成 `pm2.app.json`（5s 重拉、最多 50 次、退出码 78 与 75 停手、日志合并到 `daemon.log`，与 builtin 语义一致），再 `pm2 start` 它。
+`wemind start` 默认用**自带的跨平台后台守护进程**（builtin）：后台拉起 `wemind _watchdog`，它循环执行 `wemind daemon`，进程退出后自动重拉。也可以用 `--runner pm2`（或 `WEMIND_RUNNER=pm2`）交给 pm2，两者语义一致。进程树、pid 记录、日志轮转等细节见 [部署与运维](../../docs/repowiki/10-部署与运维.md)。
 
 开机自启：让系统在登录时执行一次 `wemind start <账号>` 即可（Windows 计划任务/启动文件夹、Linux systemd user service、macOS launchd）。**同一账号只用一套常驻方案**——两种 runner 同时跑会抢同一个 bot token。
 
 ## 数据与安全
 
 - 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标（读到哪条消息了）、`allowFrom.json` 授权清单、`brain-home/` 大脑沙箱、`agent-sessions/`（agent 自己的会话库；目前 DSH 的 `deepseek/{brain,worker}` 在这里，不再写 `brain-home/sessions`）、`daemon.log` 日志。
-- **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：先 `npm i -g <适配器包>`（npx 只作兜底，常驻 daemon / 每条 worker 任务起进程时它要每次联网且版本会漂）。Claude Code：`npm i -g @agentclientprotocol/claude-agent-acp`（**Node ≥22**；Windows 产出 `claude-agent-acp.cmd`）→ `wemind brain set claude-code`；沙箱用 `CLAUDE_CONFIG_DIR=<brain-home>/claude`（实测连 `~/.claude.json` 一起隔离），MCP 走 ACP `mcpServers`（目录取真实 `~/.claude.json`，`wechat` 永远排除），免审批走 `session/set_mode bypassPermissions`。Codex：`npm i -g @agentclientprotocol/codex-acp`（Windows 产出 `codex-acp.cmd`）→ `wemind brain set codex`；认证走 Codex 自己（`codex login` 或 `OPENAI_API_KEY`），免审批走 `session/set_mode agent-full-access`；**stdio MCP 不支持**（探针实测）→ 微信侧「加载/卸载 MCP」对 codex 无效；**没有沙箱配置目录**（只有 cwd 指向 `brain-home`，要在真实项目里干活请在消息里点明路径）。pi：`npm i -g @earendil-works/pi-coding-agent` + 终端 `pi` 登录 + `npm i -g pi-acp` → `wemind brain set pi`；沙箱用 `PI_CODING_AGENT_DIR=<brain-home>`（`settings.json` / `auth.json` / `models*.json` 同步），MCP 走 pi 自己的 `mcp.json`（kiro 格式），免审批无需开关，启动横幅用 pi 自己的 `quietStartup` 关掉（不进微信回复）；**只装适配器不够**（`requiresBins` 会报 pi 本体缺失）。
-- ⚠️ **daemon 会让大脑免确认执行工具**（**9 个内置预设默认都免审批**：kiro v2 `--trust-all-tools`（v3 用沙箱 `settings/permissions.yaml` 的 allow-all）、gemini `--approval-mode yolo`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `permission: allow`、DSH `danger-full-access`、claude-code `bypassPermissions`、codex `agent-full-access`、pi 默认不逐次审批）：能给这个 bot 发消息的人，即可让大脑在本机执行任意工具（shell / 写文件）。微信平台限制决定了只有扫码登录这个 bot 的**登录者**能发消息；另有一道**发件人授权（allowFrom）兜底**：登录者自动写入，**勿清空**。边缘权限请求默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行。
+- **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：`npm i -g <适配器包>` 后 `wemind brain set <agent 名>`；各适配器的安装命令、认证、沙箱与 MCP 差异见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
+- ⚠️ **daemon 会让大脑免确认执行工具**：9 个内置预设默认都免审批，能给这个 bot 发消息的人即可让大脑在本机执行任意工具（shell / 写文件）。微信平台限制决定了只有扫码登录这个 bot 的**登录者**能发消息；另有一道**发件人授权（allowFrom）兜底**：登录者自动写入，**勿清空**。想收紧权限见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - `account.json`（bot token）、`state.json`（`context_token`）、`qr_login.json` 在 POSIX 上统一 chmod 600；Windows 上都是明文，请用目录权限或磁盘加密。
 - 同一个 bot token **只能有一个消费者**：`wemind` daemon 与 `@wemind/wechat-mcp` 二选一，否则互相抢消息。
 
@@ -96,106 +96,6 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 - 接入其它 ACP agent：[docs/接入方案/接入其它-ACP-Agent.md](../../docs/接入方案/接入其它-ACP-Agent.md)
 - Qoder 接入：[docs/接入方案/接入-Qoder.md](../../docs/接入方案/接入-Qoder.md)
 - Daemon 常驻原理：[docs/repowiki/10-部署与运维.md](../../docs/repowiki/10-部署与运维.md)
-
-## 维护者：发布新版本
-
-本包（包名 `@wemind/cli`，命令 `wemind`）通过 GitHub Actions（[`.github/workflows/wemind-publish.yml`](../../.github/workflows/wemind-publish.yml)）发布到 npm。**下面的命令都在 WeMind 仓库根目录运行**，不是在 `packages/wechat-daemon` 子目录。
-
-> ℹ️ **版本号只有一处来源**：`packages/wechat-daemon/package.json` 的 `version`。`src/version.ts` 在**运行时**读它（不再手写常量），所以改版本不会漏改源码。仓库提供 `npm run release:*` 一步到位，并自动跑一致性自检。
-
-### 第一步：判断要不要发版
-
-| 你改了什么 | 需要发版吗 |
-| --- | --- |
-| `packages/wechat-daemon/src/**` 或 `packages/wechat-ilink-core/src/**`（内核会内联进来） | ✅ 要 |
-| 只改了 `*.md` 文档 | ❌ 不用（CI 仍跑检查，但版本没变会跳过发布） |
-| 只改了 `packages/wechat-mcp/**` | ❌ 与本包无关，发的是另一个包 |
-
-> 同一个版本号**不能重复发布**。所以「有没有改代码」不是关键，「有没有升版本号」才是——没升就只会跑检查、不发布。
-
-### 第二步：选版本号
-
-| 参数 | 示例 | 什么时候用 |
-| --- | --- | --- |
-| `patch` | `1.0.0` → `1.0.1` | Bug 修复、兼容性改动（**最常用**） |
-| `minor` | `1.0.0` → `1.1.0` | 新增向后兼容的能力（如新增内置的大脑 agent、新增子命令） |
-| `major` | `1.0.0` → `2.0.0` | 不兼容改动（如删子命令、改数据目录布局、改 CLI 参数） |
-
-### 第三步：升版本号（一条命令）
-
-```powershell
-npm run release:patch    # 1.4.0 → 1.4.1（Bug 修复）
-npm run release:minor    # 1.4.0 → 1.5.0（向后兼容的新功能）
-npm run release:major    # 1.4.0 → 2.0.0（不兼容改动）
-```
-
-这三个脚本等价于：
-
-```powershell
-npm version <type> --workspace @wemind/cli --no-git-tag-version && npm run check:version
-```
-
-- 前半句改 **`package.json` 与 `package-lock.json` 两处**；`--no-git-tag-version` 让它**不**自动创建 git commit 和 tag（我们的发布流程要求「版本号 + 源码改动」在同一个 commit 里）；
-- 后半句跑 `check-version` 自检：包名、`bin` 是否仍叫 `wemind`、lock 是否同步、**`src/version.ts` 有没有被改回硬编码版本号**。任一项不对就 `exit 1`，`&&` 会中断，不会带着错误版本继续。
-
-> **指定具体版本**：`npm version 1.4.2 --workspace @wemind/cli --no-git-tag-version`
->
-> 想完全手动也可以：改 `packages/wechat-daemon/package.json` 的 `"version"`，再 `npm install --package-lock-only --ignore-scripts` 刷新 lock。
-> **不需要**改 `src/version.ts`——它运行时读 package.json。不要手动编辑 `package-lock.json`。
-
-### 第四步：本地校验
-
-```powershell
-npm run check:version    # 包名 / bin / lock / 无硬编码版本号
-npm run lint && npm run typecheck && npm run build && npm test
-npm pack --dry-run --workspace @wemind/cli    # 应看到 5 个文件：LICENSE / README.md / package.json / dist/cli.js / dist/cli.js.map
-```
-
-> ⚠️ **`npm publish` 不会自动 build**。CI 会 build，但本地 `npm pack` 前必须先 `npm run build`，否则打出来是旧产物（`dist/` 在 `.gitignore` 里）。
->
-> `prepack` 守卫（`scripts/prepack-guard.mjs`）会兜底拒绝：产物目录为空、`bin` 缺失、或声明了 sourcemap 却没把 `.map` 带进包。
-
-### 第五步：提交并推送
-
-```powershell
-git add packages/wechat-daemon/package.json package-lock.json
-git add packages/wechat-daemon/src packages/wechat-ilink-core/src   # 有源码改动时
-git commit -m "chore: release @wemind/cli 1.4.0"   # 换成当前要发的版本
-git push origin main
-```
-
-推送到 `main` 后，工作流依次执行：
-
-```
-check-version（包名 / bin / lock / 无硬编码版本号）→ npm ci → lint → format:check → typecheck → build → test
-→ npm pack --dry-run（prepack 守卫确认包内容）
-→ 把 tarball 真装到临时目录跑 wemind version / help（装包冒烟）
-→ 检查 npm 上是否已存在该版本
-→ 不存在则 npm publish（带 provenance 来源证明）；已存在则跳过并输出 notice
-```
-
-**看到 `Publish to npm` 显示 skipped 是正常的**：说明这个版本已发过（比如你只改了文档、没升版本）。想真正发版，回到第二步升版本号。
-
-### 第六步：发布后验收
-
-```powershell
-npm view @wemind/cli version                        # 应显示新版本号
-npm i -g @wemind/cli@latest && wemind version       # → wemind <新版本> (@wemind/cli, node …, <platform>-<arch>)
-wemind list                                         # 应能正确识别在跑的账号与进程
-```
-
-已装用户升级：`npm i -g @wemind/cli@latest`，然后 `wemind stop <账号> && wemind start <账号>` ——**正在运行的 daemon 不会自动加载新代码**。
-
-### 常见坑
-
-| 现象 | 原因 | 处理 |
-| --- | --- | --- |
-| `check-version` 报「lock 版本不一致」 | 手改了 `package.json` 没刷新 lock | `npm install --package-lock-only --ignore-scripts`（或改用 `npm run release:*`） |
-| `check-version` 报「硬编码 CLI_VERSION 字面量」 | 有人把 `src/version.ts` 改回了常量写法 | 还原为 `readOwnVersion(...)`（版本号必须只来自 package.json） |
-| CI 绿了但 npm 上没新版本 | 版本号没升，被跳过 | `npm run release:patch` 后再推 |
-| `npm pack` 出来是空壳 | 没先 `npm run build` | 先 build 再 pack |
-| `prepack` 守卫拒绝发布 | 产物为空 / `bin` 缺失 / 声明了 sourcemap 但 `.map` 不在包里 | 按守卫提示补 build 或检查 `files` |
-| `npm publish` 报 403 / EOTP | 本地直发需要交互式 2FA | **不要本地发**，走 CI（Trusted Publisher 已配好） |
 
 ## License
 

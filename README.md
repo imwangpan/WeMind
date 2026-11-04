@@ -55,6 +55,7 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 | **想用远程任务** | [使用指南-远程任务](docs/使用指南/使用指南-远程任务（worker）.md) · [本地双入口](docs/机制与协议说明/本地双入口-命令派发与查看回复.md) |
 | **运维 / 部署** | [部署与运维](docs/repowiki/10-部署与运维.md) · [跨平台常驻（pm2）](docs/部署与运维/跨平台常驻-pm2.md) · [数据目录与环境变量速查](docs/使用指南/速查-数据目录与环境变量.md) |
 | **想改这个仓库 / 贡献代码** | [开发指南](docs/repowiki/11-开发指南.md) · [系统架构](docs/repowiki/02-系统架构.md) · [发布流程](docs/发布与变更记录/发布-wemind-npm.md) |
+| **维护者 / 发布新版本** | [如何发布新版本](docs/发布与变更记录/如何发布新版本.md) —— 两个包的版本号、CI 流程、验收与常见坑 |
 | **AI 编码助手**（帮我改这个仓库的 agent） | 先读 [AGENTS.md](AGENTS.md) → [docs/ai/README.md](docs/ai/README.md)（含术语表与任务配方） |
 
 深入架构、协议与运行机制：[docs/repowiki/](docs/repowiki/README.md) —— 依据源码整理的完整技术 wiki（含 Mermaid 图）。

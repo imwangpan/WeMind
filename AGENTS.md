@@ -269,6 +269,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 - AI 上下文包：[`docs/ai/README.md`](docs/ai/README.md)
 - 任务配方：[`docs/ai/recipes/`](docs/ai/recipes/)
 - **发布方案与检查清单（已发布 1.4.0）**：[`docs/发布与变更记录/发布-wemind-npm.md`](docs/发布与变更记录/发布-wemind-npm.md)
+- **维护者发版手册（两个包）**：[`docs/发布与变更记录/如何发布新版本.md`](docs/发布与变更记录/如何发布新版本.md)
 - 面向用户的新手教程：[`docs/使用指南/新手教程.md`](docs/使用指南/新手教程.md)
 - 远程任务（多任务/指定 agent/续跑）：[`docs/使用指南/使用指南-远程任务（worker）.md`](docs/使用指南/使用指南-远程任务（worker）.md)
 - 数据目录与环境变量速查：[`docs/使用指南/速查-数据目录与环境变量.md`](docs/使用指南/速查-数据目录与环境变量.md)
