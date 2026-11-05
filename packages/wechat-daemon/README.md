@@ -4,7 +4,21 @@
 
 [WeMind](https://github.com/imwangpan/WeMind) monorepo 的完整应用包；只依赖内核 `@wemind/wechat-ilink-core`（构建时已内联进单文件产物），不碰 MCP 层，可独立运行。
 
-> **包名 `@wemind/cli` ≠ 命令名 `wemind`。** 与 `@modelcontextprotocol/*`、`@angular/cli`、`@openai/codex` 的惯例一致：包收在 scope 下，命令保持短名。因为包名与 bin 名不同，**`npx` 不会自动挑 bin，必须写全包名**。
+> **包名 `@wemind/cli`，命令名 `wemind`。** 包收在 scope 下，命令保持短名。**`npx` 必须写全包名**。
+
+## 环境要求
+
+1. Node.js >= 20.19；
+2. PATH 上有一个支持 **ACP** 的 agent CLI。
+
+### 已适配的 Agent CLI
+
+- 原生支持 ACP：`kiro-cli` / `opencode` / `gemini` / `DeepSeek Harness` / `qodercli` / `cline` 等；未显示配置时自动按以下顺序自动探测： `opencode → cline → qoder → gemini → deepseek → kiro`；
+- 适配器类：`claude-code` / `codex` / `pi` 不参与探测，要显式 `wemind brain set|switch`。
+
+### 其它
+
+各 agent 的沙箱、凭据与免审批配置见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 
 ## 安装
 
@@ -14,9 +28,7 @@ wemind version           # → wemind 1.4.0 (@wemind/cli, node …, win32-x64)  
 wemind list              # 查看账号与运行状态
 ```
 
-不想全局安装、只想临时跑一次时：因为包名 ≠ 命令名，必须写全包名 `npx -y @wemind/cli <子命令>`（如 `npx -y @wemind/cli list`）。
-
-要求：**Node.js >= 20.19**；想让它真的会「思考」，需要 PATH 上有一个支持 **ACP** 的 agent CLI（`kiro-cli` / `opencode` / `gemini` / 桌面端 `dsh` / `qodercli` / `cline` 等；未配置时自动探测 `opencode → cline → qoder → gemini → deepseek → kiro`；适配器类 `claude-code` / `codex` / `pi` 不参与探测，要显式 `wemind brain set|switch`）。各 agent 的沙箱、凭据与免审批配置见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
+不想全局安装、只想临时跑一次时，必须写全包名 `npx -y @wemind/cli <子命令>`（如 `npx -y @wemind/cli list`）。
 
 ## 升级
 
@@ -37,19 +49,19 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 
 ## 常用命令
 
-| 命令 | 作用 |
-| --- | --- |
-| `wemind login [--label 名] [--start] [--runner builtin\|pm2]` | 扫码登录；`--start` 顺带拉起常驻 |
-| `wemind list` | 账号、别名、运行状态、当前大脑、worker 池 |
-| `wemind start / stop <key\|label>` | 启停某账号的常驻 |
-| `wemind brain [show\|set\|unset\|check]` | 查看 / 设置（写入磁盘）/ 清除 / 自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`）；只加启动开关用 `--extra-args "…"`（追加，保留预设的 ACP 模式参数），`--args "…"` 是整段替换（漏掉 `acp` 会握手超时，`wemind brain` 会警告；`--args ""` 清空） |
-| `wemind brain switch <agent 名\|auto>` | **热切换对话大脑**：daemon 在跑也不重启、不打断在途回合；失败自动回滚。`--worker` 设默认任务大脑；`wemind brain handoff` 生成交接摘要 |
-| `wemind session new [名字] / list / resume <ref> / rename <ref> <名> / delete <ref> [<key\|label>]` | 会话管理：新建 / 列表 / 严格恢复 / 改名 / 删除（`ref` = 序号、名字或 id 前缀；省略账号 = 默认账号） |
-| `wemind task "<描述>" [--agent 名] [--cwd 目录] [<key\|label>]` | 派发任务给 worker（多任务并行、按编号回话；`--cwd` 相对路径按当前终端目录解析） |
-| `wemind task-list / task-reply <编号> "…" / task-stop [编号\|全部] [<key\|label>]` | 任务列表、回话续跑（`task-reply 继续`）、结束（在等回复的进程回池复用） |
-| `wemind allow / revoke / allowlist` | 授权管理（谁能驱动这个 bot） |
-| `wemind logout / delete / label / set-default` | 账号运维（`delete` 停不掉 daemon 时会拒绝删目录，先 `stop`） |
-| `wemind version` / `wemind help` | 版本、完整帮助 |
+| 命令                                                                                                | 作用                                                                                                                                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `wemind login [--label 名] [--start] [--runner builtin\|pm2]`                                       | 扫码登录；`--start` 顺带拉起常驻                                                                                                                                                                                                                             |
+| `wemind list`                                                                                       | 账号、别名、运行状态、当前大脑、worker 池                                                                                                                                                                                                                    |
+| `wemind start / stop <key\|label>`                                                                  | 启停某账号的常驻                                                                                                                                                                                                                                             |
+| `wemind brain [show\|set\|unset\|check]`                                                            | 查看 / 设置（写入磁盘）/ 清除 / 自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`）；只加启动开关用 `--extra-args "…"`（追加，保留预设的 ACP 模式参数），`--args "…"` 是整段替换（漏掉 `acp` 会握手超时，`wemind brain` 会警告；`--args ""` 清空） |
+| `wemind brain switch <agent 名\|auto>`                                                              | **热切换对话大脑**：daemon 在跑也不重启、不打断在途回合；失败自动回滚。`--worker` 设默认任务大脑；`wemind brain handoff` 生成交接摘要                                                                                                                        |
+| `wemind session new [名字] / list / resume <ref> / rename <ref> <名> / delete <ref> [<key\|label>]` | 会话管理：新建 / 列表 / 严格恢复 / 改名 / 删除（`ref` = 序号、名字或 id 前缀；省略账号 = 默认账号）                                                                                                                                                          |
+| `wemind task "<描述>" [--agent 名] [--cwd 目录] [<key\|label>]`                                     | 派发任务给 worker（多任务并行、按编号回话；`--cwd` 相对路径按当前终端目录解析）                                                                                                                                                                              |
+| `wemind task-list / task-reply <编号> "…" / task-stop [编号\|全部] [<key\|label>]`                  | 任务列表、回话续跑（`task-reply 继续`）、结束（在等回复的进程回池复用）                                                                                                                                                                                      |
+| `wemind allow / revoke / allowlist`                                                                 | 授权管理（谁能驱动这个 bot）                                                                                                                                                                                                                                 |
+| `wemind logout / delete / label / set-default`                                                      | 账号运维（`delete` 停不掉 daemon 时会拒绝删目录，先 `stop`）                                                                                                                                                                                                 |
+| `wemind version` / `wemind help`                                                                    | 版本、完整帮助                                                                                                                                                                                                                                               |
 
 `key` = 由微信 botId 派生的目录名；`label` = 人类可读别名，多数命令两者都能用。
 
@@ -69,23 +81,23 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 
 ## 环境变量（常用）
 
-| 变量 | 含义 |
-| --- | --- |
-| `WEMIND_HOME` | 数据根目录，默认 `~/.wemind` |
-| `WECHAT_ACCOUNT` / `WECHAT_DATA_DIR` | 指定账号 / 指定完整数据目录（多账号隔离） |
-| `WEMIND_RUNNER` | `builtin`（默认）或 `pm2` |
-| `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_EXTRA_ARGS` | 一次性覆盖大脑选择与启动参数（`ARGS` 整段替换、`EXTRA_ARGS` 追加；持久化请用 `wemind brain set`） |
-| `WEMIND_ACP_AUTO_ALLOW=1` | 放行 ACP agent 的一次性权限请求（默认为拒绝） |
-| `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off` 关闭，其它值 = 该 modeId |
-| `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP` | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate` |
+| 变量                                                                                  | 含义                                                                                                                     |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `WEMIND_HOME`                                                                         | 数据根目录，默认 `~/.wemind`                                                                                             |
+| `WECHAT_ACCOUNT` / `WECHAT_DATA_DIR`                                                  | 指定账号 / 指定完整数据目录（多账号隔离）                                                                                |
+| `WEMIND_RUNNER`                                                                       | `builtin`（默认）或 `pm2`                                                                                                |
+| `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_EXTRA_ARGS` | 一次性覆盖大脑选择与启动参数（`ARGS` 整段替换、`EXTRA_ARGS` 追加；持久化请用 `wemind brain set`）                        |
+| `WEMIND_ACP_AUTO_ALLOW=1`                                                             | 放行 ACP agent 的一次性权限请求（默认为拒绝）                                                                            |
+| `WEMIND_ACP_SESSION_MODE`                                                             | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off` 关闭，其它值 = 该 modeId                                |
+| `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                                               | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate` |
 
 ## 与 MCP 形态的区别
 
-| | `@wemind/cli`（命令 `wemind`） | `@wemind/wechat-mcp` |
-| --- | --- | --- |
-| 驱动 | 自己常驻、自己调大脑 | 随 MCP 客户端生命周期，被动调工具 |
-| 大脑 | 独立 ACP agent 进程 | 就是 MCP 客户端背后的模型 |
-| 能力 | 收发图/文件、远程任务、多账号、7×24 | 文本收发为主 |
+|      | `@wemind/cli`（命令 `wemind`）      | `@wemind/wechat-mcp`              |
+| ---- | ----------------------------------- | --------------------------------- |
+| 驱动 | 自己常驻、自己调大脑                | 随 MCP 客户端生命周期，被动调工具 |
+| 大脑 | 独立 ACP agent 进程                 | 就是 MCP 客户端背后的模型         |
+| 能力 | 收发图/文件、远程任务、多账号、7×24 | 文本收发为主                      |
 
 ## 文档
 
@@ -94,7 +106,6 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 - 发布与版本规则：[docs/发布与变更记录/发布-wemind-npm.md](../../docs/发布与变更记录/发布-wemind-npm.md)
 - AI 协作者入口：[AGENTS.md](../../AGENTS.md)
 - 接入其它 ACP agent：[docs/接入方案/接入其它-ACP-Agent.md](../../docs/接入方案/接入其它-ACP-Agent.md)
-- Qoder 接入：[docs/接入方案/接入-Qoder.md](../../docs/接入方案/接入-Qoder.md)
 - Daemon 常驻原理：[docs/repowiki/10-部署与运维.md](../../docs/repowiki/10-部署与运维.md)
 
 ## License
