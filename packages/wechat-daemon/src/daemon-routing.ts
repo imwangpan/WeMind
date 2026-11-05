@@ -12,12 +12,12 @@ import { providerIssue, shouldResumeTask } from "./task-manager.js";
 /**
  * 三档进度（按最终答案到达时间）：
  * - <5s：只发最终答案；
- * - 5–10s：第 5s 发「收到」；
- * - ≥10s：第 5s 发「收到」，第 10s 再发第二条（正文已开始→「整理回复」，否则→「还在处理中」）。
- * 固定提示让位于已有进度：5s 时已发过工具/心跳/图片/重试提示就不再发确认；10s 的第二条要求距上一条非确认进度 ≥5s。
+ * - 5–15s：第 5s 发「收到」；
+ * - ≥15s：第 5s 发「收到」，第 15s 再发第二条（正文已开始→「整理回复」，否则→「还在处理中」）。
+ * 固定提示让位于已有进度：5s 时已发过工具/心跳/图片/重试提示就不再发确认；15s 的第二条要求距上一条非确认进度 ≥5s。
  */
 export const PROGRESS_ACK_DELAY_MS = 5_000;
-export const PROGRESS_SECOND_NOTICE_MS = 10_000;
+export const PROGRESS_SECOND_NOTICE_MS = 15_000;
 export const PROGRESS_NOTICE_GAP_MS = 5_000;
 
 /** 第 5s 的即时确认：只在还没有任何可见进度时发（有进度就顶替它）。 */
@@ -25,7 +25,7 @@ export function shouldShowAck(progressSent: boolean): boolean {
   return !progressSent;
 }
 
-/** 第 10s 的第二条：最终答案未发出，且距上一条非确认进度至少 5s（确认本身不算，否则它会挡住第二条）。 */
+/** 第 15s 的第二条：最终答案未发出，且距上一条非确认进度至少 5s（确认本身不算，否则它会挡住第二条）。 */
 export function shouldShowSecondNotice(
   elapsedMs: number,
   finalStarted: boolean,
@@ -38,7 +38,7 @@ export function shouldShowSecondNotice(
   );
 }
 
-/** 第 10s 第二条的措辞：正文已开始 → 整理回复；还在思考/跑工具 → 还在处理中。 */
+/** 第 15s 第二条的措辞：正文已开始 → 整理回复；还在思考/跑工具 → 还在处理中。 */
 export function secondNoticeText(answerStarted: boolean): string {
   return answerStarted ? "✍️ 正在整理回复…" : "⏳ 还在处理中…";
 }

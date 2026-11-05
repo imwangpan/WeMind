@@ -291,7 +291,7 @@ async function handleMessage(
   let finalStarted = false;
   let answerStarted = false;
   let secondNoticeSent = false;
-  // 三档进度：<5s 只发最终答案；5–10s 第 5s 发确认；≥10s 第 10s 再发第二条。
+  // 三档进度：<5s 只发最终答案；5–15s 第 5s 发确认；≥15s 第 15s 再发第二条。
   // 固定提示让位于已有进度（工具/心跳/图片/重试），避免叠加；「正在输入」由 keepAlive 每 5s 续发。
   let ackTimer: NodeJS.Timeout | undefined;
   let secondTimer: NodeJS.Timeout | undefined;
@@ -320,7 +320,7 @@ async function handleMessage(
     if (b.awaiting) return; // 等待「继续」期间不发任何进度
     const now = Date.now();
     visibleProgressSent = true;
-    if (!opts?.ackOnly) lastNonAckProgressAt = now; // 5s 确认不能挡住 10s 的第二条
+    if (!opts?.ackOnly) lastNonAckProgressAt = now; // 5s 确认不能挡住 15s 的第二条
     // 发出一条文本会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，否则接下来的等待窗口看不到指示。
     const sendWithTyping = (text: string) => {
       void sends
@@ -350,7 +350,7 @@ async function handleMessage(
     }, PROGRESS_ACK_DELAY_MS);
     ackTimer.unref?.();
   }
-  // 第 10s 的第二条：正文已开始→「整理回复」，否则→「还在处理中」；距上一条非确认进度不足 5s 就跳过（工具/心跳刚提示过）。
+  // 第 15s 的第二条：正文已开始→「整理回复」，否则→「还在处理中」；距上一条非确认进度不足 5s 就跳过（工具/心跳刚提示过）。
   secondTimer = setTimeout(() => {
     secondTimer = undefined;
     const now = Date.now();
@@ -436,7 +436,7 @@ async function handleMessage(
         } else if (ev.type === "thinking") {
           lastProgressAt = Date.now();
         } else if (ev.type === "answer") {
-          answerStarted = true; // 只用于第 10s 第二条选词；不再额外补发「整理回复」
+          answerStarted = true; // 只用于第 15s 第二条选词；不再额外补发「整理回复」
         } else {
           // activity：brain 产出任意帧 → 静默刷新心跳基线，避免流式输出期间误报"仍在处理"
           lastProgressAt = Date.now();

@@ -84,22 +84,22 @@ describe("三档进度提示（快 / 中 / 慢）", () => {
     expect(shouldShowAck(true)).toBe(false);
   });
 
-  it("10s 第二条要求最终答案未开始、且距上一条非确认进度 ≥5s", () => {
-    expect(shouldShowSecondNotice(9_999, false, 10_000)).toBe(false);
-    expect(shouldShowSecondNotice(10_000, false, 4_999)).toBe(false);
-    expect(shouldShowSecondNotice(10_000, false, 5_000)).toBe(true);
-    expect(shouldShowSecondNotice(10_000, true, 10_000)).toBe(false);
+  it("15s 第二条要求最终答案未开始、且距上一条非确认进度 ≥5s", () => {
+    expect(shouldShowSecondNotice(14_999, false, 15_000)).toBe(false);
+    expect(shouldShowSecondNotice(15_000, false, 4_999)).toBe(false);
+    expect(shouldShowSecondNotice(15_000, false, 5_000)).toBe(true);
+    expect(shouldShowSecondNotice(15_000, true, 15_000)).toBe(false);
     expect(shouldShowSecondNotice(30_000, false, 20_000)).toBe(true);
   });
 
-  it("第 10s 第二条的措辞随正文是否开始切换", () => {
+  it("第 15s 第二条的措辞随正文是否开始切换", () => {
     expect(secondNoticeText(false)).toBe("⏳ 还在处理中…");
     expect(secondNoticeText(true)).toBe("✍️ 正在整理回复…");
   });
 
-  it("阈值：确认 5s、第二条 10s；确认本身不能挡住 10s 的第二条", () => {
+  it("阈值：确认 5s、第二条 15s；确认本身不能挡住 15s 的第二条", () => {
     expect(PROGRESS_ACK_DELAY_MS).toBe(5_000);
-    expect(PROGRESS_SECOND_NOTICE_MS).toBe(10_000);
+    expect(PROGRESS_SECOND_NOTICE_MS).toBe(15_000);
     expect(PROGRESS_NOTICE_GAP_MS).toBeLessThanOrEqual(
       PROGRESS_SECOND_NOTICE_MS - PROGRESS_ACK_DELAY_MS,
     );
