@@ -58,7 +58,7 @@ node scripts/acp-probe.mjs
 
 | # | 产出物 | 位置 | 由谁检查 |
 |---|---|---|---|
-| 1 | 预设 | `brain-agents.ts` 的 `ACP_AGENT_PRESETS` | 单测 |
+| 1 | 预设 | `brain-presets.ts` 的 `ACP_AGENT_PRESETS` | 单测 |
 | 2 | 预设单测 | `brain-agents.test.ts` | `npm test` |
 | 3 | 沙箱单测（涉及沙箱时） | `sandbox-<name>.test.ts` | `npm test` |
 | 4 | 接入文档 | `docs/接入方案/接入-<Name>.md`，含 §0.6 的五类小节 + `## 待实测` | `check-agent-docs.mjs` |
@@ -100,7 +100,7 @@ node scripts/acp-probe.mjs
 
 ---
 
-## 2. 加 agent（`brain-agents.ts`）
+## 2. 加 agent（`brain-presets.ts`）
 
 ```ts
 acme: {
@@ -220,7 +220,7 @@ wemind brain check
 - **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。三处入口（brain / worker / `brain check`）共用 `acp-reverse.ts`，别在某一处另写一份。
 - **committed-only + 15s 心跳 = 烧连发额度**：先调心跳，再考虑首帧。
 - **密钥不要写进 agent**：daemon 进程环境提供。
-- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-agents.ts`。
+- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-presets.ts`。
 - **冷启动耗时（2026-10-29 已量）**：DSH `initialize` **5.8s** / `session/new` 50ms；opencode ~650ms / ~800ms；qoder 1.7s / 1.5s——均远小于 `REQ_TIMEOUT=30s`，**暂不需要** `reqTimeoutMs`（见 `run-e2e.md` §7.3）。新接入的 agent 仍要先量；若超过 30s，再在 agent 里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
 - **适配器不要用 npx 当默认**：全局安装后 `bin` 写 `claude-agent-acp`（Windows `claude-agent-acp.cmd`）+ `shell: true`；npx 只做兜底。没装时用 `ADAPTER_INSTALL_HINT` 给提示，别只回一句「找不到」。适配器另有运行时依赖（`pi-acp` → `pi`）时用 `requiresBins`；`onPathAny()` 会补试 `.cmd`/`.exe`。
 - **「免审批」要用漂移检测兜住**：`ACP_TEST_TOOL=1` 跑探针——强制一次工具调用（写标记文件），断言「0 个 `session/request_permission` + 文件真的落盘」。只看 stopReason 分不出「被拒绝」和「没执行」；上游改成逐次审批时探针会先红，而不是微信第一条消息卡 30s 超时。

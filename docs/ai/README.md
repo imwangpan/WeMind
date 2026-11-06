@@ -116,7 +116,7 @@ poller（长轮询，不被大脑阻塞）
 | opencode agent 可用（`session/load`、无反向请求） | ✅ 实测 | `docs/接入方案/接入-OpenCode.md` §3.3 |
 | 任意兼容 ACP 的 agent 都「无需改代码」 | ⚪ **不成立** | 需要 load/resume、反向请求、首帧/心跳、image 能力适配 |
 | `session/load` 是 ACP 通用能力 | ⚪ **不成立** | DSH 只有 `session/resume`；`load` 返回 `-32601` |
-| 代码按 `initialize` 回包自动适配能力 | ⚪ **不成立** | `acp-brain.ts` / `worker-acp.ts` 发出 `initialize` 后只置 `initialized = true`，**不解析** `agentCapabilities`；image/restore/mcpViaAcp 全部来自 `brain-agents.ts` agent 配置字段 |
+| 代码按 `initialize` 回包自动适配能力 | ⚪ **不成立** | `acp-brain.ts` / `worker-acp.ts` 发出 `initialize` 后只置 `initialized = true`，**不解析** `agentCapabilities`；image/restore/mcpViaAcp 全部来自 `brain-presets.ts` 的 agent 配置字段 |
 | 仓库存在 `Brain` 接口 | ⚪ **不存在** | `acp-brain.ts` 直接导出 `askBrain`/`newSession`/`restart`/`restartForMcpChange` |
 | `wemind brain check` 默认 60s | ✅ 代码 | 冷启动慢的 agent 仍可能误报 |
 | `deepseek` agent 已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验。**2026-11-03（rc.3）**：预设 `isolateSessions: true`，`prepareAgent()` 落盘 `--patch` 把会话 root 指到 `<账号目录>/agent-sessions/deepseek/<brain\|worker>`（共用沙箱根的 `sessions/` 被 kiro/pi 写过会让 DSH 报 `unsupported flat-file layout`）；`- id: acp` 的 model 被桌面端目录淘汰时 `wemind brain` 用 `acpModelHint` 给替换提示（只提示不代改） |
@@ -168,18 +168,18 @@ poller（长轮询，不被大脑阻塞）
 
 | 任务 | 先读 | 再读 |
 |---|---|---|
-| 接新 ACP agent | `brain-agents.ts` | `acp-brain.ts`、`mcp-sandbox.ts`、`docs/ai/recipes/add-acp-agent.md` |
-| 改 ACP 自愈/超时 | `acp-connection.ts`（帧/超时/模型与模式，brain 与 worker 共用） | `acp-brain.ts` / `worker-acp.ts`（进程生命周期与会话持久化各自实现）、`brain-check.ts` |
-| 改反向请求应答（权限 / fs / terminal） | `acp-reverse.ts` | `acp-reverse.test.ts`；brain、worker、`brain check` 三处共用 |
-| 改 ACP 连接公共层 | `acp-connection.ts`：帧分类、请求/回合超时、模型与模式、回放静默 | `acp-connection.test.ts`（覆盖上述全部）；brain 与 worker 共用，改一处两边生效 |
-| 改 MCP 挂载 | `mcp-sandbox.ts` | `agent-mcp.ts`、`worker-sandbox.ts`、`sandbox-inherit.ts`（记忆/技能继承与换 agent 清理）、`docs/ai/recipes/add-mcp.md` |
-| **改热切换大脑** | `brain-switch.ts`（预检 → 等在途回合结束 → 启动新大脑 → 成功才落盘 → 失败退回） | `acp-brain.ts` 的 `beginSwitch`/`drainTurn`/`warmup`、`agent-slot.ts`（槽位）、`daemon-control.ts` 的 `AI`/`切换大脑` 分支 |
-| **改多任务 / 进程池 / 任务编号** | `worker-pool.ts`（`planAcquire`/`planReap` 纯函数；`acquire` 起进程前按这条任务的 agent 调 `ensureWorkerHome(ag)`） | `worker-acp.ts`（`class WorkerConn`）、`task-manager.ts`、`task-store.ts`、`docs/repowiki/07` |
-| **改会话五条指令 / 恢复语义** | `session-manager.ts`（操作层） | `session-registry.ts`（登记表，派生元数据）、`session-map.ts`（当前会话表，唯一权威）、`acp-brain.ts` 的 `resumeSession`（严格恢复） |
-| **改交接** | `handoff.ts`（写入磁盘 / 带上 / 消费） | `index.ts` 的 `workerLoop` 前缀带上、`daemon-control.ts` 的 `交接` 分支 |
-| 改微信消息/回复 | `index.ts`、`send-pipeline.ts` | `md-reply.ts`、`image-reply.ts`、`pending-push.ts` |
-| 改 CLI | `cli.ts`（分派 `cli-dispatch.ts`） | `manage.ts` + 按主题拆出的 `cli-context.ts` / `cli-task.ts` / `cli-session.ts` / `cli-brain.ts` / `cli-login.ts` |
-| 改数据/账号 | `wechat-ilink-core/src/store/*` | `brain-config.ts`、`docs/repowiki/08` |
+| 接新 ACP agent | `agents/brain-agents.ts` | `acp/acp-brain.ts`、`agents/sandbox/mcp-sandbox.ts`、`docs/ai/recipes/add-acp-agent.md` |
+| 改 ACP 自愈/超时 | `acp/protocol/acp-connection.ts`（帧/超时/模型与模式，brain 与 worker 共用） | `acp/acp-brain.ts` / `tasks/worker-acp.ts`（进程生命周期与会话持久化各自实现）、`acp/brain-check.ts` |
+| 改反向请求应答（权限 / fs / terminal） | `acp/protocol/acp-reverse.ts` | `acp/protocol/acp-reverse.test.ts`；brain、worker、`brain check` 三处共用 |
+| 改 ACP 连接公共层 | `acp/protocol/acp-connection.ts`：帧分类、请求/回合超时、模型与模式、回放静默 | `acp/protocol/acp-connection.test.ts`（覆盖上述全部）；brain 与 worker 共用，改一处两边生效 |
+| 改 MCP 挂载 | `agents/sandbox/mcp-sandbox.ts` | `agents/sandbox/agent-mcp.ts`、`agents/sandbox/worker-sandbox.ts`、`agents/sandbox/sandbox-inherit.ts`（记忆/技能继承与换 agent 清理）、`docs/ai/recipes/add-mcp.md` |
+| **改热切换大脑** | `acp/brain-switch.ts`（预检 → 等在途回合结束 → 启动新大脑 → 成功才落盘 → 失败退回） | `acp/acp-brain.ts` 的 `beginSwitch`/`drainTurn`/`warmup`、`agents/agent-slot.ts`（槽位）、`daemon/daemon-control.ts` 的 `AI`/`切换大脑` 分支 |
+| **改多任务 / 进程池 / 任务编号** | `tasks/worker-pool.ts`（`planAcquire`/`planReap` 纯函数；`acquire` 起进程前按这条任务的 agent 调 `ensureWorkerHome(ag)`） | `tasks/worker-acp.ts`（`class WorkerConn`）、`tasks/task-manager.ts`、`tasks/task-store.ts`、`docs/repowiki/07` |
+| **改会话五条指令 / 恢复语义** | `sessions/session-manager.ts`（操作层） | `sessions/session-registry.ts`（登记表，派生元数据）、`sessions/session-map.ts`（当前会话表，唯一权威）、`acp/acp-brain.ts` 的 `resumeSession`（严格恢复） |
+| **改交接** | `sessions/handoff.ts`（写入磁盘 / 带上 / 消费） | `index.ts` 的 `workerLoop` 前缀带上、`daemon/daemon-control.ts` 的 `交接` 分支 |
+| 改微信消息/回复 | `index.ts`、`daemon/messaging/send-pipeline.ts` | `daemon/messaging/md-reply.ts`、`daemon/messaging/image-reply.ts`、`daemon/messaging/pending-push.ts` |
+| 改 CLI | `cli.ts`（分派 `cli/cli-dispatch.ts`） | `cli/manage.ts`（参数解析/分派）+ `cli/account-commands.ts` / `cli/process-lifecycle.ts` + `cli/cli-context.ts` + `cli/subcommands/cli-*.ts` |
+| 改数据/账号 | `wechat-ilink-core/src/store/*` | `agents/brain-config.ts`、`docs/repowiki/08` |
 | 排查不回复 | `docs/ai/recipes/debug-daemon.md` | `daemon.log`、`brain.json`、`brain check` |
 | 端到端验收 | `docs/ai/recipes/run-e2e.md` | `scripts/doctor.ps1` |
 

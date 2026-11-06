@@ -41,7 +41,7 @@ export const RULES = [
     trigger: (diffLines) =>
       diffLines.some(
         (line) =>
-          line.startsWith('+packages/wechat-daemon/src/brain-agents.ts\t') &&
+          line.startsWith('+packages/wechat-daemon/src/agents/brain-presets.ts\t') &&
           /name:\s*["'][a-z0-9_-]+["']/.test(line),
       ),
     // 文档路径根据 name 的值动态生成：docs/接入方案/接入-<name>.md
@@ -60,7 +60,7 @@ export const RULES = [
     trigger: (diffLines) =>
       diffLines.some(
         (line) =>
-          /^\+packages\/wechat-daemon\/src\/(manage|chat-commands|cli|cli-dispatch)\.ts\t/.test(line) &&
+          /^\+packages\/wechat-daemon\/src\/(?:[\w-]+\/)*(manage|chat-commands|chat-command-specs|cli|cli-dispatch)\.ts\t/.test(line) &&
           /case\s+["'][\w-]+["']/.test(line),
       ),
     docs: [
@@ -207,9 +207,9 @@ export const RULES = [
       'docs/ai/README.md 代码导航',
       'docs/repowiki/02-系统架构.md',
     ],
-    // --check 只要求上述三个文档至少改一个；完整核对清单另由方案文档提供：
-    // docs/审查与质量记录/方案-源码目录重构-2026-11-05.md §4 步骤 4（14 个文件、87 处引用）
-    note: '至少同步一个目录结构文档；并对照重构方案 §4 步骤 4 的完整清单逐项核对（历史快照文档只加「当时路径」说明，不改正文）。',
+    // --check 只要求上述三个文档至少改一个；完整核对清单另由设计文档提供：
+    // docs/设计文档/源码目录分层设计.md §9
+    note: '至少同步一个目录结构文档；并对照源码目录分层设计 §9 的完整清单逐项核对（历史快照文档只加「当时路径」说明，不改正文）。',
   },
 ];
 

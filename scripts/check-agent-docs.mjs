@@ -2,7 +2,7 @@
 /**
  * 接入文档完整性检查。
  *
- * 对 packages/wechat-daemon/src/brain-agents.ts 里的每个内置预设，断言：
+ * 对 packages/wechat-daemon/src/agents/brain-presets.ts 里的每个内置预设，断言：
  *   1. docs/接入方案/ 下有一篇接入文档（正文提到预设名）；
  *   2. 文档头部有「最后核对」「实测环境」「状态」三个字段；
  *   3. 有五类二级标题：安装/准备、预设/沙箱、探针/实测、限制（或风险）、验证/复现/验收；
@@ -19,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PRESET_SOURCE = "packages/wechat-daemon/src/brain-agents.ts";
+const PRESET_SOURCE = "packages/wechat-daemon/src/agents/brain-presets.ts";
 const DOC_DIR = "docs/接入方案";
 // AGENTS.md §6 已于 2026-11-06 拆到 docs/ai/已知坑.md：预设名现在在那里出现。
 const INDEX_FILES = [

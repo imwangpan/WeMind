@@ -273,7 +273,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 
 ### 命令一览（自动生成）
 
-> 本表由 `node scripts/gen-docs-tables.mjs` 从 `manage.ts` 与 `chat-commands.ts` 生成，保证命令清单与代码一致。
+> 本表由 `node scripts/gen-docs-tables.mjs` 从 `cli/manage.ts` 与 `ipc/chat-command-specs.ts` 生成，保证命令清单与代码一致。
 
 <!-- BEGIN:auto cli-commands -->
 **CLI 子命令**（`wemind <命令>`）
@@ -481,7 +481,7 @@ iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 1
 
 brain 跑在独立的沙箱目录里（默认 `<数据目录>/brain-home`，由该 agent 预设的 `homeEnvVar` 环境变量指给它，如 kiro 的 `KIRO_HOME`、opencode 的 `XDG_CONFIG_HOME`；可用 `WECHAT_BRAIN_HOME` 覆盖），**默认不加载任何 MCP**——既快又杜绝 `wechat` 自身回环（内置工具如 `web_search` 仍可用）。
 
-> **继承你的记忆与规则**：沙箱会用目录 junction 把所用 agent 真实配置目录里的「知识/记忆」类子目录链进来，让微信里的大脑和你日常使用读到**同样的记忆、规则、技能**。`settings/` 里**除 `mcp.json` 外**的文件（尤其 `cli.json`，含 `chat.defaultModel` 等——这决定大脑用哪个模型！）也会同步过来，**只有 `mcp.json` 隔离 curated**（防 `wechat` 回环）；`sessions`（brain 自有会话）保持沙箱本地。**按 agent 配置驱动**（`brain-agents.ts` 里该 agent 的 `realHome`/`inheritDirs`）：kiro 预置 `steering`/`memories`/`skills`/`agents`/`powers`/`tasks`/`extensions` 等目录；gemini / opencode / deepseek / qoder / cline / pi / claude-code 也各自按预设继承 `skills` / `agents` / `commands` / `memory` 等目录与设置基底，`sandbox-inherit.ts` 会在换 agent 时按清单清掉上一个 agent 留下的继承项；`codex` 的适配器不认沙箱配置目录，因此不继承。非空目录（如 kiro 自建 agents 脚手架）会补拷缺失文件。可用 `WEMIND_BRAIN_REAL_HOME` / `WEMIND_BRAIN_INHERIT_DIRS` 覆盖，`WEMIND_BRAIN_INHERIT=0` 可关闭。**注意：直接改 agent 自己的配置文件换模型后，旧 ACP 会话可能仍绑旧模型，需在微信发「新会话」重建**（用 `wemind brain set --model` 再 `switch` 会在会话建立/恢复时重下发模型，不受此限）。需要某个 MCP 时，直接**在微信里发指令**（daemon 拦截处理，不进 brain）：
+> **继承你的记忆与规则**：沙箱会用目录 junction 把所用 agent 真实配置目录里的「知识/记忆」类子目录链进来，让微信里的大脑和你日常使用读到**同样的记忆、规则、技能**。`settings/` 里**除 `mcp.json` 外**的文件（尤其 `cli.json`，含 `chat.defaultModel` 等——这决定大脑用哪个模型！）也会同步过来，**只有 `mcp.json` 隔离 curated**（防 `wechat` 回环）；`sessions`（brain 自有会话）保持沙箱本地。**按 agent 配置驱动**（`brain-presets.ts` 里该 agent 的 `realHome`/`inheritDirs`）：kiro 预置 `steering`/`memories`/`skills`/`agents`/`powers`/`tasks`/`extensions` 等目录；gemini / opencode / deepseek / qoder / cline / pi / claude-code 也各自按预设继承 `skills` / `agents` / `commands` / `memory` 等目录与设置基底，`sandbox-inherit.ts` 会在换 agent 时按清单清掉上一个 agent 留下的继承项；`codex` 的适配器不认沙箱配置目录，因此不继承。非空目录（如 kiro 自建 agents 脚手架）会补拷缺失文件。可用 `WEMIND_BRAIN_REAL_HOME` / `WEMIND_BRAIN_INHERIT_DIRS` 覆盖，`WEMIND_BRAIN_INHERIT=0` 可关闭。**注意：直接改 agent 自己的配置文件换模型后，旧 ACP 会话可能仍绑旧模型，需在微信发「新会话」重建**（用 `wemind brain set --model` 再 `switch` 会在会话建立/恢复时重下发模型，不受此限）。需要某个 MCP 时，直接**在微信里发指令**（daemon 拦截处理，不进 brain）：
 
 | 指令                        | 作用                                            |
 | --------------------------- | ----------------------------------------------- |
@@ -505,7 +505,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | 3 | ACP 实现覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt`；先用 `wemind brain check` 真握手 |
 | 4 | 能**完成认证**且二进制可解析 | PATH 上能找到，或用 `--bin` 给绝对路径；`.cmd`/`.bat` 需经 shell |
 
-> **「支持 ACP」四个字不足以说明可用**：`session/load`、`session/resume`、图片输入、MCP 传输、反向请求都是**可降级项**（agent 没实现就退到简单做法），按 agent 而异（见 `packages/wechat-daemon/src/brain-agents.ts` 的 `AcpAgentPreset` 字段与 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md) §9）。接入前先跑能力探针。
+> **「支持 ACP」四个字不足以说明可用**：`session/load`、`session/resume`、图片输入、MCP 传输、反向请求都是**可降级项**（agent 没实现就退到简单做法），按 agent 而异（见 `packages/wechat-daemon/src/agents/brain-presets.ts` 的 `AcpAgentPreset` 字段与 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md) §9）。接入前先跑能力探针。
 
 | 环境变量                | 作用                                                | 默认         |
 | ----------------------- | --------------------------------------------------- | ------------ |

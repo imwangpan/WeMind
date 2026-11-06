@@ -1,0 +1,422 @@
+import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import {
+  descendantPids,
+  helpText,
+  agentLabel,
+  resolveTaskCwd,
+  runManage,
+  taskAckOutcome,
+  deleteGuard,
+  stopSummary,
+} from "./manage.js";
+import { isAlive } from "../shared/process/proc-identity.js";
+
+/*
+ * 只测 POSIX 的后代收集：Windows 走 `taskkill /T`，没有对应逻辑。
+ *
+ * 为什么要测：`stopDaemon` 以前逐个 `process.kill(pid)`——只结束候选 pid 本身，且候选里没有 `worker.pid`，daemon 拉起的 ACP 任务 worker 会留下来继续占着会话与文件句柄（Windows 因为 `/T` 连带子树，问题一直没暴露）。`descendantPids` 是这条「停整条链」路径的地基，必须证明真能查到孙进程。
+ */
+const isPosix = process.platform !== "win32";
+const spawned: number[] = [];
+
+afterAll(() => {
+  for (const pid of spawned) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* ignore */
+    }
+  }
+});
+
+describe("helpText（CLI 帮助面）", () => {
+  it("列出自本次改造起新增的指令：热切换 / 交接 / 会话四件套 / 任务列表（与微信表同源）", () => {
+    const h = helpText();
+    for (const s of [
+      "wemind brain switch", // 热切换（--worker 也在同一条里）
+      "wemind brain handoff",
+      "wemind session new",
+      "wemind session list",
+      "wemind session resume",
+      "wemind session rename",
+      "wemind session delete",
+      "wemind task-list",
+      "wemind task-reply",
+      "--model", // brain set 可以覆盖模型（DSH 的模型路由不再是改源码才能换）
+      "控制桥", // 说明「CLI 与微信走同一段代码」的那句
+    ])
+      expect(h).toContain(s);
+    expect(h).not.toContain("（无 CLI）"); // CLI 帮助不列只在微信里存在的操作（加载/卸载 MCP）
+  });
+});
+
+describe("resolveTaskCwd（--cwd 相对路径按用户当前目录解析）", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-cwd-"));
+  fs.mkdirSync(path.join(base, "sub"));
+
+  it("相对路径 → 以用户当前目录为基准的绝对路径", () => {
+    expect(resolveTaskCwd("sub", base)).toBe(path.join(base, "sub"));
+  });
+
+  it("省略 → 当前目录", () => {
+    expect(resolveTaskCwd(undefined, base)).toBe(path.resolve(base));
+  });
+
+  it("不存在 / 不是目录 → 提前报错（不把相对路径丢给 daemon 解析）", () => {
+    expect(() => resolveTaskCwd("nope", base)).toThrow(/工作目录不存在/);
+    fs.writeFileSync(path.join(base, "file.txt"), "x");
+    expect(() => resolveTaskCwd("file.txt", base)).toThrow(/不是目录/);
+  });
+});
+
+describe("deleteGuard（daemon 没停干净不删目录）", () => {
+  it("还有进程活着 → 拒绝并给出下一步", () => {
+    const msg = deleteGuard("abc", true);
+    expect(msg).toMatch(/仍在运行/);
+    expect(msg).toMatch(/wemind stop abc/);
+  });
+
+  it("已停止 → 放行", () => {
+    expect(deleteGuard("abc", false)).toBeNull();
+  });
+});
+
+describe("stopSummary（stop 的实际结果决定能否删目录）", () => {
+  it("kill 后仍有目标存活 → ok=false，文案点名进程", () => {
+    const r = stopSummary(["daemon 1"], [], ["daemon 1"]);
+    expect(r.ok).toBe(false);
+    expect(r.msg).toMatch(/未能停止 daemon 1/);
+    expect(r.msg).toMatch(/仍在运行/);
+  });
+
+  it("跳过非本程序不算失败；全部停止 → ok=true", () => {
+    const r = stopSummary(["daemon 1"], ["runner 2"], []);
+    expect(r.ok).toBe(true);
+    expect(r.msg).toContain("已停止 daemon 1");
+    expect(r.msg).toContain("跳过 runner 2");
+  });
+
+  it("没有任何候选 → 明确「无运行中的进程」", () => {
+    expect(stopSummary([], [], [])).toEqual({ msg: "无运行中的进程", ok: true });
+  });
+});
+
+describe("CLI 参数校验（缺值 / 非法编号 / 未知 runner）", () => {
+  it("开关缺值直接报错，不再静默用默认值", async () => {
+    await expect(runManage(["task", "x", "--cwd"])).rejects.toThrow(/--cwd 缺少参数值/);
+    await expect(runManage(["start", "x", "--runner"])).rejects.toThrow(/--runner 缺少参数值/);
+    await expect(runManage(["session", "list", "--page"])).rejects.toThrow(/--page 缺少参数值/);
+  });
+
+  it("未知 runner / 非法页码 / 0 号任务直接拒绝", async () => {
+    await expect(runManage(["start", "x", "--runner", "foo"])).rejects.toThrow(/未知 runner/);
+    await expect(runManage(["session", "list", "--page", "0"])).rejects.toThrow(/正整数/);
+    await expect(runManage(["task-reply", "#0 hi"])).rejects.toThrow(/正整数/);
+    await expect(runManage(["task-stop", "0"])).rejects.toThrow(/正整数/);
+  });
+});
+
+describe("taskAckOutcome（任务答复的文案与退出码）", () => {
+  it("daemon 明确失败 → 用它的文案，并标记 failed（CLI 退出码非 0）", () => {
+    expect(taskAckOutcome({ ok: false, text: "❌ 已达任务上限" }, "已发送")).toEqual({
+      text: "❌ 已达任务上限",
+      failed: true,
+    });
+  });
+
+  it("成功且无额外文案 → 用调用方文案，不算失败", () => {
+    expect(taskAckOutcome({ ok: true, text: "" }, "已发送任务")).toEqual({
+      text: "已发送任务",
+      failed: false,
+    });
+  });
+
+  it("等不到答复 → 回退措辞 + 说明，不算失败（老版 daemon）", () => {
+    const r = taskAckOutcome(null, "已发送任务");
+    expect(r.failed).toBe(false);
+    expect(r.text).toContain("已发送任务");
+    expect(r.text).toContain("没等到 daemon 答复");
+  });
+});
+
+/*
+ * 「省略账号 = 默认账号」：`start`/`stop` 走 pickKey（与 session/task 一致）。
+ * `WEMIND_ROOT` 是模块加载时定死的，所以要在设好 WEMIND_HOME 之后**重新加载模块**。
+ */
+describe("pickKey（省略账号 = 默认账号）", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-pickkey-"));
+  const prevHome = process.env.WEMIND_HOME;
+  let pickKey: typeof import("./manage.js").pickKey;
+
+  beforeAll(async () => {
+    process.env.WEMIND_HOME = home;
+    vi.resetModules();
+    ({ pickKey } = await import("./manage.js"));
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.WEMIND_HOME;
+    else process.env.WEMIND_HOME = prevHome;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const writeRegistry = (reg: unknown) =>
+    fs.writeFileSync(path.join(home, "accounts.json"), JSON.stringify(reg), "utf-8");
+
+  it("没有登记账号 → 报「无默认账号」（而不是旧的「需要 <key 或 label>」）", () => {
+    expect(() => pickKey()).toThrow(/无默认账号/);
+  });
+
+  it("省略 → 默认账号；显式 key / 别名优先；查不到 → 报错", () => {
+    writeRegistry({
+      default: "bbb",
+      accounts: {
+        aaa: {
+          key: "aaa",
+          botId: "a",
+          userId: "u",
+          baseUrl: "https://x",
+          label: "副号",
+          addedAt: 1,
+        },
+        bbb: {
+          key: "bbb",
+          botId: "b",
+          userId: "u",
+          baseUrl: "https://x",
+          label: "main",
+          addedAt: 2,
+        },
+      },
+    });
+    expect(pickKey()).toBe("bbb");
+    expect(pickKey("aaa")).toBe("aaa");
+    expect(pickKey("副号")).toBe("aaa");
+    expect(() => pickKey("nope")).toThrow(/未找到账号/);
+  });
+
+  it("default 字段缺失（老注册表）→ 回落第一个登记的账号", () => {
+    writeRegistry({
+      accounts: {
+        ccc: {
+          key: "ccc",
+          botId: "c",
+          userId: "u",
+          baseUrl: "https://x",
+          label: "ccc",
+          addedAt: 1,
+        },
+        ddd: {
+          key: "ddd",
+          botId: "d",
+          userId: "u",
+          baseUrl: "https://x",
+          label: "ddd",
+          addedAt: 2,
+        },
+      },
+    });
+    expect(pickKey()).toBe("ccc");
+  });
+});
+
+/*
+ * 并发登录隔离：每次 `wimind login` 必须拿一个独立暂存目录，不能共用固定的 `.staging/`。
+ * 同 pickKey：`WEMIND_ROOT` 在模块加载时定死，所以设好 WEMIND_HOME 后重新加载模块。
+ */
+describe("createLoginStagingDir（并发登录不共用暂存目录）", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-staging-"));
+  const prevHome = process.env.WEMIND_HOME;
+  let createStaging: typeof import("./manage.js").createLoginStagingDir;
+
+  beforeAll(async () => {
+    process.env.WEMIND_HOME = home;
+    vi.resetModules();
+    ({ createLoginStagingDir: createStaging } = await import("./manage.js"));
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.WEMIND_HOME;
+    else process.env.WEMIND_HOME = prevHome;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it("每次返回不同目录，父目录是 WEMIND_HOME，且目录已创建", () => {
+    const a = createStaging();
+    const b = createStaging();
+    try {
+      expect(a).not.toBe(b);
+      expect(path.dirname(a)).toBe(home);
+      expect(path.dirname(b)).toBe(home);
+      expect(fs.existsSync(a)).toBe(true);
+      expect(fs.existsSync(b)).toBe(true);
+    } finally {
+      fs.rmSync(a, { recursive: true, force: true });
+      fs.rmSync(b, { recursive: true, force: true });
+    }
+  });
+});
+
+/*
+ * `wemind brain set --model`：模型覆盖与 `--bin` 走同一条读-改-写路径（顶层与 presets[agent 名] 各写一份）。
+ * `WEMIND_HOME` 是模块加载时定死的，所以先指到临时目录、再重新加载模块（同 pickKey 那组）。
+ */
+describe("brain set --model（模型覆盖写入磁盘）", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brainmodel-"));
+  const prevHome = process.env.WEMIND_HOME;
+  let runManage: typeof import("./manage.js").runManage;
+
+  beforeAll(async () => {
+    process.env.WEMIND_HOME = home;
+    fs.writeFileSync(
+      path.join(home, "accounts.json"),
+      JSON.stringify({
+        default: "t1",
+        accounts: {
+          t1: { key: "t1", botId: "b", userId: "u", baseUrl: "https://x", label: "t1", addedAt: 1 },
+        },
+      }),
+      "utf-8",
+    );
+    vi.resetModules();
+    ({ runManage } = await import("./manage.js"));
+  });
+
+  afterAll(() => {
+    if (prevHome === undefined) delete process.env.WEMIND_HOME;
+    else process.env.WEMIND_HOME = prevHome;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const brainJson = () => JSON.parse(fs.readFileSync(path.join(home, "t1", "brain.json"), "utf-8"));
+
+  it("--model 写进顶层与 presets[agent]；不带 --model 时沿用；--model auto = 跟随 agent 默认", async () => {
+    const pro = '["deepseek-account","deepseek-v4-pro"]';
+    await runManage(["brain", "set", "deepseek", "--model", pro, "t1"]);
+    expect(brainJson()).toMatchObject({
+      agent: "deepseek",
+      model: pro,
+      presets: { deepseek: { model: pro } },
+    });
+
+    await runManage(["brain", "set", "deepseek", "t1"]); // 只改 agent，不带 --model：沿用
+    expect(brainJson().model).toBe(pro);
+
+    await runManage(["brain", "set", "deepseek", "--model", "auto", "t1"]);
+    expect(brainJson().model).toBe("auto"); // 原样存，解析层再翻成「跟随默认」
+  });
+
+  it("--model=VALUE 等号写法也认（以前会被静默丢掉，命令还报成功）", async () => {
+    const pro = '["deepseek-account","deepseek-v4-pro"]';
+    await runManage(["brain", "set", "deepseek", `--model=${pro}`, "t1"]);
+    expect(brainJson()).toMatchObject({ agent: "deepseek", model: pro });
+  });
+
+  it("空 --model 与 `set auto --model` 直接拒绝（不写盘）", async () => {
+    const before = fs.readFileSync(path.join(home, "t1", "brain.json"), "utf-8");
+    await expect(runManage(["brain", "set", "deepseek", "--model", "   ", "t1"])).rejects.toThrow(
+      /缺少参数值/,
+    );
+    await expect(runManage(["brain", "set", "deepseek", "--model=", "t1"])).rejects.toThrow(
+      /缺少参数值/,
+    );
+    // auto 只是「自动探测」，没有具体 agent 可绑模型（写进 presets.auto 永远读不到，顶层值会发给探测到的任意 agent）
+    await expect(runManage(["brain", "set", "auto", "--model", "x", "t1"])).rejects.toThrow(
+      /不能配 --model/,
+    );
+    expect(fs.readFileSync(path.join(home, "t1", "brain.json"), "utf-8")).toBe(before);
+  });
+
+  it("auto 不接受 --bin/--args/--shell（自动探测不绑定具体 agent）", async () => {
+    await expect(runManage(["brain", "set", "auto", "--bin", "x", "t1"])).rejects.toThrow(
+      /不绑定具体 agent/,
+    );
+    await expect(runManage(["brain", "set", "auto", "--args", "acp", "t1"])).rejects.toThrow(
+      /不绑定具体 agent/,
+    );
+  });
+
+  it("拼错的开关直接报错（以前被当未知参数静默过滤）", async () => {
+    await expect(runManage(["brain", "set", "deepseek", "--modle", "x", "t1"])).rejects.toThrow(
+      /未知参数/,
+    );
+  });
+});
+
+describe("agentLabel（list 的 agent 列）", () => {
+  it("daemon 没跑时只看配置；运行中优先显示实际大脑，不一致时两者都写", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-manage-label-"));
+    try {
+      fs.writeFileSync(path.join(dir, "brain.json"), JSON.stringify({ agent: "deepseek" }));
+      expect(agentLabel(dir)).toBe("deepseek");
+      expect(
+        agentLabel(dir, {
+          agent: "deepseek",
+          source: "file",
+          bin: "dsh.cmd",
+          args: [],
+          startedAt: 1,
+        }),
+      ).toBe("deepseek");
+      expect(
+        agentLabel(dir, {
+          agent: "cline",
+          source: "env",
+          bin: "cline.cmd",
+          args: ["--acp"],
+          startedAt: 1,
+        }),
+      ).toBe("cline（运行，来源 env；配置 deepseek）");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.skipIf(!isPosix)("descendantPids（POSIX 进程树）", () => {
+  it("能查到子进程与孙进程；叶子 pid 返回空", async () => {
+    // 父 → 子 → 孙，每层都用 node 起下一层，命令行稳定可查
+    const script = `
+      const { spawn } = require("node:child_process");
+      const child = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], { stdio: "ignore" });
+      process.stdout.write(String(child.pid));
+      setTimeout(() => {}, 60000);
+    `;
+    const parent = spawn(process.execPath, ["-e", script], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (parent.pid) spawned.push(parent.pid);
+
+    const childPid = await new Promise<number>((resolve, reject) => {
+      let buf = "";
+      const timer = setTimeout(() => reject(new Error("没拿到子进程 pid")), 10_000);
+      parent.stdout.on("data", (d) => {
+        buf += d.toString();
+        const n = Number.parseInt(buf, 10);
+        if (Number.isInteger(n) && n > 0) {
+          clearTimeout(timer);
+          resolve(n);
+        }
+      });
+      parent.on("error", reject);
+    });
+    spawned.push(childPid);
+
+    const desc = descendantPids(parent.pid as number);
+    expect(desc).toContain(childPid);
+
+    // 叶子（孙进程）没有后代：不能因为「查不到」而返回它的父/兄弟
+    expect(descendantPids(childPid)).toEqual([]);
+  }, 20_000);
+
+  it("不存在的 pid → 空数组（不抛、不误伤）", () => {
+    // 2147483647 必然不存在；isAlive 也确认一下，避免断言建立在假设上
+    expect(isAlive(2147483647)).toBe(false);
+    expect(descendantPids(2147483647)).toEqual([]);
+  });
+});

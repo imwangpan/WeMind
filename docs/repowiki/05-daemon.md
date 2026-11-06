@@ -8,77 +8,87 @@ daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询�
 
 ## 5.1 模块全景
 
-`src/` 目前是**平铺一层**的 57 个源文件（另有 60 个同目录测试）；下表按职责分组，便于定位。目录分层改造的提案见 [`docs/审查与质量记录/方案-源码目录重构-2026-11-05.md`](../审查与质量记录/方案-源码目录重构-2026-11-05.md)。
+`src/` 是 **8 个一级目录 + 6 个二级目录**下的 63 个源文件（另有 60 个与源码同目录的测试）；下表按目录给出每个文件的职责。分层设计与迁移记录见 [`docs/设计文档/源码目录分层设计.md`](../设计文档/源码目录分层设计.md)。
 
 ```
 packages/wechat-daemon/src/
-├── 入口与路由
-│   ├── index.ts            # 主入口 runDaemon：poller / 快车道 / 大脑三个循环、消息路由、回合编排、进度节流
-│   ├── cli.ts              # bin 入口（wemind）：分发 daemon / _watchdog / 其余给 manage
-│   ├── cli-dispatch.ts     # CLI 子命令注册与分发
-│   ├── manage.ts           # CLI 分派、账号与进程生命周期（命令实现见 cli-*.ts）
-│   ├── daemon-routing.ts   # 纯路由判定：快车道 / 控制与任务指令 / 错误分类与提示
-│   └── daemon-control.ts   # 微信控制指令与控制桥请求的分派（两入口共用实现）
-├── 消息与回复
-│   ├── send-pipeline.ts    # 外发管线：串行链、节流、连发预算、旧 token 挂起/补发、任务推送让位
-│   ├── pending-push.ts     # 旧 token 期间失败外发的内存挂起队列（下一条消息到达后补发）
-│   ├── poller-batch.ts     # 一批消息的计数重置与「全部做完」判定
-│   ├── access.ts           # 发件人兜底鉴权（登录者 + allowFrom）
-│   ├── chat-commands.ts    # 命令表：解析 + 帮助**同表**驱动（无副作用模块）
-│   ├── md-reply.ts         # 长回复转 .md 文件
-│   ├── image-reply.ts      # 从大脑回复提取图片引用并决定能否发图
-│   └── image-url.ts        # 回复里图片 URL 的识别与规整
-├── ACP 协议层（brain / worker 共用）
-│   ├── acp-connection.ts   # 帧处理、请求与回合超时、模型/模式、load 后回放静默（→ 第 6 章）
-│   ├── acp-reverse.ts      # 反向请求应答器（权限默认拒绝；未知 method 回 -32601）
-│   ├── acp-quiet.ts        # 恢复会话后等回放帧安静（200ms 静默窗口 / 最多 3s）
-│   └── line-decoder.ts     # stdout 行解码（容错非 JSON 日志行）
-├── 大脑
-│   ├── acp-brain.ts        # 常驻 ACP 进程、严格会话恢复、beginSwitch/drainTurn/warmup（→ 第 6 章）
-│   ├── agent-slot.ts       # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
-│   ├── brain-switch.ts     # 运行时换大脑（预检/等在途回合结束/启动新大脑/回滚）（→ 第 6 章）
-│   ├── brain-agents.ts     # ACP_AGENT_PRESETS、resolveAgent、agentProblem、派生配置落盘（→ 第 6 章）
-│   ├── brain-config.ts     # brain.json 读写
-│   ├── brain-state.ts      # brain-runtime.json：daemon 实际生效的大脑
-│   ├── brain-check.ts      # wemind brain check 的真 ACP 握手
-│   ├── profile-model.ts    # 真实 profile 的默认模型读取与「缺 - id: acp」提示
-│   └── mcp-sandbox.ts      # brain 沙箱：MCP 隔离 + 记忆继承（→ 第 6 章）
-├── 沙箱与进程
-│   ├── agent-mcp.ts        # MCP 激活集与按 agent 的挂载格式
-│   ├── sandbox-inherit.ts  # 记忆/技能继承（junction/拷贝 + 继承清单）
-│   ├── spawn-agent.ts      # 统一 spawn（Windows .cmd 经 shell + 逐参数引号）
-│   ├── debug-env.ts        # 摘除 VS Code 调试器注入的 NODE_OPTIONS
-│   ├── pid-record.ts       # brain.pid / workers.pid.json 身份记录
-│   └── proc-identity.ts    # 进程身份校验（isOurProcess 等）
-├── 任务（worker）
-│   ├── worker-acp.ts       # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
-│   ├── worker-pool.ts      # worker 进程池：复用/回收/上限（→ 第 7 章）
-│   ├── worker-sandbox.ts   # worker 沙箱（→ 第 7 章）
-│   ├── task-manager.ts     # 任务表：编号/编号寻址/停止（→ 第 7 章）
-│   ├── task-store.ts       # 任务表写入磁盘 tasks.json（重启后续跑）（→ 第 7 章）
-│   ├── task-inbox.ts       # 任务收件箱两个通道（task-inbox/ 命令 + task-out/ 答复）
-│   ├── task-inbox-runner.ts # 任务收件箱扫描（时间序/先删后做/出错回 ack）
-│   └── cline-credentials.ts # 从 Cline providers.json 派生 CLINE_PROVIDER/CLINE_API_KEY
-├── 会话
-│   ├── session-manager.ts  # 会话五条指令的实现层（→ 第 6 章）
-│   ├── session-registry.ts # 会话登记表（派生元数据：名字/标题/轮次）（→ 第 6 章）
-│   ├── session-map.ts      # 当前会话表 brain-sessions.json / worker-sessions.json（→ 第 6 章）
-│   └── handoff.ts          # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才消费（→ 第 6 章）
-├── CLI 命令实现（cli-*.ts）
-│   ├── cli-context.ts      # CLI 共用上下文：账号选择、daemon/控制桥存活、viaBridge
-│   ├── cli-task.ts         # task* 命令（文件桥写入 + 答复文案）
-│   ├── cli-session.ts      # session* 命令（读登记表 / 写走控制桥）
-│   ├── cli-brain.ts        # brain* 命令（配置 / 自检 / 热切换 / 交接）
-│   └── cli-login.ts        # 扫码登录（独立暂存目录 / 二维码 / 登记 / 解除暂停）
-├── 桥与常驻
-│   ├── control-bridge.ts   # CLI↔daemon 控制桥（请求/应答/.bridge 凭据）（→ 第 7 章）
+├── cli.ts                    # bin 入口（wemind）：分发 daemon / _watchdog / 其余给 cli/manage
+├── index.ts                  # 主入口 runDaemon：poller / 快车道 / 大脑三个循环、消息路由、回合编排、进度节流
+├── daemon/                   # 微信侧本体：路由、控制、收件箱
+│   ├── daemon-routing.ts     # 纯路由判定：快车道 / 控制与任务指令 / 错误分类与提示
+│   ├── daemon-control.ts     # 微信控制指令与控制桥请求的分派（两入口共用实现）
+│   ├── access.ts             # 发件人兜底鉴权（登录者 + allowFrom）
 │   ├── control-inbox-runner.ts # 控制桥收件箱扫描（单条串行/过期不执行/失败必写应答）
-│   ├── watchdog-runner.ts  # 自带后台守护进程（崩溃重拉、stdout/err 并入 daemon.log）
-│   ├── pm2-runner.ts       # pm2 runner（--runner pm2）
-│   └── log-rotate.ts       # RotatingLog：逐块追加 + 运行中轮转
-└── 通用
-    ├── atomic-json.ts      # 原子写 JSON（临时文件 + rename）
-    └── version.ts          # 版本号唯一来源（运行时读 package.json）
+│   ├── task-inbox-runner.ts  # 任务收件箱扫描（时间序/先删后做/出错回 ack）
+│   └── messaging/            # 外发与回复
+│       ├── send-pipeline.ts  # 外发管线：串行链、节流、连发预算、旧 token 挂起/补发、任务推送让位
+│       ├── pending-push.ts   # 旧 token 期间失败外发的内存挂起队列（下一条消息到达后补发）
+│       ├── poller-batch.ts   # 一批消息的计数重置与「全部做完」判定
+│       ├── md-reply.ts       # 长回复转 .md 文件
+│       ├── image-reply.ts    # 从大脑回复提取图片引用并决定能否发图
+│       └── image-url.ts      # 回复里图片 URL 的识别与规整
+├── acp/                      # 常驻大脑与协议
+│   ├── acp-brain.ts          # 常驻 ACP 进程、严格会话恢复、beginSwitch/drainTurn/warmup（→ 第 6 章）
+│   ├── brain-switch.ts       # 运行时换大脑（预检/等在途回合结束/启动新大脑/回滚）（→ 第 6 章）
+│   ├── brain-check.ts        # wemind brain check 的真 ACP 握手
+│   └── protocol/             # brain / worker 共用协议层
+│       ├── acp-connection.ts # 帧处理、请求与回合超时、模型/模式、load 后回放静默（→ 第 6 章）
+│       ├── acp-reverse.ts    # 反向请求应答器（权限默认拒绝；未知 method 回 -32601）
+│       └── acp-quiet.ts      # 恢复会话后等回放帧安静（200ms 静默窗口 / 最多 3s）
+├── agents/                   # agent 预设、配置状态与沙箱
+│   ├── brain-presets.ts      # AcpAgentPreset 类型与 9 个内置预设（纯数据，无 IO）
+│   ├── brain-agents.ts       # resolveAgent、agentProblem、派生配置落盘（→ 第 6 章）
+│   ├── brain-config.ts       # brain.json 读写
+│   ├── brain-state.ts        # brain-runtime.json：daemon 实际生效的大脑
+│   ├── agent-slot.ts         # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
+│   ├── profile-model.ts      # 真实 profile 的默认模型读取与「缺 - id: acp」提示
+│   ├── cline-credentials.ts  # 从 Cline providers.json 派生 CLINE_PROVIDER/CLINE_API_KEY
+│   └── sandbox/              # 沙箱与 MCP
+│       ├── mcp-sandbox.ts    # brain 沙箱：MCP 隔离 + 记忆继承（→ 第 6 章）
+│       ├── worker-sandbox.ts # worker 沙箱（继承全量 MCP，排除 wechat）（→ 第 7 章）
+│       ├── agent-mcp.ts      # MCP 激活集与按 agent 的挂载格式
+│       └── sandbox-inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单）
+├── tasks/                    # 任务（worker）
+│   ├── worker-acp.ts         # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
+│   ├── worker-pool.ts        # worker 进程池：复用/回收/上限（→ 第 7 章）
+│   ├── task-manager.ts       # 任务表：编号/编号寻址/停止（→ 第 7 章）
+│   ├── task-store.ts         # 任务表写入磁盘 tasks.json（重启后续跑）（→ 第 7 章）
+│   └── task-inbox.ts         # 任务收件箱两个通道（task-inbox/ 命令 + task-out/ 答复）
+├── sessions/                 # 会话
+│   ├── session-manager.ts    # 会话五条指令的实现层（→ 第 6 章）
+│   ├── session-registry.ts   # 会话登记表门面（改名/删除 + re-export store/view）（→ 第 6 章）
+│   ├── registry-store.ts     # 登记表存储层：读写/裁剪/登记刷新
+│   ├── registry-view.ts      # 登记表视图层：引用解析/名字校验/列表渲染
+│   ├── session-map.ts        # 当前会话表 brain-sessions.json / worker-sessions.json（→ 第 6 章）
+│   └── handoff.ts            # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才消费（→ 第 6 章）
+├── cli/                      # 本地 CLI
+│   ├── manage.ts             # 参数解析、switch 分派、帮助文本
+│   ├── account-commands.ts   # list / adopt / logout / delete / start（账号维度）
+│   ├── process-lifecycle.ts  # brainRecord、整树停止、startDaemon/stopDaemon/deleteGuard
+│   ├── cli-context.ts        # CLI 共用上下文：账号选择、daemon/控制桥存活、viaBridge
+│   ├── cli-dispatch.ts       # CLI 子命令注册与分发
+│   ├── watchdog-runner.ts    # 自带后台守护进程（崩溃重拉、stdout/err 并入 daemon.log）
+│   ├── pm2-runner.ts         # pm2 runner（--runner pm2）
+│   └── subcommands/          # 主题命令实现
+│       ├── cli-brain.ts      # brain* 命令（配置 / 自检 / 热切换 / 交接）
+│       ├── cli-login.ts      # 扫码登录（独立暂存目录 / 二维码 / 登记 / 解除暂停）
+│       ├── cli-session.ts    # session* 命令（读登记表 / 写走控制桥）
+│       └── cli-task.ts       # task* 命令（文件桥写入 + 答复文案）
+├── ipc/                      # 进程间与文本协议
+│   ├── control-bridge.ts     # CLI↔daemon 控制桥（请求/应答/.bridge 凭据）（→ 第 7 章）
+│   ├── chat-command-specs.ts # 微信/CLI 指令表（类型 + 规格 + owner-only 判定）
+│   └── chat-commands.ts      # 指令解析与帮助渲染（与指令表同表驱动）
+└── shared/                   # 通用工具
+    ├── debug-env.ts          # 摘除 VS Code 调试器注入的 NODE_OPTIONS
+    ├── version.ts            # 版本号唯一来源（运行时读 package.json）
+    ├── process/
+    │   ├── pid-record.ts     # brain.pid / workers.pid.json 身份记录
+    │   ├── proc-identity.ts  # 进程身份校验（isAlive / matchesMarkers 等）
+    │   └── spawn-agent.ts    # 统一 spawn（Windows .cmd 经 shell + 逐参数引号）
+    └── io/
+        ├── atomic-json.ts    # 原子写 JSON（临时文件 + rename）
+        ├── line-decoder.ts   # stdout 行解码（容错非 JSON 日志行）
+        └── log-rotate.ts     # RotatingLog：逐块追加 + 运行中轮转
 ```
 
 ## 5.2 启动流程（`runDaemon()`）

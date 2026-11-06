@@ -1,6 +1,8 @@
 # 方案 C：受控 ACP 工作机（设计文档）
 
 > **历史文档（2026-11-04 标注）**：本文记录当时的方案设计与实施过程，**不作为现行实现的说明**；现行行为以 [README.md](../../README.md)、[repowiki/07-远程任务-Worker.md](../repowiki/07-远程任务-Worker.md) 与源码为准。文中与现行不一致之处已在正文标注。
+>
+> **路径说明（2026-11-06 补）**：文中源码路径是当时的平铺路径；`src/` 分层后对应位置见 [`docs/ai/代码地图.md`](../ai/代码地图.md)。
 
 > 状态：**MVP 已实现** ✅（2026-06-17，真机跑通，见 [方案C-MVP-远程human-in-the-loop.md](方案C-MVP-远程human-in-the-loop.md)）。本文为总设计与方案对比（A/B/C）；MVP 落地细节（worker-acp / task-manager / 消息路由 / typing）见 MVP 文档。
 >

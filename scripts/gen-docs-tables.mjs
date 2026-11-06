@@ -47,7 +47,12 @@ function listSourceFiles(dir) {
       result.push(abs);
     }
   }
-  return result;
+  // 按相对路径排序：fs.readdirSync 的顺序在 NTFS 与 ext4 上不同，不排序会让「变量首现位置」随 OS 变化。
+  return result.sort((a, b) => {
+    const ra = path.relative(dir, a).split(path.sep).join("/");
+    const rb = path.relative(dir, b).split(path.sep).join("/");
+    return ra < rb ? -1 : ra > rb ? 1 : 0;
+  });
 }
 
 /** 运行环境自带、不是 WeMind 配置项的变量：不进文档表。 */
@@ -196,9 +201,11 @@ export function renderCliTable(cliCommands, wechatCommands) {
 
 export function generateAll() {
   const envVars = collectEnvVars();
-  const presets = parsePresetRows(readText("packages/wechat-daemon/src/brain-agents.ts"));
-  const cli = collectCliCommands(readText("packages/wechat-daemon/src/manage.ts"));
-  const wechat = collectWechatCommands(readText("packages/wechat-daemon/src/chat-commands.ts"));
+  const presets = parsePresetRows(readText("packages/wechat-daemon/src/agents/brain-presets.ts"));
+  const cli = collectCliCommands(readText("packages/wechat-daemon/src/cli/manage.ts"));
+  const wechat = collectWechatCommands(
+    readText("packages/wechat-daemon/src/ipc/chat-command-specs.ts"),
+  );
   return {
     "env-vars": renderEnvVarsTable(envVars),
     presets: renderPresetsTable(presets),

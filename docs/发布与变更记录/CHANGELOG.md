@@ -2,13 +2,15 @@
 
 本文件记录本 Fork 相对上游 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server) 的改动。
 
-> **版本边界**：下面每个 `## [x.y.z]` 段只记**该版本发布时**的行为。发布之后才改的行为进 `## [Unreleased]`，不要回改已发布版本的条目——用户装的 1.4.0 与条目描述必须对得上。
+> **版本边界**：下面每个 `## [x.y.z]` 段只记**该版本发布时**的行为。发布之后才改的行为进 `## [Unreleased]`，不要回改已发布版本的条目——用户装的 1.4.0 与条目描述必须对得上。各版本条目里的源码路径是**发布当时**的路径；2026-11-06 起 `src/` 已分层，旧路径不再存在，现行位置见 [`docs/ai/代码地图.md`](../ai/代码地图.md)。
 
 ## [Unreleased] — 发布后的改动（2026-11-06 起）
 
 <!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
 
-（暂无）
+### Changed
+
+- **源码目录分层（2026-11-06，内部重构，无用户可见行为变化）**：`packages/wechat-daemon/src/` 从平铺 117 个文件改为 8 个一级目录 + 6 个二级目录（`daemon/messaging`、`acp/protocol`、`agents/sandbox`、`cli/subcommands`、`shared/process`、`shared/io`）；同批拆出 `agents/brain-presets.ts`、`ipc/chat-command-specs.ts`、`cli/process-lifecycle.ts`、`cli/account-commands.ts`、`sessions/registry-store.ts`、`sessions/registry-view.ts`。导出符号、CLI/微信命令、环境变量、数据文件格式与日志文案均未改变；包仍是单文件 `dist/cli.js`。详见 [源码目录分层设计](../设计文档/源码目录分层设计.md)。
 
 ## [1.5.0] 文档审计 · 进度提示改 15 秒（2026-11-06）
 

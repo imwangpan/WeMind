@@ -45,9 +45,10 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 
 相关代码：
 
-- `packages/wechat-daemon/src/brain-agents.ts` —— agent 表与解析逻辑（本文主角）；
-- `packages/wechat-daemon/src/acp-brain.ts` —— ACP 客户端（协议层；缺 load/反向请求时需要改）；
-- `packages/wechat-daemon/src/worker-acp.ts` —— worker 的 ACP 客户端；协议层（帧分类、超时、模型与模式、回放静默）brain 与 worker 共用 `acp-connection.ts`，只有进程生命周期与会话持久化各自实现。
+- `packages/wechat-daemon/src/agents/brain-presets.ts` —— agent 表（本文主角的数据）；
+- `packages/wechat-daemon/src/agents/brain-agents.ts` —— 预设解析/探测逻辑；
+- `packages/wechat-daemon/src/acp/acp-brain.ts` —— ACP 客户端（协议层；缺 load/反向请求时需要改）；
+- `packages/wechat-daemon/src/tasks/worker-acp.ts` —— worker 的 ACP 客户端；协议层（帧分类、超时、模型与模式、回放静默）brain 与 worker 共用 `acp/protocol/acp-connection.ts`，只有进程生命周期与会话持久化各自实现。
 
 ---
 
@@ -148,7 +149,7 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 
 ## 4. 配置方式 B：新增一条 agent 配置（推荐长期使用）
 
-在 `packages/wechat-daemon/src/brain-agents.ts` 的 `ACP_AGENT_PRESETS` 里加一条：
+在 `packages/wechat-daemon/src/agents/brain-presets.ts` 的 `ACP_AGENT_PRESETS` 里加一条：
 
 ```ts
 export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
@@ -365,7 +366,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
    想直接看解析对象（不走 CLI）：
 
    ```powershell
-   npx tsx -e "import { resolveAgent } from './packages/wechat-daemon/src/brain-agents.ts'; console.log(resolveAgent())"
+   npx tsx -e "import { resolveAgent } from './packages/wechat-daemon/src/agents/brain-agents.ts'; console.log(resolveAgent())"
    ```
 
 ---
@@ -399,7 +400,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
   WEMIND_BRAIN_HOME_ENV=<配置目录环境变量名，没有则不设>
 
 长期接入（加 agent）：
-  在 brain-agents.ts 的 ACP_AGENT_PRESETS 加一条 → npm run build → wemind brain set <键>
+  在 brain-presets.ts 的 ACP_AGENT_PRESETS 加一条 → npm run build → wemind brain set <键>
 
 验证：
   看 daemon.log 的 [wemind/wechat-daemon/acp] spawn / prompt ok；或 wemind brain check

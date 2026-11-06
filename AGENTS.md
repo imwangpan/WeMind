@@ -39,6 +39,15 @@ packages/
   wechat-ilink-core/    iLink HTTP 客户端、类型、错误码、会话守卫、账号/状态、收发图加解密（私有，不发布）
   wechat-mcp/           MCP server，6 个工具（已发布到 npm，bin: wemind-mcp）
   wechat-daemon/        常驻 daemon + ACP 大脑 + worker + CLI（发布包 @wemind/cli，命令 wemind）
+    src/                入口 cli.ts / index.ts + 8 个一级目录（按需再分二级）
+      daemon/           消息路由、控制指令、收件箱；messaging/ 外发管线与回复
+      acp/              常驻大脑、热切换、自检；protocol/ 连接层与反向请求
+      agents/           预设/配置/状态/槽位；sandbox/ 沙箱与 MCP
+      tasks/            任务表、worker 客户端与进程池
+      sessions/         会话指令、登记表（store/view）、交接
+      cli/              参数解析/分派、账号与进程生命周期；subcommands/ 主题命令
+      ipc/              控制桥、指令表与解析
+      shared/           通用工具；process/ 进程身份与 spawn，io/ 原子写与日志
 docs/
   README.md             全库文档总索引（按读者与主题分组；新增/移动文档后必须同步）
   repowiki/             完整技术 wiki（人读；AI 可按需检索）
@@ -46,10 +55,10 @@ docs/
   接入方案/              9 篇各 agent 实测 + 1 篇通用接入指南（`接入其它-ACP-Agent.md`）
   使用指南/              新手教程、速查、远程任务使用指南
   部署与运维/            daemon 常驻原理、跨平台常驻 pm2
-  设计文档/              历史：方案 C 总设计 / MVP / CLI 化设计；现行：文档守卫设计（已实施）
+  设计文档/              历史：方案 C 总设计 / MVP / CLI 化设计；现行：文档守卫设计、源码目录分层设计（均已实施）
   机制与协议说明/        本地双入口文件桥（现行机制 + 2026-06/2026-10 演进记录，正文标注现行口径）
   待办与后续计划/        暂缓项（非历史：描述的是当前行为与未做的改进）
-  审查与质量记录/        历史：2026-11-02 全局审查快照、2026-11-04 归档清单、2026-11-05 源码目录重构方案（设计稿，未实施）、2026-11-05 审计经验
+  审查与质量记录/        历史：2026-11-02 全局审查快照、2026-11-04 归档清单、2026-11-05 源码目录重构初稿（已被设计文档取代）、2026-11-05 审计经验
   发布与变更记录/        发版手册、CHANGELOG
 scripts/                常驻外壳（run-daemon.ps1 / pm2）、doctor、发布守卫（prepack-guard / check-version）、文档守卫（doc-impact / check-agent-docs / gen-docs-tables）
 .worktrees/             git worktree 检出目录（每分支一个子目录；不入库；约定见 §4.16）
@@ -79,14 +88,14 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 
 ## 4. 不可违背的约束（改代码前必读）
 
-> 每条末尾的**守卫**标注：哪份测试/脚本能自动发现这条被违反。标「未覆盖」的只能靠评审。守卫文件都在 `packages/wechat-daemon/src/*.test.ts` 或 `scripts/`。
+> 每条末尾的**守卫**标注：哪份测试/脚本能自动发现这条被违反。标「未覆盖」的只能靠评审。守卫文件都在 `packages/wechat-daemon/src/**/*.test.ts` 或 `scripts/`。
 
 1. **单实例收消息**：同一个 bot token 同时只能有一个程序收消息；MCP 形态与 daemon 形态二选一；brain 的 MCP 沙箱永久禁止 `wechat`（防它把消息发回自己）；**按名字之外还按定义判**——改名条目只要 command/args/url 里跑 `wemind-mcp` 或 `@wemind/wechat-mcp` 同样被拒（`isWechatMcpServer()`，brain 与 worker 共用）。agent 自己配置文件里的微信 MCP 也在此约束内：DSH 的 `cordis.patch.yml` 复制进沙箱前剔除并告警（真实文件不动，`stripWechatMcpEntries`）。**守卫**：`agent-mcp.test.ts`、`sandbox-*.test.ts`。
 2. **ACP 是最小方法集，不是「所有 agent 都一样」**：
    - `session/load` 不是通用能力；DSH 只有 `session/resume`，缺失时退化为 `session/new`。
-   - **image / restore / mcpViaAcp 来自 `brain-agents.ts` 的配置字段，不来自 `initialize` 回包**（`acp-brain.ts` 从不解析 `agentCapabilities`）。接新 agent 必须人工跑一次 `scripts/acp-probe.mjs` 并把结论写进预设。
+   - **image / restore / mcpViaAcp 来自 `agents/brain-presets.ts` 的配置字段，不来自 `initialize` 回包**（`acp-brain.ts` 从不解析 `agentCapabilities`）。接新 agent 必须人工跑一次 `scripts/acp-probe.mjs` 并把结论写进预设。
    - 反向请求统一走 `acp-reverse.ts`（brain / worker / `brain check` 三处共用）：权限默认拒绝，未知 method 回 `-32601`；可信部署设 `WEMIND_ACP_AUTO_ALLOW=1` 只放行一次性权限。三处必须共用同一实现，否则会「微信能跑、`brain check` 超时」。**守卫**：`acp-reverse.test.ts`、`brain-agents.test.ts`。
-3. **brain 是一个 ACP 进程、worker 是 N 个（进程池）**：帧处理/超时/模型与模式等协议细节在 `acp-connection.ts`（两边共用，改一处两边生效）；生命周期与会话持久化各自实现（`acp-brain.ts` 常驻 + `brain-sessions.json`；`worker-acp.ts` 每连接实例 + `worker-sessions.json`），改这些要两边看。**守卫**：`acp-connection.test.ts`、`acp-switch.test.ts`、`worker-pool.test.ts`。
+3. **brain 是一个 ACP 进程、worker 是 N 个（进程池）**：帧处理/超时/模型与模式等协议细节在 `acp-connection.ts`（两边共用，改一处两边生效）；生命周期与会话持久化各自实现（`acp-brain.ts` 常驻 + `brain-sessions.json`；`worker-acp.ts` 每连接实例 + `worker-sessions.json`），改这些要两边看。**守卫**：`acp-connection.test.ts`、`brain-switch.test.ts`、`worker-pool.test.ts`。
 4. **MCP 按 agent 分派**：kiro 读 `settings/mcp.json`；opencode 读 `opencode.json` 的 `mcp.servers`；qoder 读 `settings.json` 的 `mcpServers`；gemini 读 `<沙箱>/.gemini/settings.json` 的 `mcpServers`；cline 读沙箱 `cline/mcp.json`；pi 读沙箱根 `mcp.json`（kiro 格式）；DSH 与 Claude Code 走 ACP `session/new` 的 `mcpServers`（Claude Code 的目录是真实 `~/.claude.json`；codex 的适配器不消费 stdio MCP）。**不要让 A 读 B 的配置文件**。**守卫**：`sandbox-*.test.ts`、`agent-mcp.test.ts`。
 5. **微信连发上限约 10 条**，进度消息占额度，按最终答案到达时间分三档：`<5s` 只发答案、`5–15s` 第 5s 发「收到」、`≥15s` 第 5s「收到」+ 第 15s 第二条（正文已开始→「整理回复」，否则→「还在处理中」；之后不再补第三条固定提示）。工具/心跳/图片/重试提示算已有进度，顶替 5s 确认；第 15s 第二条要求距上一条非确认进度 ≥5s，否则跳过（不延后）；最终发送或失败时取消定时器。工具步骤优先用 agent 给的 purpose，否则从 `rawInput` 取 command/路径/query 截 60 字。`index.ts` 的 15s 心跳在无 activity 帧时持续发，接入 committed-only agent 要单独处理。**守卫**：`send-pipeline.test.ts`、`index.test.ts`、`daemon-routing.test.ts`。
 6. **Windows `.cmd`/`.bat` 必须经 shell**：统一用 `spawnAgent()`，不要直接 `spawn(bin,args,{shell:true})`（DEP0190 + 注入面）。`spawnAgent` 在 Windows 上给子进程设 `NoDefaultCurrentDirectoryInExePath=1`，禁止从**任务 cwd** 解析裸命令名（防同名 `.cmd` 劫持）。**守卫**：`spawn-agent.test.ts`。
@@ -95,8 +104,8 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 9. **不要把密钥写进 agent/源码**；`DEEPSEEK_API_KEY` 等由 daemon 进程环境提供。**守卫**：未覆盖。
 10. **注释按段落换行，不按行宽折行**：一段一行（多长都不手工断开），语义分段才另起一行；列表项/标题/代码围栏/分隔线/用法表/独立命令行各自成行，「标签：内容」行（`用法：`/`退出码：`/`注意：`）另起一行；缩进保留（它表达层级）。`oxfmt` 不重排注释，别把英文注释按 120 列折回来。**守卫**：未覆盖。
 11. **控制桥只接受「agent 名 + 纯数据」**：`control-bridge.ts` 的请求字段只有 `target`（agent 名）/`ref`/`name`/`page`/`expiresAt`（CLI 等待截止，过期不执行），**没有也不可能有 `bin`/`args`/`shell`**——伪造请求最坏只能「选一个已装的 agent 或清掉自己的会话」。请求/应答 id 只允许 `[A-Za-z0-9._-]`（不含 `..`/盘符）：它直接拼成 `control-out/<id>.json`，不校验就能借 `../` 覆盖账号数据。`wemind brain set` 带 `--bin/--args/--extra-args/--shell/--model` 时**不走桥**（只写磁盘；其中 `--bin`/`--args`/`--extra-args`/`--model` 可用随后的 `wemind brain switch <同名 agent>` 当场应用——`sameAgent()` 按 name/bin/args/model 判，`--shell` 只能重启），这是刻意的边界，不要拆。**守卫**：`control-bridge.test.ts`。
-12. **「当前是哪个会话」的唯一权威是 `brain-sessions.json`**；`session-registry.json` 只是派生元数据（名字/标题/轮次），写失败只记日志、**不得**抛出拖垮回合。`恢复会话` 是**严格恢复**：load/resume 都失败就如实报错、**不回退新建、不改当前会话记录**（宁可报错，不要「假恢复」）；恢复后的模型设置失败只记日志。**守卫**：`acp-switch.test.ts`、`session-manager.test.ts`、`session-map.test.ts`、`session-registry.test.ts`。
-13. **任务侧的两条持久化纪律**：① 结束**在等你回复**的任务时进程**留着复用**（空闲回收交给池）；**正在跑**的那条被结束时只能力杀（ACP 回合无法优雅取消）；`wemind stop`/daemon 退出杀光整池。② `tasks.json` 只用于「重启后续跑」——**不自动 spawn**、**不做历史归档**（聊天记录本身就是归档）；未完成的标「已中断」，用户回「继续」才续跑。切换大脑时**持久化放最后**（成功才写 `brain.json`），失败退回无需撤销。**守卫**：`task-store.test.ts`、`task-manager.test.ts`、`worker-pool.test.ts`、`acp-switch.test.ts`。
+12. **「当前是哪个会话」的唯一权威是 `brain-sessions.json`**；`session-registry.json` 只是派生元数据（名字/标题/轮次），写失败只记日志、**不得**抛出拖垮回合。`恢复会话` 是**严格恢复**：load/resume 都失败就如实报错、**不回退新建、不改当前会话记录**（宁可报错，不要「假恢复」）；恢复后的模型设置失败只记日志。**守卫**：`brain-switch.test.ts`、`session-manager.test.ts`、`session-map.test.ts`、`session-registry.test.ts`。
+13. **任务侧的两条持久化纪律**：① 结束**在等你回复**的任务时进程**留着复用**（空闲回收交给池）；**正在跑**的那条被结束时只能力杀（ACP 回合无法优雅取消）；`wemind stop`/daemon 退出杀光整池。② `tasks.json` 只用于「重启后续跑」——**不自动 spawn**、**不做历史归档**（聊天记录本身就是归档）；未完成的标「已中断」，用户回「继续」才续跑。切换大脑时**持久化放最后**（成功才写 `brain.json`），失败退回无需撤销。**守卫**：`task-store.test.ts`、`task-manager.test.ts`、`worker-pool.test.ts`、`brain-switch.test.ts`。
 14. **优先「用」agent，而不是「改造」它**：模型/MCP/权限/会话/技能优先用 agent 自己的配置与接口（`session/set_config_option`、`mcpServers`、CLI 参数），WeMind 只选择、传值与编排；没有开关才写适配层，并写清「补的是它的哪个缺口」。判断标准：**调用已有能力，还是替它发明？** 沙箱（`BRAIN_HOME`/`WORKER_HOME`）是隔离手段，镜像真实配置按原样复制；但 MCP 视图（brain 默认空 + 按需加载，worker 全量且**永远排除 `wechat`**）是安全边界，不因这条放松。**守卫**：未覆盖。
 15. **改代码必须同一次改完三件套：代码 + 测试 + 文档**。任何行为/接口/命令/参数/环境变量/配置字段/数据文件结构/日志文案的变化都在**同一个提交**里补齐：
     - **测试**：正常路径 + 失败/边界路径；改既有语义就同步改断言；至少 `npm test` 全绿。

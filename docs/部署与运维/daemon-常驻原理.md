@@ -16,13 +16,13 @@
 
 > 相关文件：
 >
-> - `packages/wechat-daemon/src/watchdog-runner.ts` —— **builtin 后台守护进程**（发布版默认；`cli.js _watchdog`）
-> - `packages/wechat-daemon/src/pm2-runner.ts` —— pm2 runner（`wemind start --runner pm2`）
+> - `packages/wechat-daemon/src/cli/watchdog-runner.ts` —— **builtin 后台守护进程**（发布版默认；`cli.js _watchdog`）
+> - `packages/wechat-daemon/src/cli/pm2-runner.ts` —— pm2 runner（`wemind start --runner pm2`）
 > - `scripts/run-daemon.ps1` —— PowerShell 版后台守护进程（源码开发者，Windows）
 > - `scripts/run-all-daemons.ps1` —— 多账号批量启动（PowerShell 路线）
 > - `packages/wechat-daemon/src/index.ts` —— daemon 本体（poller/worker 循环）
-> - `packages/wechat-daemon/src/acp-brain.ts` —— 大脑 ACP 子进程
-> - `packages/wechat-daemon/src/manage.ts` —— 管理命令（start/stop/logout/delete）
+> - `packages/wechat-daemon/src/acp/acp-brain.ts` —— 大脑 ACP 子进程
+> - `packages/wechat-daemon/src/cli/process-lifecycle.ts` —— 管理命令的进程启停（start/stop/logout/delete）
 
 ---
 

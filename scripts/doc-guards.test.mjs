@@ -108,7 +108,7 @@ describe("doc-impact 规则匹配", () => {
   it("规则声明 files 时只看这些目录", () => {
     const outside = match(["M packages/wechat-mcp/src/foo-store.ts"]).map((h) => h.rule.id);
     expect(outside).not.toContain("data-file");
-    const inside = match(["M packages/wechat-daemon/src/task-store.ts"]).map((h) => h.rule.id);
+    const inside = match(["M packages/wechat-daemon/src/tasks/task-store.ts"]).map((h) => h.rule.id);
     expect(inside).toContain("data-file");
   });
 
@@ -127,8 +127,10 @@ describe("doc-impact 规则匹配", () => {
     expect(match(lines).map((h) => h.rule.id)).toContain("restructure");
   });
 
-  it("预设只在 brain-agents.ts 里触发，并标记动态文档", () => {
-    const hit = match(['+packages/wechat-daemon/src/brain-agents.ts\t  acme: { name: "acme",']);
+  it("预设只在 brain-presets.ts 里触发，并标记动态文档", () => {
+    const hit = match([
+      '+packages/wechat-daemon/src/agents/brain-presets.ts\t  acme: { name: "acme",',
+    ]);
     expect(hit.map((h) => h.rule.id)).toContain("preset");
     expect(hit.find((h) => h.rule.id === "preset").dynamic).toBe(true);
     expect(hit.find((h) => h.rule.id === "preset").dynamicNames).toEqual(["acme"]);

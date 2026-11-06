@@ -106,7 +106,7 @@ qoder: {
 },
 ```
 
-- **不用 `homeEnvVar`**：大脑 `cwd` 就是沙箱根（[acp-brain.ts:287](../../packages/wechat-daemon/src/acp-brain.ts)）。若配置目录也是沙箱根，`<cwd>/AGENTS.md` 会被当作用户级和项目级各读一次；放到 `<沙箱>/qoder` 避开。`%HOME%` 替换在 brain / worker / brain check 三处都已支持。
+- **不用 `homeEnvVar`**：大脑 `cwd` 就是沙箱根（[acp-brain.ts:287](../../packages/wechat-daemon/src/acp/acp-brain.ts)）。若配置目录也是沙箱根，`<cwd>/AGENTS.md` 会被当作用户级和项目级各读一次；放到 `<沙箱>/qoder` 避开。`%HOME%` 替换在 brain / worker / brain check 三处都已支持。
 - **不需要** `restore` / `firstFrameMs` / `heartbeatMs` / `images:false`——Q1/Q4/Q5 证明默认值适用。
 - **记忆/技能继承（M3-5 已核对）**：Qoder 1.1.78 的用户级记忆落在 `~/.qoder/memory/`（agent 的用户画像/偏好），已加入 `inheritDirs` 并以 **junction 共享**——大脑与日常 Qoder 读写同一份记忆（写入会落到真实目录，与 kiro 的 `memories/` 一致）。`skills/agents/commands` 与 `AGENTS.md` 在本机不存在，当前是空操作，保留以便上游新增后自动生效。
 - `AUTO_PROBE_ORDER` 末尾追加 `qoder`，不影响老用户。（**2026-10-27 当时的实施记录**；当前顺序为 `opencode → cline → qoder → gemini → deepseek → kiro`，qoder 排第 3 位——按实测启动耗时排。）
