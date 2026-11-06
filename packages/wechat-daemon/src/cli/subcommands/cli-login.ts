@@ -16,7 +16,7 @@ import {
   addAllowFrom,
   loadAccount as readAccount,
 } from "@wemind/wechat-ilink-core";
-import { bridgeReady, viaBridge } from "./cli-context.js";
+import { bridgeReady, viaBridge } from "../cli-context.js";
 
 const BASE = process.env.WEMIND_ILINK_BASE?.trim() || "https://ilinkai.weixin.qq.com";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

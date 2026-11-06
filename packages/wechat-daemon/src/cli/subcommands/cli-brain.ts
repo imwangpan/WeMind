@@ -7,16 +7,16 @@ import {
   presetAvailable,
   acpArgsWarning,
   type ResolvedAgent,
-} from "./agents/brain-agents.js";
+} from "../../agents/brain-agents.js";
 import {
   loadBrainConfig,
   updateBrainConfig,
   clearBrainConfig,
   brainConfigPath,
   type BrainConfig,
-} from "./agents/brain-config.js";
-import { checkAgent } from "./acp/brain-check.js";
-import { acpModelHint, acpOverrideHint } from "./agents/profile-model.js";
+} from "../../agents/brain-config.js";
+import { checkAgent } from "../../acp/brain-check.js";
+import { acpModelHint, acpOverrideHint } from "../../agents/profile-model.js";
 import {
   aliveOurs,
   bridgeReady,
@@ -25,8 +25,8 @@ import {
   readPid,
   requireDaemonAlive,
   viaBridge,
-} from "./cli-context.js";
-import type { BrainRuntime } from "./agents/brain-state.js";
+} from "../cli-context.js";
+import type { BrainRuntime } from "../../agents/brain-state.js";
 
 // ===== 大脑（ACP agent）选择：账号级持久配置 brain.json，见 brain-config.ts =====
 const BRAIN_SRC_LABEL: Record<ResolvedAgent["source"], string> = {

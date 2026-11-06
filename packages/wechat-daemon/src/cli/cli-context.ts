@@ -7,7 +7,7 @@ import {
   listAccounts,
   loadAccount as readAccount,
 } from "@wemind/wechat-ilink-core";
-import { CLI_PID_MARKERS, isOurProcess } from "./shared/process/proc-identity.js";
+import { CLI_PID_MARKERS, isOurProcess } from "../shared/process/proc-identity.js";
 import {
   awaitControlResponse,
   bridgePidOf,
@@ -16,9 +16,9 @@ import {
   writeControlRequest,
   type ControlKind,
   type ControlRequest,
-} from "./ipc/control-bridge.js";
-import { resolveAgent } from "./agents/brain-agents.js";
-import { loadBrainConfig } from "./agents/brain-config.js";
+} from "../ipc/control-bridge.js";
+import { resolveAgent } from "../agents/brain-agents.js";
+import { loadBrainConfig } from "../agents/brain-config.js";
 
 /** 读裸 pid 文件（daemon.pid / wrapper.pid / brain.pid）；不存在/坏内容 → null。 */
 export function readPid(dir: string, name: string): number | null {

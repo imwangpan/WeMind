@@ -6,8 +6,8 @@ import {
   awaitTaskAck,
   type TaskAck,
   writeTaskCmd as writeTaskCommand,
-} from "./tasks/task-inbox.js";
-import { daemonAlive, pickKey, requireDaemonAlive } from "./cli-context.js";
+} from "../../tasks/task-inbox.js";
+import { daemonAlive, pickKey, requireDaemonAlive } from "../cli-context.js";
 
 // ===== 本地任务命令（文件桥）：写 task-inbox/*.json，由 daemon 扫描执行；状态读 task-state.json，结果读 task-out/*.json =====
 

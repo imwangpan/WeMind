@@ -5,8 +5,12 @@ import {
   listSessions,
   renderSessionList,
   renameSession,
-} from "./sessions/session-registry.js";
-import { brainSessionMapPath, clearSessionPointer, sessionKey } from "./sessions/session-map.js";
+} from "../../sessions/session-registry.js";
+import {
+  brainSessionMapPath,
+  clearSessionPointer,
+  sessionKey,
+} from "../../sessions/session-map.js";
 import {
   agentNameOf,
   bridgeReady,
@@ -16,7 +20,7 @@ import {
   requireDaemonAlive,
   splitKeyArg,
   viaBridge,
-} from "./cli-context.js";
+} from "../cli-context.js";
 
 /**
  * `wemind session <new|list|resume|rename|delete>`。

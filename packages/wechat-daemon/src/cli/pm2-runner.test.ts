@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildAppDeclaration, writeAppDeclaration } from "./pm2-runner.js";
-import { BRAIN_CONFIG_EXIT_CODE } from "./agents/brain-agents.js";
+import { BRAIN_CONFIG_EXIT_CODE } from "../agents/brain-agents.js";
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
 
 /*

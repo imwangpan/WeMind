@@ -178,7 +178,7 @@ poller（长轮询，不被大脑阻塞）
 | **改会话五条指令 / 恢复语义** | `session-manager.ts`（操作层） | `session-registry.ts`（登记表，派生元数据）、`session-map.ts`（当前会话表，唯一权威）、`acp-brain.ts` 的 `resumeSession`（严格恢复） |
 | **改交接** | `handoff.ts`（写入磁盘 / 带上 / 消费） | `index.ts` 的 `workerLoop` 前缀带上、`daemon-control.ts` 的 `交接` 分支 |
 | 改微信消息/回复 | `index.ts`、`send-pipeline.ts` | `md-reply.ts`、`image-reply.ts`、`pending-push.ts` |
-| 改 CLI | `cli.ts`（分派 `cli-dispatch.ts`） | `manage.ts` + 按主题拆出的 `cli-context.ts` / `cli-task.ts` / `cli-session.ts` / `cli-brain.ts` / `cli-login.ts` |
+| 改 CLI | `cli.ts`（分派 `cli/cli-dispatch.ts`） | `cli/manage.ts`（参数解析/分派）+ `cli/account-commands.ts` / `cli/process-lifecycle.ts` + `cli/cli-context.ts` + `cli/subcommands/cli-*.ts` |
 | 改数据/账号 | `wechat-ilink-core/src/store/*` | `brain-config.ts`、`docs/repowiki/08` |
 | 排查不回复 | `docs/ai/recipes/debug-daemon.md` | `daemon.log`、`brain.json`、`brain check` |
 | 端到端验收 | `docs/ai/recipes/run-e2e.md` | `scripts/doctor.ps1` |

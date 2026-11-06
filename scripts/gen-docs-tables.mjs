@@ -202,7 +202,7 @@ export function renderCliTable(cliCommands, wechatCommands) {
 export function generateAll() {
   const envVars = collectEnvVars();
   const presets = parsePresetRows(readText("packages/wechat-daemon/src/agents/brain-presets.ts"));
-  const cli = collectCliCommands(readText("packages/wechat-daemon/src/manage.ts"));
+  const cli = collectCliCommands(readText("packages/wechat-daemon/src/cli/manage.ts"));
   const wechat = collectWechatCommands(
     readText("packages/wechat-daemon/src/ipc/chat-command-specs.ts"),
   );

@@ -4,10 +4,10 @@
  * - 子命令 `daemon`：跑 daemon 本体（长轮询 + 大脑 + worker），通常由 pm2 调用，用户不直接用。
  * - 其余子命令（login/list/start/stop/task…）：交给 manage 派发。
  */
-import { cliHook } from "./cli-dispatch.js";
+import { cliHook } from "./cli/cli-dispatch.js";
 import { runDaemon } from "./index.js";
-import { runManage } from "./manage.js";
-import { runWatchdog } from "./watchdog-runner.js";
+import { runManage } from "./cli/manage.js";
+import { runWatchdog } from "./cli/watchdog-runner.js";
 
 const argv = process.argv.slice(2);
 const hook = cliHook(argv);
