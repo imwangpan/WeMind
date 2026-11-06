@@ -616,7 +616,7 @@ DSH 的会话在 `<账号目录>/agent-sessions/deepseek/{brain,worker}`（2026-
 
 ## 12. 预设与沙箱
 
-`brain-agents.ts` 的 `ACP_AGENT_PRESETS.deepseek`（§5.3 M1）关键字段：
+`brain-presets.ts` 的 `ACP_AGENT_PRESETS.deepseek`（§5.3 M1）关键字段：
 
 - 启动：`bin: "dsh"`、`binWin: "dsh.cmd"`、`args: ["--profile", "acp"]`、`shell: true`。
 - 沙箱：`homeEnvVar: "DSH_HOME"`、`realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGENTS.md"]`、`credentialFiles: [".credentials.yaml"]`；`configSubdir` 留空（`DSH_HOME` 本身就是 home）。

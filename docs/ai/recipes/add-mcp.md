@@ -142,7 +142,7 @@ MCP                 # 列出可选与已激活
 
 ## 4. 安全
 
-- brain 默认免审批（内置预设各用自己 agent 的机制，见 `brain-agents.ts` 与 `docs/接入方案/接入其它-ACP-Agent.md` §5）；**加载一个 MCP = 对登录者（唯一能发消息的人）开放该工具的全部能力**。
+- brain 默认免审批（内置预设各用自己 agent 的机制，见 `brain-presets.ts` 与 `docs/接入方案/接入其它-ACP-Agent.md` §5）；**加载一个 MCP = 对登录者（唯一能发消息的人）开放该工具的全部能力**。
 - `allowFrom` 是**兜底**发件人闸门（默认拒绝，正常只含登录者一个 userId），不要为了省事关掉；平台本身只投递登录者的消息，这个白名单防的是发送范围变化/别的入口。
 - worker 继承全量 MCP，风险更高；不要把 worker 的 cwd 指到敏感目录。
 - `wechat` 永久禁止：同一 token 长轮询会与 daemon 抢消息/回环。

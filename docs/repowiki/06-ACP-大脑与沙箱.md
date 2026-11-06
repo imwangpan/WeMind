@@ -14,7 +14,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 
 | 方法 | 作用 | 注意 |
 |------|------|------|
-| `initialize` | 握手 | **WeMind 只置 `initialized = true`，从不解析回包里的 `agentCapabilities`**——`load`/`resume`、图片、`mcpViaAcp` 全部取自 `brain-agents.ts` 的预设字段（见下条） |
+| `initialize` | 握手 | **WeMind 只置 `initialized = true`，从不解析回包里的 `agentCapabilities`**——`load`/`resume`、图片、`mcpViaAcp` 全部取自 `brain-presets.ts` 的预设字段（见下条） |
 | `session/new` | 新建会话 | 绝对 `cwd`；可传 `mcpServers` |
 | `session/load` | 按 sessionId 恢复会话 | **不是所有 agent 都实现**（DSH 返回 `-32601`） |
 | `session/resume` | 恢复持久会话 | DSH 用这个；恢复日志但不回放旧更新 |
@@ -22,7 +22,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 | `session/update`（通知） | 流式回包：`agent_message_chunk`（正文）、`agent_thought_chunk`（思考）、`tool_call`/`tool_call_update`（工具进度） | committed-only agent 可能整段提交 |
 | `session/request_permission`（反向请求） | agent 请求权限 | 客户端内置应答器：默认拒绝（`cancelled`）；可信部署设 `WEMIND_ACP_AUTO_ALLOW=1` 放行 `allow_once`/`allow_always`；接入前仍建议验证 |
 
-> ⚠️ **能力来自预设字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`mcpViaAcp` 都写在 `brain-agents.ts` 的 `ACP_AGENT_PRESETS` 里，来源是接入时的**探针实测**。因此接新 agent 必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进预设——代码不会自动适配（详见 [AGENTS.md §4.2](../../AGENTS.md)）。
+> ⚠️ **能力来自预设字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`mcpViaAcp` 都写在 `brain-presets.ts` 的 `ACP_AGENT_PRESETS` 里，来源是接入时的**探针实测**。因此接新 agent 必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进预设——代码不会自动适配（详见 [AGENTS.md §4.2](../../AGENTS.md)）。
 
 「接入一个新 agent」主要是告诉 WeMind「怎么把它以 ACP 模式启动」；协议层能复用，但**能力差异要按 agent 补**（见 §6.6）。
 
@@ -133,7 +133,7 @@ graph TD
 
 ### 进程身份（pid-record.ts）
 
-`brain.pid` 不再是裸整数，而是 **JSON 身份记录**（`{pid, agent, bin, args, shell, state, startedAt, writtenAt}`），worker 侧是 `workers.pid.json` **身份记录**（单条时是对象、多条时是数组，读侧都认）。原因：`manage.ts` 过去用**配置里**的 agent 算进程特征串（bin+args）来判定/杀进程，有三种情况会失效——① `wemind brain set X` 不带 `--restart`（配置已改、旧 agent 进程还在跑，`list` 显示「已停止」、`stop` 跳过不杀；1.2.0 起 `brain set` 对纯 agent 名会当场应用，这种「配置与进程不一致」已少见，但带 `--bin` 的改动、或 daemon 没跑时改配置仍会出现）；② 热切换窗口内；③ **多任务/多 agent 并存**（多 worker 之后是常态）。现在按记录里**起进程时真实用的** bin/args 算，缺失时回退配置（兼容旧账号）；旧版 CLI 读新格式会拿到 `NaN` → 显示「已停止」且**不杀**（安全侧）。
+`brain.pid` 不再是裸整数，而是 **JSON 身份记录**（`{pid, agent, bin, args, shell, state, startedAt, writtenAt}`），worker 侧是 `workers.pid.json` **身份记录**（单条时是对象、多条时是数组，读侧都认）。原因：`cli/process-lifecycle.ts`（原 `manage.ts`）过去用**配置里**的 agent 算进程特征串（bin+args）来判定/杀进程，有三种情况会失效——① `wemind brain set X` 不带 `--restart`（配置已改、旧 agent 进程还在跑，`list` 显示「已停止」、`stop` 跳过不杀；1.2.0 起 `brain set` 对纯 agent 名会当场应用，这种「配置与进程不一致」已少见，但带 `--bin` 的改动、或 daemon 没跑时改配置仍会出现）；② 热切换窗口内；③ **多任务/多 agent 并存**（多 worker 之后是常态）。现在按记录里**起进程时真实用的** bin/args 算，缺失时回退配置（兼容旧账号）；旧版 CLI 读新格式会拿到 `NaN` → 显示「已停止」且**不杀**（安全侧）。
 
 ### 进度回调与「可发图」提示
 
@@ -184,7 +184,7 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 
 `ensureBrainHome()` 启动时按顺序执行：`syncSettings`（含 `syncProfilePatch`——配了 `realProfile` 的 agent 把真实 `profiles/<名>/cordis.patch.yml` **原样复制**进沙箱（WeMind 不追加/合成条目；这份文件是用户自己的配置，DSH 的 `- id: acp` 这类覆盖由用户自己维护，缺时 `wemind brain` 只提示怎么补）；**唯独剔除用户自己挂的微信 MCP 条目**（`stripWechatMcpEntries`：跑 `wemind-mcp` 的、或 `serverName: wechat` 的 mcp-client——否则沙箱里的 agent 会成为第二个收消息实例、抢同一个 bot token；真实文件不动、只记日志）；以及 `settingsBase` 基底生成）→ `applySandbox`（写 curated mcp.json；配了 `mcpViaAcp` 的 agent 如 DSH / Claude Code 跳过文件，改由 `activeMcpServers(ag)` 转成 ACP 声明随 `session/new|resume` 下发——**必须传正在启动的那个 agent**：热切换时槽位还指着旧大脑，用默认的 `getAgent("brain")` 会把旧 agent 的 catalog 发给新大脑）→ `mirrorRealKiro` → `syncCredentials`（`credentialFiles` 新者胜 + `identityFiles` 内容不同即覆盖）→ `applySettingsDefaults`（预设默认设置项，如 pi 的 `quietStartup`）。
 
-## 6.4 可配置的 agent（brain-agents.ts）
+## 6.4 可配置的 agent（brain-presets.ts / brain-agents.ts）
 
 大脑通过 ACP 驱动，未配置时默认 `auto`（按 `opencode → cline → qoder → gemini → deepseek → kiro` 探测已安装者）。**多数原生 ACP agent 可以零代码接入**（加 agent/环境变量）；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 §6.6）。
 

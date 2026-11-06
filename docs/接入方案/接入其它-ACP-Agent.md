@@ -400,7 +400,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
   WEMIND_BRAIN_HOME_ENV=<配置目录环境变量名，没有则不设>
 
 长期接入（加 agent）：
-  在 brain-agents.ts 的 ACP_AGENT_PRESETS 加一条 → npm run build → wemind brain set <键>
+  在 brain-presets.ts 的 ACP_AGENT_PRESETS 加一条 → npm run build → wemind brain set <键>
 
 验证：
   看 daemon.log 的 [wemind/wechat-daemon/acp] spawn / prompt ok；或 wemind brain check
