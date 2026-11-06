@@ -41,7 +41,7 @@ export const RULES = [
     trigger: (diffLines) =>
       diffLines.some(
         (line) =>
-          line.startsWith('+packages/wechat-daemon/src/brain-agents.ts\t') &&
+          line.startsWith('+packages/wechat-daemon/src/agents/brain-presets.ts\t') &&
           /name:\s*["'][a-z0-9_-]+["']/.test(line),
       ),
     // 文档路径根据 name 的值动态生成：docs/接入方案/接入-<name>.md

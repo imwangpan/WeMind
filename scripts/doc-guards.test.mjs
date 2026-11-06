@@ -127,8 +127,10 @@ describe("doc-impact 规则匹配", () => {
     expect(match(lines).map((h) => h.rule.id)).toContain("restructure");
   });
 
-  it("预设只在 brain-agents.ts 里触发，并标记动态文档", () => {
-    const hit = match(['+packages/wechat-daemon/src/brain-agents.ts\t  acme: { name: "acme",']);
+  it("预设只在 brain-presets.ts 里触发，并标记动态文档", () => {
+    const hit = match([
+      '+packages/wechat-daemon/src/agents/brain-presets.ts\t  acme: { name: "acme",',
+    ]);
     expect(hit.map((h) => h.rule.id)).toContain("preset");
     expect(hit.find((h) => h.rule.id === "preset").dynamic).toBe(true);
     expect(hit.find((h) => h.rule.id === "preset").dynamicNames).toEqual(["acme"]);
