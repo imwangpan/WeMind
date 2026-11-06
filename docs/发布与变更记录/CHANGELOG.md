@@ -4,11 +4,52 @@
 
 > **版本边界**：下面每个 `## [x.y.z]` 段只记**该版本发布时**的行为。发布之后才改的行为进 `## [Unreleased]`，不要回改已发布版本的条目——用户装的 1.4.0 与条目描述必须对得上。
 
-## [Unreleased] — 发布后的改动（2026-11-05 起）
+## [Unreleased] — 发布后的改动（2026-11-06 起）
+
+<!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
+
+（暂无）
+
+## [1.5.0] 文档审计 · 进度提示改 15 秒（2026-11-06）
 
 ### Changed
 
-- **进度第二条提示从第 10 秒改到第 15 秒（2026-11-05，commit `76db44b`）**：`PROGRESS_SECOND_NOTICE_MS` 由 `10_000` 改为 `15_000`，三档随之变为 `<5s` / `5–15s` / `≥15s`（第 15s 发第二条）。**这一改动发生在 1.4.0 发布之后**：线上 1.4.0 的用户看到的仍是 10 秒档（见下方 `[1.4.0]` 的对应条目）。README / AGENTS / repowiki 05 / docs/ai 已按 15 秒同步。
+- **进度第二条提示从第 10 秒改到第 15 秒（2026-11-05，commit `76db44b`）**：`PROGRESS_SECOND_NOTICE_MS` 由 `10_000` 改为 `15_000`，三档随之变为 `<5s` / `5–15s` / `≥15s`（第 15s 发第二条）。1.4.0 的用户看到的仍是 10 秒档（见下方 `[1.4.0]` 的对应条目）。README / AGENTS / repowiki 05 / docs/ai 已按 15 秒同步。
+
+### Docs
+
+- **全库文档审计（12 维度，2026-11-05）**：对全库文档做代码/文档不一致、完整性、术语、事实错误、归档分类、陈旧、读者适配、标题与内容、超长、格式、缺失文档、专业批评十二个维度的审计，逐条对照源码与上游实现核实后修正。修正的重点：
+  - **安全方向性错误（P0）**：`WEMIND_ACP_AUTO_ALLOW=1` 原先被列在「想收紧权限」的清单里——它实际是**放松**权限；现在单独拆出，明确它是「逐次自动放行」而非收紧开关，唯一能收紧的是 `WEMIND_ACP_SESSION_MODE=0`。
+  - **能力来源**：ACP 能力全部来自 `brain-agents.ts` 的预设字段，`acp-brain.ts` **从不解析** `initialize` 回包——补齐 Codex / Claude Code 文档里的 `sessionCapabilities`、`configOptions` 实际字段与条件性字段。
+  - **适配器类 Node 下限**：`claude-agent-acp` 需 Node ≥22，且**必须是运行 daemon 的那个 Node**（`agentProblem()` 只查 PATH、不查版本，Node 20 会过预检再在 spawn 时失败）；pi 本体需 ≥22.19（`pi-acp` 本身 ≥20）。
+  - **codex 的「加载 MCP」答复与实际效果不符**：`addMcp()` 不判断 agent 是否真读 MCP 文件，指对目录就回「已加载…下一条消息生效」并写进 `brain-home/settings/mcp.json`，但 codex 从不读它——文档改为如实说明。
+  - **沙箱与能力细节**：pi 的 **worker** 沙箱是「真实 `~/.pi/agent/mcp.json` 全量复制」（只排除 `wechat` 与 `disabled: true`），与 brain 的激活集不同；Gemini `promptCapabilities` 实为 `{image, audio, embeddedContext}` 三元组（WeMind 只用 `images`）；pi 的 `thought_level` 档位按当前模型支持的集合动态生成。
+  - **Windows 平台事实**：`TaskSettings.Hidden` 只表示「不在计划任务列表显示」，**不是**隐藏窗口；`ExecutionTimeLimit` 默认 **PT72H**（不显式设 0 会在三天后被杀）；`.lnk` 的 `SetShowCmd` 只接受 1/3/7，没有 `SW_HIDE`；VBScript 弃用三阶段（Phase 1 已发生 → Phase 2 约 2027 → Phase 3 无日期），且 `WScript.Shell`（`wshom.ocx`）与 `vbscript.dll` 是两个不同组件。
+  - **常驻层归属**：开机触发器补上 macOS `launchd`（原文只写「计划任务/VBS/systemd」）；pm2 不属于触发器层，已从该层移除。
+- **新增文档（均为设计稿/待办，未实施，不改变现行行为）**：
+  - [`docs/部署与运维/自启方案对比.md`](../部署与运维/自启方案对比.md) —— 两条路线（源码开发者 / 发布版用户）的开机自启方案对比、多账号 `wemind start --all`、`wemind service install` 设计，含实施排期 P1–P6 与待实测清单。
+  - [`docs/审查与质量记录/方案-源码目录重构-2026-11-05.md`](../审查与质量记录/方案-源码目录重构-2026-11-05.md) —— `packages/wechat-daemon/src/` 117 个文件平铺的分层方案（单独分支实施）。
+  - [`docs/审查与质量记录/审查-2026-11-05-经验与约束.md`](../审查与质量记录/审查-2026-11-05-经验与约束.md) —— 审计经验与「让规范不绿就红」的三层约束设计（`doc-impact` / `check-agent-docs` / `gen-docs-tables` 三个守卫脚本）。
+  - [`docs/待办与后续计划/待办-start-与-WECHAT_DATA_DIR.md`](../待办与后续计划/待办-start-与-WECHAT_DATA_DIR.md) —— `wemind start` 继承 `WECHAT_DATA_DIR` 导致的三种静默失败形态与修法（暂缓）。
+  - [`docs/README.md`](../README.md) —— 全库文档总索引（按读者与主题分组）；[`docs/ai/术语表.md`](../ai/术语表.md) —— 术语含义与中英写作口径。
+- **文档结构整理**：`docs/发布与变更记录/发布-wemind-npm.md` 并入《如何发布新版本》后删除；`docs/历史文档清单-2026-11-04.md` 移入 `docs/审查与质量记录/`；全库去掉文档头部的「适用版本」字段，改为「最后核对」日期 + 实测环境。
+- 源码侧仅一处注释修正（`brain-agents.ts` 的 `applySessionMode` → `applyAcpSessionMode`，与实际函数名对齐），**无行为变化**。
+
+## [1.1.0] `@wemind/wechat-mcp` 补发已合入的修复（2026-11-06）
+
+`@wemind/wechat-mcp` 停在 `1.0.5`（2026-10-27）期间，主分支合入了一批只影响 MCP 形态与内核的修复；这些条目**已记在下面 `[1.4.0]` 的 Fixed 段**（当时随 `@wemind/cli` 一起发布），但对 MCP 用户而言它们是**首次发布**。本次把 MCP 包版本提升到 `1.1.0`，让装了 `1.0.5` 的用户能通过 `npm i -g @wemind/wechat-mcp@latest` 拿到：
+
+- **收消息按登录者白名单过滤**：`get_messages` 只返回登录者（或登录者白名单内）的消息，其它发件人被过滤。
+- **`send_text_message` 支持进度状态**：新增可选 `state: "finish" | "generating"`，`generating` 用于中间进度消息；同时在工具描述里明示媒体限制。
+- **长轮询可取消**：`get_messages` 的 `wait=true` 能被客户端取消；状态写回前重读，避免覆盖并发写入。
+- **传输错误分类与发送重试**：区分可重试与不可重试的传输错误。
+- **登出失败不再谎称凭证已清除**。
+- **登录登记 CLI 账号体系**：标准目录登录成功后自动登记 `accounts.json`，`wemind list` / `start` 可见；自定义 `WECHAT_DATA_DIR` 不登记。
+- **重新扫码可并入现有账号**（会话过期重登不再要求手删账号目录）；高级登录态（验证码/IDC 重定向）立即失败并说明原因。
+- **白名单与账号注册表的读-改-写加跨进程锁**（`file-lock.ts`，`wx` 锁文件 + 陈旧锁清理）。
+- **POSIX 下凭证文件统一收紧为 600**；**图片下载边读边限流**，超限立即取消。
+
+> 内核（`@wemind/wechat-ilink-core`）内联进两个包，所以本次同时提升了 `@wemind/cli` 到 `1.5.0`——两个 workflow 都会跑。
 
 ## [1.4.0] 新增 pi / Gemini 预设 · 任务消息显式寻址（2026-11-04）
 
