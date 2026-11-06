@@ -32,7 +32,7 @@ const {
   resetPoolForTest,
 } = await import("./worker-pool.js");
 const { readPidRecords } = await import("./shared/process/pid-record.js");
-import type { ResolvedAgent } from "./brain-agents.js";
+import type { ResolvedAgent } from "./agents/brain-agents.js";
 
 const FAKE = path.join(root, "fake-worker.mjs");
 fs.writeFileSync(

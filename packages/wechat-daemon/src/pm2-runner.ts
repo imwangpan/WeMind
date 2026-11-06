@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { accountDir } from "@wemind/wechat-ilink-core"; // 与 daemon 自身用的是同一个根（尊重 WEMIND_HOME）
 
-import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
+import { BRAIN_CONFIG_EXIT_CODE } from "./agents/brain-agents.js";
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
 
 /*

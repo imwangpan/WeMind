@@ -505,7 +505,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | 3 | ACP 实现覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt`；先用 `wemind brain check` 真握手 |
 | 4 | 能**完成认证**且二进制可解析 | PATH 上能找到，或用 `--bin` 给绝对路径；`.cmd`/`.bat` 需经 shell |
 
-> **「支持 ACP」四个字不足以说明可用**：`session/load`、`session/resume`、图片输入、MCP 传输、反向请求都是**可降级项**（agent 没实现就退到简单做法），按 agent 而异（见 `packages/wechat-daemon/src/brain-agents.ts` 的 `AcpAgentPreset` 字段与 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md) §9）。接入前先跑能力探针。
+> **「支持 ACP」四个字不足以说明可用**：`session/load`、`session/resume`、图片输入、MCP 传输、反向请求都是**可降级项**（agent 没实现就退到简单做法），按 agent 而异（见 `packages/wechat-daemon/src/agents/brain-presets.ts` 的 `AcpAgentPreset` 字段与 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md) §9）。接入前先跑能力探针。
 
 | 环境变量                | 作用                                                | 默认         |
 | ----------------------- | --------------------------------------------------- | ------------ |

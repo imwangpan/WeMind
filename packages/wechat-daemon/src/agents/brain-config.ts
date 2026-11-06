@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
-import { writeJsonAtomic } from "./shared/io/atomic-json.js";
+import { writeJsonAtomic } from "../shared/io/atomic-json.js";
 
 /**
  * 账号级「大脑」持久配置（brain.json）。

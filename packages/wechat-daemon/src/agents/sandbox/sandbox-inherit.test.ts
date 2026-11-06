@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ResolvedAgent } from "./brain-agents.js";
+import type { ResolvedAgent } from "../brain-agents.js";
 import { syncInherited } from "./sandbox-inherit.js";
 
 /*

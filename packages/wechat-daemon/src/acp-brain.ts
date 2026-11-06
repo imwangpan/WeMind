@@ -2,9 +2,9 @@ import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_proce
 import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import { BRAIN_HOME, activeMcpServers } from "./mcp-sandbox.js";
-import { getAgent } from "./agent-slot.js";
-import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "./brain-agents.js";
+import { BRAIN_HOME, activeMcpServers } from "./agents/sandbox/mcp-sandbox.js";
+import { getAgent } from "./agents/agent-slot.js";
+import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "./agents/brain-agents.js";
 import { pidRecordOf, writePidRecords } from "./shared/process/pid-record.js";
 import { spawnAgent } from "./shared/process/spawn-agent.js";
 import {

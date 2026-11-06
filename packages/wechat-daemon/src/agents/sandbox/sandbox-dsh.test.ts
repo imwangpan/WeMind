@@ -32,7 +32,7 @@ const patch = (model: string) =>
 
 let ensureBrainHome: typeof import("./mcp-sandbox.js").ensureBrainHome;
 let ensureWorkerHome: typeof import("./worker-sandbox.js").ensureWorkerHome;
-let resetSlotsForTest: typeof import("./agent-slot.js").resetSlotsForTest;
+let resetSlotsForTest: typeof import("../agent-slot.js").resetSlotsForTest;
 
 beforeAll(async () => {
   fs.mkdirSync(path.dirname(realPatch), { recursive: true });
@@ -44,7 +44,7 @@ beforeAll(async () => {
   delete process.env.WEMIND_BRAIN_INHERIT;
   ({ ensureBrainHome } = await import("./mcp-sandbox.js"));
   ({ ensureWorkerHome } = await import("./worker-sandbox.js"));
-  ({ resetSlotsForTest } = await import("./agent-slot.js"));
+  ({ resetSlotsForTest } = await import("../agent-slot.js"));
 });
 
 afterAll(() => {

@@ -1,4 +1,4 @@
-import { ACP_AGENT_PRESETS } from "./brain-agents.js";
+import { ACP_AGENT_PRESETS } from "./agents/brain-agents.js";
 
 /**
  * 微信指令表：**解析与帮助是同一张表**（一处改动不会让「帮助里写的」和「真正认的」不一致）。

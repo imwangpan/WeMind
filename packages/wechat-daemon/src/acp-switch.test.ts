@@ -33,8 +33,8 @@ const {
   restartForMcpChange,
   resumeSession,
 } = await import("./acp-brain.js");
-const { getAgent, resetSlotsForTest, seedSlots, setAgent } = await import("./agent-slot.js");
-const { loadBrainConfig, saveBrainConfig } = await import("./brain-config.js");
+const { getAgent, resetSlotsForTest, seedSlots, setAgent } = await import("./agents/agent-slot.js");
+const { loadBrainConfig, saveBrainConfig } = await import("./agents/brain-config.js");
 const { readPidRecords } = await import("./shared/process/pid-record.js");
 const { loadRegistry } = await import("./session-registry.js");
 

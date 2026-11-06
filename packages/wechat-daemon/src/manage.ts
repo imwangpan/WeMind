@@ -27,8 +27,8 @@ import {
   isAlive,
   matchesMarkers,
 } from "./shared/process/proc-identity.js";
-import { resolveAgent } from "./brain-agents.js";
-import { loadBrainConfig } from "./brain-config.js";
+import { resolveAgent } from "./agents/brain-agents.js";
+import { loadBrainConfig } from "./agents/brain-config.js";
 import { agentLabel, cmdBrain } from "./cli-brain.js";
 import { cmdLogin, finalizeStaging } from "./cli-login.js";
 import { cmdSession, cmdSessionCurrent } from "./cli-session.js";
@@ -47,7 +47,7 @@ export { agentLabel } from "./cli-brain.js";
 export { createLoginStagingDir } from "./cli-login.js";
 export { resolveTaskCwd, taskAckOutcome } from "./cli-task.js";
 import { readPidRecords, recordMarkers } from "./shared/process/pid-record.js";
-import { BRAIN_RUNTIME_FILE, readBrainState } from "./brain-state.js";
+import { BRAIN_RUNTIME_FILE, readBrainState } from "./agents/brain-state.js";
 import { CLI_VERSION, versionLine } from "./shared/version.js";
 import { renderHelp } from "./chat-commands.js";
 

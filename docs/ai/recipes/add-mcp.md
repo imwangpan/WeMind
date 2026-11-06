@@ -37,9 +37,9 @@ transport（怎么让 agent 看到）
 
 | 文件 | 作用 |
 |---|---|
-| `packages/wechat-daemon/src/mcp-sandbox.ts` | brain 沙箱、catalog、激活集、`加载/卸载` |
-| `packages/wechat-daemon/src/worker-sandbox.ts` | worker 全量继承、排除集 |
-| `packages/wechat-daemon/src/agent-mcp.ts` | 文件式 MCP 格式（kiro / opencode / HTTP）的读/写/转换 |
+| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | brain 沙箱、catalog、激活集、`加载/卸载` |
+| `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | worker 全量继承、排除集 |
+| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts` | 文件式 MCP 格式（kiro / opencode / HTTP）的读/写/转换 |
 | `packages/wechat-daemon/src/index.ts` | 指令拦截；加载/卸载后 `restart()` |
 | `packages/wechat-daemon/src/acp-brain.ts` | 重启 ACP，重建后恢复 session |
 

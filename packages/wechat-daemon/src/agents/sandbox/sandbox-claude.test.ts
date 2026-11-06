@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ResolvedAgent } from "./brain-agents.js";
+import type { ResolvedAgent } from "../brain-agents.js";
 
 /**
  * Claude Code 沙箱：配置目录在 <沙箱>/claude（预设用 CLAUDE_CONFIG_DIR 指到目录本身），

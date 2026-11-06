@@ -10,7 +10,7 @@ import {
   type ConnInfo,
   type PoolLimits,
 } from "./worker-pool.js";
-import type { ResolvedAgent } from "./brain-agents.js";
+import type { ResolvedAgent } from "./agents/brain-agents.js";
 
 /**
  * 进程池的**取用/回收策略**是纯函数（`planAcquire`/`planReap`），IO（真起进程）在别处。

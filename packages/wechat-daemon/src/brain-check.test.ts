@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { checkAgent } from "./brain-check.js";
-import { resolveAgent } from "./brain-agents.js";
+import { resolveAgent } from "./agents/brain-agents.js";
 
 /*
  * 用假 ACP 进程验「握手成功」的判据：只回 initialize + session/new，不依赖任何真实 agent。

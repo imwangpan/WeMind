@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, accountDir } from "@wemind/wechat-ilink-core";
-import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
+import { BRAIN_CONFIG_EXIT_CODE } from "./agents/brain-agents.js";
 import { stripVscodeDebugEnv } from "./shared/debug-env.js";
 import { logLimitsFromEnv, RotatingLog } from "./shared/io/log-rotate.js";
 import { CLI_PID_MARKERS, otherOurProcessPid } from "./shared/process/proc-identity.js";

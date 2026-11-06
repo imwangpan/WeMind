@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { ResolvedAgent } from "./brain-agents.js";
+import type { ResolvedAgent } from "../brain-agents.js";
 
 /**
  * 把 agent 真实配置目录里的「记忆/规则/技能」链入沙箱配置目录，并在**换 agent** 时清掉上一个 agent 留下的条目。

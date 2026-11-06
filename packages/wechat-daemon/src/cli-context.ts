@@ -17,8 +17,8 @@ import {
   type ControlKind,
   type ControlRequest,
 } from "./control-bridge.js";
-import { resolveAgent } from "./brain-agents.js";
-import { loadBrainConfig } from "./brain-config.js";
+import { resolveAgent } from "./agents/brain-agents.js";
+import { loadBrainConfig } from "./agents/brain-config.js";
 
 /** 读裸 pid 文件（daemon.pid / wrapper.pid / brain.pid）；不存在/坏内容 → null。 */
 export function readPid(dir: string, name: string): number | null {

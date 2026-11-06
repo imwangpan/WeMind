@@ -1,6 +1,6 @@
 import { handleReverseRequest } from "./acp-reverse.js";
 import { waitForFrameQuiet } from "./acp-quiet.js";
-import type { ResolvedAgent } from "./brain-agents.js";
+import type { ResolvedAgent } from "./agents/brain-agents.js";
 import { LineDecoder } from "./shared/io/line-decoder.js";
 
 /**

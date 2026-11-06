@@ -4,7 +4,7 @@ import os from "node:os";
 import fs from "node:fs";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import { WORKER_HOME, workerMcpServers } from "./worker-sandbox.js";
+import { WORKER_HOME, workerMcpServers } from "./agents/sandbox/worker-sandbox.js";
 import { spawnAgent } from "./shared/process/spawn-agent.js";
 import {
   backupCorruptSessionMap,
@@ -12,7 +12,7 @@ import {
   readSessionMapStrict,
   sessionKey,
 } from "./session-map.js";
-import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "./brain-agents.js";
+import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "./agents/brain-agents.js";
 import {
   applyAcpModel,
   applyAcpSessionMode,

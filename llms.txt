@@ -86,10 +86,11 @@
 - `packages/wechat-ilink-core/`: iLink HTTP client, types, errors, session guard, account/state, image crypto. Private, bundled into the published packages.
 - `packages/wechat-mcp/`: MCP server with 6 tools. Published as `@wemind/wechat-mcp` (bin `wemind-mcp`).
 - `packages/wechat-daemon/`: daemon, ACP brain, worker, CLI. Published as `@wemind/cli` (bin `wemind`).
-- `packages/wechat-daemon/src/brain-agents.ts`: `ACP_AGENT_PRESETS`, `resolveAgent()`, `agentProblem()`.
+- `packages/wechat-daemon/src/agents/brain-presets.ts`: `ACP_AGENT_PRESETS` (the 9 built-in agent presets).
+- `packages/wechat-daemon/src/agents/brain-agents.ts`: `resolveAgent()`, `agentProblem()`.
 - `packages/wechat-daemon/src/acp-brain.ts`: resident ACP client (brain).
 - `packages/wechat-daemon/src/worker-acp.ts`: resident ACP client (worker).
-- `packages/wechat-daemon/src/mcp-sandbox.ts`: brain sandbox + MCP activation.
+- `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts`: brain sandbox + MCP activation.
 - `packages/wechat-daemon/src/index.ts`: message routing, turn orchestration, progress budget.
 
 ## Commands

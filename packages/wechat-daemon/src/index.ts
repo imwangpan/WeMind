@@ -35,15 +35,15 @@ import type {
   ImageItem,
 } from "@wemind/wechat-ilink-core";
 import { askBrain, supportsImages, heartbeatMs } from "./acp-brain.js";
-import { agentProblem, BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
+import { agentProblem, BRAIN_CONFIG_EXIT_CODE } from "./agents/brain-agents.js";
 import { switchInFlightTarget } from "./brain-switch.js";
-import { loadBrainConfig } from "./brain-config.js";
-import { getAgent, seedSlots } from "./agent-slot.js";
-import { writeBrainState } from "./brain-state.js";
+import { loadBrainConfig } from "./agents/brain-config.js";
+import { getAgent, seedSlots } from "./agents/agent-slot.js";
+import { writeBrainState } from "./agents/brain-state.js";
 import { CLI_PID_MARKERS, otherOurProcessPid } from "./shared/process/proc-identity.js";
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
 import { isOwnerOnly } from "./chat-commands.js";
-import { ensureBrainHome } from "./mcp-sandbox.js";
+import { ensureBrainHome } from "./agents/sandbox/mcp-sandbox.js";
 import { syncFromPointerMap } from "./session-registry.js";
 import { clearControlDirs, markBridgeReady } from "./control-bridge.js";
 import { ControlInboxRunner } from "./control-inbox-runner.js";
@@ -81,7 +81,7 @@ import {
 import { clearTaskDirs, writeTaskAck } from "./task-inbox.js";
 import { scanTaskInbox } from "./task-inbox-runner.js";
 import { killAll as killWorkerPool, sweep as sweepWorkerPool } from "./worker-pool.js";
-import { ensureWorkerHome } from "./worker-sandbox.js";
+import { ensureWorkerHome } from "./agents/sandbox/worker-sandbox.js";
 
 const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon]", ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

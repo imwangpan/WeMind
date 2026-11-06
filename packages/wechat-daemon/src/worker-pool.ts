@@ -8,8 +8,8 @@ import {
   type PidRecord,
   type PidState,
 } from "./shared/process/pid-record.js";
-import type { ResolvedAgent } from "./brain-agents.js";
-import { ensureWorkerHome } from "./worker-sandbox.js";
+import type { ResolvedAgent } from "./agents/brain-agents.js";
+import { ensureWorkerHome } from "./agents/sandbox/worker-sandbox.js";
 
 /**
  * worker 进程池：**一条任务一条 ACP 连接**，按 agent 复用常驻进程。

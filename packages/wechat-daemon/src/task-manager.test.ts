@@ -40,7 +40,11 @@ function fakeConn(name = "kiro") {
   };
 }
 
-const { setAgent: setSlotAgent, resetSlotsForTest, getAgent } = await import("./agent-slot.js");
+const {
+  setAgent: setSlotAgent,
+  resetSlotsForTest,
+  getAgent,
+} = await import("./agents/agent-slot.js");
 const {
   dispatchTask,
   injectTask,

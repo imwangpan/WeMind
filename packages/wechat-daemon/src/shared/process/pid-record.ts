@@ -2,7 +2,7 @@ import fs from "node:fs";
 
 import { writeJsonAtomic } from "../io/atomic-json.js";
 import { brainPidMarkers } from "./proc-identity.js";
-import type { ResolvedAgent } from "../../brain-agents.js";
+import type { ResolvedAgent } from "../../agents/brain-agents.js";
 
 /**
  * ACP 进程的「身份记录」文件（`brain.pid` / `workers.pid.json`）。

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { writeJsonAtomic } from "./shared/io/atomic-json.js";
+import { writeJsonAtomic } from "../shared/io/atomic-json.js";
 import type { ResolvedAgent } from "./brain-agents.js";
 
 /**

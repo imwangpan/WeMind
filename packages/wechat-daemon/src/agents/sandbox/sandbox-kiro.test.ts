@@ -28,8 +28,8 @@ const writeSettings = (home: string, acpEngine: string) => {
 
 let ensureBrainHome: typeof import("./mcp-sandbox.js").ensureBrainHome;
 let ensureWorkerHome: typeof import("./worker-sandbox.js").ensureWorkerHome;
-let resolveAgent: typeof import("./brain-agents.js").resolveAgent;
-let resetSlotsForTest: typeof import("./agent-slot.js").resetSlotsForTest;
+let resolveAgent: typeof import("../brain-agents.js").resolveAgent;
+let resetSlotsForTest: typeof import("../agent-slot.js").resetSlotsForTest;
 
 beforeAll(async () => {
   writeSettings(v3Home, "v3");
@@ -40,8 +40,8 @@ beforeAll(async () => {
   delete process.env.WEMIND_BRAIN_INHERIT;
   ({ ensureBrainHome } = await import("./mcp-sandbox.js"));
   ({ ensureWorkerHome } = await import("./worker-sandbox.js"));
-  ({ resolveAgent } = await import("./brain-agents.js"));
-  ({ resetSlotsForTest } = await import("./agent-slot.js"));
+  ({ resolveAgent } = await import("../brain-agents.js"));
+  ({ resetSlotsForTest } = await import("../agent-slot.js"));
 });
 
 afterAll(() => {

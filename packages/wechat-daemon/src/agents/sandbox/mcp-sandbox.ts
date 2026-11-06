@@ -3,8 +3,8 @@ import path from "node:path";
 import os from "node:os";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import { ensureKiroV3Permissions, type ResolvedAgent } from "./brain-agents.js";
-import { getAgent } from "./agent-slot.js";
+import { ensureKiroV3Permissions, type ResolvedAgent } from "../brain-agents.js";
+import { getAgent } from "../agent-slot.js";
 import {
   readMcpServers,
   withMcpServers,
@@ -12,7 +12,7 @@ import {
   toAcpMcpServers,
   isWechatMcpServer,
 } from "./agent-mcp.js";
-import { copyProfilePatch } from "./profile-model.js";
+import { copyProfilePatch } from "../profile-model.js";
 import { syncInherited } from "./sandbox-inherit.js";
 
 /**

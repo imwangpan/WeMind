@@ -1,6 +1,6 @@
 import type { WeixinMessage } from "@wemind/wechat-ilink-core";
 import { MessageItemType } from "@wemind/wechat-ilink-core";
-import { authHint } from "./brain-agents.js";
+import { authHint } from "./agents/brain-agents.js";
 import {
   parseChatCommand,
   parseTaskCommand,

@@ -3,9 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { parseJsonc } from "./agent-mcp.js";
-import { agentEnv, authHint, prepareAgent, type ResolvedAgent } from "./brain-agents.js";
-import { copyProfilePatch } from "./profile-model.js";
+import { parseJsonc } from "./agents/sandbox/agent-mcp.js";
+import { agentEnv, authHint, prepareAgent, type ResolvedAgent } from "./agents/brain-agents.js";
+import { copyProfilePatch } from "./agents/profile-model.js";
 import { spawnAgent } from "./shared/process/spawn-agent.js";
 import { handleReverseRequest } from "./acp-reverse.js";
 import { LineDecoder } from "./shared/io/line-decoder.js";

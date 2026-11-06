@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatCommand } from "./chat-commands.js";
-import type { ResolvedAgent } from "./brain-agents.js";
+import type { ResolvedAgent } from "./agents/brain-agents.js";
 import type { ControlRequest } from "./control-bridge.js";
 
 const m = vi.hoisted(() => ({
@@ -55,17 +55,17 @@ vi.mock("./acp-brain.js", () => ({
   restartForMcpChange: m.restartForMcpChange,
   resumeSession: m.resumeSession,
 }));
-vi.mock("./brain-config.js", () => ({
+vi.mock("./agents/brain-config.js", () => ({
   loadBrainConfig: m.loadBrainConfig,
   agentConfigFor: m.agentConfigFor,
 }));
-vi.mock("./brain-agents.js", () => ({
+vi.mock("./agents/brain-agents.js", () => ({
   ACP_AGENT_PRESETS: { gemini: {}, pi: {} },
   presetAvailable: m.presetAvailable,
   presetNames: m.presetNames,
   resolvePresetByName: m.resolvePresetByName,
 }));
-vi.mock("./agent-slot.js", () => ({ getAgent: m.getAgent, setAgent: m.setAgent }));
+vi.mock("./agents/agent-slot.js", () => ({ getAgent: m.getAgent, setAgent: m.setAgent }));
 vi.mock("./brain-switch.js", () => ({
   preflightSwitch: m.preflightSwitch,
   switchBrain: m.switchBrain,
@@ -79,7 +79,7 @@ vi.mock("./session-manager.js", () => ({
   renameSessionCmd: m.renameSessionCmd,
   deleteSessionCmd: m.deleteSessionCmd,
 }));
-vi.mock("./mcp-sandbox.js", () => ({
+vi.mock("./agents/sandbox/mcp-sandbox.js", () => ({
   addMcp: m.addMcp,
   removeMcp: m.removeMcp,
   listMcp: m.listMcp,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ResolvedAgent } from "./brain-agents.js";
+import type { ResolvedAgent } from "./agents/brain-agents.js";
 import {
   applyAcpModel,
   applyAcpSessionMode,
