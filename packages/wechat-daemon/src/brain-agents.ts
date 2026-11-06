@@ -296,7 +296,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   //   `npm i -g @agentclientprotocol/claude-agent-acp`。适配器自带 @anthropic-ai/claude-agent-sdk（含平台原生二进制）；
   //   若装的时候漏了 optional 依赖（native binary not found），可用 CLAUDE_CODE_EXECUTABLE 指向本机已装的 claude 二进制。
   // - 免审批：适配器**不解析** --dangerously-skip-permissions 之类 CLI flag；会话建立/恢复后走 `session/set_mode {modeId:"bypassPermissions"}`（见 sessionMode）。
-  //   以 root 运行且未设 IS_SANDBOX=1 时该模式不可用——会话回包的 availableModes 里没有它，applySessionMode 会跳过并记日志。
+  //   以 root 运行且未设 IS_SANDBOX=1 时该模式不可用——会话回包的 availableModes 里没有它，applyAcpSessionMode 会跳过并记日志。
   // - 沙箱：CLAUDE_CONFIG_DIR 指向 <BRAIN_HOME>/claude（实测会把 ~/.claude.json 一起搬进该目录，用户级 mcpServers 不会漏进大脑）；
   //   CLAUDE.md/skills/agents/commands 与日常使用共享；OAuth 登录态 .credentials.json 同步进沙箱。
   //   **不复制 settings.json**：它常含网关 token（env），按 §4.9 密钥由 daemon 进程环境提供；需要网关时设 ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL。

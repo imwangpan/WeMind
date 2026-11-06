@@ -1,6 +1,6 @@
 # 使用指南：远程任务（worker）
 
-> **最后核对**：2026-11-02
+> **最后核对**：2026-11-05
 >
 > 让**漫长任务在后台受控运行**，在它「需要你决策」（列了方案让你选）或「中断」时通知你，你回一句它就接着干。可以**同时开多条**（默认上限 3，各自一个独立进程）。
 > 两个入口管同一批任务：**微信**（人离开电脑时）＋ **本地终端**（人在电脑前时）。
@@ -16,7 +16,7 @@
   ```bash
   wemind list   # 看到「运行中(pid …)」即可
   ```
-- 没在跑就启动：`wemind start [<key|label>]`（省略 = 默认账号；或 `scripts/run-all-daemons.ps1` 全部账号）。
+- 没在跑就启动：`wemind start [<key|label>]`（省略 = 注册表里的默认账号）。逐个账号起一遍即可；`scripts/run-all-daemons.ps1` 只有从源码仓库运行时才有（npm 安装的包只含 `dist/`，没有 `scripts/`）。
 
 ---
 
@@ -117,5 +117,5 @@ wemind task-stop 2      # 结束 2 号；不带编号只在恰好一条活跃任
 | `WEMIND_WORKER_REAP_MS` | 300000（5min） | 空闲超多久回收 worker 连接 |
 | `WEMIND_WORKER_IDLE_MS` / `_CAP_MS` / `_FIRST_FRAME_MS` | 180000 / 1800000 / 30000 | worker 单轮空闲 / 硬上限（到点就放弃）/ 首帧超时 |
 | `WEMIND_WORKER_PROGRESS` | `0` | 是否推送全程文字进度（默认安静；`1` 开启） |
-| `WEMIND_TASK_SCAN_MS` | 1000 | daemon 扫描本地命令收件箱的间隔 |
+| `WEMIND_TASK_SCAN_MS` | 1000 | daemon 扫描本地收件箱的间隔（**两个桥都用它**：`task-inbox/` 与 `control-inbox/`） |
 | `WEMIND_WORKER_MCP_EXCLUDE` | `wechat` | worker 不继承的 MCP（`wechat` 强制排除防它把消息发回自己） |

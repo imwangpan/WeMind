@@ -1,6 +1,6 @@
 # 接入 Gemini CLI（原生 ACP，探针 + 真机实测）
 
-> **最后核对**：2026-11-02 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
+> **最后核对**：2026-11-05 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
 >
 > **状态**：✅ 内置预设、ACP 探针全部通过（`initialize` / `session/new` / prompt / 图片 / 工具调用 0 反向请求 / 强杀后 `session/load`）；MCP 与沙箱已实测；`wemind brain check` 握手通过（约 3.0s）；**微信真机 E2E 已通过（2026-11-01：单轮、杀 daemon 后 `session/load`、热切换、worker 任务）**。
 >
@@ -13,7 +13,8 @@
 ```powershell
 npm i -g @google/gemini-cli    # 实测 0.66.0；要求 Node ≥20
 gemini                         # 终端里先完成认证（Google 登录 / API key / 自定义网关）
-gemini --version               # 确认版本与 ACP 参数（0.66 起是 --acp）
+gemini --version               # 确认版本（0.66+）
+gemini --help                  # 确认 --acp 参数存在（--version 只打印版本号，不列参数）
 ```
 
 认证方式以 `~/.gemini/settings.json` 的 `security.auth.selectedType` 为准；API key / 自定义网关（如本机 magpie）的 base URL 写在 `~/.gemini/.env`：
@@ -46,7 +47,7 @@ WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / 
 
 | 项 | 结果 |
 |---|---|
-| `initialize` | `protocolVersion: 1`；`agentInfo = gemini-cli 0.66.0`；`loadSession: true`；`promptCapabilities.image: true`；`mcpCapabilities: { http: true, sse: true }`（**没有 acp 字段**）；`authMethods` 含 oauth-personal / gemini-api-key / vertex-ai / gateway |
+| `initialize` | `protocolVersion: 1`；`agentInfo = gemini-cli 0.66.0`；`loadSession: true`；`promptCapabilities: { image: true, audio: true, embeddedContext: true }`（**WeMind 只用预设的 `images` 字段决定发不发图，`audio` / `embeddedContext` 未使用**）；`mcpCapabilities: { http: true, sse: true }`（**没有 acp 字段**）；`authMethods` 含 oauth-personal / gemini-api-key / vertex-ai / gateway |
 | `session/new` | OK；回包有 `modes`（default / autoEdit / yolo / plan，当前 yolo）与 `models`（`currentModelId` = 用户 settings 里的模型，如 `auto/hy3`） |
 | prompt | 首帧 ~1ms（usage/thought），**首段正文 3.4s**，整轮 ~3.6s；update 类型 `user_message_chunk` / `agent_thought_chunk` / `agent_message_chunk` / `available_commands_update` / `usage_update`（有 activity 帧，心跳无忧） |
 | 图片 | ✅ 接受（1×1 PNG → `end_turn`，无报错） |
@@ -59,6 +60,21 @@ WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / 
 | MCP（配置文件） | ✅ 沙箱 `settings.json` 的 `mcpServers` 被加载；模型真实调用 `probe_ping` → `PONG` |
 | MCP（ACP `session/new.mcpServers`） | ✅ 也能用（同样是 `probe_ping` → `PONG`），但 `initialize` 不声明 acp → 预设仍走配置文件，不依赖未声明的能力 |
 
+升级后要复现上表，直接用下面这段（临时 home，不碰真实 `~/.gemini`）：
+
+```powershell
+$env:ACP_BIN = "gemini.cmd"                       # 或绝对路径
+$env:ACP_ARGS = '["--acp","--approval-mode","yolo","--skip-trust"]'
+$env:ACP_SHELL = "1"
+$env:ACP_HOME_ENV = "GEMINI_CLI_HOME"             # 预设的 homeEnvVar
+$env:ACP_HOME = "$env:TEMP\gemini-acp-probe"
+$env:ACP_TEST_TOOL = "1"                          # 漂移检测：强制一次工具调用
+$env:ACP_TEST_IMAGE = "1"
+node scripts/acp-probe.mjs
+```
+
+> 探针只验证**参数与能力**；凭据要另备（临时 home 里没有认证信息）。要看微信大脑的真实效果，仍然以 `wemind brain check` 和真机一轮为准。
+
 ## 4. 已知限制 / 坑
 
 - **`--skip-trust` 不能省**：未信任目录 = yolo 降级 + MCP 全禁用。大脑 cwd 是沙箱根（每次都是「新目录」），所以必须显式信任。
@@ -68,7 +84,7 @@ WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / 
 - **MCP 视图**：大脑默认空 + 微信里 `加载 <名>` 才写进沙箱；worker 继承真实 `mcpServers` 全量但**永久排除 `wechat`**。真实 `~/.gemini/settings.json` 不动。
 - **不支持 `session/set_config_option`**：除模型外，其它想通过 ACP 改的配置项也走不了；优先改 `settings.json`（WeMind 会镜像进沙箱）或启动参数。
 - **`session/close` 未实现**：WeMind 本来就不调用；只是探针会记一条。
-- **`GEMINI_CLI_HOME` 的隔离边界**：配置目录整体重定向（实测临时 home 会生成 `.gemini/`，真实 `~/.gemini` 不被写）。`extensions/` 不在继承清单里，沙箱也不会加载用户的扩展；确需共享时按 agent 布局加 `inheritDirs`。
+- **`GEMINI_CLI_HOME` 的隔离边界**：配置目录整体重定向（实测临时 home 会生成 `.gemini/`，真实 `~/.gemini` 不被写）。`extensions/` 不在继承清单里（WeMind 不复制、不 junction）；Gemini 是否仍会从真实 home 读到扩展**待实测**——别把「没继承」直接当成「不会加载」。确需共享时按 agent 布局加 `inheritDirs`。
 - **OAuth 凭据的范围**：默认文件存储下同步 `oauth_creds.json` + `google_accounts.json`。若显式开启 `GEMINI_FORCE_ENCRYPTED_FILE_STORAGE`，凭据可能在系统钥匙串或 `gemini-credentials.json`，沙箱无法可靠复用（待实测）；这种部署改用 API key，或关闭该选项。
 - **settings.json 允许注释**：Gemini CLI 用 `strip-json-comments` 读配置，`//` / `/* */` 是它的合法输入。WeMind 的沙箱镜像、MCP 目录读取与 `wemind brain check` 都按 JSONC 解析，不会因为注释把 model/security 静默丢成空基底。
 - **上游版本会变**：0.66.0 的 `--acp`、`mcpCapabilities`、`set_config_option` 缺失都是当前事实；升级后重跑 `scripts/acp-probe.mjs`（含 `ACP_TEST_TOOL=1`）与 `wemind brain check`，别拿旧结论当现状。

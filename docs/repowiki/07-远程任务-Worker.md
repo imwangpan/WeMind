@@ -2,7 +2,7 @@
 
 > 上一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md) ｜ 下一页：[8. 数据存储与多账号](08-数据存储与多账号.md)
 >
-> **最后核对**：2026-11-02
+> **最后核对**：2026-11-05
 
 除了「对话大脑」，daemon 还能把**漫长任务**交给**受控的 ACP worker 进程**跑 —— 你在电脑上派发任务后离开，它在「需要你决策」（列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑。这就是**远程 human-in-the-loop（人在回路）**。
 
@@ -289,7 +289,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `WEMIND_WORKER_CWD` | 用户主目录 | worker 默认工作目录（本地 `task --cwd` 覆盖） |
-| `WEMIND_WORKER_BRAIN` | — | **默认任务大脑**（agent 名）。优先级：env → `brain.json` 的 `worker.agent ?? agent` → `auto` |
+| `WEMIND_WORKER_BRAIN` | — | **默认任务大脑**（agent 名）。优先级：`WEMIND_WORKER_BRAIN` → `WEMIND_BRAIN`（env 回落）→ `brain.json` 的 `worker.agent ?? agent` → `auto` |
 | `WEMIND_MAX_WORKERS` | 3 | 同时运行的**任务**数上限 |
 | `WEMIND_IDLE_MAX` | 2 | 池中保留的**空闲** worker 进程数上限 |
 | `WEMIND_WORKER_REAP_MS` | 300000 | 空闲 worker 进程回收时间（**不是**单轮空闲超时） |

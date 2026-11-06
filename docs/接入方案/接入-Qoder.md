@@ -1,9 +1,8 @@
 # 接入 Qoder CLI（设计与实测）
 
-> **状态**：M0 能力探针 **已完成 ✅** ｜ M1 agent + 沙箱隔离 **已完成 ✅** ｜ M2 按 M0 结果为空 ｜ M3 真机 E2E **已完成 ✅**（2026-10-27）。
-> **实测范围**：Qoder CLI 1.1.78（M0 探针 + M3 真机 E2E，见 §2 / §2.1）｜ **最后核对**：2026-11-04（本次仅修硬错误）。
-> **实测环境**：Windows 11 / Node 24 / **Qoder CLI 1.1.78**（官方原生安装）/ WeMind 1.0.1。
-> **最后核对**：2026-10-27 ｜ **分支**：`feat/qoder-brain` ｜ 结论**仅适用于 qodercli 1.1.78**。
+> **状态**：M0–M4 全部完成 ✅（`qoder` 是内置预设；M2 按 M0 结果为空）。
+> **实测范围**：Qoder CLI 1.1.78（M0 探针 + M3 真机 E2E，见 §2 / §2.1）｜ **最后核对**：2026-11-05
+> **实测环境**：Windows 11 / Node 24 / Qoder CLI 1.1.78（官方原生安装）。结论**仅适用于 qodercli 1.1.78**。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](../ai/recipes/add-acp-agent.md) · [接入-OpenCode.md](接入-OpenCode.md)（文件式 MCP 样板）· [接入-DeepSeek.md](接入-DeepSeek.md)（凭据同步样板）
 
 ---
@@ -18,7 +17,7 @@
   3. **登录态要同步两个文件**：`.auth/user` + `.auth/machine_id`（缺一个就报 `Authentication required`）；
   4. 设置继承：复制 `~/.qoder/settings.json` 作为基底（去掉 MCP/插件/自定义供应商键），并强制关闭自动更新。
 - 已定：用 `--yolo`；官方原生安装；**不复制 `providers`**（BYOK 含明文 `apiKey`，内置模型只需账号登录；`model` 一并剥离，避免指向已剥离的供应商）。
-- M1 状态：agent + 沙箱已在 `feat/qoder-brain` 实现；typecheck / lint / format:check / 155 项单测全绿；`wemind brain check` 真机握手通过（约 2.4 s）。
+- M1 状态：agent + 沙箱已实现（`brain-agents.ts` + `mcp-sandbox.ts`）；`wemind brain check` 真机握手通过（约 2.4 s）。
 - **M3 真机 E2E 全通过**：文字对话、发图识别、动态 `加载/卸载` MCP（真实调用并回环拒绝 `wechat`）、冷重启与换脑切换后 `session/load` 恢复、worker 派发 → 强杀中断 →「继续」续跑、`memory/` 继承生效；细节见 §2.1。
 
 ---
@@ -55,7 +54,7 @@ node scripts/acp-probe.mjs
 | Q3 | 反向请求 | `--yolo` 下 prompt 触发 3 次工具调用，**0 个反向请求**（无 `request_permission`、无 `fs/*`、无 `terminal/*`） |
 | Q4 | 首帧 / 帧类型 | 首帧 1.0–1.7 s，首字 1.4–2.8 s；`agent_thought_chunk`、`agent_message_chunk`、`tool_call`、`tool_call_update` → 默认 25 s 首帧 / 15 s 心跳均适用 |
 | Q5 | 硬杀后恢复 | `taskkill /T /F` 后新进程 `session/load` 成功，追问答出 `PINEAPPLE` ✅ |
-| Q6 | 模型 / 模式 | `session/new` 返回 `modes`（`default/acceptEdits/auto/dontAsk/yolo`，当前 `yolo`）、`models`（默认 `auto`，另有 `ultimate/fast/efficient` 等 15 个）与 `configOptions`（`mode`、`model` 两个 select）→ 可用现有 `model` agent 配置字段走 `session/set_config_option` |
+| Q6 | 模型 / 模式 | `session/new` 返回 `modes`（`default/acceptEdits/auto/dontAsk/yolo`，当前 `yolo`）、`models`（默认 `auto`，另有 `ultimate/fast/efficient` 等 15 个）与 `configOptions`（`mode`、`model` 两个 select）→ **能力声明层面**支持现有 `model` agent 配置字段走 `session/set_config_option`；**尚未实测下发**（Q1 只证明能力声明，没有一次真实的 `set_config_option` 调用记录，2026-11-05 核对） |
 | Q7 | 图片 | 1×1 PNG 的 prompt 返回 `end_turn` 无报错；真实图片识别留到 M3 真机验证 |
 | — | stdout 杂质 | 无非 JSON 行 |
 
@@ -90,7 +89,7 @@ qoder: {
   name: "qoder",
   bin: "qodercli",
   binWin: "qodercli.exe",              // 直接起本体，不走 qoder.cmd 分发器；.exe → shell:false
-  // 官方原生安装不在 PATH 时兜底（auto 探测仍只看 PATH）
+  // 官方原生安装不在 PATH 时兜底；auto 探测也认这条（presetAvailable → presetBinPath 会试它）
   fallbackBinPaths: [path.join(os.homedir(), ".qoder", "bin", "qodercli", "qodercli.exe")],
   args: ["--acp", "--yolo"],
   env: { QODER_CONFIG_DIR: `%HOME%${path.sep}qoder` },  // 替换 global 配置目录 → 真正隔离
@@ -120,9 +119,9 @@ qoder: {
 
 - 加 `qoder` agent，`AUTO_PROBE_ORDER` 末尾追加（**当时的实施记录**；当前顺序为 `opencode → cline → qoder → gemini → deepseek → kiro`，qoder 排第 3 位，按实测启动耗时）；
 - `AcpAgentPreset` / `ResolvedAgent` 增加 `settingsBase?` / `identityFiles` / `fallbackBinPaths`；`credentialFile?: string` 改为 `credentialFiles?: string[]`（DSH agent 同步改成 `[".credentials.yaml"]`）；
-- `fallbackBinPaths`：`onPath()` 找不到时按顺序试绝对路径（官方原生安装的 `~/.qoder/bin/qodercli/qodercli.exe` 常不在 PATH 上或 PATH 未刷新）。**auto 探测仍只看 PATH**，避免「装了 Qoder Desktop 但没登录 CLI」被误选；
+- `fallbackBinPaths`：`onPath()` 找不到时按顺序试绝对路径（官方原生安装的 `~/.qoder/bin/qodercli/qodercli.exe` 常不在 PATH 上或 PATH 未刷新）。**auto 探测也认它**——`presetAvailable()` 走 `presetBinPath()`，判据是「显式覆盖 > PATH > `fallbackBinPaths`」，所以只有 `qodercli.exe` 落在官方安装目录、没进 PATH 的机器同样会被自动探测选中（2026-11-05 核对源码修正：此前本文写「auto 探测仍只看 PATH」，与实现相反）。若不想它被自动选中（例如装了 Qoder Desktop 但没登录 CLI），写一个明确的 `wemind brain set <其它 agent>`——配置里的选择优先于 `auto` 探测；
 - 修一个已有缺陷：`WEMIND_BRAIN=qoder` 这类**环境变量临时切换**时，`brain.json` 里另一 agent 的 `bin`/`args`/`homeEnvVar` 覆盖会串进来（例如残留 `bin=dsh.cmd`）。现在只有当 `cfg.agent` 与最终选中的 key 一致时才应用文件覆盖（`overrideCfg`）；
-- `agentProblem()`：qoder 找不到时提示「官方安装到 `~/.qoder/bin/qodercli/`，确认它在 PATH 上，或 `wemind brain set qoder --bin <绝对路径>`」；找到但未登录时提示先 `qoder login`。
+- `agentProblem()`：qoder 找不到时提示「官方安装到 `~/.qoder/bin/qodercli/`，确认它在 PATH 上，或 `wemind brain set qoder --bin <绝对路径>`」。**没有「找到但未登录」分支**——二进制可解析就算可用，未登录会在 `session/new` 时以 `Authentication required` 暴露（`agentProblem()` 只判「找不到二进制 / 缺运行时」）；
 
 ### 4.2 沙箱设置继承（`mcp-sandbox.ts` + `worker-sandbox.ts` 两边同步）
 
@@ -149,7 +148,7 @@ syncSettings():
 
 `brain-check.ts` 也把这两类文件复制进临时沙箱，否则 `wemind brain check` 会误报「未登录」。
 
-兜底：daemon 进程环境里设 `QODER_PERSONAL_ACCESS_TOKEN`（PAT）也能认证，不依赖文件同步；**不写进 agent / `brain.json`**（AGENTS.md 约束 9）。
+兜底：daemon 进程环境里设 `QODER_PERSONAL_ACCESS_TOKEN`（PAT）也能认证，不依赖文件同步；**不写进 agent / `brain.json`**（AGENTS.md 约束 9）。**假设/待实测**：这条是按 Qoder 官方文档的变量名写的兜底建议，本项目**没有** PAT 路线的实测记录——优先用 `.auth/user` + `.auth/machine_id` 文件同步（M0–M3 全程验证过）。
 
 ### 4.4 协议层（`acp-brain.ts` + `worker-acp.ts`）
 
@@ -179,7 +178,7 @@ syncSettings():
 | `apiKey` 明文副本 | 多出 2 份 × 账号数（brain-home、worker-home） | 不复制 |
 | 一致性 | 与「大脑和日常使用同款配置」原则一致 | 若 `model.name` 指向某个 BYOK 模型，需同时剔除 `model`，否则大脑起不来或静默回退 |
 
-本机现状：`providers: {}`、`model: {}`，选哪个当下都没有区别。**决策：剔除 `providers` 与 `model`**——减少密钥副本，身份验证仍走账号登录；要换模型用配置里的 `model` 字段（`session/set_config_option`，Q1 已证明可用）。
+本机现状：`providers: {}`、`model: {}`，选哪个当下都没有区别。**决策：剔除 `providers` 与 `model`**——减少密钥副本，身份验证仍走账号登录；要换模型用配置里的 `model` 字段（`session/set_config_option`；Q6 只证明 `configOptions` 里有 `model` 这一项，**实际下发尚未实测**，用时先 `wemind brain check` 看日志有没有 `model set failed`）。
 
 ---
 

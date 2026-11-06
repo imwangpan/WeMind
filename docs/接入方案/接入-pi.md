@@ -1,6 +1,6 @@
 # 接入 pi coding agent（经 pi-acp 适配器，探针 + 真机 E2E）
 
-> **最后核对**：2026-11-02 ｜ **实测环境**：Windows 11 + Node 24 + `pi-acp@0.0.34` + pi `1.4.0`
+> **最后核对**：2026-11-05 ｜ **实测环境**：Windows 11 + Node 24 + `pi-acp@0.0.34` + pi `1.4.0`
 >
 > **状态**：✅ 内置预设、ACP 探针全绿（`initialize` / `session/new` / prompt / 图片 / 强杀后 `session/load` / 工具调用 0 反向请求）；**微信真机 E2E 已通过（2026-11-01：brain 单轮、热切换 pi↔codex、微信「任务 pi：…」派发）**。
 >
@@ -11,7 +11,7 @@
 ## 1. 准备
 
 ```powershell
-npm i -g @earendil-works/pi-coding-agent   # pi 本体（实测 1.4.0；Node ≥22）
+npm i -g @earendil-works/pi-coding-agent   # pi 本体（实测 1.4.0；Node ≥22.19，engines 要求，不是 ≥22）
 pi                                          # 终端里先配好模型/登录（pi 自己的 Terminal Auth / API key）
 npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 ```
@@ -39,7 +39,7 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 | 项 | 结果 |
 |---|---|
 | `initialize` | `protocolVersion: 1`；`loadSession: true`；`image: true`；mcpCapabilities http/sse 均否 |
-| `session/new` | OK；`configOptions` 有 `model`（select，currentValue = 用户 pi 默认）与 `thought_level`（low/high） |
+| `session/new` | OK；`configOptions` 有 `model`（select，currentValue = 用户 pi 默认）与 `thought_level`——档位**按当前模型支持的集合动态生成**（pi 有 off/minimal/low/medium/high/xhigh/max，xhigh/max 仅在模型支持时暴露；本机实测只出现 low/high） |
 | prompt | 首帧 **0–3ms**；简单问答 4–7s；update 类型 `agent_message_chunk` / `agent_thought_chunk` / `session_info_update` / `usage_update` / `available_commands_update`，工具轮还有 `tool_call` / `tool_call_update`（有 activity 帧，心跳无忧） |
 | 图片 | 接受（`end_turn`） |
 | 反向请求 | **0**（不问权限、不用 fs/terminal 委托） |
@@ -47,11 +47,25 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 | 漂移检测（`ACP_TEST_TOOL=1`） | ✅ 工具强制 prompt → 3 次工具调用全部执行、标记文件落盘、**0 个 `session/request_permission`**（2026-11-01 复跑同结论；上游改审批默认时探针会红） |
 | MCP | ✅ 配置路径：`pi mcp list` 能识别 `<PI_CODING_AGENT_DIR>/mcp.json` 里的 `mcpServers`（kiro 格式）；`session/new` 的 `mcpServers` 不被 pi-acp 使用（只存不读） |
 
+升级后复跑上表：
+
+```powershell
+$env:ACP_BIN = "pi-acp.cmd"                        # 或绝对路径
+$env:ACP_SHELL = "1"
+$env:ACP_HOME_ENV = "PI_CODING_AGENT_DIR"          # 预设的 homeEnvVar
+$env:ACP_HOME = "$env:TEMP\pi-acp-probe"
+$env:ACP_TEST_TOOL = "1"                           # 漂移检测：强制一次工具调用
+$env:ACP_TEST_IMAGE = "1"
+node scripts/acp-probe.mjs
+```
+
+> 探针进程必须能在 PATH 上解析到 **pi 本体**（`requiresBins: ["pi"]` 检查的就是它）；只有适配器没有本体时，`session/new` 会失败。
+
 ## 4. 已知限制
 
 - **启动横幅默认关掉**：pi-acp 会把 pi 的启动信息（`## Context` / `## Skills` …）当作 `agent_message_chunk` 发出来（源码 `setStartupInfo`；那是给 Zed 之类客户端看的启动面板），在微信里就成了新会话首答的前缀。预设用 pi 自己的 `quietStartup: true`（官方 settings.md）在沙箱 `settings.json` 里关掉；用户显式设过 `quietStartup` 就保留用户的值，真实 `~/.pi/agent/settings.json` 不动。
 - **worker 沙箱按任务 agent 准备**：daemon 启动时只按默认任务大脑备一次 worker-home；派发到别的 agent（`wemind task --agent pi` / 微信「任务 pi：…」）时 `worker-pool.ts` 的 `acquire` 会在起进程前按**这条任务的 agent** 再跑一次 `ensureWorkerHome(ag)`——否则 pi 的 `settings.json` / `models.json` 没进沙箱，它会拿空配置跑（2026-11-01 真机踩过：任务输出异常）。
-- **MCP 走配置文件**：WeMind 把激活集写进 `<沙箱根>/mcp.json`；pi 自己也会读真实 `~/.pi/agent/mcp.json`，但 WeMind **不复制**用户的 mcp.json（沙箱里的 MCP 视图由 WeMind 控制，`wechat` 永久排除）。`pi mcp list` 的 `exposure` 默认是 `codemode`；若某 server 显示 `disabled`/`failed`，先看 `pi mcp list --json` 的 `state`/`error`（连接失败与「不支持」是两回事）。
+- **MCP 走配置文件**：**brain 与 worker 的视图不同**——brain 只把激活集写进 `<沙箱根>/mcp.json`（默认空 + 微信里 `加载 <名>` 才加）；**worker 会把真实 `~/.pi/agent/mcp.json` 全量复制进 worker 沙箱**（只排除 `wechat` 与 `disabled: true` 的条目）。pi 自己也会读真实 `~/.pi/agent/mcp.json`，但 WeMind 不把它复制进 brain 沙箱（brain 的 MCP 视图由 WeMind 控制，`wechat` 永久排除）。`pi mcp list` 的 `exposure` 默认是 `codemode`；若某 server 显示 `disabled`/`failed`，先看 `pi mcp list --json` 的 `state`/`error`（连接失败与「不支持」是两回事）。
 - **有 thought 与 tool 帧**（2026-11-01 复跑 `pi-acp@0.0.34` + pi 1.4.0）：除 `agent_message_chunk` 外还会发 `agent_thought_chunk`、`tool_call` / `tool_call_update`——早期探针曾记为「只有 message chunk」，以本机复跑为准；这些帧也给 15s 心跳提供了 activity。
 - **沙箱隔离不完整（已核对适配器源码）**：`~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills` 由 pi-acp 从真实 `homedir()` 读取，不随 `PI_CODING_AGENT_DIR` 走；`settings.json` 是原样复制，里面的 `packages`/`extensions` 键也会带进沙箱。跨账号共享的只是映射/提示词等元数据，**会话本体与凭据副本仍在各账号沙箱内**；但如果你要求「沙箱里看不到日常 pi 的扩展」，目前需要上游支持或额外剥离（WeMind 不替 agent 改配置，§4.14）。
 - **适配器定位是 MVP**（开发以 Zed 为主），上游小版本可能快速变化——升级 pi-acp 后建议重跑 `wemind brain check` 和 `ACP_TEST_TOOL=1` 的探针。

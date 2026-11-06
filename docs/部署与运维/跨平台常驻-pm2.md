@@ -1,6 +1,8 @@
 # 跨平台常驻方案（pm2）
 
-WeMind 的 daemon 本体是纯 Node.js，**跨平台**；只有「常驻外壳」（后台守护进程 + 自启）原先是 Windows + PowerShell 7 专属（`scripts/run-daemon.ps1` + 计划任务）。本文给出一份 **Windows / Linux / macOS 通用**的常驻方案，用 [pm2](https://pm2.keymetrics.io/)。
+> **最后核对**：2026-11-05
+
+WeMind 的 daemon 本体是纯 Node.js，**跨平台**；常驻外壳有三套实现：**builtin**（`wemind start` 默认，跨平台零依赖）、**pm2**（`--runner pm2` 或 `WEMIND_RUNNER=pm2`）、**PowerShell 版后台守护进程**（`scripts/run-daemon.ps1`，Windows 源码开发者）。本文说明 pm2 这套：**Windows / Linux / macOS 通用**，适合想用成熟进程管理器统一管理多账号的场景。
 
 > 配置文件：仓库根的 `ecosystem.config.cjs`（多账号动态生成）。
 > 常驻底层原理见 [daemon-常驻原理.md](daemon-常驻原理.md)。
@@ -9,31 +11,36 @@ WeMind 的 daemon 本体是纯 Node.js，**跨平台**；只有「常驻外壳�
 
 ## 1. 为什么用 pm2
 
-pm2 是 Node 生态的进程管理器，**一个工具同时顶替**原来那套 PowerShell 外壳要手写的所有东西：
+pm2 是 Node 生态的进程管理器，**一个工具同时顶替**常驻外壳要手写的所有东西：
 
-| 能力 | 原 Windows 方案 | pm2 |
+| 能力 | builtin `_watchdog` / `run-daemon.ps1` | pm2 |
 |------|----------------|-----|
-| 崩溃自动重拉（后台守护进程） | `run-daemon.ps1` 的 `while` 循环 | `autorestart`（内置） |
-| 开机自启 | 计划任务 / 启动文件夹 VBS | `pm2 startup` + `pm2 save` |
-| 单实例 | 命名 Mutex | 按 app 名天然唯一 |
-| 脱离终端 | 计划任务 / `Start-Process` | pm2 守护化（内置） |
-| 多账号 | 每账号一个 wrapper | `ecosystem.config.cjs` 按账号生成多 app |
-| 日志 | `*>> daemon.log` | `out_file`/`error_file`（已指到各账号 `daemon.log`） |
+| 崩溃自动重拉（后台守护进程） | 各自的重拉循环（5s） | `autorestart`（内置） |
+| 开机自启 | 系统计划任务 / systemd / launchd | `pm2 startup` + `pm2 save` |
+| 单实例 | `wrapper.pid` 身份校验 / 命名 Mutex | 按 app 名天然唯一 |
+| 脱离终端 | detached spawn / `Start-Process` | pm2 守护化（内置） |
+| 多账号 | 每账号一条链（`run-all-daemons.ps1`） | `ecosystem.config.cjs` 按账号生成多 app |
+| 日志 | `RotatingLog` / `*>> daemon.log` | `out_file`/`error_file`（已指到各账号 `daemon.log`） |
 
-所以在 Linux/macOS 上，`run-daemon.ps1` 整个用不上；在 Windows 上 pm2 也能替代它（自启那一步稍特殊，见 §4）。
+所以 Linux/macOS 上本来就有 builtin（无需 pm2）；pm2 的价值在于**跨平台统一、多账号集中管理**。在 Windows 上 pm2 也能替代 `run-daemon.ps1`（自启那一步稍特殊，见 §4）。
 
 ---
 
 ## 2. 安装与前置
 
+**两条路线，先选一条**：
+
+- **安装版用户**（`npm i -g @wemind/cli`，机器上没有本仓库）：不需要 `npm run build`，也没有 `ecosystem.config.cjs`。用 CLI 自带的 pm2 runner：`wemind start <账号> --runner pm2`（或 `WEMIND_RUNNER=pm2`），`wemind stop <账号>` 停。下文 §3–§6 的 `ecosystem.config.cjs` 步骤只适用于源码路线。
+- **源码开发者**（clone 了本仓库）：按下文步骤走。
+
 ```bash
 npm install -g pm2      # 全局装 pm2
-npm run build           # 在仓库根：先构建出 packages/wechat-daemon/dist
+npm run build           # 仅源码路线：在仓库根构建出 packages/wechat-daemon/dist
 ```
 
 前提：**至少登录过一个账号**（`~/.wemind/accounts.json` 存在）。没有注册表时配置会回退到单账号 `default`（数据目录 `~/.wemind/default`）。登录见 README 的「多账号管理」。
 
-`agent 二进制要在 PATH 上`：pm2 不像 PowerShell wrapper 那样兜底找 `%LOCALAPPDATA%\Kiro-Cli`。确保 `kiro-cli`（或你选的 ACP agent）在 PATH，或在 `ecosystem.config.cjs` 的 `env` 里加 `WEMIND_BRAIN_BIN`（见 docs/接入方案/接入其它-ACP-Agent.md）。更好的做法：`wemind brain set <agent 名> --bin <绝对路径>` 落到账号 `brain.json`，各启动方式通吃。
+`agent 二进制要在 PATH 上`：pm2 不像 PowerShell 版守护进程那样兜底找 `%LOCALAPPDATA%\Kiro-Cli`。确保 `kiro-cli`（或你选的 ACP agent）在 PATH，或在 `ecosystem.config.cjs` 的 `env` 里加 `WEMIND_BRAIN_BIN`（见 docs/接入方案/接入其它-ACP-Agent.md）。更好的做法：`wemind brain set <agent 名> --bin <绝对路径>` 落到账号 `brain.json`，各启动方式通吃。
 
 ---
 
@@ -101,18 +108,18 @@ pm2 save                       # 保存当前列表（改动后记得存，否�
   pm2 start ecosystem.config.cjs    # 会为新账号补起 app（已在跑的不受影响）
   pm2 save
   ```
-- **移除账号**：`pm2 delete wemind-<key>` + `pm2 save`，再按需 `wemind delete <key>` 清数据目录。顺序别反：`wemind delete` 停不掉仍在运行的 daemon 时会拒绝删目录。
+- **移除账号**：直接 `wemind delete <key>` 即可——它内部先 `stopDaemon()`（先 `pm2 delete` 该 app，再按 pid 兜底杀 wrapper/daemon/brain/worker），确认停干净后才删目录。删完记得 `pm2 save`（否则重启后 pm2 还会按旧清单尝试拉起）。若想分步：`wemind stop <key>` → `wemind delete <key>` → `pm2 save`。
 
 ---
 
-## 7. 与原 Windows 方案的互斥（重要）
+## 7. 与其它常驻方案的互斥（重要）
 
-**不要对同一账号同时跑 pm2 和 `run-daemon.ps1`**——会出现两个 daemon 抢同一 token、互相打架。二选一：
+**不要对同一账号同时跑两套常驻**（pm2 / builtin `_watchdog` / `run-daemon.ps1` 任意两套）——会出现两个 daemon 抢同一 token、互相打架。二选一：
 
-- 用 pm2 → 关掉/删除原计划任务「wemind-daemon」，并确保没有 `run-daemon.ps1` 在跑；
-- 用原 PowerShell 方案 → 不要 `pm2 start`。
+- 用 pm2 → 先 `wemind stop <账号>`（它会杀掉 builtin 后台守护进程），并确保没有 `run-daemon.ps1` 在跑、原计划任务「wemind-daemon」已删除；
+- 用 builtin 或原 PowerShell 方案 → 不要 `pm2 start`。
 
-原 PowerShell 方案的命名 Mutex 只防它自己重复，**不感知 pm2**，所以互斥要靠你在两套之间二选一。
+builtin 的 `wrapper.pid` 单实例守卫与 PowerShell 版的命名 Mutex 都**只防自己那一套重复**，不感知 pm2，所以互斥要靠你在两套之间二选一。
 
 ---
 
@@ -125,6 +132,19 @@ pm2 save                       # 保存当前列表（改动后记得存，否�
 - `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS` —— 大脑回合空闲/硬超时。
 
 `WECHAT_ACCOUNT` 已由配置自动按账号注入，不要手动覆盖。
+
+### 日志轮转（必须配）
+
+pm2 只是把 stdout/err 写进 `daemon.log`，**不会自己轮转**——`ecosystem.config.cjs` 里没有 `max_size`/`retain`，长期跑会把磁盘写满。装一次 pm2-logrotate 即可（与 builtin 的 `RotatingLog` 等价）：
+
+```bash
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 10M      # 与 builtin 的 WEMIND_LOG_MAX_MB 默认 10 对齐
+pm2 set pm2-logrotate:retain 3          # 与 WEMIND_LOG_KEEP 默认 3 对齐
+pm2 set pm2-logrotate:compress true     # 压缩历史，省磁盘
+```
+
+> 用 builtin runner（`wemind start` 不带 `--runner pm2`）时**不需要**这一步——`log-rotate.ts` 的 `RotatingLog` 自己会按 `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP` 轮转。
 
 ---
 
@@ -165,6 +185,6 @@ loginctl enable-linger $USER                                # 允许未登录也
 ## 10. 小结
 
 - **业务代码零改动**即跨平台；本方案只加常驻外壳。
-- **Linux/macOS**：`pm2 start ecosystem.config.cjs && pm2 save && pm2 startup`（或写 systemd/launchd unit），一条龙。
-- **Windows**：可用 pm2（自启走计划任务执行 `pm2 resurrect`），或继续用原 `run-daemon.ps1` + 计划任务。
+- **Linux/macOS**：不装 pm2 也能用 builtin（`wemind start <账号>`）；要集中管理就用 `pm2 start ecosystem.config.cjs && pm2 save && pm2 startup`，或写 systemd/launchd unit。
+- **Windows**：默认 builtin；也可用 pm2（自启走计划任务执行 `pm2 resurrect`），或源码开发者的 `run-daemon.ps1` + 计划任务。
 - **同一账号只用一套**常驻方案，别叠加。

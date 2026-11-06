@@ -2,16 +2,27 @@
 
 > WeMind turns a personal WeChat account into an I/O channel for AI agents. It ships two mutually exclusive forms: an MCP server (`@wemind/wechat-mcp`) that any MCP client can drive, and a daemon CLI (**`@wemind/cli`**, command `wemind`) that long-polls WeChat itself, calls a resident ACP agent as its "brain", and replies automatically. Same bot token = one consumer only.
 
-## Start here (AI agents)
+## Start here
 
-- [AGENTS.md](AGENTS.md): first-entry map, invariants, commands, known traps.
-- [docs/ai/README.md](docs/ai/README.md): compressed context pack, glossary, data flows, verified-vs-assumed facts.
+- [docs/README.md](docs/README.md): documentation index, grouped by reader and topic.
+- [AGENTS.md](AGENTS.md): first-entry map for AI agents — invariants, commands, known traps.
+- [docs/ai/README.md](docs/ai/README.md): compressed context pack, data flows, verified-vs-assumed facts.
+- [docs/ai/术语表.md](docs/ai/术语表.md): glossary and Chinese/English writing conventions.
 - [docs/ai/recipes/](docs/ai/recipes/): task recipes.
+
+## User guides
+
+- [docs/使用指南/新手教程.md](docs/使用指南/新手教程.md): step-by-step first-run tutorial.
+- [docs/使用指南/使用指南-远程任务（worker）.md](docs/使用指南/使用指南-远程任务（worker）.md): remote tasks — multi-task, per-task agent, resume.
+- [docs/使用指南/速查-数据目录与环境变量.md](docs/使用指南/速查-数据目录与环境变量.md): data-dir and env-var cheat sheet.
 
 ## Architecture
 
+- [docs/repowiki/README.md](docs/repowiki/README.md): wiki index with reading paths.
 - [docs/repowiki/01-项目概览.md](docs/repowiki/01-项目概览.md): project overview, fork history, packages.
 - [docs/repowiki/02-系统架构.md](docs/repowiki/02-系统架构.md): three packages, two forms, process model.
+- [docs/repowiki/03-iLink-协议内核.md](docs/repowiki/03-iLink-协议内核.md): iLink protocol core — HTTP client, types, error codes, storage, media crypto.
+- [docs/repowiki/04-MCP-Server.md](docs/repowiki/04-MCP-Server.md): the MCP form — 6 tools, input/return shapes, packaging.
 - [docs/repowiki/05-daemon.md](docs/repowiki/05-daemon.md): poller/worker, turn orchestration, send limits.
 - [docs/repowiki/06-ACP-大脑与沙箱.md](docs/repowiki/06-ACP-大脑与沙箱.md): ACP client, agent slots, runtime hot-switch, session management, MCP sandbox, memory inheritance.
 - [docs/repowiki/07-远程任务-Worker.md](docs/repowiki/07-远程任务-Worker.md): remote task worker — multi-task, worker process pool, task numbering, restart-resume.
@@ -19,6 +30,24 @@
 - [docs/repowiki/09-配置项与环境变量.md](docs/repowiki/09-配置项与环境变量.md): env vars.
 - [docs/repowiki/10-部署与运维.md](docs/repowiki/10-部署与运维.md): deployment, watchdog, pm2.
 - [docs/repowiki/11-开发指南.md](docs/repowiki/11-开发指南.md): build, test, conventions.
+
+## Deployment and release
+
+- [docs/部署与运维/daemon-常驻原理.md](docs/部署与运维/daemon-常驻原理.md): three-layer process tree, watchdog, singleton guard, self-healing.
+- [docs/部署与运维/跨平台常驻-pm2.md](docs/部署与运维/跨平台常驻-pm2.md): cross-platform persistence with pm2.
+- [docs/部署与运维/自启方案对比.md](docs/部署与运维/自启方案对比.md): autostart options compared (design draft, not implemented) — multi-account `wemind start --all`, planned `wemind service install`.
+- [docs/发布与变更记录/如何发布新版本.md](docs/发布与变更记录/如何发布新版本.md): release runbook for both packages — versions, CI, verification, rollback, invariants, first-release record.
+- [docs/发布与变更记录/CHANGELOG.md](docs/发布与变更记录/CHANGELOG.md): changelog.
+
+## Mechanisms
+
+- [docs/机制与协议说明/本地双入口-命令派发与查看回复.md](docs/机制与协议说明/本地双入口-命令派发与查看回复.md): **current** file-bridge protocol between CLI and daemon (`task-inbox/` / `task-out/` + control bridge), with the 2026-06/2026-10 evolution timeline.
+
+## Historical (archived, not current behavior)
+
+- [docs/设计文档/](docs/设计文档/): Plan C design, MVP, CLI-ization design.
+- [docs/审查与质量记录/](docs/审查与质量记录/): 2026-11-02 audit snapshot, 2026-11-04 archive list, 2026-11-05 source-layout refactor design, and the 2026-11-05 audit lessons + doc-guard design (`doc-impact` / `check-agent-docs` / `gen-docs-tables`, not implemented).
+- [docs/待办与后续计划/](docs/待办与后续计划/): deferred work — task numbering and record size (describes current behavior), and `wemind start` inheriting `WECHAT_DATA_DIR` (known bug, fix designed but not applied).
 
 ## Agent integration
 
@@ -41,7 +70,7 @@
 - `npm i -g @wemind/cli` → command `wemind` (package name ≠ command name).
 - `npx -y @wemind/wechat-mcp` → MCP server (binary `wemind-mcp`); the usual MCP setup, the client launches it on demand. Alternatively `npm i -g @wemind/wechat-mcp` and use the global `wemind-mcp` binary.
 - `npx -y @wemind/cli <cmd>` runs the CLI once without installing (without a version pin it resolves `latest`); plain `npx wemind` does NOT (name mismatch).
-- Release process: [docs/发布与变更记录/发布-wemind-npm.md](docs/发布与变更记录/发布-wemind-npm.md).
+- Release process: [docs/发布与变更记录/如何发布新版本.md](docs/发布与变更记录/如何发布新版本.md) (the runbook, including first-release history and invariants).
 
 ## Code map
 
@@ -56,15 +85,15 @@
 
 ## Commands
 
-- `npm run build`, `npm run typecheck`, `npm test`, `npm run lint`.
-- `npm run check:version` (package name + version consistency), `npm run verify:publish`.
+- `npm run build`, `npm run typecheck`, `npm test`, `npm run lint`, `npm run verify` (CI-equivalent self-check).
+- `npm run check:version` (package name + version consistency). `npm run verify` is the CI-equivalent gate (lint, format check, typecheck, build, version check, both `npm pack --dry-run` guards, tests, docs link check); `npm run verify:publish` is the publish-only subset.
 - `wemind list` / `wemind brain <key>` / `wemind brain check <key>` (installed CLI)
 - `node packages/wechat-daemon/dist/cli.js list` (same thing from source)
 - `pwsh -NoProfile -File scripts/doctor.ps1`
 - `pwsh -NoProfile -File scripts/check-docs.ps1`
 - `node scripts/acp-probe.mjs` (env: `ACP_BIN`, `ACP_ARGS`, `ACP_SHELL`, `ACP_HOME_ENV`, `ACP_HOME`, `ACP_MODEL`)
 
-## Hard facts (2026-11-03)
+## Hard facts (2026-11-05)
 
 - Published: `@wemind/wechat-mcp` and `@wemind/cli`. Never publish `@wemind/wechat-ilink-core` (private, inlined).
 - Package name ≠ command name: `@wemind/cli` installs the `wemind` binary. `npx` must use the package name.

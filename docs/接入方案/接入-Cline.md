@@ -1,9 +1,8 @@
 # 接入 Cline CLI（原生 ACP 实测）
 
-> **状态**：M0 能力探针 **已完成 ✅** ｜ M1 agent + 沙箱 **已完成 ✅** ｜ M2 协议层 **无改动** ｜ M3 **已完成 ✅**（含微信真机 E2E，2026-10-31）。
-> **实测范围**：Cline CLI 3.0.74（M0 探针 + 微信真机 E2E，2026-10-31，见 §2 / §5）｜ **最后核对**：2026-11-04（本次仅修硬错误）。
-> **实测环境**：Windows 11 / Node 24 / **Cline CLI 3.0.74（npm 全局安装）** / WeMind 1.3.0。
-> **最后核对**：2026-10-31 ｜ **分支**：`feat/cline-acp`（当时的特性分支，功能已并入 main）｜ 结论**仅适用于 cline 3.0.74**。
+> **状态**：M0–M3 全部完成 ✅（`cline` 是内置预设；M2 协议层无改动）。
+> **实测范围**：Cline CLI 3.0.74（M0 探针 + 微信真机 E2E，2026-10-31，见 §2 / §5）｜ **最后核对**：2026-11-05
+> **实测环境**：Windows 11 / Node 24 / Cline CLI 3.0.74（npm 全局安装）。结论**仅适用于 cline 3.0.74**。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](../ai/recipes/add-acp-agent.md) · [接入-Qoder.md](接入-Qoder.md)（同款「配置目录指到子目录」样板） · [接入-OpenCode.md](接入-OpenCode.md)（文件式 MCP 样板）
 
 ---
@@ -82,7 +81,7 @@ wemind stop <账号>; wemind start <账号>
 
 注意：
 
-- 自动读取发生在**每次 spawn**：改了 `cline auth` / `providers.json` 后，重启 daemon 或 `wemind brain switch cline` 会重新读取；正在运行的 ACP 子进程不会热更新。
+- 自动读取发生在**每次 spawn**：改了 `cline auth` / `providers.json` 后，**重启 daemon**（`wemind stop <key> && wemind start <key>`）或切到**另一个** agent 再切回来，才会重新读取；正在运行的 ACP 子进程不会热更新。**`wemind brain switch cline` 在已经是 cline 时不会重启进程**——`preflightSwitch()` 的 `sameAgent()` 判 name/bin/args/model 全相同即返回 `already`，直接答复「已经是它，无需切换」，只把选择落实到磁盘（改过 `providers.json` 这种情况尤其容易踩：切换「成功」了但 key 仍是旧的）。要强制重读：`wemind stop <key> && wemind start <key>`，或先 `wemind brain switch <别的 agent>` 再切回 cline。
 - 只读、不写、不打印 key；key 只进入子进程环境，不写进 `brain.json` 或源码（AGENTS §4.9）。
 - `wemind brain check` 和微信里的失败回复仍会给出可执行提示（`authHint()`），不会再只说「重启一次 daemon」。
 
@@ -121,10 +120,11 @@ cline: {
   binWin: "cline.cmd",              // npm 全局安装的 Windows shim；shell:true
   args: ["--acp", "--auto-approve", "true"],
   shell: true,
+  images: false,                    // 3.0.74 实测：广告 image:true 但 ACP prompt 丢弃图片
   env: {
-    CLINE_DIR: `%HOME%/cline`,
-    CLINE_DATA_DIR: `%HOME%/cline/data`,
-    CLINE_MCP_SETTINGS_PATH: `%HOME%/cline/mcp.json`,
+    CLINE_DIR: `%HOME%${path.sep}cline`,
+    CLINE_DATA_DIR: `%HOME%${path.sep}cline${path.sep}data`,
+    CLINE_MCP_SETTINGS_PATH: `%HOME%${path.sep}cline${path.sep}mcp.json`,
   },
   realHome: path.join(os.homedir(), ".cline"),
   inheritDirs: ["rules", "skills", "agents"],
@@ -165,7 +165,7 @@ cline: {
 
 ```powershell
 wemind brain set cline
-wemind brain                 # 应显示 agent=cline、configSubdir=cline、model=…
+wemind brain                 # 应显示 agent=cline、args=[acp --auto-approve true]、model=…（**没有 configSubdir 字段**——它只在预设里，`wemind brain` 不显示）
 wemind brain check           # 真握手；自定义 provider 会自动复用 providers.json 的 key
 ```
 
@@ -190,8 +190,8 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 4. **OAuth token 单向同步**：沙箱内刷新不会回写真实 `providers.json`（见 §3）。API-key provider 不受影响。
 5. **图片不支持（实测）**：`initialize` 广告 `image:true`，但 3.0.74 ACP `prompt` 的 `de()` 只保留 `text` 块，image 被丢弃；预设显式 `images:false`，daemon 收到纯图片消息会直接回「当前大脑暂不支持看图」，不再让模型猜；带文字的消息只按文字回答并注明图片被忽略。
 6. **微信真机 E2E 已完成（2026-10-31）**：文本消息/回复、多轮上下文、重启后 `session/load`（PINEAPPLE）、worker 任务均通过。
-7. **同 agent 并发**：两个 worker 共用 `<worker-home>/cline`（与其它 agent 相同）；Cline 的会话库是 SQLite，长期并发风险要观察。
-8. **「新会话」不隔离文件系统（暂缓项）**：Cline 作为工具型 agent，会在任务 cwd 内看到并操作文件；旧 session transcript 也落在 `brain-home/cline/data/sessions/`（cwd 内）。这是工具型 agent 的预期行为，WeMind 不额外改写 `.clineignore` 或搬移其数据目录；需要强隔离时请把任务 `--cwd` 指到独立目录。
+7. **同 agent 并发**：两个 worker 共用 `<worker-home>/cline`（与其它 agent 相同）；**假设/待实测**：Cline 的会话库据其源码是 SQLite，长期并发风险未验证（本轮只跑过单任务与双 agent 并发，没跑同 agent 双 worker 的长时间样本）。
+8. **「新会话」不隔离文件系统（暂缓项）**：Cline 作为工具型 agent，会在任务 cwd 内看到并操作文件；旧 session transcript 也落在 `brain-home/cline/data/sessions/`（**假设/待实测**：目录位置来自 Cline 的数据布局，本轮未逐个文件核实）。这是工具型 agent 的预期行为，WeMind 不额外改写 `.clineignore` 或搬移其数据目录；需要强隔离时请把任务 `--cwd` 指到独立目录。
 
 ---
 

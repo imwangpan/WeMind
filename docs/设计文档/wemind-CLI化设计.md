@@ -1,10 +1,10 @@
 # WeMind CLI 化设计（可发布的 `wemind` 命令）
 
-> **历史文档（2026-11-04 标注）**：本文记录当时的方案设计与实施过程，**不作为现行实现的说明**；现行行为以 [README.md](../../README.md)、[发布-wemind-npm.md](../发布与变更记录/发布-wemind-npm.md) 与源码为准。文中与现行不一致之处已在正文标注。
+> **历史文档（2026-11-04 标注）**：本文记录当时的方案设计与实施过程，**不作为现行实现的说明**；现行行为以 [README.md](../../README.md)、[如何发布新版本.md](../发布与变更记录/如何发布新版本.md) 与源码为准。文中与现行不一致之处已在正文标注。
 
 > 状态：设计定稿（2026-06-24）；**已实现**（2026-10 复核：`wemind login/start/stop/list/task/daemon`、自带后台守护进程与 pm2 双 runner 均已落地）。唯一未落地项（截至设计定稿时；后续状态见 README 与发布文档）：`wemind service install` 自动化（见 §10 阶段 2，按需排期）。
 >
-> **命名更新（2026-10-26）**：发布包名定为 **`@wemind/cli`**（收进已注册的 `@wemind` scope），**命令名仍为 `wemind`**；因此 `npx` 需写全包名 `npx -y @wemind/cli`，`npm i -g` 后命令不变。详见 [`docs/发布与变更记录/发布-wemind-npm.md`](../发布与变更记录/发布-wemind-npm.md)。
+> **命名更新（2026-10-26）**：发布包名定为 **`@wemind/cli`**（收进已注册的 `@wemind` scope），**命令名仍为 `wemind`**；因此 `npx` 需写全包名 `npx -y @wemind/cli`，`npm i -g` 后命令不变。详见 [`docs/发布与变更记录/如何发布新版本.md`](../发布与变更记录/如何发布新版本.md)。
 
 ## 1. 目标
 
@@ -104,4 +104,4 @@
 - **单实例**：`wrapper.pid` + 存活检查（`process.kill(pid,0)`），零依赖、复用现有停止句柄；竞态由「start 前先 stop」压低（选型对比 pid 文件 vs proper-lockfile：前者零依赖且一份文件兼作停止句柄，后者原子但加依赖且仍需额外 pid，本场景竞态罕见，故选 pid 文件）。
 - `stop`/`list` 无需改：现有 `stopDaemon`（pm2 delete + 杀 wrapper/daemon/brain pid）与 `daemon.pid` 存活检查同时覆盖两种 runner。
 
-**阶段 2（开机自启 — 文档化方案已落实）**——跨平台开机自启**采用文档方案**而非自研：新手教程给出 Windows 启动文件夹 / 计划任务、Linux systemd user service、macOS launchd 三平台调 `wemind start` 的具体配置（`wemind start` 内部 builtin 后台守护进程负责崩溃重拉，自启层只需开机拉起一次）。自研 `wemind service install` 自动化留按需排期 + 对应系统实测。
+**阶段 2（开机自启 — 文档化方案已落实）**——跨平台开机自启**采用文档方案**而非自研：新手教程给出 Windows 启动文件夹 / 计划任务、Linux systemd user service、macOS launchd 三平台的配置。**写法按平台不同**：Windows 启动项用 `wemind start`（内部 builtin 后台守护进程负责崩溃重拉，自启层只需开机拉起一次）；Linux systemd / macOS launchd 必须用 `wemind daemon`（前台常驻）——`wemind start` 会拉起后台守护进程后立刻退出，systemd/launchd 会当成服务挂了反复重启。（2026-11-05 按现行教程更正：原文把三平台都写成调 `wemind start`。）自研 `wemind service install` 自动化留按需排期 + 对应系统实测。
