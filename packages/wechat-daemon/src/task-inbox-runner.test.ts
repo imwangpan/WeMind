@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { scanTaskInbox, type TaskInboxOps } from "./task-inbox-runner.js";
-import { taskInboxDir } from "./task-inbox.js";
+import { taskInboxDir } from "./tasks/task-inbox.js";
 
 const dirs: string[] = [];
 afterEach(() => {

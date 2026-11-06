@@ -1,8 +1,8 @@
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
-import { getAgent } from "./agents/agent-slot.js";
-import { agentConfigFor, loadBrainConfig } from "./agents/brain-config.js";
-import { resolvePresetByName, type ResolvedAgent } from "./agents/brain-agents.js";
+import { getAgent } from "../agents/agent-slot.js";
+import { agentConfigFor, loadBrainConfig } from "../agents/brain-config.js";
+import { resolvePresetByName, type ResolvedAgent } from "../agents/brain-agents.js";
 import { acquire, drop, release, poolSummary } from "./worker-pool.js";
 import type { WorkerConn, WorkerProgressEvent } from "./worker-acp.js";
 import {

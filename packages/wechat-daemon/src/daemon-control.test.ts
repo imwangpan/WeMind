@@ -88,8 +88,8 @@ vi.mock("./sessions/handoff.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./sessions/handoff.js")>();
   return { ...actual, saveHandoff: m.saveHandoff };
 });
-vi.mock("./worker-pool.js", () => ({ killIdle: m.killIdle }));
-vi.mock("./task-manager.js", () => ({
+vi.mock("./tasks/worker-pool.js", () => ({ killIdle: m.killIdle }));
+vi.mock("./tasks/task-manager.js", () => ({
   hasActiveTask: m.hasActiveTask,
   taskPoolSummary: m.taskPoolSummary,
 }));

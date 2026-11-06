@@ -7,7 +7,7 @@ import {
   type ChatCommand,
   type TaskCommand,
 } from "./chat-commands.js";
-import { providerIssue, shouldResumeTask } from "./task-manager.js";
+import { providerIssue, shouldResumeTask } from "./tasks/task-manager.js";
 
 /**
  * 三档进度（按最终答案到达时间）：

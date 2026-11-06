@@ -28,8 +28,8 @@ import {
   saveHandoff,
 } from "./sessions/handoff.js";
 import { LONG_REPLY_THRESHOLD } from "./md-reply.js";
-import { hasActiveTask, taskPoolSummary } from "./task-manager.js";
-import { killIdle as killIdleConns } from "./worker-pool.js";
+import { hasActiveTask, taskPoolSummary } from "./tasks/task-manager.js";
+import { killIdle as killIdleConns } from "./tasks/worker-pool.js";
 
 const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon]", ...a);
 

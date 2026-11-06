@@ -77,10 +77,10 @@ import {
   setTaskStateSink,
   setTaskAckSink,
   type TaskStateSnapshot,
-} from "./task-manager.js";
-import { clearTaskDirs, writeTaskAck } from "./task-inbox.js";
+} from "./tasks/task-manager.js";
+import { clearTaskDirs, writeTaskAck } from "./tasks/task-inbox.js";
 import { scanTaskInbox } from "./task-inbox-runner.js";
-import { killAll as killWorkerPool, sweep as sweepWorkerPool } from "./worker-pool.js";
+import { killAll as killWorkerPool, sweep as sweepWorkerPool } from "./tasks/worker-pool.js";
 import { ensureWorkerHome } from "./agents/sandbox/worker-sandbox.js";
 
 const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon]", ...a);

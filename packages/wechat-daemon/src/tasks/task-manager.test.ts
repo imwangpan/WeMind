@@ -44,7 +44,7 @@ const {
   setAgent: setSlotAgent,
   resetSlotsForTest,
   getAgent,
-} = await import("./agents/agent-slot.js");
+} = await import("../agents/agent-slot.js");
 const {
   dispatchTask,
   injectTask,
