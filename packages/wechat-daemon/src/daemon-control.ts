@@ -11,7 +11,7 @@ import { getAgent, setAgent } from "./agents/agent-slot.js";
 import { preflightSwitch, switchBrain, switchInFlightTarget } from "./brain-switch.js";
 import { renderHelp, type ChatCommand } from "./chat-commands.js";
 import type { ControlRequest } from "./control-bridge.js";
-import { currentSessionIdOf } from "./session-registry.js";
+import { currentSessionIdOf } from "./sessions/session-registry.js";
 import {
   deleteSessionCmd,
   newSessionCmd,
@@ -19,9 +19,14 @@ import {
   resumeSessionCmd,
   sessionsCmd,
   type SessionCtx,
-} from "./session-manager.js";
+} from "./sessions/session-manager.js";
 import { addMcp, listMcp, removeMcp } from "./agents/sandbox/mcp-sandbox.js";
-import { HANDOFF_PROMPT, HANDOFF_TTL_MS, HANDOFF_VERSION, saveHandoff } from "./handoff.js";
+import {
+  HANDOFF_PROMPT,
+  HANDOFF_TTL_MS,
+  HANDOFF_VERSION,
+  saveHandoff,
+} from "./sessions/handoff.js";
 import { LONG_REPLY_THRESHOLD } from "./md-reply.js";
 import { hasActiveTask, taskPoolSummary } from "./task-manager.js";
 import { killIdle as killIdleConns } from "./worker-pool.js";

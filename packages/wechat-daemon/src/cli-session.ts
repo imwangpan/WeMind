@@ -5,8 +5,8 @@ import {
   listSessions,
   renderSessionList,
   renameSession,
-} from "./session-registry.js";
-import { brainSessionMapPath, clearSessionPointer, sessionKey } from "./session-map.js";
+} from "./sessions/session-registry.js";
+import { brainSessionMapPath, clearSessionPointer, sessionKey } from "./sessions/session-map.js";
 import {
   agentNameOf,
   bridgeReady,

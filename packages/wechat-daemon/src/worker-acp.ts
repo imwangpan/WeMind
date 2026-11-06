@@ -11,7 +11,7 @@ import {
   normalizeSessionMap,
   readSessionMapStrict,
   sessionKey,
-} from "./session-map.js";
+} from "./sessions/session-map.js";
 import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "./agents/brain-agents.js";
 import {
   applyAcpModel,

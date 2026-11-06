@@ -44,10 +44,10 @@ import { CLI_PID_MARKERS, otherOurProcessPid } from "./shared/process/proc-ident
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
 import { isOwnerOnly } from "./chat-commands.js";
 import { ensureBrainHome } from "./agents/sandbox/mcp-sandbox.js";
-import { syncFromPointerMap } from "./session-registry.js";
+import { syncFromPointerMap } from "./sessions/session-registry.js";
 import { clearControlDirs, markBridgeReady } from "./control-bridge.js";
 import { ControlInboxRunner } from "./control-inbox-runner.js";
-import { clearHandoff, handoffPrefix, loadHandoff, takeHandoffFor } from "./handoff.js";
+import { clearHandoff, handoffPrefix, loadHandoff, takeHandoffFor } from "./sessions/handoff.js";
 import {
   canSendImage,
   extractImages,

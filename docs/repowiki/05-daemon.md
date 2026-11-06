@@ -61,7 +61,9 @@ packages/wechat-daemon/src/
 │   └── cline-credentials.ts # 从 Cline providers.json 派生 CLINE_PROVIDER/CLINE_API_KEY
 ├── 会话
 │   ├── session-manager.ts  # 会话五条指令的实现层（→ 第 6 章）
-│   ├── session-registry.ts # 会话登记表（派生元数据：名字/标题/轮次）（→ 第 6 章）
+│   ├── session-registry.ts # 会话登记表门面（改名/删除 + re-export store/view）（→ 第 6 章）
+│   ├── registry-store.ts   # 登记表存储层：读写/裁剪/登记刷新
+│   ├── registry-view.ts    # 登记表视图层：引用解析/名字校验/列表渲染
 │   ├── session-map.ts      # 当前会话表 brain-sessions.json / worker-sessions.json（→ 第 6 章）
 │   └── handoff.ts          # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才消费（→ 第 6 章）
 ├── CLI 命令实现（cli-*.ts）

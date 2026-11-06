@@ -71,8 +71,8 @@ vi.mock("./brain-switch.js", () => ({
   switchBrain: m.switchBrain,
   switchInFlightTarget: m.switchInFlightTarget,
 }));
-vi.mock("./session-registry.js", () => ({ currentSessionIdOf: m.currentSessionIdOf }));
-vi.mock("./session-manager.js", () => ({
+vi.mock("./sessions/session-registry.js", () => ({ currentSessionIdOf: m.currentSessionIdOf }));
+vi.mock("./sessions/session-manager.js", () => ({
   newSessionCmd: m.newSessionCmd,
   sessionsCmd: m.sessionsCmd,
   resumeSessionCmd: m.resumeSessionCmd,
@@ -84,8 +84,8 @@ vi.mock("./agents/sandbox/mcp-sandbox.js", () => ({
   removeMcp: m.removeMcp,
   listMcp: m.listMcp,
 }));
-vi.mock("./handoff.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./handoff.js")>();
+vi.mock("./sessions/handoff.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./sessions/handoff.js")>();
   return { ...actual, saveHandoff: m.saveHandoff };
 });
 vi.mock("./worker-pool.js", () => ({ killIdle: m.killIdle }));

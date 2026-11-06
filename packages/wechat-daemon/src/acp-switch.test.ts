@@ -36,7 +36,7 @@ const {
 const { getAgent, resetSlotsForTest, seedSlots, setAgent } = await import("./agents/agent-slot.js");
 const { loadBrainConfig, saveBrainConfig } = await import("./agents/brain-config.js");
 const { readPidRecords } = await import("./shared/process/pid-record.js");
-const { loadRegistry } = await import("./session-registry.js");
+const { loadRegistry } = await import("./sessions/session-registry.js");
 
 // 本文件起真子进程（Windows 上单次 0.5–0.7s，全量并发时更慢），默认 5s 会偶发不够：放宽到 20s（同 spawn-agent.test.ts）
 vi.setConfig({ testTimeout: 20_000 });

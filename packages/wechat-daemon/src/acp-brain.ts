@@ -14,9 +14,9 @@ import {
   readSessionMapStrict,
   sessionKey,
   writeSessionMap,
-} from "./session-map.js";
-import { ensureEntry, markUsed, titleOf, touchEntry } from "./session-registry.js";
-import { stripHandoffPrefix } from "./handoff.js";
+} from "./sessions/session-map.js";
+import { ensureEntry, markUsed, titleOf, touchEntry } from "./sessions/session-registry.js";
+import { stripHandoffPrefix } from "./sessions/handoff.js";
 import {
   applyAcpModel,
   applyAcpSessionMode,

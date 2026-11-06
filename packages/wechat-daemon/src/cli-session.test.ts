@@ -26,8 +26,8 @@ vi.mock("./cli-context.js", () => ({
   pickKey: m.pickKey,
   splitKeyArg: m.splitKeyArg,
 }));
-vi.mock("./session-registry.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./session-registry.js")>();
+vi.mock("./sessions/session-registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./sessions/session-registry.js")>();
   return {
     ...actual,
     listSessions: m.listSessions,
@@ -36,8 +36,8 @@ vi.mock("./session-registry.js", async (importOriginal) => {
     renameSession: m.renameSession,
   };
 });
-vi.mock("./session-map.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./session-map.js")>();
+vi.mock("./sessions/session-map.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./sessions/session-map.js")>();
   return { ...actual, clearSessionPointer: m.clearSessionPointer };
 });
 
