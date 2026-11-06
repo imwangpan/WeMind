@@ -8,6 +8,10 @@
 
 <!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
 
+（暂无）
+
+## [1.5.1] 源码目录分层（2026-11-06）
+
 ### Changed
 
 - **源码目录分层（2026-11-06，内部重构，无用户可见行为变化）**：`packages/wechat-daemon/src/` 从平铺 117 个文件改为 8 个一级目录 + 6 个二级目录（`daemon/messaging`、`acp/protocol`、`agents/sandbox`、`cli/subcommands`、`shared/process`、`shared/io`）；同批拆出 `agents/brain-presets.ts`、`ipc/chat-command-specs.ts`、`cli/process-lifecycle.ts`、`cli/account-commands.ts`、`sessions/registry-store.ts`、`sessions/registry-view.ts`。导出符号、CLI/微信命令、环境变量、数据文件格式与日志文案均未改变；包仍是单文件 `dist/cli.js`。详见 [源码目录分层设计](../设计文档/源码目录分层设计.md)。
