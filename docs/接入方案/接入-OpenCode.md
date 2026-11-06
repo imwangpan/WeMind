@@ -1,9 +1,8 @@
 # 接入 OpenCode（设计与实测）
 
-> **状态**：M1 冒烟验证 **已完成 ✅** · M2（agent + 沙箱）**已实现 ✅**；M3+ 见 §3.6。（**当时 M1/M2 计划口径**；后续里程碑已全部落地，详见 §3.6 里程碑表。）
-> **实测范围**：OpenCode v2.0.29（M1 探针；2.0.32 复测 `session/delete` / `load` 回放 / 并行任务；M2–M4 实现见 §3.4 / §3.6）｜ **最后核对**：2026-11-04（本次仅修硬错误）。
-> **实测环境**：Windows 11 / Node ≥20 / OpenCode **v2.0.29** / WeMind 1.0.1。
-> **最后核对**：2026-10-30 ｜ 本文结论**基于 OpenCode v2.0.29**；2026-10-29 在 2.0.32 上复测了 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）；其它 agent 的能力（load/image/MCP）可能不同。
+> **状态**：M1–M4 全部落地 ✅ —— `opencode` 是内置预设（见 §3.6）。**brain 通道的真机 E2E 已在 2026-10-29 通过**（微信发消息 → opencode acp → 自动回复，记录见 [CHANGELOG](../发布与变更记录/CHANGELOG.md)），M4 行与此一致。
+> **实测范围**：OpenCode v2.0.29（M1 探针）；2026-10-29 在 2.0.32 上复测 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）｜ **最后核对**：2026-11-05
+> **实测环境**：Windows 11 / Node ≥20 / OpenCode v2.0.29。本文结论基于该版本；其它 agent 的能力（load/image/MCP）可能不同。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](../repowiki/06-ACP-大脑与沙箱.md)。
 
 ---
@@ -60,7 +59,7 @@ opencode mcp list
 要点：
 - 把示例里的 `<repo>` / `<abs>` 换成**你自己的 clone 绝对路径**（不要照抄别人的本机路径）。
 - **V2 结构是 `mcp.servers`**（server 名不直接挂在 `mcp` 下）。README 的 OpenCode 片段已是 V2 `mcp.servers` 写法（2026-11-02 核对）。
-- 工具以 `wemind_*` 命名；默认 Code Mode 下经 `tools.wemind.*` 暴露。
+- 工具名就是 MCP 工具名本身（`get_messages` / `send_text_message` / `send_typing` / `login_qrcode` / `check_qrcode_status` / `logout`），**没有** `wemind_` 前缀，也不是 `tools.wemind.*` 命名空间；OpenCode 会按 server 名 `wemind` 分组显示。
 - 需 OpenCode 侧自行遵循 `get_messages(wait=true)`→`send_typing`→`send_text_message`→`send_typing(cancel)` 的工作流。
 
 ---
@@ -83,7 +82,7 @@ WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文�
 | 模型选择 | `settings/cli.json` 的 `chat.defaultModel` | `opencode.json` 的 `model` 字段 |
 | 记忆/技能 | 目录式 `steering/ memories/ skills/ …` | 目录式 `skills/ agents/ commands/`；另有单文件 `AGENTS.md` |
 | 权限 | `--trust-all-tools` | `opencode acp` **不接受** `--auto`（官方 issue #52216）；WeMind 在沙箱 `opencode.json` 写 `"permission": "allow"`（用户自己配了 permission 则保留用户的）；ACP 仍可能发 `session/request_permission`，宿主默认拒绝、`WEMIND_ACP_AUTO_ALLOW=1` 放行 |
-| 凭证/数据 | `KIRO_HOME` 移动 = 同目录规则 | 数据在 `~/.local/share/opencode`（**与配置分离**）→ 隔离配置不丢登录态 |
+| 凭证/数据 | `KIRO_HOME` 移动 = 同目录规则 | 数据在 `~/.local/share/opencode`（**与配置分离**）→ 隔离配置不丢登录态；**代价是数据目录本身没有按账号隔离**：同一台机器上多个 WeMind 账号共用同一份登录态与后台服务（与 AGENTS.md §4.7「数据按账号隔离」的口径有出入，已知边界） |
 
 ### 3.3 M1 实测结果（已验证事实）
 
@@ -123,55 +122,57 @@ opencode: {
   args: ["acp"],
   shell: true,                   // Windows 必需（PATH 上是 opencode.cmd shim）
   homeEnvVar: "XDG_CONFIG_HOME", // 指向沙箱 → 配置落在 <沙箱>/opencode/，真正替换 global
-  configSubdir: "opencode",      // 新增字段：agent 配置目录相对沙箱的子路径（kiro 为空）
   realHome: path.join(os.homedir(), ".config", "opencode"),
   inheritDirs: ["skills", "agents", "commands"],
+  inheritFiles: ["AGENTS.md"],
+  configSubdir: "opencode",      // agent 配置目录相对沙箱的子路径（kiro 为空）
+  mcpFormat: "opencode",         // opencode.json 的 mcp.servers
+  mcpConfigFile: "opencode.json",
+  catalogFile: "opencode.json",
+  env: { OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, // 不从 cwd 祖先目录发现用户 opencode.json
 },
 ```
 
 新增字段（`AcpAgentPreset`）：
 - `configSubdir?: string` —— agent 配置目录相对沙箱根的子路径（kiro `""`；opencode `"opencode"`）。
+- `mcpFormat` / `mcpConfigFile` / `catalogFile` —— MCP 格式与文件名（见 Step 3）。
+- `inheritFiles` —— 单文件继承（`AGENTS.md`）。
 - `env?: Record<string, string>` —— 额外注入的环境变量，值里 `%HOME%` 占位为沙箱根（见 Step 2）。
 
-#### Step 2 · `acp-brain.ts` 支持多环境变量注入
+#### Step 2 · 环境变量注入（`brain-agents.ts` 的 `agentEnv()`）
 
-现状只注入一个 `homeEnvVar`：
-
-```ts
-if (AGENT.homeEnvVar) env[AGENT.homeEnvVar] = BRAIN_HOME;
-```
-
-改为：
+现状只注入一个 `homeEnvVar`；实际实现把三处合成一个函数（brain 与 worker 共用，不再各自写一遍）：
 
 ```ts
-if (AGENT.homeEnvVar) env[AGENT.homeEnvVar] = BRAIN_HOME;
-for (const [k, v] of Object.entries(AGENT.env ?? {}))
-  env[k] = v.replaceAll("%HOME%", BRAIN_HOME);
+export function agentEnv(ag: ResolvedAgent, home: string, skipped: string[] = []) {
+  const env = { ...process.env };
+  if (ag.homeEnvVar) env[ag.homeEnvVar] = home;                      // 沙箱目录
+  for (const [k, v] of Object.entries(ag.credentialEnv?.(...) ?? {})) … // 凭据派生
+  for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
+  for (const [k, v] of Object.entries(ag.envDefaults ?? {})) …       // 父进程已设则保留父进程
+  return env;
+}
 ```
 
-opencode agent 可附带（可选，防御性）：
-
-```ts
-env: { OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, // 不从 cwd 祖先目录发现用户 opencode.json
-```
+opencode agent 附带 `OPENCODE_DISABLE_PROJECT_CONFIG: "1"`（防御性：不从 cwd 祖先目录发现用户 opencode.json）。
 
 #### Step 3 · MCP 沙箱按 agent 分派（`mcp-sandbox.ts`）
 
-现状硬编码 kiro 约定：`BRAIN_MCP_JSON = <沙箱>/settings/mcp.json`、读写 `{mcpServers}`、CATALOG 默认 `<realHome>/settings/mcp.json`。
+现状曾硬编码 kiro 约定：`BRAIN_MCP_JSON = <沙箱>/settings/mcp.json`、读写 `{mcpServers}`、CATALOG 默认 `<realHome>/settings/mcp.json`。
 
-改为引入 **`BRAIN_CONFIG_DIR`**（= `path.join(BRAIN_HOME, preset.configSubdir ?? "")`）与一个**按 agent 的 strategy**：
+现已引入 **配置目录**（`path.join(BRAIN_HOME, preset.configSubdir ?? "")`）与按 agent 的 **`mcpFormat`**（纯函数在 `agent-mcp.ts`：`readMcpServers` / `withMcpServers` / `parseJsonc`）：
 
 | 能力 | kiro | opencode |
 |---|---|---|
 | 配置目录 | `<沙箱>` | `<沙箱>/opencode` |
 | 写 MCP | `<cfg>/settings/mcp.json` = `{mcpServers}` | `<cfg>/opencode.json` 的 `mcp.servers` |
-| 读目录(CATALOG) | `<realHome>/settings/mcp.json` 的 `mcpServers` | 用户全局 opencode 配置的 `mcp.servers` |
+| 读目录(CATALOG) | `<realHome>/settings/mcp.json` 的 `mcpServers` | `<realHome>/opencode.json` 的 `mcp.servers` |
 | 隔离项 | 保持 `wechat` 在 `FORBIDDEN` | 同左 |
 
 要点：
 - brain 仍**默认空 MCP**；微信指令 `加载/卸载` 后写激活集 → 重启 ACP 生效。
 - opencode 的 `mcp.servers` 对象**原样透传**（CATALOG 若来自用户 OpenCode 配置，格式已正确）。
-- CATALOG 默认路径需按 agent 变：opencode 指向用户全局配置（`<realHome>/opencode.json` 或 `<realHome>/opencode.jsonc`）。
+- CATALOG 默认路径按 agent 的 `catalogFile` 取**单一文件名**（opencode 预设是 `<realHome>/opencode.json`；**不**自动回退到 `opencode.jsonc`——你的真实配置若只有 `.jsonc`，需要 `WEMIND_MCP_CATALOG` 显式指过去）。
 
 #### Step 4 · 记忆/技能继承
 
@@ -191,7 +192,7 @@ worker 策略相反（**继承全量 MCP，仅排除 wechat**），但同样要�
 #### Step 7 · Windows / 跨平台
 
 - **必须 `shell:true`**（PATH 上是 `opencode.cmd`；`onPath("opencode.exe")` 找不到）。经 shell 时用裸名 `opencode`。
-- 若用户用 scoop/winget 装了原生 `opencode.exe`，可设 `WEMIND_BRAIN_BIN=<绝对路径>` 免 shell。
+- 装了原生 `opencode.exe` 想跳过 shell 时，设 `WEMIND_BRAIN_SHELL=0` **并**用 `WEMIND_BRAIN_BIN=<绝对路径>` 指定可执行文件——只设 `WEMIND_BRAIN_BIN` 不会关掉预设的 `shell: true`。
 
 #### Step 8 · 验证
 
@@ -231,7 +232,7 @@ npm run build; npm run daemon
 | M1 | 冒烟：`opencode acp` 可被现有 ACP 客户端驱动，确认无反向请求 | ✅ 完成 |
 | M2 | Step 1–3：agent + 多 env 注入 + 沙箱 strategy（brain 默认空、动态 MCP） | ✅ 完成 |
 | M3 | Step 4–6：记忆/技能继承 + worker 改造 + 模型注入 | ✅ 完成 |
-| M4 | Step 7–8 + 文档：Windows 兼容、验证脚本、更新 [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) 与 README 的 OpenCode 片段 | ✅ 文档/脚本就绪；**worker 侧**任务结果推送已于 2026-10-29 实测（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）；**对话大脑**的微信端到端待跑 |
+| M4 | Step 7–8 + 文档：Windows 兼容、验证脚本、更新 [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) 与 README 的 OpenCode 片段 | ✅ 文档/脚本就绪；**worker 侧**任务结果推送与**对话大脑**的微信端到端均已于 2026-10-29 实测通过（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)） |
 
 **实现清单（本次改动）**：
 

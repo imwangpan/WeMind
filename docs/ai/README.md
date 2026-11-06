@@ -23,7 +23,7 @@ WeMind 只做一件事：**把个人微信的消息，变成某个 AI agent 的�
 形态② daemon：
   微信 ──►  daemon（自己长轮询）
              ├─ brain：常驻 ACP agent（对话，每用户一个 session）
-             └─ worker：常驻 ACP agent（任务，单 session，可「继续」）
+             └─ worker：进程池里 N 个 ACP agent（任务，一条任务一条连接，可「继续」）
            ──►  daemon 把回复发回微信
 ```
 
@@ -84,117 +84,29 @@ poller（长轮询，不被大脑阻塞）
 
 ---
 
-## 4. 术语表
+## 4. 术语
 
-| 术语 | 含义 |
+> **术语表已独立成篇**：[docs/ai/术语表.md](术语表.md) —— WeMind 内部概念（brain / worker / 任务编号 / 控制桥 / 激活集…）、中英术语对照（spawn、stdio、daemon、watchdog、capability、reverse request…）、账号与权限的用词纪律（「登录者」「登录者白名单」，禁用「主号」）、以及注释按段落换行的写作口径。
+
+最常用的几条，先记住：
+
+| 词 | 一句话 |
 |---|---|
-| **ACP** | Agent Client Protocol，JSON-RPC 2.0 over stdio，每行一个 JSON；Zed 提出 |
-| **brain** | 对话大脑，`acp-brain.ts`，每用户一个 session；协议细节走 `acp-connection.ts` |
-| **worker** | 远程任务执行器，`worker-acp.ts` 的 `class WorkerConn`，**一条任务一条连接**（进程池复用）；协议细节同样走 `acp-connection.ts` |
-| **agent 槽位（agent-slot）** | `agent-slot.ts`：`getAgent("brain"\|"worker")` 懒解析 + 记忆化；`setAgent` 供热切换改写（取代了模块常量） |
-| **热切换 / brain-switch** | `brain-switch.ts`：预检 → 等回合结束 → 启动新大脑 → **成功才写入磁盘**；失败退回 |
-| **drain / 等在途回合结束** | 切换/停止前「等在跑的回合自然结束」的门（默认 30s，超时=诚实失败，不砍回合） |
-| **启动新大脑 / warmup** | 切脑时先把新 agent 起起来跑 `initialize` + 建会话，成功才对外宣布切换完成 |
-| **当前会话表** | `brain-sessions.json`（键 `<agent>:<userId>`）——**「当前是哪个会话」的唯一权威** |
-| **会话登记表** | `session-registry.json`：名字/标题/轮次/最近使用（派生元数据，坏了只导致列表空） |
-| **严格恢复** | `恢复会话` 的语义：`load`/`resume` 都失败就如实报错，**不回退 `new`、不改当前会话记录**；恢复成功后模型设置失败只记日志，不退回新建 |
-| **交接 / handoff** | `handoff.ts`：摘要写入磁盘（TTL 24h），切走后**下一条消息作为前缀带上**、**答成才消费**、切回来源不带上 |
-| **任务编号 / 寻址** | 按用户单调递增、**不复用**、跨重启不归零；回任务用 `#<编号> 正文`（`>` 为明确发给任务的短前缀），无前缀消息一律走 brain（只有「继续」类短句可续跑任务） |
-| **默认任务大脑** | `worker.agent ?? agent`；`切换任务大脑`/`--worker` 可在**进程内**覆盖它（**不写入磁盘**，重启回到配置值）；`任务 <agent 名>：`/`--agent` **只对那一条任务生效**，不改它 |
-| **进程池 / worker-pool** | `worker-pool.ts`：同 agent 空闲复用 → 回收最旧腾位 → spawn；并发 `WEMIND_MAX_WORKERS`、空闲 `WEMIND_IDLE_MAX`、回收 `WEMIND_WORKER_REAP_MS` |
-| **daemon.log 轮转** | `log-rotate.ts`：builtin watchdog 用管道 + 逐块追加在运行中轮转（`WEMIND_LOG_MAX_MB` 默认 10、`WEMIND_LOG_KEEP` 默认 3）；`run-daemon.ps1` 每次重拉前轮转；pm2 交给 `pm2-logrotate` |
-| **控制桥 / control-bridge** | CLI ↔ daemon 的双向文件桥（`control-inbox/` → `control-out/`）：CLI 写的命令由 daemon 用**与微信同一段实现**执行并回话。**只收 agent 名与纯数据**（无 `bin`/`args`/`shell`） |
-| **控制桥扫描 / ControlInboxRunner** | `control-inbox-runner.ts`：同一时刻只执行一条、过期请求不执行但一定写回失败应答、单条异常不拖垮后续 |
-| **任务收件箱扫描 / scanTaskInbox** | `task-inbox-runner.ts`：按文件名时间序处理 dispatch/reply/stop，先删文件再执行，坏 JSON 丢弃，执行出错写回 ❌ ack |
-| **发件人鉴权 / isAuthorizedSender** | `access.ts`：登录者始终放行，其余人看 `allowFrom`（兜底校验；平台正常只投登录者） |
-| **外发管线 / SendPipeline** | `send-pipeline.ts`：串行链、最小间隔、按用户连发预算、旧 token 挂起/补发、任务推送让位；注入假发送函数即可单测 |
-| **路由判定 / daemon-routing** | `daemon-routing.ts`：快车道与「继续」归属、控制/任务指令解析、大脑错误分类与提示；纯函数，`index.ts` 只调用 |
-| **控制指令分派 / daemon-control** | `daemon-control.ts`：微信控制指令（MCP/会话/切脑/任务大脑/交接/AI/帮助）与控制桥请求共用同一批实现；`index.ts` 只接入入口 |
-| **CLI 共享上下文 / cli-context** | `cli-context.ts`：账号选择（key/label）、daemon 与控制桥存活判断、`viaBridge`（控制桥请求/等待/过期） |
-| **CLI 任务命令 / cli-task** | `cli-task.ts`：`task` / `task-reply` / `task-stop` / `task-list` / `task-status` 五条的收件箱写入、答复文案与退出码；`manage.ts` 只做分派 |
-| **CLI 会话命令 / cli-session** | `cli-session.ts`：`session list/new/resume/rename/delete` 与 `session current`；列表读登记表、`current` 读当前会话表，写优先走控制桥，旧版 daemon 的降级说明也在这里 |
-| **CLI 大脑命令 / cli-brain** | `cli-brain.ts`：`brain show/set/unset/check/switch/handoff` 与 `agentLabel`；`--restart` 的重启由入口注入，不在模块里硬连生命周期 |
-| **CLI 登录 / cli-login** | `cli-login.ts`：扫码登录的暂存目录、二维码刷新、登记与登录后解除 `-14` 暂停；`--start` 的启动由入口注入 |
-| **`.bridge` 凭据** | `control-out/.bridge` 内容是 `{pid, at}` 的 JSON，CLI 取其中 pid：对不上 = daemon 是**升级前的旧版本**，CLI 写命令发前拒绝、读命令降级 |
-| **preset / `ACP_AGENT_PRESETS`** | **代码里的叫法**；用户面统一写「agent 名」（`切换大脑 <agent 名>`、`任务 <agent 名>：正文`）。一条 = 二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承 |
-| **BRAIN_HOME** | brain 的沙箱目录（默认 `<数据目录>/brain-home`），通过 `homeEnvVar` 传给 agent |
-| **WORKER_HOME** | worker 的沙箱目录 |
-| **configSubdir** | agent 配置目录相对沙箱根的子路径（kiro 与 pi 空——配置目录就是沙箱根；opencode `opencode`；claude-code `claude`；gemini `".gemini"`；qoder `"qoder"`；cline `"cline"`） |
-| **catalog** | 可选 MCP 的定义来源（按 agent 各自的配置文件读取） |
-| **激活集** | 当前 brain 实际加载的 MCP 名单，存 `brain-mcps.json`；默认空 |
-| **curated MCP** | 沙箱里由 WeMind 写入的 MCP 配置；`wechat` 永久禁止 |
-| **session/load** | 按 sessionId 恢复会话；**不是所有 agent 都支持** |
-| **session/resume** | DSH 的恢复方法；恢复持久会话，但不回放旧更新 |
-| **agent-sessions** | `<数据目录>/agent-sessions/<agent>/`：agent 自己的会话库/派生配置。目前只有 DSH：`deepseek/{brain,worker}` + `session-root-<role>.patch.yml`（启动前由 `prepareAgent()` 生成，用 `--patch` 把会话 root 指进去，避免与共用沙箱根的 kiro/pi 互踩） |
-| **反向请求** | agent 发给 client 的请求（`session/request_permission`、`fs/*`、`terminal/*`）；不应答会挂起 |
-| **committed-only** | agent 只在消息提交后发正文（非逐 token），如 DSH 官方 ACP |
-| **brain.json** | 账号级大脑选择，`<数据目录>/brain.json`；`wemind brain set` 写入 |
-| **auto** | 未配置时的探测顺序：`opencode → cline → qoder → gemini → deepseek → kiro` |
+| **brain** | 常驻 ACP 对话进程，每用户一个 session（`acp-brain.ts`） |
+| **worker** | 远程任务执行器，一条任务一条 ACP 连接（`worker-acp.ts` 的 `WorkerConn`） |
+| **当前会话表** | `brain-sessions.json`，键 `<agent>:<userId>` —— 「当前是哪个会话」的唯一权威 |
+| **会话登记表** | `session-registry.json`，只是派生元数据（名字/标题/轮次），坏了只导致列表空 |
+| **严格恢复** | `load`/`resume` 都失败就如实报错，不回退 `new`、不改当前会话记录 |
+| **交接** | 摘要写盘（TTL 24h），切走后下一条消息作为前缀带上，答成才消费 |
+| **反向请求** | agent → client 的请求；三处入口共用 `acp-reverse.ts`，权限默认拒绝、未知方法回 `-32601` |
+| **daemon / watchdog** | `daemon` = 常驻业务进程；「守护进程」专指负责重拉它的 watchdog |
 
-### 4.1 中英术语对照（写作口径）
-
-**用法**：写文档/回答问题时用「推荐译法」；**英文原词只在首次出现时括注**（如「启动为子进程（spawn）」），之后不必重复。
-**原则**：① 有公认中文译名且不产生歧义的，一律用中文；② 是缩写、字面值或生态专名的（`stdio`、`CLI`、`ACP`、`brain`），保留原文；③ 代码、命令、API 名**永远**不翻译。
-
-#### A. 进程与 I/O（最常被译错的一组）
-
-| 英文 | 推荐译法 | 详细说明（含义 · 为什么这样译 · 常见误译） |
-|---|---|---|
-| **spawn** | **启动（子进程）**；需强调父子关系时用「**派生**」 | 原义「产卵」，在操作系统语境是**创建并执行一个新进程**的通用说法（与 `fork`/`exec` 同族）。Node 里对应 `child_process.spawn()`：创建子进程、**立即执行**指定程序、把它的标准流交给父进程读写。<br>**为什么用「启动」**：中文技术语境里「启动一个进程/子进程」最自然、读者零成本理解；需要体现「它是我派生的、生命周期依附于我」时用「派生」。<br>**别译**：❌「生成」（与数据生成混淆）、❌「孵化」（无对应技术含义）、❌「唤起」（指唤醒休眠，不是创建）。 |
-| **stdio** | **标准输入输出**（首次写全称，之后可保留 `stdio`） | `st`andar**d** **i**nput / **o**utput 的缩写，指进程自带的三个流：标准输入（stdin）、标准输出（stdout）、标准错误（stderr）。<br>**为什么保留原文**：它不是普通英文单词，而是 Node API 名（`spawn(..., { stdio: "inherit" })`）和 CLI 参数的字面值，翻译后反而无法对应代码。<br>**别译**：❌「标准IO」（半中半英，不如写全称）、❌「控制台输出」（错，`stdio` 不等于终端）。 |
-| **stdin / stdout / stderr** | 标准输入 / 标准输出 / 标准错误 | 说明语境时用中文，引用代码/参数时保留原文（`stdio: ["ignore", logFd, logFd]`）。 |
-| **CLI** | 指**程序**时译「**命令行工具**」；指**形态/界面**时译「**命令行界面**」 | command-line interface 的首字母缩写。<br>**判断方法**：能「安装、运行」（如 `wemind` 是 CLI）→ 命令行工具；说「相比 GUI」（图形界面）这种对比 → 命令行界面。中文技术写作里**保留 CLI** 也完全可接受，尤其 `kiro-cli`、`claude-code` 这类名字里的 CLI 绝不能翻。<br>**别译**：❌「客户端」（CLI 与 client 是两回事：`@wemind/cli` 是命令行工具，MCP 客户端才是 client）、❌「命令行程序包」。 |
-| **daemon** | **常驻进程**（正文一律直接写 `daemon`） | 后台长期运行、无人值守的进程。本文直接用 `daemon`（大量专名如 daemon 形态、`wechat-daemon` 目录依赖它）。**命名约定（1.2.0）**：「守护进程」不再译 daemon——那个词留给真正负责守护它的 watchdog（「后台守护进程」，见下条），否则「守护进程停掉自动重启」这类句子会读反。 |
-| **watchdog** | **后台守护进程** | 外层监督循环：它盯着子进程，退出后自动重拉。本文有 `runWatchdog()`、`wrapper.pid`。同段第二次出现可简称「守护进程」；代码/协议名里的 `_watchdog`、`watchdog-runner.ts` 保持原样。<br>**别译**：❌「监视器」（过泛）、❌「看门狗」（口语；系统/硬件语境里的 watchdog 另有含义）。 |
-| **wrapper** | **包装进程** / 外层 | 包在真正业务进程外面、负责保活/传参的那一层（`wrapper.pid`）。 |
-
-#### B. 协议与协议实现（最容易混淆的一组）
-
-| 英文 | 推荐译法 | 详细说明 |
-|---|---|---|
-| **ACP** | **ACP（Agent Client Protocol）** | 首次出现给全称，之后直接用 `ACP`。ACP 是**协议**：规定 client（WeMind daemon）与 agent 之间如何交换 JSON-RPC 消息。 |
-| **protocol** | **协议**（规范） | ⚠️ **协议是可选的，实现是可变的**：`session/load` 在 ACP 里是**可选方法**，写「协议不支持 load」是错的，正确说法是「这个 agent 的实现没有提供 `session/load`」。 |
-| **implementation** | **实现**（具体程序） | 一个程序对某协议的具体落地。同一协议的不同实现，完备度差别很大——这正是 WeMind 要给每个 agent 配 preset 的原因。 |
-| **implement / support ACP** | **实现 ACP** / **支持 ACP** | **不要写「说 ACP」**。理由：「会说/不会说」是二元判断，会掩盖「实现完备度不同」这个事实（有的实现支持 load、有的只有 resume、有的不发流式帧）。而「实现/支持」天然可分级。<br>更精确时用可验证的事实：「它以 ACP server 身份响应 `initialize`/`session/new`/`session/prompt`」。 |
-| **minimal method set** | **最小方法集** | WeMind 实际用到的 ACP 方法子集：`initialize` → `session/new` → `session/prompt` + 流式 `session/update`。缺任一即不可用。 |
-| **capability** | **能力**（保留 `agentCapabilities` 原文） | 指「这个实现支持哪些**可选特性**」（load/resume/image/mcp），**不是权限**。别译「权限」——权限是 permission，见下条。注意：本仓库当前**不消费** `initialize` 回包，能力全部来自 agent 配置字段，见事实表。 |
-| **permission** | **权限** | 与 capability 区分：`agentCapabilities` 是能力声明；`session/request_permission` 是运行时**请求授权**。 |
-| **reverse request** | **反向请求** | ACP 的反向通道：**agent → client** 的请求（`session/request_permission`、`fs/read_text_file`、`terminal/create` 等）。与正常方向（client → agent）相反，故称「反向」。<br>⚠️ 关键：**不应答会挂起**。WeMind 的 brain、worker、`brain check` 共用 `acp-reverse.ts`：权限默认拒绝、未知方法回 `-32601`（`WEMIND_ACP_AUTO_ALLOW=1` 才放行 agent 给出的 `allow_once`/`allow_always`）。 |
-| **streaming** | **流式** | agent 边生成边推送增量（`session/update` 的 `agent_message_chunk`），而不是一次性返回完整答案。 |
-| **handshake** | **握手** | 连接建立时的协商：`initialize` 交换版本与 `agentCapabilities`。 |
-| **session** | **会话** | 一段带上下文的多轮对话。ACP 里由 `session/new`（新建）、`session/load` / `session/resume`（恢复）管理。 |
-| **handshake / probe** | **握手 / 探针** | 探针 = 主动探测能力的小脚本（本仓库 `scripts/acp-probe.mjs`、`wemind brain check`）。 |
-
-#### C. WeMind 内部概念
-
-| 英文 | 推荐译法 | 详细说明 |
-|---|---|---|
-| **brain** | **对话大脑** / `brain` | 常驻 ACP 进程，负责日常聊天问答（每用户一个 session）。因为大量代码/路径名含 brain，正文也直接写 `brain`。 |
-| **worker** | **任务工作机** / `worker` | 独立 ACP 进程，跑漫长任务，单 session，可「继续」续跑。 |
-| **preset** | **内置 agent 配置**（用户面写「agent 名」） | `ACP_AGENT_PRESETS` 里的一条：二进制、ACP 参数、配置目录变量、MCP 格式、记忆继承、能力覆盖等。 |
-| **sandbox** | **沙箱** | 隔离目录（`BRAIN_HOME` / `WORKER_HOME`），让 agent 读到的是干净配置而非你的真实配置。 |
-| **fallback / degrade** | **回退 / 降级（退化）** | 如「agent 缺 `session/load` 时**退化为** `session/new`（上下文丢失但能继续用）」。 |
-| **activation set** | **激活集** | 当前 brain 实际加载的 MCP 名单（`brain-mcps.json`），默认空。 |
-| **curated MCP** | **WeMind 写入的 MCP 配置** | 沙箱里由 WeMind 生成的 MCP 定义；`wechat` 永久禁止（防它把消息发回自己）。 |
-| **committed-only** | **仅提交后发正文** | 指 agent 不逐 token 推流、只在生成完成后一次性发正文（如 DSH 官方 ACP），需靠心跳兜底。 |
-| **idempotent** | **幂等** | 同一操作重复执行结果一致。 |
-| **atomic write** | **原子写** | 先写临时文件再 `rename` 覆盖，避免写一半被读到半截 JSON。 |
-
-#### D. 通用工程词（本项目高频）
-
-| 英文 | 推荐译法 | 说明 |
-|---|---|---|
-| **agent** | `agent`（保留英文）或「智能体」 | 本文保留 `agent`：大量专名依赖它（ACP agent、brain agent、coding agent），翻译反而更绕。**注意「AI Agent」在本文有三重含义**（MCP 客户端 / ACP 大脑 / 编码助手），见根 README 的区分。 |
-| **root cause / triage** | **根因 / 定位分类** | 排障时先说清属于哪层（poller / brain / worker / wrapper）。 |
-| **regression** | **回归** | 已修好的问题又出现；CI 里也指「跑全部测试」。 |
-| **provenance** | **来源证明** | npm 发布时的构建来源证明（`--provenance`），把包与某次 CI 构建绑定。 |
-| **prepack** | `prepack`（保留，npm 生命周期名） | `npm pack`/`publish` 前自动执行的钩子；本项目用它跑产物守卫。 |
-| **guard** | **守卫** | 如 `prepack-guard.mjs`：不满足条件就拒绝打包。 |
-| **smoke test** | **冒烟测试** | 最小可用性验证（本仓库：真装 tarball 跑 `wemind version`）。 |
 
 ---
 
 ## 5. 事实状态表（先看这张，别被旧文档带偏）
+
+> **这张表是结论索引**（「现在是什么」）。逐条的**已知坑、踩坑细节与验证方法**在 [`AGENTS.md`](../../AGENTS.md) §6 / §7——那两节是唯一权威清单，本表只给结论与证据入口，细节以那边为准（两边不一致时按 AGENTS.md 并顺手修本表）。
 
 | 事实 | 状态 | 证据/备注 |
 |---|---|---|
@@ -215,7 +127,7 @@ poller（长轮询，不被大脑阻塞）
 | `codex` 预设存在且已实测 | ✅ 代码/实测（探针 + 真机 E2E） | 适配器 `@agentclientprotocol/codex-acp` 2.5.0（**全局安装**，口径同 claude-code）：`load`/图片/`set_mode`/`set_config_option(model)` ✅、工具调用 0 反向请求；**stdio MCP ❌**（`mcpCapabilities.acp=false`）→ 不开 `mcpViaAcp`；心跳 60s；**没有沙箱配置目录**（只有 cwd 指向沙箱根）；**不在** `AUTO_PROBE_ORDER`，只能显式选用；真机 E2E：worker 与 brain 通道均通过（见 [接入-Codex.md](../接入方案/接入-Codex.md)） |
 | `pi` 预设已内置 | ✅ 代码/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务） | 社区适配器 `pi-acp`（**全局安装**）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent`，先登录/配好模型；只装适配器会被 `agentProblem()` 提前拒绝）；`PI_CODING_AGENT_DIR` 沙箱根、`settings.json`/`auth.json`/`models*.json` 同步、`skills/` junction + `AGENTS.md` 复制；MCP 走 `<沙箱根>/mcp.json`（kiro 格式，`pi mcp list` 实测）、`mcpViaAcp: false`（pi-acp 只存不读）；免审批无需开关；`loadSession: true`/图片 ✅/0 反向请求；**不在** `AUTO_PROBE_ORDER`；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动横幅（`## Context` / `## Skills`，用户显式设过则保留）；worker 沙箱在每次派发前按该任务的 agent 重备（`worker-pool.acquire` → `ensureWorkerHome(ag)`，否则派到非默认 agent 时拿空配置跑）；沙箱隔离不完整（pi-acp 从真实 `homedir()` 读 session-map/prompts/skills）。见 [接入-pi.md](../接入方案/接入-pi.md) |
 | Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |
-| Qoder 可免 `--bin` 绝对路径 | ✅ 代码 | `fallbackBinPaths` 兜底 `~/.qoder/bin/qodercli/qodercli.exe`；auto 探测仍只看 PATH |
+| Qoder 可免 `--bin` 绝对路径 | ✅ 代码 | `fallbackBinPaths` 兜底 `~/.qoder/bin/qodercli/qodercli.exe`；**auto 探测也认它**（`presetAvailable()` → `presetBinPath()` 先 `onPath()` 再 `fallbackBinPaths`，2026-11-05 核对） |
 | Qoder 用户记忆落点 | ✅ 实测 | `~/.qoder/memory/`；已 junction 进沙箱（写入回流真实目录）。`skills/agents/commands`/`AGENTS.md` 在 1.1.78 不存在 |
 | Qoder Desktop 的 MCP 都在 `settings.json` | ⚪ **不一定** | 本机有 `~/.qoder/mcp-router.json`（本地路由）；只登记在路由里的 MCP 不会出现在 `列出 MCP` |
 | `onPath()` 会补试 `.cmd` | ⚪ **不会** | 只有 `dsh.cmd` 时 `binWin` 必须写 `dsh.cmd` |
@@ -259,9 +171,13 @@ poller（长轮询，不被大脑阻塞）
 | 接新 ACP agent | `brain-agents.ts` | `acp-brain.ts`、`mcp-sandbox.ts`、`docs/ai/recipes/add-acp-agent.md` |
 | 改 ACP 自愈/超时 | `acp-connection.ts`（帧/超时/模型与模式，brain 与 worker 共用） | `acp-brain.ts` / `worker-acp.ts`（进程生命周期与会话持久化各自实现）、`brain-check.ts` |
 | 改反向请求应答（权限 / fs / terminal） | `acp-reverse.ts` | `acp-reverse.test.ts`；brain、worker、`brain check` 三处共用 |
-| **ACP 连接公共层 / acp-connection** | `acp-connection.ts`：帧分类、请求/回合超时、模型与模式、回放静默；`acp-connection.test.ts` 覆盖 |
+| 改 ACP 连接公共层 | `acp-connection.ts`：帧分类、请求/回合超时、模型与模式、回放静默 | `acp-connection.test.ts`（覆盖上述全部）；brain 与 worker 共用，改一处两边生效 |
 | 改 MCP 挂载 | `mcp-sandbox.ts` | `agent-mcp.ts`、`worker-sandbox.ts`、`sandbox-inherit.ts`（记忆/技能继承与换 agent 清理）、`docs/ai/recipes/add-mcp.md` |
-| 改微信消息/回复 | `index.ts`、`send-pipeline.ts` | `md-reply.ts`、`image-reply.ts` |
+| **改热切换大脑** | `brain-switch.ts`（预检 → 等在途回合结束 → 启动新大脑 → 成功才落盘 → 失败退回） | `acp-brain.ts` 的 `beginSwitch`/`drainTurn`/`warmup`、`agent-slot.ts`（槽位）、`daemon-control.ts` 的 `AI`/`切换大脑` 分支 |
+| **改多任务 / 进程池 / 任务编号** | `worker-pool.ts`（`planAcquire`/`planReap` 纯函数；`acquire` 起进程前按这条任务的 agent 调 `ensureWorkerHome(ag)`） | `worker-acp.ts`（`class WorkerConn`）、`task-manager.ts`、`task-store.ts`、`docs/repowiki/07` |
+| **改会话五条指令 / 恢复语义** | `session-manager.ts`（操作层） | `session-registry.ts`（登记表，派生元数据）、`session-map.ts`（当前会话表，唯一权威）、`acp-brain.ts` 的 `resumeSession`（严格恢复） |
+| **改交接** | `handoff.ts`（写入磁盘 / 带上 / 消费） | `index.ts` 的 `workerLoop` 前缀带上、`daemon-control.ts` 的 `交接` 分支 |
+| 改微信消息/回复 | `index.ts`、`send-pipeline.ts` | `md-reply.ts`、`image-reply.ts`、`pending-push.ts` |
 | 改 CLI | `cli.ts`（分派 `cli-dispatch.ts`） | `manage.ts` + 按主题拆出的 `cli-context.ts` / `cli-task.ts` / `cli-session.ts` / `cli-brain.ts` / `cli-login.ts` |
 | 改数据/账号 | `wechat-ilink-core/src/store/*` | `brain-config.ts`、`docs/repowiki/08` |
 | 排查不回复 | `docs/ai/recipes/debug-daemon.md` | `daemon.log`、`brain.json`、`brain check` |
@@ -273,7 +189,7 @@ poller（长轮询，不被大脑阻塞）
 
 1. 每篇接入/架构文档顶部写：`最后核对日期 / 实测范围`（**不写「适用版本」**）。全库文档描述当前分支的最新代码，**不绑定已发布版本号**；发布版本号只在 `package.json`、`CHANGELOG` 与发布文档中记录。
 2. 把「ACP 通用」与「该 agent 实测」分开写；后者给命令与输出。
-3. 变更代码时同步更新：`AGENTS.md` 的「已知坑」、本文件的「事实状态表」、对应 recipe。
+3. 变更代码时同步更新：`AGENTS.md` 的「已知坑」、本文件的「事实状态表」、[术语表](术语表.md)（涉及新概念/用词时）、对应 recipe。
 4. 不在文档里复制易变细节（版本号、完整方法列表）；给「怎么查」（`initialize`、`wemind brain`）而不是「背答案」。
 5. 内部链接用相对路径；新增文件后跑 `pwsh -NoProfile -File scripts/check-docs.ps1`（CI 也可用）。
 

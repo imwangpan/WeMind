@@ -1,6 +1,6 @@
 # 配方：新增 / 调试 MCP 挂载
 
-> **最后核对**：2026-11-02
+> **最后核对**：2026-11-05
 >
 > 目标：让 brain 能在微信里通过「加载/卸载 MCP」动态获得工具，同时不破坏隔离、不引入 `wechat` 回环。
 
@@ -9,16 +9,17 @@
 ## 0. 先理解三条链路
 
 ```text
-catalog（定义从哪来）
+catalog（定义从哪来；一律读**真实**配置目录，不读沙箱）
   └─ 按 agent 各自约定读取（不要跨 agent 借文件）：
        kiro     ~/.kiro/settings/mcp.json                 { "mcpServers": { ... } }
        opencode ~/.config/opencode/opencode.json          { "mcp": { "servers": { ... } } }
        qoder    ~/.qoder/settings.json                    { "mcpServers": { ... } }
-       cline    ~/.cline/data/settings/cline_mcp_settings.json / CLINE_MCP_SETTINGS_PATH
-       gemini   <沙箱>/.gemini/settings.json              { "mcpServers": { ... } }（JSONC）
-       pi       <沙箱根>/mcp.json                         { "mcpServers": { ... } }
-       DSH、claude-code  ACP session/new 的 mcpServers   （无文件式 catalog 时用 WEMIND_MCP_CATALOG）
-       codex    ❌ 适配器 mcpCapabilities.acp=false，stdio MCP 不可用
+       cline    ~/.cline/data/settings/cline_mcp_settings.json   { "mcpServers": { ... } }
+       gemini   ~/.gemini/settings.json                   { "mcpServers": { ... } }（JSONC）
+       pi       ~/.pi/agent/mcp.json                      { "mcpServers": { ... } }
+       DSH               ACP session/new 的 mcpServers   （无文件式 catalog 时用 WEMIND_MCP_CATALOG）
+       claude-code       ~/.claude.json 的 mcpServers     （catalogFile 写成 `../.claude.json`，回到 realHome 上一层）
+       codex             ❌ 适配器 mcpCapabilities.acp=false，stdio MCP 不可用
   └─ 可用 WEMIND_MCP_CATALOG / WECHAT_MCP_CATALOG 覆盖
 
 激活集（哪些允许给 brain）
@@ -29,6 +30,8 @@ transport（怎么让 agent 看到）
   └─ brain：applySandbox() 写沙箱配置文件（文件式 MCP 的 agent），或 mcpViaAcp 传 session/new|resume（DSH / claude-code，已实现）
   └─ worker：applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）
 ```
+
+> 注意「catalog 读真实、transport 写沙箱」：`加载 <名>` 只把定义**拷进沙箱**（brain 默认空、worker 全量），真实配置文件一律不动。
 
 关键代码：
 

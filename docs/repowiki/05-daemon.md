@@ -8,60 +8,100 @@ daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询�
 
 ## 5.1 模块全景
 
+`src/` 目前是**平铺一层**的 57 个源文件（另有 60 个同目录测试）；下表按职责分组，便于定位。目录分层改造的提案见 [`docs/审查与质量记录/方案-源码目录重构-2026-11-05.md`](../审查与质量记录/方案-源码目录重构-2026-11-05.md)。
+
 ```
 packages/wechat-daemon/src/
-├── index.ts            # 主入口：poller / 快车道 / 大脑三个循环、消息路由、回合编排、进度节流
-├── daemon-routing.ts   # 纯路由判定：快车道 / 控制与任务指令 / 错误分类与提示
-├── daemon-control.ts   # 微信控制指令与控制桥请求的分派（两入口共用实现）
-├── send-pipeline.ts    # 外发管线：串行链、节流、连发预算、旧 token 挂起/补发、任务推送让位
-├── access.ts           # 发件人兜底鉴权（登录者 + allowFrom）
-├── control-inbox-runner.ts # 控制桥收件箱扫描（单条串行/过期不执行/失败必写应答）
-├── task-inbox-runner.ts    # 任务收件箱扫描（时间序/先删后做/出错回 ack）
-├── chat-commands.ts    # 命令表：解析 + 帮助**同表**驱动（无副作用模块）
-├── acp-connection.ts   # brain/worker 共用：帧处理、超时、模型/模式、回放静默（→ 第 6 章）
-├── acp-brain.ts        # 默认大脑：常驻 ACP 进程、严格会话恢复（→ 第 6 章）
-├── agent-slot.ts       # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
-├── brain-switch.ts     # 运行时换大脑（预检/等在途回合结束/启动新大脑/回滚）（→ 第 6 章）
-├── brain-agents.ts     # ACP agent 与解析（→ 第 6 章）
-├── mcp-sandbox.ts      # brain 沙箱：MCP 隔离 + 记忆继承（→ 第 6 章）
-├── worker-acp.ts       # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
-├── worker-pool.ts      # worker 进程池：复用/回收/上限（→ 第 7 章）
-├── worker-sandbox.ts   # worker 沙箱（→ 第 7 章）
-├── task-manager.ts     # 任务表：编号/编号寻址/停止（→ 第 7 章）
-├── task-store.ts       # 任务表写入磁盘 tasks.json（重启后续跑）（→ 第 7 章）
-├── session-manager.ts  # 会话五条指令的实现层（→ 第 6 章）
-├── session-registry.ts # 会话登记表（派生元数据：名字/标题/轮次）（→ 第 6 章）
-├── handoff.ts          # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才消费（→ 第 6 章）
-├── control-bridge.ts   # CLI↔daemon 控制桥（请求/应答/.bridge 凭据）（→ 第 7 章）
-├── pid-record.ts       # brain.pid / workers.pid.json 身份记录
-├── manage.ts           # CLI 入口分派、账号与进程生命周期（命令实现见 cli-*.ts）（→ 第 8、7 章）
-├── cli-context.ts      # CLI 共用上下文：账号选择、daemon/控制桥存活、viaBridge
-├── cli-task.ts         # CLI 的 task* 命令（文件桥写入 + 答复文案）
-├── cli-session.ts      # CLI 的 session* 命令（读登记表 / 写走控制桥）
-├── cli-brain.ts        # CLI 的 brain* 命令（配置 / 自检 / 热切换 / 交接）
-├── cli-login.ts        # CLI 扫码登录（独立暂存目录 / 二维码 / 登记 / 解除暂停）
-├── image-reply.ts      # 从大脑回复提取图片引用
-└── md-reply.ts         # 长回复转 .md 文件
+├── 入口与路由
+│   ├── index.ts            # 主入口 runDaemon：poller / 快车道 / 大脑三个循环、消息路由、回合编排、进度节流
+│   ├── cli.ts              # bin 入口（wemind）：分发 daemon / _watchdog / 其余给 manage
+│   ├── cli-dispatch.ts     # CLI 子命令注册与分发
+│   ├── manage.ts           # CLI 分派、账号与进程生命周期（命令实现见 cli-*.ts）
+│   ├── daemon-routing.ts   # 纯路由判定：快车道 / 控制与任务指令 / 错误分类与提示
+│   └── daemon-control.ts   # 微信控制指令与控制桥请求的分派（两入口共用实现）
+├── 消息与回复
+│   ├── send-pipeline.ts    # 外发管线：串行链、节流、连发预算、旧 token 挂起/补发、任务推送让位
+│   ├── pending-push.ts     # 旧 token 期间失败外发的内存挂起队列（下一条消息到达后补发）
+│   ├── poller-batch.ts     # 一批消息的计数重置与「全部做完」判定
+│   ├── access.ts           # 发件人兜底鉴权（登录者 + allowFrom）
+│   ├── chat-commands.ts    # 命令表：解析 + 帮助**同表**驱动（无副作用模块）
+│   ├── md-reply.ts         # 长回复转 .md 文件
+│   ├── image-reply.ts      # 从大脑回复提取图片引用并决定能否发图
+│   └── image-url.ts        # 回复里图片 URL 的识别与规整
+├── ACP 协议层（brain / worker 共用）
+│   ├── acp-connection.ts   # 帧处理、请求与回合超时、模型/模式、load 后回放静默（→ 第 6 章）
+│   ├── acp-reverse.ts      # 反向请求应答器（权限默认拒绝；未知 method 回 -32601）
+│   ├── acp-quiet.ts        # 恢复会话后等回放帧安静（200ms 静默窗口 / 最多 3s）
+│   └── line-decoder.ts     # stdout 行解码（容错非 JSON 日志行）
+├── 大脑
+│   ├── acp-brain.ts        # 常驻 ACP 进程、严格会话恢复、beginSwitch/drainTurn/warmup（→ 第 6 章）
+│   ├── agent-slot.ts       # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
+│   ├── brain-switch.ts     # 运行时换大脑（预检/等在途回合结束/启动新大脑/回滚）（→ 第 6 章）
+│   ├── brain-agents.ts     # ACP_AGENT_PRESETS、resolveAgent、agentProblem、派生配置落盘（→ 第 6 章）
+│   ├── brain-config.ts     # brain.json 读写
+│   ├── brain-state.ts      # brain-runtime.json：daemon 实际生效的大脑
+│   ├── brain-check.ts      # wemind brain check 的真 ACP 握手
+│   ├── profile-model.ts    # 真实 profile 的默认模型读取与「缺 - id: acp」提示
+│   └── mcp-sandbox.ts      # brain 沙箱：MCP 隔离 + 记忆继承（→ 第 6 章）
+├── 沙箱与进程
+│   ├── agent-mcp.ts        # MCP 激活集与按 agent 的挂载格式
+│   ├── sandbox-inherit.ts  # 记忆/技能继承（junction/拷贝 + 继承清单）
+│   ├── spawn-agent.ts      # 统一 spawn（Windows .cmd 经 shell + 逐参数引号）
+│   ├── debug-env.ts        # 摘除 VS Code 调试器注入的 NODE_OPTIONS
+│   ├── pid-record.ts       # brain.pid / workers.pid.json 身份记录
+│   └── proc-identity.ts    # 进程身份校验（isOurProcess 等）
+├── 任务（worker）
+│   ├── worker-acp.ts       # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
+│   ├── worker-pool.ts      # worker 进程池：复用/回收/上限（→ 第 7 章）
+│   ├── worker-sandbox.ts   # worker 沙箱（→ 第 7 章）
+│   ├── task-manager.ts     # 任务表：编号/编号寻址/停止（→ 第 7 章）
+│   ├── task-store.ts       # 任务表写入磁盘 tasks.json（重启后续跑）（→ 第 7 章）
+│   ├── task-inbox.ts       # 任务收件箱两个通道（task-inbox/ 命令 + task-out/ 答复）
+│   ├── task-inbox-runner.ts # 任务收件箱扫描（时间序/先删后做/出错回 ack）
+│   └── cline-credentials.ts # 从 Cline providers.json 派生 CLINE_PROVIDER/CLINE_API_KEY
+├── 会话
+│   ├── session-manager.ts  # 会话五条指令的实现层（→ 第 6 章）
+│   ├── session-registry.ts # 会话登记表（派生元数据：名字/标题/轮次）（→ 第 6 章）
+│   ├── session-map.ts      # 当前会话表 brain-sessions.json / worker-sessions.json（→ 第 6 章）
+│   └── handoff.ts          # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才消费（→ 第 6 章）
+├── CLI 命令实现（cli-*.ts）
+│   ├── cli-context.ts      # CLI 共用上下文：账号选择、daemon/控制桥存活、viaBridge
+│   ├── cli-task.ts         # task* 命令（文件桥写入 + 答复文案）
+│   ├── cli-session.ts      # session* 命令（读登记表 / 写走控制桥）
+│   ├── cli-brain.ts        # brain* 命令（配置 / 自检 / 热切换 / 交接）
+│   └── cli-login.ts        # 扫码登录（独立暂存目录 / 二维码 / 登记 / 解除暂停）
+├── 桥与常驻
+│   ├── control-bridge.ts   # CLI↔daemon 控制桥（请求/应答/.bridge 凭据）（→ 第 7 章）
+│   ├── control-inbox-runner.ts # 控制桥收件箱扫描（单条串行/过期不执行/失败必写应答）
+│   ├── watchdog-runner.ts  # 自带后台守护进程（崩溃重拉、stdout/err 并入 daemon.log）
+│   ├── pm2-runner.ts       # pm2 runner（--runner pm2）
+│   └── log-rotate.ts       # RotatingLog：逐块追加 + 运行中轮转
+└── 通用
+    ├── atomic-json.ts      # 原子写 JSON（临时文件 + rename）
+    └── version.ts          # 版本号唯一来源（运行时读 package.json）
 ```
 
-## 5.2 启动流程（main）
+## 5.2 启动流程（`runDaemon()`）
 
 ```mermaid
 graph TD
-    A["loadAccount（未登录则退出）"] --> B["解析登录者 owner<br/>WECHAT_OWNER_ID 或扫码登录者"]
-    B --> C["addAllowFrom(owner)<br/>种入授权清单（迁移老账号）"]
-    C --> D["写 daemon.pid + 注册退出清理"]
-    D --> E["注册全局 unhandledRejection / uncaughtException<br/>（只记录不退出）"]
+    A["单实例守卫：daemon.pid 里已有本账号的存活进程<br/>→ 直接 exit 75（DAEMON_ALREADY_RUNNING）"]
+    A --> B["seedSlots(loadBrainConfig()) → agentProblem(brain)<br/>大脑不可用 → exit 78（BRAIN_CONFIG）；后台守护据此停止重拉"]
+    B --> B2["writeBrainState：落 brain-runtime.json<br/>（`wemind list` 的「实际生效」来源）<br/>任务大脑不可用只 WARN，不退出"]
+    B2 --> C["loadAccount（未登录则 exit 1）"]
+    C --> D["解析登录者 owner（WECHAT_OWNER_ID 或扫码登录者）<br/>→ addAllowFrom(owner) 种入白名单（迁移老账号）"]
+    D --> E["写 daemon.pid + 注册 exit/SIGINT/SIGTERM 清理<br/>+ 全局 unhandledRejection / uncaughtException（只记录不退出）"]
     E --> F["ensureBrainHome() + ensureWorkerHome()<br/>准备两个沙箱"]
     F --> G["notifyStart 通知上线"]
-    G --> H["接入 setTaskPush / setTaskTyping / setTaskStateSink"]
-    H --> I["syncFromPointerMap：按当前会话表回填会话登记表<br/>（老账号没有 session-registry.json 时的首次迁移）"]
-    I --> J["clearControlDirs + markBridgeReady(自己的 pid)<br/>→ 清控制桥残留、写下「我认识桥」凭据"]
-    J --> K["读回 tasks.json：未完成任务标「已中断」（**不**自动 spawn）"]
-    K --> L["清空 task-inbox / control-inbox<br/>+ 各自启动扫描定时器(1s)"]
-    L --> M["pollerLoop（后台）"]
-    L --> N["fastWorkerLoop（后台，控制/任务）"]
-    L --> O["workerLoop（前台 await，只喂大脑）"]
+    G --> H["接入 setTaskPush / setTaskTyping / setTaskStateSink / setTaskAckSink"]
+    H --> I["clearTaskDirs + 启动 task-inbox 扫描定时器(1s)"]
+    I --> J["clearControlDirs + markBridgeReady(自己的 pid)<br/>→ 清控制桥残留、写下「我认识桥」凭据<br/>+ 启动 control-inbox 扫描定时器(1s)"]
+    J --> K["initTasks(DATA_DIR)：读回 tasks.json<br/>未完成的标「已中断」（**不**自动 spawn）"]
+    K --> L["syncFromPointerMap：按当前会话表回填会话登记表<br/>（老账号首次迁移，幂等）"]
+    L --> M["sweepWorkerPool 定时器(30s，unref)"]
+    M --> N["pollerLoop（后台）"]
+    M --> O["fastWorkerLoop（后台，控制/任务）"]
+    M --> P["workerLoop（前台 await，只喂大脑）"]
 ```
 
 两个关键防御：
@@ -140,7 +180,7 @@ graph TD
     C4B -->|否| H6["handleMessage → brain（默认）"]
 ```
 
-三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时存在 interrupted）才交给任务侧（`shouldResumeTask()`，2026-11-02 起）；多条可续跑任务时会回编号清单让你指明，不替你选。任务出完结果后不会再接管日常消息；图片消息始终走 brain。
+三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时存在 interrupted）才交给任务侧（`shouldResumeTask()`，2026-11-02 起）；多条可续跑任务时会回编号清单让你指明，不替你选。任务出完结果后不会再接管日常消息。**图片的归属要分两个队列看**：`msgQueue` 一侧由 `shouldResumeInBrainQueue()` 判，带图（`imageCount > 0`）一律给 brain；但 `isFastLane()` **只看文本**——一条「继续」+ 图片会进 `fastQueue`，出队后按续跑 `injectTask` 只带文本，**图片被静默丢弃**（已知边界，2026-11-05 核对代码确认）。要带图就别用「继续」这种短句。
 
 **命令层（1.2.0 起）**：解析与帮助**同表驱动**（`chat-commands.ts` 的 `COMMAND_SPECS`），中文与斜杠双轨、`/ai` 是统一入口前缀（`/ai` 列可选、`/ai brain X`、`/ai task X`），中文（`切换大脑`、`切换任务大脑`）与旧斜杠（`/brain`、`/worker`）是等价别名。`帮助`/`/help` 按角色裁剪（非登录者看不到「仅登录者」命令）。
 
@@ -230,13 +270,13 @@ graph TD
     B["按用户跨回合的发送计数<br/>budgetOf(to).count"] --> C{"count ≥ 上限-2<br/>（默认第 8 条）?"}
     C -->|是| D["发『接近上限，回复继续』提示<br/>进入 awaiting 等待段<br/>停发进度、靠 typing 撑存活<br/>留最后一条额度给最终答案"]
     C -->|否| E["正常发进度（GENERATING）"]
-    F["用户发任何消息<br/>（照抄服务端规则）"] --> G["重置 count=0 + 退出 awaiting"]
+    F["用户发任何消息<br/>（照抄服务端规则）"] --> G["重置 count = inflightSends<br/>（不清零：在途的仍占额度）+ 退出 awaiting"]
     H["回『继续』(等待段)"] --> I["换新 token 恢复进度<br/>仅作恢复信号、不入队"]
 ```
 
 要点：
 
-- **计数按用户、跨回合维护**（`budgetOf(to)`），只在该用户发来任何消息时重置 —— 照抄服务端「距上一条用户消息计数」的规则。这修正了「新任务从 0 计数撞上限」的 bug。
+- **计数按用户、跨回合维护**（`budgetOf(to)`），只在该用户发来任何消息时重置 —— 照抄服务端「距上一条用户消息计数」的规则。重置**不是清零**，而是 `count = inflightCount(from)`：上一回合还没上线路的发送（`replyChain` 里排着的、正在补发的）仍会落在这条消息之后、占新窗口额度（`index.ts` 的 `b.count = sends.inflightCount(from)`）。这修正了「新任务从 0 计数撞上限」的 bug，也防「误以为额度还满、最终答案被限流丢掉」。
 - 进度/中间消息用 `GENERATING`，仅最终答案用 `FINISH`（见 [3. 协议内核](03-iLink-协议内核.md#关键枚举)）。
 - 最终答案占等待段预留的最后一条额度。
 - **图片也占额度**：每张图计一条，并走同一条 `replyChain`；额度不够时不再发图，改为在最终文字里附原链接（不抢最终答案的最后一条）。
@@ -252,10 +292,10 @@ graph TD
 
 ## 5.7 收发富媒体
 
-- **收图**：poller 提取 `image_item` → `downloadImage` 下载解密 → `sniffMime` 嗅探 MIME → 作为 ACP image 块喂大脑。**两个方向**的下载都走 core 的 `readBodyWithLimit()`：收图（CDN 密文）上限 20MB，发图（大脑回复里的图片链接）上限 10MB；边读边计大小，超限立即取消（不把超大响应整个读进内存），`content-length` 只作提前拒绝的提示。**前提是 agent 广告 `promptCapabilities.image:true`**（kiro/opencode 支持；DSH 官方 0.2.1-rc.2 实测为 false，带图会 `-32602`）。图片用不了时（全部下载失败 / 大脑不支持）由 `planImageTurn()` 决定：**有文字就只按文字回答**（答复前注明图片被忽略），**没文字才直接拒绝**——不会拿空 prompt 白问一回合，也不会连文字一起丢。
+- **收图**：poller 提取 `image_item` → `downloadImage` 下载解密 → `sniffMime` 嗅探 MIME → 作为 ACP image 块喂大脑。**两个方向**的下载都走 core 的 `readBodyWithLimit()`：收图（CDN 密文）上限 20MB，发图（大脑回复里的图片链接）上限 10MB；边读边计大小，超限立即取消（不把超大响应整个读进内存），`content-length` 只作提前拒绝的提示。**前提是预设的 `images` 字段为真**（`supportsImages()` 读 `agent-slot` 里该 agent 的 `images`，不是 `initialize` 回包——代码不解析 `agentCapabilities`；kiro/opencode 支持，DSH 官方 0.2.1-rc.2 实测不支持，预设关掉了它）。图片用不了时（全部下载失败 / 大脑不支持）由 `planImageTurn()` 决定：**有文字就只按文字回答**（答复前注明图片被忽略），**没文字才直接拒绝**——不会拿空 prompt 白问一回合，也不会连文字一起丢。
 - **发图**：`extractImages` 从大脑回复里提取 Markdown `![](src)` 或裸图片 URL → `resolveImageBytes` 下载/读取 → `sendImage` 发出，剩余文本另发。`image-reply.ts` 实现：下载带 15s 超时 + 浏览器 UA（规避图床热链 403）、10MB 上限；失败的图把原链接附文本发给用户（不静默丢图）。URL 逐跳过安全闸（`image-url.ts` 的 `assertPublicHttpUrl`）：非 http(s)、本机/私网/CGNAT/链路本地/组播（含 IPv6 与 `::ffff:` 映射）以及解析到这些地址的域名都拒绝；重定向手动跟随、每跳复查、最多 3 跳——防大脑输出被提示注入成内网 SSRF。本地文件绝对路径不受影响（那是大脑自己就能读的文件）。
 - **收语音**：直接取 `voice_item.text`（微信侧已转写）当文本喂大脑，零依赖（无需 SILK 解码）。
-- **发文件/视频**：core 的 `sendFile` 按扩展名自动判类型组装。
+- **发文件**：daemon 只用 `sendFile` 发**长回复转成的 `.md`**（`kind: "file"`）。core 的 `sendFile` 本身按扩展名自动判 image/video/file，但 daemon 侧**没有**发视频或任意文件的入口（也没有对应微信指令）。
 
 ## 5.8 长回复转 .md（md-reply.ts）
 
@@ -269,7 +309,7 @@ daemon 通过两个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s�
 
 | 目录 | 方向 | 用途 |
 |------|------|------|
-| `task-inbox/*.json` | **单向**（CLI 派活，结果从微信回） | 本地终端派发/回复/结束任务 → `dispatch`/`reply`/`stop` |
+| `task-inbox/*.json` | **双向**（命令在 `task-inbox/`，答复在 `task-out/<id>.json`：`{id, at, ok, text}`） | 本地终端派发/回复/结束任务 → `dispatch`/`reply`/`stop`；答复要等起进程有结果才写，所以 `wemind task` 的等待上限是 30s |
 | `control-inbox/*.json` | **双向**（daemon 写 `control-out/<id>.json` 应答） | 热切换大脑、会话命令、交接 —— CLI 要**当场知道成没成**；任务命令走 `task-inbox/`，不经过这里 |
 
 **控制桥**（`control-bridge.ts`）让 CLI 与微信**走同一段代码**：`handleControlRequest` 调的就是微信指令用的那几个函数（会话类命令以**登录者**作为 userId——即「CLI 代表机主本人」，所以不经过「仅登录者」那道微信侧的门）。要点：
@@ -281,7 +321,7 @@ daemon 通过两个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s�
 - **应答生命周期**：CLI 读到应答即删；daemon 每秒扫描时清掉超过 1 小时没人读的旧应答（CLI 崩溃/放弃留下的），长期运行不会无限堆积。
 - **`.bridge` 凭据**：daemon 启动时清空两个桥目录并写 `control-out/.bridge`（内容 = 自己的 pid）。CLI 据此判断对方是不是「认识桥的版本」——详见 [7. 远程任务 Worker](07-远程任务-Worker.md) §7.5。
 - **安全边界**：请求字段只有 `target`（agent 名）/`ref`/`name`/`page`/`expiresAt`，**没有 `bin`/`args`/`shell` 的位置**（`parseControlRequest` 是唯一入口校验）。请求/应答 id 只允许 `[A-Za-z0-9._-]`（不含 `..`/盘符）——`control-out/<id>.json` 与 `task-out/<id>.json` 都由它拼成，不校验就能借 `../` 覆盖账号数据。
-- 启动时清空 `task-inbox/` 作废重启前残留命令（防重放）。
+- 启动时 `clearTaskDirs()` **同时清空 `task-inbox/` 与 `task-out/`**：作废重启前残留命令（防重放），也清掉没人读的旧答复。
 
 ---
 

@@ -1,6 +1,6 @@
 # @wemind/cli — 命令 `wemind`
 
-> **你的 AI 大脑，挂在微信上。** 常驻微信 Bot daemon：自己长轮询 iLink 收消息 → 调常驻 **ACP 大脑**生成回复 → 自动回发。支持**运行时切换大脑**（免重启）、**多任务并行（worker 进程池）**、**完整会话管理**（列表/恢复/改名/删除）、**会话交接**、**多账号**、收发图/文件。
+> **你的 AI 大脑，挂在微信上。** 常驻微信 Bot daemon：自己长轮询 iLink 收消息 → 调常驻 **ACP 大脑**生成回复 → 自动回发。支持**运行时切换大脑**（免重启）、**多任务并行（worker 进程池）**、**完整会话管理**（列表/恢复/改名/删除）、**会话交接**、**多账号**、收发**图片**（入站只收图、语音取微信转写，文件/视频不入站；出站发图与长回复自动转 `.md`）。
 
 [WeMind](https://github.com/imwangpan/WeMind) monorepo 的完整应用包；只依赖内核 `@wemind/wechat-ilink-core`（构建时已内联进单文件产物），不碰 MCP 层，可独立运行。
 
@@ -69,7 +69,12 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 
 `wemind start` 默认用**自带的跨平台后台守护进程**（builtin）：后台拉起 `wemind _watchdog`，它循环执行 `wemind daemon`，进程退出后自动重拉。也可以用 `--runner pm2`（或 `WEMIND_RUNNER=pm2`）交给 pm2，两者语义一致。进程树、pid 记录、日志轮转等细节见 [部署与运维](../../docs/repowiki/10-部署与运维.md)。
 
-开机自启：让系统在登录时执行一次 `wemind start <账号>` 即可（Windows 计划任务/启动文件夹、Linux systemd user service、macOS launchd）。**同一账号只用一套常驻方案**——两种 runner 同时跑会抢同一个 bot token。
+开机自启分两种写法，**别混用**：
+
+- **Windows**：启动文件夹 / 计划任务里执行一次 `wemind start <账号>` 即可——它拉起后台守护进程后立刻退出，重拉由 builtin watchdog 负责。
+- **Linux systemd / macOS launchd**：`ExecStart` / `ProgramArguments` 必须写 **`wemind daemon`（前台常驻）**，**不要写 `wemind start`**——后者会立刻退出，systemd/launchd 会以为服务挂了并反复重启，还可能和 builtin watchdog 双跑抢同一个 token。完整 unit / plist 示例见 [新手教程](../../docs/使用指南/新手教程.md)。
+
+**同一账号只用一套常驻方案**——两种 runner（builtin / pm2）同时跑会抢同一个 bot token。
 
 ## 数据与安全
 
@@ -88,7 +93,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `WEMIND_RUNNER`                                                                       | `builtin`（默认）或 `pm2`                                                                                                |
 | `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_EXTRA_ARGS` | 一次性覆盖大脑选择与启动参数（`ARGS` 整段替换、`EXTRA_ARGS` 追加；持久化请用 `wemind brain set`）                        |
 | `WEMIND_ACP_AUTO_ALLOW=1`                                                             | 放行 ACP agent 的一次性权限请求（默认为拒绝）                                                                            |
-| `WEMIND_ACP_SESSION_MODE`                                                             | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off` 关闭，其它值 = 该 modeId                                |
+| `WEMIND_ACP_SESSION_MODE`                                                             | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off`/`no` 关闭，其它值 = 该 modeId                              |
 | `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                                               | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate` |
 
 ## 与 MCP 形态的区别
@@ -97,13 +102,13 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | ---- | ----------------------------------- | --------------------------------- |
 | 驱动 | 自己常驻、自己调大脑                | 随 MCP 客户端生命周期，被动调工具 |
 | 大脑 | 独立 ACP agent 进程                 | 就是 MCP 客户端背后的模型         |
-| 能力 | 收发图/文件、远程任务、多账号、7×24 | 文本收发为主                      |
+| 能力 | 收发图片（长回复转 `.md`）、远程任务、多账号、7×24 | 文本收发为主                      |
 
 ## 文档
 
 - 完整文档：<https://github.com/imwangpan/WeMind>
 - 新手一步步教程：[docs/使用指南/新手教程.md](../../docs/使用指南/新手教程.md)
-- 发布与版本规则：[docs/发布与变更记录/发布-wemind-npm.md](../../docs/发布与变更记录/发布-wemind-npm.md)
+- 发布与版本规则：[docs/发布与变更记录/如何发布新版本.md](../../docs/发布与变更记录/如何发布新版本.md)
 - AI 协作者入口：[AGENTS.md](../../AGENTS.md)
 - 接入其它 ACP agent：[docs/接入方案/接入其它-ACP-Agent.md](../../docs/接入方案/接入其它-ACP-Agent.md)
 - Daemon 常驻原理：[docs/repowiki/10-部署与运维.md](../../docs/repowiki/10-部署与运维.md)

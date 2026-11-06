@@ -1,6 +1,6 @@
 # 配方：排查 daemon 不回复 / 大脑异常
 
-> **最后核对**：2026-11-02
+> **最后核对**：2026-11-05
 >
 > 先跑 [`scripts/doctor.ps1`](../../../scripts/doctor.ps1) 收集环境事实，再按症状定位。不要一上来改代码。
 
@@ -95,7 +95,7 @@ wemind session list <key|label>
 [wemind/wechat-daemon] turn start to=... msgAge=...
 [wemind/wechat-daemon/acp] spawn <agent> acp pid=... bin=... args=[...]
 [wemind/wechat-daemon/acp] initialized
-[wemind/wechat-daemon/acp] session/new ok ...  |  session/load ok ...  |  session/load failed (...), creating new
+[wemind/wechat-daemon/acp] session/new ok ...  |  session/load ok ...  |  session/load failed (...)   （失败后还会再试 session/resume，两者都失败才 session/new）
 [wemind/wechat-daemon/acp] → session/prompt#...
 [wemind/wechat-daemon/acp] prompt ok ... chunks=N updateTypes=[...]
 [wemind/wechat-daemon/acp] turn waits for in-flight brain switch…      # 回合在等切换（不是卡死）
@@ -152,14 +152,15 @@ wemind brain
 - 卡在 `initialize` → 不是 ACP，或参数没进入 ACP server 模式；
 - Windows `.cmd`/`npx` → `shell: true`（agent 或 `WEMIND_BRAIN_SHELL=1`）；
 - 路径含空格/`&` → 用绝对路径 + `shell`，并确认 `spawnAgent` 的引号逻辑；
-- 反向请求无应答 → 现在会静默丢弃；接入新 agent 时先做应答器（见 `docs/ai/recipes/add-acp-agent.md`）。
+- 反向请求无应答 → **不会发生了**：brain / worker / `brain check` 三处共用 `acp-reverse.ts` 的应答器，权限请求默认回 `cancelled`、未知 method 回 `-32601`，对端不会挂起。要逐次放行设 `WEMIND_ACP_AUTO_ALLOW=1`（见 `docs/ai/recipes/add-acp-agent.md`）。
 
 ### 3.4 重启后上下文丢失
 
 ```powershell
 # 看日志有没有：
-#   session/load failed (...), creating new
-#   session/load ok | session/resume ok
+#   session/load failed (...)        ← 失败（不是句尾带 ", creating new" 那种写法）
+#   session/resume failed (...)      ← load 之后还会再试 resume
+#   session/load ok | session/resume ok | session/new ok
 ```
 
 - agent 不支持 `session/load` → 需要 `session/resume` 兜底；DSH 属此类；
@@ -267,7 +268,7 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 
 原因：VS Code 集成终端的「智能自动附加」给终端里每个 node 进程注入 `NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` 和 `VSCODE_INSPECTOR_OPTIONS`（`deferredMode:true` 等）——被注入的进程**要等调试器接上才执行主脚本**。终端里的前台命令（`stop`/`list`/`start` 本体）会被接上，所以输出都正常；但 `start` **脱离出去的后台守护进程不会被接**，于是卡在「等调试器」里，既不写 `wrapper.pid` 也不拉 daemon。
 
-处置：1.2.0 起 `watchdog-runner.ts` 的两次脱离式 spawn（拉起后台守护进程、它再拉起 daemon）都先过 `debug-env.ts` 的 `stripVscodeDebugEnv()`；1.3.0 起 `spawn-agent.ts` 的 `spawnEnv()` 对 ACP 子进程也做同样净化（前台 daemon 在 VS Code 里跑时，agent 不会卡在等调试器），已修。旧版本撞上时：换一个**非 VS Code 集成终端**（Windows Terminal / 普通 PowerShell）执行 `wemind start <key>`，或先清变量再跑：
+处置：1.2.0 起 `watchdog-runner.ts` 的两次脱离式 spawn（拉起后台守护进程、它再拉起 daemon）都先过 `debug-env.ts` 的 `stripVscodeDebugEnv()`；1.4.0 起 `spawn-agent.ts` 的 `spawnEnv()` 对 ACP 子进程也做同样净化（前台 daemon 在 VS Code 里跑时，agent 不会卡在等调试器；修复提交 `cbf9e26` 在 1.4.0 之前，未进 1.3.0），已修。旧版本撞上时：换一个**非 VS Code 集成终端**（Windows Terminal / 普通 PowerShell）执行 `wemind start <key>`，或先清变量再跑：
 
 ```powershell
 Remove-Item Env:VSCODE_INSPECTOR_OPTIONS -ErrorAction SilentlyContinue

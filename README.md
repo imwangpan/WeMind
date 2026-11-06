@@ -9,12 +9,7 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
 | **MCP Server**（`wemind-mcp`） | `npm i -g @wemind/wechat-mcp` | 在 Claude Desktop / Cursor / OpenCode / Kiro 等已有客户端里让 AI 收发你的微信 |
 | **常驻 daemon**（命令 `wemind`） | `npm i -g @wemind/cli` | 要一个自己常驻、7×24 自动回复、还能远程派任务的微信 AI 助手 |
 
-```bash
-# 常驻 daemon 的典型三步
-npm i -g @wemind/cli
-wemind login --label 工作号 --start    # 微信扫码登录 + 启动常驻
-wemind list                          # 查看运行状态
-```
+常驻形态装完只需两步：`npm i -g @wemind/cli` → `wemind login --label 工作号 --start`（扫码登录并顺带常驻），之后 `wemind list` 看运行状态。
 
 > ⚠️ **一个 bot token 只能有一个消费者**：两种形态别同时跑，否则互相抢消息。
 > ⚠️ **包名 ≠ 命令名**：装 `@wemind/cli`，敲 `wemind`。不安装、想临时跑一次时用 `npx -y @wemind/cli`（`npx` 按包名解析，写 `npx wemind` 不可用）。
@@ -23,14 +18,7 @@ wemind list                          # 查看运行状态
 
 ### AI 大脑：能接什么 agent
 
-常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **9 个 agent 预设**：原生 ACP 的 `opencode` / `cline` / `qoder` / `gemini` / `deepseek`（DSH）/ `kiro`（**未配置时按此顺序自动探测**，按实测启动耗时排序；6 个都至少过了探针级实测（gemini 已通过真机 E2E，2026-11-01），opencode / cline / qoder / deepseek / kiro 另有长期真机使用），以及三个需适配器的 `claude-code` / `codex` / `pi`（`claude-code` 已探针级实测并跑通真机微信单轮、`codex` 已探针级实测 + 真机 E2E、`pi` 已探针级实测 + 真机 E2E（2026-11-01：brain、热切换、worker/微信任务）；只能显式选用，不参与自动探测）。判断某个 agent 能不能用：
-
-| 必要条件 | 说明 | 不满足怎么办 |
-| --- | --- | --- |
-| 有**可执行入口** | 终端里能直接跑起来，daemon 才能把它启动为子进程 | 纯 HTTP API（OpenAI / Anthropic / Ollama）没有进程可启动，**目前接不了** |
-| **实现 ACP**，或有 **ACP 适配器** | 原生：kiro / opencode / gemini（探针级实测 + 真机 E2E）/ DSH / Qoder / Cline；需适配器：Claude Code（`@agentclientprotocol/claude-agent-acp`，已探针级实测 + 真机微信单轮 E2E）、Codex（`@agentclientprotocol/codex-acp`，已探针级实测 + 真机 E2E）、pi（`pi-acp` + pi 本体，已探针级实测 + 真机 E2E，2026-11-01） | 先**全局安装**适配器（`npm i -g <包>`，npx 只作兜底），无需改 WeMind |
-| 覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt` | 跑 `wemind brain check` 实测；缺失即不可用 |
-| 能**完成认证** | 模型/登录态就绪，二进制在 PATH 上或用 `--bin` 指定 | 配 `wemind brain set <agent 名> --bin "<绝对路径>"` |
+常驻助手需要一个「大脑」——一个**实现 ACP 协议的命令行程序**。内置 **9 个 agent 预设**：原生 ACP 的 `opencode` / `cline` / `qoder` / `gemini` / `deepseek`（DSH）/ `kiro`（**未配置时按此顺序自动探测**，按实测启动耗时排序；6 个都至少过了探针级实测（gemini 已通过真机 E2E，2026-11-01），opencode / cline / qoder / deepseek / kiro 另有长期真机使用），以及三个需适配器的 `claude-code` / `codex` / `pi`（三者都已探针级实测 + 真机 E2E；只能显式选用，不参与自动探测）。**能不能接的四个必要条件**（可执行入口、实现 ACP 或装了适配器、覆盖最小方法集、能完成认证）与逐项判断见下方 [切换大脑 Agent](#切换大脑-agent通用化)。
 
 ```bash
 wemind brain                 # 看当前用的是哪个大脑
@@ -54,16 +42,18 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 | **想换 AI 大脑** | [切换大脑 Agent](#切换大脑-agent通用化) · [接入其它 ACP Agent](docs/接入方案/接入其它-ACP-Agent.md) · [OpenCode](docs/接入方案/接入-OpenCode.md) · [DeepSeek](docs/接入方案/接入-DeepSeek.md) · [Qoder](docs/接入方案/接入-Qoder.md) |
 | **想用远程任务** | [使用指南-远程任务](docs/使用指南/使用指南-远程任务（worker）.md) · [本地双入口](docs/机制与协议说明/本地双入口-命令派发与查看回复.md) |
 | **运维 / 部署** | [部署与运维](docs/repowiki/10-部署与运维.md) · [跨平台常驻（pm2）](docs/部署与运维/跨平台常驻-pm2.md) · [数据目录与环境变量速查](docs/使用指南/速查-数据目录与环境变量.md) |
-| **想改这个仓库 / 贡献代码** | [开发指南](docs/repowiki/11-开发指南.md) · [系统架构](docs/repowiki/02-系统架构.md) · [发布流程](docs/发布与变更记录/发布-wemind-npm.md) |
+| **想改这个仓库 / 贡献代码** | [开发指南](docs/repowiki/11-开发指南.md) · [系统架构](docs/repowiki/02-系统架构.md) · [发版手册](docs/发布与变更记录/如何发布新版本.md) |
 | **维护者 / 发布新版本** | [如何发布新版本](docs/发布与变更记录/如何发布新版本.md) —— 两个包的版本号、CI 流程、验收与常见坑 |
-| **AI 编码助手**（帮我改这个仓库的 agent） | 先读 [AGENTS.md](AGENTS.md) → [docs/ai/README.md](docs/ai/README.md)（含术语表与任务配方） |
+| **AI 编码助手**（帮我改这个仓库的 agent） | 先读 [AGENTS.md](AGENTS.md) → [docs/ai/README.md](docs/ai/README.md) → [术语表](docs/ai/术语表.md)（写作口径）与 [任务配方](docs/ai/recipes/) |
 
-深入架构、协议与运行机制：[docs/repowiki/](docs/repowiki/README.md) —— 依据源码整理的完整技术 wiki（含 Mermaid 图）。
+深入架构、协议与运行机制：[docs/repowiki/](docs/repowiki/README.md) —— 依据源码整理的完整技术 wiki（含 Mermaid 图）。**全库文档总索引**在 [docs/README.md](docs/README.md)。
 
 | 入口                                                     | 内容                                                    |
 | -------------------------------------------------------- | ------------------------------------------------------- |
+| [docs/README.md](docs/README.md)                         | **全库文档总索引**：按读者与主题分组                    |
 | [AGENTS.md](AGENTS.md)                                   | **AI 编码助手入口**：30 秒定位、硬约束、改哪里、已知坑 |
-| [docs/ai/README.md](docs/ai/README.md)                   | AI 上下文包：术语、数据流、事实状态表、任务配方         |
+| [docs/ai/README.md](docs/ai/README.md)                   | AI 上下文包：数据流、事实状态表、任务配方               |
+| [docs/ai/术语表.md](docs/ai/术语表.md)                   | 术语含义与中英写作口径                                  |
 | [RepoWiki 首页](docs/repowiki/README.md)                 | 按角色的阅读导航 + 章节目录                             |
 | [系统架构](docs/repowiki/02-系统架构.md)                 | 三包协作、两种接入形态、poller/worker 解耦、双 ACP 进程 |
 | [iLink 协议内核](docs/repowiki/03-iLink-协议内核.md)     | HTTP 客户端、协议类型、错误码、收发图加解密             |
@@ -87,7 +77,7 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 ## 环境要求
 
 - [Node.js](https://nodejs.org/) >= 20.19（发布包 `engines` 的下限；CI 在 Node 20 与 22 上验证，已在 Node 24 实测）。**从源码构建**需要 Node >= 22.18（`tsdown` 的 engines 要求；只安装/运行 `@wemind/cli`、`@wemind/wechat-mcp` 不受影响）
-- 仍兼容 Bun（可选）
+- Bun：产物是单文件 ESM，理论上可跑，但**未单独实测**（本文所有验证都在 Node 上）
 
 ## 项目结构（npm workspaces 三包）
 
@@ -101,7 +91,7 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 
 > 📌 上表「发布」列指的是**该子包**是否发布到 npm：对外发布的是 `@wemind/wechat-mcp`（MCP 形态）与 `@wemind/cli`（完整应用 CLI，命令 `wemind`）两个入口。两者共用同一个 bot token 时**只能二选一**。
 
-`@wemind/wechat-mcp` 与 `@wemind/cli` 发布时都用 [tsdown](https://tsdown.dev/)（rolldown + oxc）把 `core` **内联**进单一产物，**两个包各自自包含**；`core` 本身 `private: true`，永不单独发布。发布流程见 [`.github/workflows/wemind-publish.yml`](.github/workflows/wemind-publish.yml) 与 [`docs/发布与变更记录/发布-wemind-npm.md`](docs/发布与变更记录/发布-wemind-npm.md)。
+`@wemind/wechat-mcp` 与 `@wemind/cli` 发布时都用 [tsdown](https://tsdown.dev/)（rolldown + oxc）把 `core` **内联**进单一产物，**两个包各自自包含**；`core` 本身 `private: true`，永不单独发布。发布流程见 [`.github/workflows/wemind-publish.yml`](.github/workflows/wemind-publish.yml) 与 [`docs/发布与变更记录/如何发布新版本.md`](docs/发布与变更记录/如何发布新版本.md)。
 
 ## 安装（两种形态，二选一）
 
@@ -225,6 +215,8 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | 文件/目录                                     | 说明                                                                                                        |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `account.json`                                | Bot Token、botId、userId、baseUrl（POSIX 下权限 600；**Windows 下为明文**，见「安全说明」）                 |
+| `brain.json`                                  | **持久大脑配置**（`agent` 与各 agent 的 `presets` 启动覆盖）；热切换**成功才写**、失败不动，所以它始终等于「下次会用的那个大脑」 |
+| `allowFrom.json`                              | **登录者白名单**（兜底鉴权，默认拒绝；正常只含登录者一个 userId，**别清空**——清空后除登录者外的发件人全部被拒） |
 | `state.json`                                  | 长轮询游标（记录读到哪条了；`updatesBuf`）、各会话 `context_token`、`lastMessageId`（去重；POSIX 下权限 600） |
 | `qr_login.json` / `qrcode.png` / `qrcode.txt` | 扫码登录临时态与二维码（登录后即失效；`qr_login.json` POSIX 下权限 600）                                    |
 | `brain-sessions.json`                         | `<agent>:<userId> → ACP sessionId` 映射（按大脑分开存，切换 agent 互不覆盖）；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建） |
@@ -232,6 +224,11 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain-home/`                                 | brain 沙箱（由该 agent 配置里的 `homeEnvVar` 指向它；kiro 是 `KIRO_HOME`，opencode 是 `XDG_CONFIG_HOME`），含 agent 配置与 ACP 会话 |
 | `worker-sessions.json`                        | worker（远程任务）`ACP sessionId` 映射（键 `<agent>:task-<编号>@<userId>`），任务中断后据此 `load`/`resume` 续跑 |
 | `worker-home/`                                | worker 沙箱（同 brain 机制；MCP 继承**全量除 `wechat`** ＋ 记忆/技能/settings）                              |
+| `agent-sessions/`                             | agent 自己的会话库隔离位置（目前只有 DeepSeek/DSH 用：`deepseek/{brain,worker}/`，由预设的 `isolateSessions` + `--patch` 指过来，避免它把别的 agent 写的 `sessions/` 当成自己的库） |
+| `daemon.log`                                  | daemon 日志（stdout/stderr 合并；运行中按 `WEMIND_LOG_MAX_MB`（默认 10MB）轮转、保留 `WEMIND_LOG_KEEP`（默认 3）份） |
+| `wrapper.pid`                                 | 后台守护进程的 pid（builtin `_watchdog` 写；`wemind stop` 据此连它一起停，否则 daemon 会被 5s 后重拉）       |
+| `task-state.json`                             | 本地 `task-status` 读的运行态快照（状态/轮次/最近输出）                                                      |
+| `task-inbox/` `task-out/`                     | 本地任务命令桥（CLI 写 `dispatch`/`reply`/`stop`，daemon 写答复）                                            |
 | `workers.pid.json`                            | worker 进程池的**身份记录**（每条的 pid / agent / 真实 bin+args / busy\|idle / 任务编号；**单条时文件里是单个对象，多条是数组**）；`wemind stop` 一次杀光全部，旧账号的裸整数 `worker.pid` 仍兼容读取 |
 | `session-registry.json`                       | 会话**登记表**（名字/标题/轮次/最近使用；最多 50 条/人·大脑）——只供列表展示，「当前是哪个」的唯一权威仍是 `brain-sessions.json` |
 | `tasks.json`                                  | 任务表（编号/agent/状态/轮次/cwd/最近输出），用于**重启后续跑**：未完成的标「已中断」，回「继续」才续跑；损坏则降级为空表（只影响列表，不影响运行） |
@@ -241,9 +238,9 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain-runtime.json`                          | daemon 实际生效的大脑（agent/source/bin/args；启动/热切换写入，stop 清掉）——`wemind list` 在运行时据此显示真实 agent |
 | `pm2.app.json`                                | **仅 `--runner pm2`**：pm2 的 app 声明（5s 重拉 / 最多 50 次 / 退出码 78（大脑配置错误）与 75（同账号已有实例）停手 / 日志合并到 `daemon.log`）    |
 
-**多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<名>` 切换（→ `~/.wemind/<名>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。
+**多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<key>` 切换（→ `~/.wemind/<key>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。**`<key>` 不能随手起名**：它由 `wemind login` 从 botId 派生并登记进 `~/.wemind/accounts.json`（`wemind list` 可查）；写一个没登记过的名字，daemon 会去一个不存在的目录找凭证。日常用 `wemind start <key|label>` 选账号即可，不必手设这个变量。
 
-> **重置**：删 `account.json`+`state.json` = 退出登录重新扫码；删 `brain-sessions.json`+`brain-home/sessions/` = 清空对话记忆（用 DeepSeek 时它的会话库在 `agent-sessions/deepseek/`，要一并删）。
+> **重置**：删 `account.json`+`state.json` = 退出登录重新扫码；清空对话记忆要删 `brain-sessions.json` + 该 agent 配置目录下的会话库（kiro/pi 是 `brain-home/sessions/`，opencode/qoder/gemini/cline 等按各自的 `configSubdir`，DSH 是 `agent-sessions/deepseek/{brain,worker}/`）。
 
 > 📄 **速查**：改数据目录 / 迁移数据 / 环境变量用法（`WEMIND_HOME`、`WECHAT_DATA_DIR` 等，含初次运行指定路径与运行后迁移） → [docs/使用指南/速查-数据目录与环境变量.md](docs/使用指南/速查-数据目录与环境变量.md)。
 
@@ -274,7 +271,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 
 ## daemon：脱离 IDE/终端常驻自动收发
 
-> 📦 **作为 `wemind` CLI 使用**：本 daemon 已发布为 **`@wemind/cli`**，装完得到 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`；常驻默认用自带后台守护进程，也可 `--runner pm2`）。`npm i -g @wemind/cli` 后即可全局使用；包名与命令名不同，不安装、临时跑一次时写 `npx -y @wemind/cli`（`npx` 按包名解析，`npx wemind` 不可用）。发布与版本约定见 [`docs/发布与变更记录/发布-wemind-npm.md`](docs/发布与变更记录/发布-wemind-npm.md)；也可以按下文从源码运行。面向最终用户的一步步指引见 **[新手教程](docs/使用指南/新手教程.md)**。
+> 📦 **作为 `wemind` CLI 使用**：本 daemon 已发布为 **`@wemind/cli`**，装完得到 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`；常驻默认用自带后台守护进程，也可 `--runner pm2`）。`npm i -g @wemind/cli` 后即可全局使用；包名与命令名不同，不安装、临时跑一次时写 `npx -y @wemind/cli`（`npx` 按包名解析，`npx wemind` 不可用）。发布与版本约定见 [`docs/发布与变更记录/如何发布新版本.md`](docs/发布与变更记录/如何发布新版本.md)；也可以按下文从源码运行。面向最终用户的一步步指引见 **[新手教程](docs/使用指南/新手教程.md)**。
 
 `packages/wechat-daemon/` 提供一个独立 daemon：自己长轮询 iLink 收消息 →
 调 **常驻 ACP agent**（JSON-RPC over stdio；未配置时 `auto` 探测 opencode/cline/qoder/gemini/deepseek/kiro）当大脑生成回复 → 自动回发。
@@ -298,17 +295,19 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 >
 > **配对授权**：登录者白名单存于每账号的 `~/.wemind/<account>/allowFrom.json`（`finalize`/`adopt` 时自动写入扫码者；daemon 启动也会把登录者种入，老账号自动迁移），通常**无需任何手动配置**。管理命令（兜底用）：`allowlist <key|label>` 查看、`allow <key|label> <userId>` 加入、`revoke <key|label> <userId>` 移除（增删即时生效，无需重启 daemon）。鉴权 = 登录者（`WECHAT_OWNER_ID` 可覆盖）或 在白名单中。
 
-环境变量：
+环境变量（**常用项**；完整清单见 [docs/repowiki/09-配置项与环境变量.md](docs/repowiki/09-配置项与环境变量.md)）：
 
 | 变量                                                    | 说明                                                                                                                                |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `WEMIND_RUNNER`                                         | `wemind start` 的常驻外壳：`builtin`（默认，自带后台守护进程）/ `pm2`；与 `--runner` 等价                                |
 | `WECHAT_OWNER_ID`                                       | 登录者覆盖（默认 = 扫码登录该 bot 的微信号 user id；常规用配对授权 allowFrom，见上）                                                |
-| `WECHAT_ACCOUNT`                                        | 账号标识，决定状态子目录 `~/.wemind/<account>/`（默认 `default`）。多账号用不同值隔离                                               |
+| `WECHAT_ACCOUNT`                                        | 账号 key，决定状态子目录 `~/.wemind/<key>/`（默认 `default`）。**必须是 `wemind login` 登记过的 key**（见上文「多账号」），日常用 `wemind start <key\|label>` 即可 |
 | `WECHAT_DATA_DIR`                                       | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则                                                                           |
 | `WEMIND_HOME`                                           | 数据根目录（默认 `~/.wemind`）                                                                                                      |
 | `WECHAT_BRAIN_HOME`                                     | brain 沙箱目录（默认 `<数据目录>/brain-home`）                                                                                      |
 | `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS`          | 大脑单回合空闲/硬超时（默认 120000 / 900000；重任务实测需 ~6.5min）                                                                 |
 | `WECHAT_BRAIN_FIRST_FRAME_MS`                           | 首帧超时：prompt 发出后多久仍无任何帧判「开局即卡死」并快速重试（默认 25000）                                                       |
+| `WECHAT_BRAIN_HEARTBEAT_MS`                             | 静默期心跳间隔：多久没有帧就发一条「还在处理」进度（默认 15000，DSH 预设 60000）                                                     |
 | `WECHAT_CONSEC_SEND_LIMIT`                              | bot 在用户回复前可连续发送的消息数上限（默认 10）。达「上限-2」后发提示并等待「继续」，留最后一条给答案                             |
 | `WECHAT_MIN_SEND_GAP_MS`                                | 两条发送之间的最小间隔，规避发送限流（默认 1500）                                                                                   |
 | `WECHAT_REPLY_FILE_THRESHOLD`                           | 回复正文超过此字符数则转 .md 文件发送（默认 1500）                                                                                  |
@@ -329,6 +328,8 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WEMIND_SWITCH_DRAIN_MS` / `WEMIND_SWITCH_TIMEOUT_MS`   | 换大脑：等在途回合结束的上限（默认 30000）/ 启动新大脑（`initialize` + 会话）硬上限（到点就放弃，默认 120000）                                 |
 | `WEMIND_CONTROL_TIMEOUT_MS`                             | CLI 等 daemon 回话的上限（默认 30000；`brain switch` 自动放大到「启动新大脑 + 等在途回合结束 + 15s」，`brain.handoff` 按回合硬上限放大，默认 915s）                                                    |
 | `WEMIND_HANDOFF_TTL_MS`                                 | 交接摘要的有效期（默认 86400000，即 24h；过期不带上）                                                                               |
+| `WEMIND_SESSION_LOG_MAX` / `WEMIND_SESSION_PAGE_SIZE`   | 会话登记表每个「登录者 · 大脑」保留的条数上限（默认 50）/ 会话列表每页条数（默认 10）                                              |
+| `WEMIND_MAX_RESTARTS`                                   | 后台守护进程的**连续崩溃**重拉上限（默认 50；跑满 10 分钟视为稳定、计数清零），超限停止自动重启（pm2 由 `max_restarts` 管）        |
 | `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                 | `daemon.log` 单文件上限（默认 10MB）/ 轮转保留份数（默认 3；`0` = 不留历史）。内置 watchdog 运行中轮转，`run-daemon.ps1` 每次重拉前轮转；pm2 runner 交给 `pm2-logrotate` |
 | 大脑 agent 选择 / 记忆继承                              | 见下方「切换大脑 Agent」与 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
 
@@ -387,10 +388,10 @@ worker 与对话大脑是**独立的 ACP 进程，互不干扰**——而且是*
 - **回任务要显式寻址**：`#2 正文`（全角 `＃2：正文` 也认）；每条任务结果/中断推送末尾都会带一行 `↩ 回这条任务用「#2 正文」；不带前缀的消息会交给大脑。`，照着写即可。
 - 唯一的隐式续跑是裸「继续 / 接着跑 / continue」：存在可续跑的任务（有「等你回复」的，或没有活跃任务时存在「已中断」的）才交给任务侧；可续跑任务多条时它会回编号清单，不替你选。其它消息都归大脑。任务埋头跑时也一样。
 - 任务编号**按用户单调递增、不复用**，且**跨重启不归零**。
-- worker 每轮输出带 `🤖【任务】` 标记；跑一轮期间持续「正在输入中」（typing 不占连续发送上限）。
+- worker 每轮输出带 `🤖【任务】` 标记（**多条任务并存时为 `🤖【任务<编号>】`**）；跑一轮期间持续「正在输入中」（typing 不占连续发送上限）。
 - **daemon 重启**、**provider 报错**（额度/密钥/计费/模型不可用）或**续跑接不上**时，任务标**「已中断」**并在 `任务列表` 可见；回「继续」（或 `#n 继续`）才拉进程续跑（按该 agent 支持的方式试 `session/load` → `session/resume`）。**普通回合失败**（进程退出/超时等）则仍停在**「等你回复」**——直接回 `#n 继续` 或补充内容，下一轮会重建进程并恢复上下文。接不上会如实说明「这次接不上」，并指出重试是同一结果、要重来就结束这条任务后重新派一条；半截回合的副作用可能已发生，续跑前会提示核对（**不会**自动续跑）。
 - 并发上限默认 3（`WEMIND_MAX_WORKERS`），超出时派发被拒并提示。
-- 详见 [docs/设计文档/方案C-MVP-远程human-in-the-loop.md](docs/设计文档/方案C-MVP-远程human-in-the-loop.md)。
+- 完整用法见 [使用指南-远程任务（worker）](docs/使用指南/使用指南-远程任务（worker）.md)，实现细节见 [repowiki 07-远程任务-Worker](docs/repowiki/07-远程任务-Worker.md)。（`docs/设计文档/方案C-MVP-远程human-in-the-loop.md` 是 2026-06 的历史设计稿，其路由描述已被现行实现取代，不要拿它当行为说明。）
 
 **本地终端入口**（与微信并列、管同一任务，**不依赖微信**）：在电脑前用 `wemind` 直接管 worker 任务，适合开任务时贴长描述 / 指定工作目录，或专注电脑工作不想掏手机时。
 
@@ -402,7 +403,7 @@ worker 与对话大脑是**独立的 ACP 进程，互不干扰**——而且是*
 | `task-reply <编号> "<内容>" [<key\|label>]`（或 `task-reply "#编号 内容"`） | 回复/发话给任务（`task-reply 2 "继续"`；不给编号 = 唯一那条） |
 | `task-stop [<编号\|全部\|all>] [<key\|label>]`                | 结束任务（不给编号 = 唯一那条，多条并存回一份编号清单）                   |
 
-机制为**文件桥**：CLI 原子写 `task-inbox/*.json`（先写临时文件再改名；带 `ack` 答复编号），daemon 独立定时器扫描分发到同一套 task-manager，命令的真实结果写回 `task-out/<id>.json`（CLI 短轮询后打印它，所以「已派发」不会说谎：达上限被拒会如实说），状态写 `task-state.json`（另有一份 `tasks.json` 供重启续跑）。CLI 的 `brain switch` / `session *` 则走**控制桥**（daemon 在跑就进程内执行、回话给你；daemon 没跑时读命令降级为直接读文件（照常能用，只是不经过 daemon））。详见 [docs/机制与协议说明/本地双入口-命令派发与查看回复.md](docs/机制与协议说明/本地双入口-命令派发与查看回复.md)。
+机制为**文件桥**：CLI 原子写 `task-inbox/*.json`（先写临时文件再改名；带 `ack` 答复编号），daemon 独立定时器扫描分发到同一套 task-manager，命令的真实结果写回 `task-out/<id>.json`（CLI 短轮询后打印它，所以「已派发」不会说谎：达上限被拒会如实说），状态写 `task-state.json`（另有一份 `tasks.json` 供重启续跑）。CLI 的 `brain switch` / `session *` 则走**控制桥**（daemon 在跑就进程内执行、回话给你）。daemon 没跑时的行为分三种：**读命令**（`session list`、`session current`、`task-list`）照常能读，只是按「下次会用的那个大脑」列、附一行说明；**纯文件操作**（`session rename` / `delete`、不带 `--worker` 的 `brain switch`）可离线直改；**必须由 daemon 执行**的（`session resume`、`brain switch --worker`、`brain handoff`）会失败并提示先 `wemind start`——`resume` 要真的让 agent `load` 那条会话。`session new` 在离线时不会报错，但它只能**丢掉当前会话记录**（下条消息开新的），**名字不会生效**（命名要等会话真建好）。详见 [docs/机制与协议说明/本地双入口-命令派发与查看回复.md](docs/机制与协议说明/本地双入口-命令派发与查看回复.md)。
 
 ### 进度提示与连续发送上限
 
@@ -458,7 +459,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | `WEMIND_BRAIN_BIN`      | 覆盖二进制（绝对路径或 PATH 上的名字）              | 自动解析     |
 | `WEMIND_BRAIN_ARGS`     | 覆盖进入 ACP 模式的启动参数（空格分隔，整段替换）   | 内置默认值   |
 | `WEMIND_BRAIN_EXTRA_ARGS` | 追加启动参数（空格分隔，拼在预设/覆盖参数之后）   | 无           |
-| `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off` 关闭，其它值 = 该 modeId | 用预设值 |
+| `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off`/`no` 关闭，其它值 = 该 modeId | 用预设值 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（指向 brain 沙箱） | 内置默认值   |
 | `KIRO_CLI_BIN`          | 旧的 kiro 专用二进制覆盖（仍兼容）                  | —            |
 
@@ -478,7 +479,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 >
 > **Cline 已内置 agent（原生 ACP，3.0.74 实测）**：装 `npm i -g cline` 后 `wemind brain set cline` 即用 `cline --acp --auto-approve true` 当大脑；`providers.json` 登录态同步、`models.json` 模型目录同步（缺它会回退 `gpt-4o`）、`mcp.json` 文件式 MCP。**认证**：ACP 只自动恢复 `cline` / `cline-pass` / `openai-codex`；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER` + `CLINE_API_KEY`（父进程显式设了就不接管），通常无需手工配置。实测与限制见 **[docs/接入方案/接入-Cline.md](docs/接入方案/接入-Cline.md)**。
 >
-> **pi 已内置（探针级实测 + 真机 E2E，2026-11-01）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，Node ≥22）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 隔离沙箱（`settings.json` / `auth.json` / `models*.json` 原样同步，`skills/` junction、`AGENTS.md` 复制）；MCP 走 pi 自己的 `<沙箱根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动横幅用 pi 自己的 `quietStartup` 在沙箱里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入方案/接入-pi.md](docs/接入方案/接入-pi.md)**。
+> **pi 已内置（探针级实测 + 真机 E2E，2026-11-01）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，**Node ≥22.19**——它的 engines 要求，比适配器的 ≥20 更严）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 隔离沙箱（`settings.json` / `auth.json` / `models*.json` 原样同步，`skills/` junction、`AGENTS.md` 复制）；MCP 走 pi 自己的 `<沙箱根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动横幅用 pi 自己的 `quietStartup` 在沙箱里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入方案/接入-pi.md](docs/接入方案/接入-pi.md)**。
 
 ### 收发图片
 
@@ -516,9 +517,9 @@ Register-ScheduledTask -TaskName "wemind-daemon" -Action $action -Trigger (New-S
 
 > **注意 · 安装版没有 `scripts/`**：上面的 `run-daemon.ps1` 只存在于源码仓库；用 npm 安装的 CLI 请直接用 `wemind start`（自带后台守护进程），不要去找仓库脚本。
 
-> **注意 · node 由版本管理器管理时**：若 `node` 由 **fnm / nvm / Volta** 这类「只往交互 shell 注入 PATH」的工具管理，登录任务/服务（`-NoProfile`、无 shell 注入）的持久 PATH 里通常**没有 node**：wrapper 会找不到它，且 daemon 拉起的大脑（如 `opencode acp`）也解析不到。`scripts/run-daemon.ps1` 已内置回退（fnm `%APPDATA%\fnm\aliases\default`、Volta、`C:\Program Files\nodejs`）并把命中目录**前置进 PATH**；若安装位置不在其中，请改脚本候选或直接用绝对路径的 node 启动。另：PS7 若只以 WindowsApps 别名存在（无 `C:\Program Files\PowerShell\7\pwsh.exe`），优先走上面的 VBS 退路。
+> **注意 · node 由版本管理器管理时**：若 `node` 由 **fnm / nvm / Volta** 这类「只往交互 shell 注入 PATH」的工具管理，登录任务/服务（`-NoProfile`、无 shell 注入）的持久 PATH 里通常**没有 node**：`run-daemon.ps1` 会找不到它，且 daemon 拉起的大脑（如 `opencode acp`）也解析不到。`scripts/run-daemon.ps1` 已内置回退（fnm `%APPDATA%\fnm\aliases\default`、Volta、`C:\Program Files\nodejs`）并把命中目录**前置进 PATH**；若安装位置不在其中，请改脚本候选或直接用绝对路径的 node 启动。另：PS7 若只以 WindowsApps 别名存在（无 `C:\Program Files\PowerShell\7\pwsh.exe`），优先走上面的 VBS 退路。
 
-> 常驻底层原理（三层进程树、wrapper 后台守护进程循环、单实例 Mutex、开机自启、多账号隔离、pid 链与故障恢复）详见 [docs/部署与运维/daemon-常驻原理.md](docs/部署与运维/daemon-常驻原理.md)。
+> 常驻底层原理（三层进程树、后台守护进程循环、单实例 Mutex、开机自启、多账号隔离、pid 链与故障恢复）详见 [docs/部署与运维/daemon-常驻原理.md](docs/部署与运维/daemon-常驻原理.md)。
 >
 > **跨平台（Windows/Linux/macOS）常驻**：用 pm2 + 根目录 `ecosystem.config.cjs` 即可，详见 [docs/部署与运维/跨平台常驻-pm2.md](docs/部署与运维/跨平台常驻-pm2.md)。上面的 PowerShell 方案为 Windows 专用，二者对同一账号**只用一套**。
 
@@ -574,7 +575,7 @@ wemind login --label 工作号 --start
 - **环境变量是进程级的，不是账号级的**：`WEMIND_BRAIN`、API key、`WEMIND_MAX_WORKERS` 等由启动 daemon 的 shell 提供，同一 shell 启动的 N 个账号会一起继承——`WEMIND_BRAIN` 会同时压过每个账号的 `brain.json`（重启后都回到它指的大脑），`WEMIND_MAX_WORKERS` 是**每个 daemon 各自**的上限（N 个账号合计最多 N × 值）。用 `scripts/run-all-daemons.ps1` 拉起多账号时可设 `WEMIND_MAX_WORKERS_TOTAL`，脚本会按账号数均分后注入每个子进程（只覆盖它拉起的 daemon，已在运行的需重启）；单独 `wemind start` 的账号仍各按自己的值。要按账号取不同值，就分开环境启动；持久的大脑选择用各账号的 `wemind brain set`。
 - **少数 agent 仍会读真实 home**：微信消息、会话表、任务表与沙箱本身都是按账号隔离的，但有个别 agent 不支持把配置目录指到沙箱——`codex` 的适配器没有沙箱配置目录（认证/配置取真实 `~/.codex`）；`pi` 经 `pi-acp` 读真实 `~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills`；`qoder` 的 `memory/` 是指向真实 `~/.qoder/memory` 的 junction。**同一台机器上多个账号由不同的人使用**时，要意识到这些数据是共享的；同一个人自用多账号不受影响。详见 [repowiki 06](docs/repowiki/06-ACP-大脑与沙箱.md#少数-agent-的真实-home-仍跨账号共享)。
 
-**自启全部账号**：`scripts/run-all-daemons.ps1` 读注册表为每个账号起一个 daemon（各账号单实例守卫，重复运行安全）。Windows 启动文件夹的 VBS 已指向它，开机自动拉起所有已登记账号。
+**自启全部账号**：`scripts/run-all-daemons.ps1` 读注册表为每个账号起一个 daemon（各账号单实例守卫，重复运行安全）。**开机自启要你自己配**：仓库不带现成的 `.vbs`——按上节「Windows 登录自启」在 `shell:startup` 放一个 `.vbs`，让它调用 `scripts/run-all-daemons.ps1`，开机才会拉起所有已登记账号。（`scripts/` 只在源码检出里，npm 安装的包没有它。）
 
 ## 常见问题
 
@@ -586,7 +587,7 @@ wemind version                      # 确认装上且版本正确
 不想全局安装、只想临时跑一次时用 `npx -y @wemind/cli version`（`npx` 按包名解析，`npx wemind` 不可用）；不带版本号时 npx 会解析 `latest`，要固定版本可写 `@wemind/cli@<版本号>` 或改用全局安装。
 
 **扫码后一直卡在加载**
-切到手机流量（关掉 WiFi）再扫一次；二维码过期会自动刷新（15 分钟内有效）。
+切到手机流量（关掉 WiFi）再扫一次；二维码过期会自动刷新（`wemind login` 的整体登录窗口是 15 分钟，超时会提示重新扫码；MCP 形态的二维码本身 5 分钟内有效，过期后重新调 `login_qrcode`）。
 
 **登录成功但发给它没反应**
 1. `wemind list` 看是否「运行中」，`wemind brain check` 看大脑是否可用；

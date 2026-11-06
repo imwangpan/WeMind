@@ -112,16 +112,16 @@ askWorker 抛错（进程退出 / idle / cap 超时）
 |---|---|---|
 | 1 | `parseControl` 命中（mcp / 新会话 / 加载…） | 走 `handleControl`（brain 控制，保持） |
 | 2 | `结束任务` / `停止任务` / `/stop` | **停止**当前任务 |
-| 3 | **明确发 worker**：`任务` / `task` + **冒号**（`任务：`、`task:`，半角/全角均可）前缀，或行首 `>`（`任务 ` + 空格**不是**有效前缀——`parseTaskControl` 要求冒号，避免把「任务很重要」这类正常对话误判为派发） | 无活跃任务 → **派发**新任务；有 → **发给它/追加**（waiting 喂下一轮、running 暂存） |
+| 3 | **明确发 worker**：`任务` / `task` + **冒号**（`任务：`、`task:`，半角/全角均可）前缀，或行首 `>`（**2026-11-02 起另有 `任务 <agent 名>：正文`**——冒号前必须恰好是一个已知 agent 名；仅 `任务 ` + 空格且无冒号仍不是前缀，`parseTaskControl` 要求冒号，避免把「任务很重要」这类正常对话误判为派发） | 无活跃任务 → **派发**新任务；有 → **发给它/追加**（waiting 喂下一轮、running 暂存） |
 | 4 | **明确问大脑**：`问大脑` / `问大脑：` 前缀 | 去前缀 → 强制走 `handleMessage`（brain），即使 worker 在等你 |
 | 5 | 无前缀 ＋ 非图片 ＋ 裸「继续」类短句 ＋ 有可续跑任务 | 作为**续跑**喂 worker（2026-11-02 起；其余无前缀消息一律走大脑） |
-| 6 | 其余（running / 无任务 / 图片消息） | 走 `handleMessage`（brain 对话） |
+| 6 | 其余（无任务 / 图片消息 / 任何非「继续」的无前缀消息） | 走 `handleMessage`（brain 对话） |
 
 **核心**：
 - **默认归大脑**——worker 不再按 waiting/running 状态接管无前缀消息；回任务一律显式寻址（`#编号 正文` / `>` / `任务 …`），只有裸「继续」类短句才作为续跑口令。
-- **三种明确性**——`任务：`/`>` 强制发 worker、`问大脑` 强制发 brain、无前缀按 worker 状态。
+- **三种明确性**——`任务：`/`>` 强制发 worker、`问大脑` 强制发 brain、其余无前缀消息归 brain（`worker` 状态不再参与判定，见上方 2026-11-02 路由说明）。
 - worker 每轮输出带 `🤖【任务】` 来源标记，一眼可辨。
-- 图片消息始终走 brain（worker MVP 不收图）。
+- 图片消息始终走 brain（worker MVP 不收图）。**现行实现有个边界**：`isFastLane()` 只看文本，一条「继续」+ 图片会进快车道，出队后按续跑只带文本、图片被丢弃——要带图别用「继续」这类短句（2026-11-05 核对）。
 
 ### 5.2 任务状态机（单任务 MVP）
 
@@ -279,7 +279,7 @@ worker 复用现有 `WEMIND_BRAIN*` 的 agent 解析（同一 `resolveAgent()`�
 ## 13. 落地步骤
 
 1. `worker-acp.ts`：复制 acp-brain，改独立一个进程 / 单任务 session / 可配 cwd / 独立沙箱 / 宽松超时。
-2. worker 沙箱：泛化 `mcp-sandbox` 产出 `WORKER_HOME`（空 MCP、继承 steering/skills）。
+2. worker 沙箱：泛化 `mcp-sandbox` 产出 `WORKER_HOME`（**继承全量 MCP − `wechat`**，另继承 steering/skills；见 §8.4）。
 3. `task-manager.ts`：`ActiveTask` 状态机 + `runTask` 后台循环 + dispatch/inject/stop + `pushToUser`。
 4. `index.ts` `workerLoop`：插入路由分支（§5.1、§9）；「继续」编号判别（§8.6）。
 5. 构建 + typecheck + 单元测试（状态机路由、编号指定、发话/暂存）+ 真机跑一个漫长任务验证端到端闭环。

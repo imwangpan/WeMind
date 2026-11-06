@@ -2,7 +2,7 @@
 
 > 上一页：[5. daemon](05-daemon.md) ｜ 下一页：[7. 远程任务 Worker](07-远程任务-Worker.md)
 >
-> **最后核对**：2026-11-02 ｜ 代码以当前分支为准。
+> **最后核对**：2026-11-05 ｜ 代码以当前分支为准。
 
 daemon 的「大脑」是一个常驻的 AI agent 子进程，通过 ACP 协议驱动。本章讲清大脑的进程生命周期、会话管理、MCP 沙箱与记忆继承，以及如何换成别的 agent。
 
@@ -14,13 +14,15 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 
 | 方法 | 作用 | 注意 |
 |------|------|------|
-| `initialize` | 握手，返回 `agentCapabilities` | 看 `sessionCapabilities`、`promptCapabilities.image`、`mcpCapabilities` |
+| `initialize` | 握手 | **WeMind 只置 `initialized = true`，从不解析回包里的 `agentCapabilities`**——`load`/`resume`、图片、`mcpViaAcp` 全部取自 `brain-agents.ts` 的预设字段（见下条） |
 | `session/new` | 新建会话 | 绝对 `cwd`；可传 `mcpServers` |
 | `session/load` | 按 sessionId 恢复会话 | **不是所有 agent 都实现**（DSH 返回 `-32601`） |
 | `session/resume` | 恢复持久会话 | DSH 用这个；恢复日志但不回放旧更新 |
-| `session/prompt` | 发一轮提问 | 图片需 `image:true` |
+| `session/prompt` | 发一轮提问 | 图片能力看预设的 `images` 字段（不是 `initialize` 回包） |
 | `session/update`（通知） | 流式回包：`agent_message_chunk`（正文）、`agent_thought_chunk`（思考）、`tool_call`/`tool_call_update`（工具进度） | committed-only agent 可能整段提交 |
 | `session/request_permission`（反向请求） | agent 请求权限 | 客户端内置应答器：默认拒绝（`cancelled`）；可信部署设 `WEMIND_ACP_AUTO_ALLOW=1` 放行 `allow_once`/`allow_always`；接入前仍建议验证 |
+
+> ⚠️ **能力来自预设字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`mcpViaAcp` 都写在 `brain-agents.ts` 的 `ACP_AGENT_PRESETS` 里，来源是接入时的**探针实测**。因此接新 agent 必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进预设——代码不会自动适配（详见 [AGENTS.md §4.2](../../AGENTS.md)）。
 
 「接入一个新 agent」主要是告诉 WeMind「怎么把它以 ACP 模式启动」；协议层能复用，但**能力差异要按 agent 补**（见 §6.6）。
 
@@ -36,7 +38,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 
 ```mermaid
 graph TD
-    A["askBrain(userId, msg)"] --> W["等切换门（switchBlocking，有界）"]
+    A["askBrain(userId, msg)"] --> W["等切换门 waitWhileSwitching()（有界）"]
     W --> B["ensureProcess(ag)"]
     B --> C{"进程存活且已 initialized?"}
     C -->|否| D["reset() 杀旧进程<br/>spawn ag + initialize<br/>写 brain.pid 身份记录"]
@@ -45,13 +47,13 @@ graph TD
     E --> F{"内存有 session?"}
     F -->|否| G["读 brain-sessions.json<br/>有则 session/load（或 resume）恢复<br/>都失败则 session/new"]
     F -->|是| H
-    G --> H["promptRequest(ag)（流式）"]
+    G --> H["runTurn(ag) → promptAcp（流式）"]
     H --> I{"成功?"}
     I -->|是| J["拼接 agent_message_chunk 返回<br/>+ 写会话登记表（轮次/标题）"]
     I -->|否| K["reset() 杀进程自愈<br/>抛错（下条消息重建 + load/resume 恢复）"]
 ```
 
-### 三重超时（promptRequest）
+### 三重超时（`promptAcp`）
 
 `session/prompt` 用专门的超时策略，只要还在出帧就不打断（避免误杀「慢但在干活」的长查询）：
 
@@ -70,7 +72,7 @@ graph TD
 ### 会话管理
 
 - **每用户一个 ACP session**，映射持久化到 `brain-sessions.json`（键 `<agent>:<userId>`，按大脑分开存：切换 agent 后各自的会话互不覆盖，切回去仍能恢复），跨进程重建保上下文。这张**当前会话表是「当前是哪个会话」的唯一权威**。
-- 另有**会话登记表** `session-registry.json`（`session-registry.ts`）：每个成功回合记录 `turns+1` 与首条用户消息的标题（`titleOf`，剥掉交接前缀）、`lastUsedAt` 刷新；每 (agent,userId) 上限 50 条，淘汰**未命名**最旧、**绝不淘汰当前会话记录当前指向的那条**；daemon **启动时**按当前会话表回填一次（`syncFromPointerMap`，把功能上线前就存在的老会话补齐——运行中删掉它不会自动重建，下次启动才补）。它只是**派生元数据**——坏了最多导致「列表空」，写失败只记日志（不拖垮回合）。
+- 另有**会话登记表** `session-registry.json`（`session-registry.ts`）：每个成功回合记录 `turns+1` 与首条用户消息的标题（`titleOf`，剥掉交接前缀）、`lastUsedAt` 刷新；每 (agent,userId) 上限 50 条（`MAX_ENTRIES_PER_KEY`），裁剪分两轮——**先淘汰未命名的**，再淘汰命名过的，都是最旧优先。**「不淘汰当前会话」是有条件的**：`capEntries(keep)` 的保护集默认是空数组，只有 `upsertEntry` 自动把「本次写入的那条」放进去；`acp-brain` 的三个调用点（`touchEntry` / `markUsed` / 恢复后校准）都**不传**当前会话 id，所以补登记/刷新**别的**会话时，当前会话仍可能被淘汰（已知边界，2026-11-05 核对）。daemon **启动时**按当前会话表回填一次（`syncFromPointerMap`，把功能上线前就存在的老会话补齐——运行中删掉它不会自动重建，下次启动才补）。它只是**派生元数据**——坏了最多导致「列表空」，写失败只记日志（不拖垮回合）。
 - 会话管理指令（微信与 CLI 同源，实现层 `session-manager.ts`）：`新会话 [名字]` / `会话列表 [页]` / `恢复会话 <序号|名字|id前缀>` / `重命名会话 <序号|名字> <新名字>`（旧名字带空格时用引号括起来） / `删除会话 <序号>`；CLI 为 `wemind session new|list|resume|rename|delete`。
 - **`恢复会话` 是严格恢复**：`resumeSession(userId, sessionId)` 按该 agent 支持的方式试 `session/load` → `session/resume`，**都失败就如实报错、不回退 `session/new`、不改当前会话记录**（宁可报错，也不要「假恢复」）；成功才写当前会话记录 + 刷新登记表。**恢复成功后的模型设置（`session/set_config_option`）失败只记日志，不算恢复失败**——否则会白丢刚恢复的上下文。目标已是当前会话时直接回「当前就在这条会话上」（省一次往返）。
 - `会话列表` 只列**本人 + 当前大脑**的会话，末尾提示「另有 N 条属于其它大脑的会话，切回该大脑后可恢复」。
@@ -87,8 +89,8 @@ graph TD
 graph TD
     A["switchBrain(目标)"] --> B["预检：resolvePresetByName + agentProblem<br/>（未知/不可用 → 直接答复失败，不 spawn）"]
     B --> C["同目标已在飞？→ 复用同一次切换<br/>异目标已在飞？→ 拒绝（不排队）"]
-    C --> D["switchBlocking = true → drainTurn<br/>等在跑的回合结束（WEMIND_SWITCH_DRAIN_MS，默认 30s）<br/>超时 = 诚实失败（不砍回合）"]
-    D --> E["ensureBrainHome(目标)：准备沙箱（只增不删）"]
+    C --> D["beginSwitch() → drainTurn<br/>等在跑的回合结束（WEMIND_SWITCH_DRAIN_MS，默认 30s）<br/>超时 = 诚实失败（不砍回合）"]
+    D --> E["ensureBrainHome(目标)：准备沙箱（见下条：会清掉上一个 agent 留下的继承条目）"]
     E --> F["reset() → spawn + initialize<br/>+ ensureSession(触发者)<br/>（硬上限 WEMIND_SWITCH_TIMEOUT_MS，默认 120s）"]
     F -->|成功| G["写 brain.json（先落盘）→ setAgent（槽位）"]
     F -->|失败| H["回滚：清 pid 记录、槽位留旧大脑<br/>答复「已回滚到 X，下一条消息会自动重启它」"]
@@ -98,7 +100,7 @@ graph TD
 - **等在途回合结束，而不是丢弃**：切换请求到达时有回合在跑 → 等它跑完（默认 30s）再换；超时就如实报「切换失败」，绝不静默打断用户正在等的那条回复。
 - **切换期间到达的用户消息**在 `askBrain` 入口等切换门（有界），因此全程**只 spawn 一次**新进程（既没有「启动新大脑时先起一个、消息又起一个」的双起，也不会拿旧 agent 答新消息）。
 - **`WEMIND_BRAIN` 陷阱**：环境变量优先级高于 `brain.json`，所以命令式切换在进程内生效并写入磁盘，但**重启后若 env 还在，会回到 env 指的大脑**——答复里有警告，别把 env 写进 profile。
-- **沙箱无需撤销**：`ensureBrainHome(newAgent)` 只往新 agent 的 `configSubdir` 里**加**文件，不动旧 agent 的沙箱。
+- **沙箱本身不需要「撤销」**：切换失败时 `brain.json` 没写、槽位仍是旧大脑，所以不必回滚磁盘上的任何东西。但 `ensureBrainHome(newAgent)` **并非纯增量**：`sandbox-inherit.ts` 读 `.wemind-inherited.json` 清单，把**上一个 agent** 有、新 agent 不要的 `inheritDirs`（符号链接）与 `inheritFiles`（普通文件）清掉再链入新的（真实目录里的内容不动，只动沙箱里的链接/副本）。所以换 agent 后沙箱里不会留着上一个 agent 的 `skills`/`AGENTS.md`。
 - 已知窄窗口：`reset()` → 新进程写 pid 记录之间约 1s 内执行 `wemind stop`，可能漏杀新起的 ACP 子进程（与既有 `/加载` 触发 `restart()` 同类，不是新引入的形态）。
 
 ### 多账号下的范围、两个入口
@@ -114,7 +116,7 @@ graph TD
 | 写入磁盘 | 成功才写该账号的 `brain.json` | 同上（同一段代码） |
 
 - CLI 侧**没有跨账号批量**：要切多个账号就逐个写 `key`/`label`；`brain set` / `unset` / `check` / `handoff` 同样按账号寻址（省略 = 默认账号）。
-- 控制桥**只接受 agent 名与纯数据**，所以 `brain switch` 带 `--bin`/`--args`/`--shell`/`--model` 会被直接拒绝——那是 `brain set` 的活（配置变更，只写入磁盘）。带这些字段的配置改完，**daemon 在跑、认桥时可用 `wemind brain switch <同名 agent>` 当场应用**（`sameAgent()` 按 name/bin/args/model 判「是不是同一个」——改过就算一次真切换），否则重启 daemon；`--shell` 不在判据里，只能重启。安全边界见 [7. Worker](07-远程任务-Worker.md) §7.5。
+- 控制桥**只接受 agent 名与纯数据**，所以 `brain switch` 带 `--bin`/`--args`/`--extra-args`/`--shell`/`--model` 会被直接拒绝——那是 `brain set` 的活（配置变更，只写入磁盘）。带这些字段的配置改完，**daemon 在跑、认桥时可用 `wemind brain switch <同名 agent>` 当场应用**（`sameAgent()` 按 name/bin/args/model 判「是不是同一个」——改过就算一次真切换），否则重启 daemon；`--shell` 不在判据里，只能重启。安全边界见 [7. Worker](07-远程任务-Worker.md) §7.5。
 - `WEMIND_BRAIN` 压过命令式切换这一条，对**每个账号各自**成立。
 
 ### 少数 agent 的真实 home 仍跨账号共享
@@ -137,9 +139,9 @@ graph TD
 
 `onProgress` 把 `session/update` 帧翻译成进度事件（`tool`/`answer`/`thinking`/`activity`）给 daemon 上报。每个工具调用只上报一次（`seenTools` 去重），优先取 `rawInput.__tool_use_purpose` 作为人类可读描述。
 
-> **心跳注意**：`index.ts` 每 `HEARTBEAT_MS` 检查 `lastProgressAt`，只有 `session/update` 帧会刷新它。纯推理/committed-only 的 agent 长时间无帧时，会连续发「还在思考」，占微信约 10 条连发额度。
+> **心跳注意**：`index.ts` 每 `HEARTBEAT_DEFAULT_MS`（15s）检查 `lastProgressAt`，只有 `session/update` 帧会刷新它。纯推理/committed-only 的 agent 长时间无帧时，会连续发「还在思考」，占微信约 10 条连发额度。
 >
-> 默认是 15s，但**三层可覆盖**（优先级从高到低）：`WECHAT_BRAIN_HEARTBEAT_MS` env → 配置里的 `heartbeatMs`（DSH 已设为 60s）→ 15s 兜底。接新 agent 时优先在 agent 里设 `heartbeatMs`，而不是让用户配 env。
+> 实际间隔由 `heartbeatMsValue` 现算，**三层可覆盖**（优先级从高到低）：`WECHAT_BRAIN_HEARTBEAT_MS` env → 配置里的 `heartbeatMs`（DSH 已设为 60s）→ `HEARTBEAT_DEFAULT_MS`（15s）。接新 agent 时优先在 agent 里设 `heartbeatMs`，而不是让用户配 env。
 
 每个会话首轮会带上一段「可发图」系统提示，告诉大脑：需要发图时用 Markdown `![](图片链接或本地绝对路径)`，并提示**服务器从中国大陆下载图片**，优先选可直链下载的源（如 `raw.githubusercontent.com`），避开被墙或带热链保护的图床。该提示只影响「发图」；「收图」取决于 agent 的 `image` 能力。
 
@@ -161,7 +163,7 @@ brain 沙箱**默认不加载任何 MCP**（既快又安全，内置工具如 we
 | `加载 <名>` / `load <名>` | 加入激活集（`wechat` 永久禁止） |
 | `卸载 <名>` / `unload <名>` | 移除 |
 
-加载/卸载后 daemon 重启 ACP 进程以按新沙箱配置重载，下一条消息生效。**只有激活集真的变了才重启**（重复加载/卸载未激活项不会白杀一次进程）；**切脑进行中先等切换结束再重启**，避免把正在预热的新大脑杀在半路。激活集持久化在 `brain-mcps.json`；**catalog 按 agent 各自约定读取**：kiro 是 `settings/mcp.json`，opencode 是 `opencode.json` 的 `mcp.servers`，qoder 是 `settings.json` 的 `mcpServers`，pi 是沙箱根 `<BRAIN_HOME>/mcp.json`（kiro 格式 `{mcpServers}`），DSH 与 Claude Code 走 ACP `mcpServers`（Claude Code 的 catalog 是真实 `~/.claude.json` 的 `mcpServers`；无文件式 catalog 时用 `WEMIND_MCP_CATALOG`）。**不要跨 agent 借配置文件。**
+加载/卸载后 daemon 重启 ACP 进程以按新沙箱配置重载，下一条消息生效。**只有激活集真的变了才重启**（重复加载/卸载未激活项不会白杀一次进程）；**切脑进行中先等切换结束再重启**，避免把正在预热的新大脑杀在半路。激活集持久化在 `brain-mcps.json`；**catalog 按 agent 各自约定、从该 agent 的「真实」配置目录读**（`mcp-sandbox.ts` 的 `catalogPath()` 用 `realHome`，不是沙箱）：kiro 是 `~/.kiro/settings/mcp.json`，opencode 是 `~/.config/opencode/opencode.json` 的 `mcp.servers`，qoder 是 `~/.qoder/settings.json` 的 `mcpServers`，cline 是 `~/.cline/data/settings/cline_mcp_settings.json`，gemini 是 `~/.gemini/settings.json`（JSONC），pi 是 `~/.pi/agent/mcp.json`（kiro 格式 `{mcpServers}`）；DSH 与 Claude Code 走 ACP `mcpServers`（Claude Code 的 catalog 是真实 `~/.claude.json` 的 `mcpServers`）。`WEMIND_MCP_CATALOG` 可覆盖成任意路径。**「读真实、写沙箱」**：`加载 <名>` 只把定义拷进沙箱，真实配置文件一律不动。**不要跨 agent 借配置文件。**
 
 ### 记忆/规则/技能继承（mirrorRealKiro）
 
@@ -188,7 +190,7 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 
 ### AcpAgentPreset 与解析
 
-`AcpAgentPreset` 描述一个 agent：`bin`/`binWin`（二进制名）、`requiresBins`（除 bin 外还必须在 PATH 上解析到的运行时，如 `pi-acp` 需要 `pi` 本体；缺失时 `agentProblem()` 直接报安装提示，不等 `session/new` 才炸）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名）、`shell`（是否经 shell 启动）、`env`（**强制**注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批/沙箱开关）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——沙箱**原样复制**真实的 `profiles/<名>/cordis.patch.yml`，并从它读默认模型（DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`），目前只有 DSH 用：`"acp"`）、`realHome`/`inheritDirs`/`inheritFiles`（记忆继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`settingsBase`（以真实设置为基底并剥离 MCP/插件/providers）、`credentialFiles`/`identityFiles`（登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`）、`kiroEngine`（kiro：按 `--agent-engine` / `acp.agentEngine` / CLI 主版本判 v2/v3——`acp --help` 说两者都没设时默认 v2，CLI ≥3 默认 v3 为假设/待实测；v3 剔 v2 参数并写沙箱 `settings/permissions.yaml`）、`isolateSessions`（DSH：`--patch` 把会话 root 指到账号数据目录）。此外还有 `restore` / `images` / `mcpViaAcp` / `modelArg` / `replayOnLoad` / `settingsStrip` / `settingsDefaults` / `mcpFormat` / `mcpConfigFile` / `catalogFile` 等字段（按 agent 覆盖协议能力与沙箱约定）；完整字段表见 [接入其它-ACP-Agent.md](../接入方案/接入其它-ACP-Agent.md) §4。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量，并在起进程前调 `prepareAgent(ag)` 落盘派生配置（目前是 DSH 的 `--patch` 文件）。
+`AcpAgentPreset` 描述一个 agent：`bin`/`binWin`（二进制名）、`requiresBins`（除 bin 外还必须在 PATH 上解析到的运行时，如 `pi-acp` 需要 `pi` 本体；缺失时 `agentProblem()` 直接报安装提示，不等 `session/new` 才炸）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名）、`shell`（是否经 shell 启动）、`env`（**强制**注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批/沙箱开关）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——沙箱**原样复制**真实的 `profiles/<名>/cordis.patch.yml`，并从它读默认模型（DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`），目前只有 DSH 用：`"acp"`）、`realHome`/`inheritDirs`/`inheritFiles`（记忆继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`configSubdir`（agent 配置目录相对沙箱根的子路径：kiro 空=沙箱根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`）、`settingsBase`（以真实设置为基底并剥离 MCP/插件/providers）、`credentialFiles`/`identityFiles`（登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`）、`kiroEngine`（kiro：按 `--agent-engine` / `acp.agentEngine` / CLI 主版本判 v2/v3——`acp --help` 说两者都没设时默认 v2，CLI ≥3 默认 v3 为假设/待实测；v3 剔 v2 参数并写沙箱 `settings/permissions.yaml`）、`isolateSessions`（DSH：`--patch` 把会话 root 指到账号数据目录）。此外还有 `restore` / `images` / `mcpViaAcp` / `modelArg` / `replayOnLoad` / `firstFrameMs`（首帧超时覆盖）/ `heartbeatMs`（静默期心跳间隔覆盖）/ `settingsStrip` / `settingsDefaults` / `mcpFormat` / `mcpConfigFile` / `catalogFile` 等字段（按 agent 覆盖协议能力与沙箱约定）；完整字段表见 [接入其它-ACP-Agent.md](../接入方案/接入其它-ACP-Agent.md) §4。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量，并在起进程前调 `prepareAgent(ag)` 落盘派生配置（目前是 DSH 的 `--patch` 文件）。
 
 内置 agent：
 
@@ -215,11 +217,11 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 | 层 | 内容 | 用途 |
 |----|------|------|
 | 环境变量 | `WEMIND_BRAIN` / `_BIN` / `_ARGS` / `_HOME_ENV` / `_SHELL` / `_INHERIT` / `_REAL_HOME` / `_INHERIT_DIRS` / `KIRO_CLI_BIN`；worker 侧 `WEMIND_WORKER_BRAIN` | 一次性覆盖（临时试别的 agent，别写进 profile） |
-| 账号配置 | `<数据目录>/brain.json`：`{ agent, bin?, args?, shell?, homeEnvVar?, model?, worker?: {…}, presets?: { <agent 名>: {…} } }` | **持久选择**，任何入口重启都复现 |
+| 账号配置 | `<数据目录>/brain.json`：`{ agent, bin?, args?, extraArgs?, shell?, homeEnvVar?, model?, worker?: {…}, presets?: { <agent 名>: {…} } }` | **持久选择**，任何入口重启都复现 |
 | `auto` | 未配置时按 `opencode → cline → qoder → gemini → deepseek → kiro` 探测第一个可用 agent | 缺省兜底 |
 
-- **`presets` 段（1.2.0 新增）**：按**agent 名**保存启动覆盖（`--bin`/`--args`/`--shell`/`homeEnvVar`/`model`）。因为顶层那几个字段是「当前 agent 的覆盖」，切走再切回就会丢（典型：DSH 的 `--bin <绝对路径>`）——换 agent 时旧覆盖自动迁进 `presets[旧 agent]`，同一 agent 再次 `set` 时沿用未给出的字段。
-- **`worker` 段**：默认任务大脑（`{agent, bin?, args?, shell?, homeEnvVar?, model?}`，与顶层同字段；`model` 同样在会话建立/恢复后经 `session/set_config_option` 下发）。它也带 `presets` 查找上下文——`agentConfigFor("worker")` 会把顶层的 `presets` 带进 worker 段，否则「有 `worker.agent` 时 `presets[agent]` 查不到」、`--bin` 之类覆盖会静默失效。
+- **`presets` 段（1.2.0 新增）**：按**agent 名**保存启动覆盖（`--bin`/`--args`/`--extra-args`/`--shell`/`homeEnvVar`/`model`）。因为顶层那几个字段是「当前 agent 的覆盖」，切走再切回就会丢（典型：DSH 的 `--bin <绝对路径>`）——换 agent 时旧覆盖自动迁进 `presets[旧 agent]`，同一 agent 再次 `set` 时沿用未给出的字段。
+- **`worker` 段**：默认任务大脑（`{agent, bin?, args?, extraArgs?, shell?, homeEnvVar?, model?}`，与顶层同字段；`model` 同样在会话建立/恢复后经 `session/set_config_option` 下发）。它也带 `presets` 查找上下文——`agentConfigFor("worker")` 会把顶层的 `presets` 带进 worker 段，否则「有 `worker.agent` 时 `presets[agent]` 查不到」、`--bin` 之类覆盖会静默失效。
 - 切换用 CLI：`wemind brain set <agent 名|auto> [--bin X] [--args "…"] [--extra-args "…"] [--model X|auto] [--restart]`、`wemind brain unset`、`wemind brain`（查看，「生效」行含 `model=`）、`wemind brain check`（真起进程跑 ACP 握手）、**`wemind brain switch <agent 名|auto> [--worker]`（运行时换大脑，见 §6.2）**。`brain set` 现在是**读-改-写**（早期版本是整体覆盖，会把 `worker`/`presets` 段抹掉），并且**在 daemon 在跑且认控制桥时，纯 agent 名会立刻当场应用（不用重启）**（等价 `brain switch`：先启动新大脑、成功才写入磁盘）；带 `--bin`/`--args`/`--extra-args`/`--shell`/`--model` 时只写入磁盘——控制桥刻意不接受这些字段（安全边界，见 §7.5），但其中 `--bin`/`--args`/`--extra-args`/`--model` 的改动可由随后的 `wemind brain switch <同名 agent>` 当场应用（判据见上一条），否则重启 daemon。`--args` 是**整段替换**（漏掉 `acp` 这类模式参数会导致「进程起得来、不实现 ACP」）；`--extra-args` 追加在末尾，适合只加开关（解析出的 args 里没有该 agent 的 ACP 模式标记时，`wemind brain` / `brain set` 只**警告**不阻止，自定义 `--bin` 时跳过）。`--model` 指定默认模型（格式 `["provider 路由","模型名"]`，如 `'["deepseek-account","deepseek-flash"]'`），会话建立后经 `session/set_config_option` 下发一次（显式覆盖以它为准）；解析优先级「本段 > `presets[agent 名]` > 真实 profile 的默认 > 预设兜底」，其中「真实 profile 的默认」由 `profile-model.ts` 读（**优先用户自己写的 `- id: acp`，否则 `agent-default-model`**）。`--model auto`（或 `default`）= **跟随真实 profile 的默认**——DSH 读 `~/.dsh/profiles/acp/cordis.patch.yml`（典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端在运行），读不到就**不下发**（`auto` **不**回退预设值：DSH 会用它自己的默认 `deepseek-official/deepseek-v4-flash`，仍需 `DEEPSEEK_API_KEY`）；只有**没写** `model` 的默认情形、读不到时才落到预设的 `deepseek-account/deepseek-flash` 兜底。**WeMind 不替 agent 合成配置**：profile 里缺 `- id: acp` 时只由 `wemind brain` 给出可粘贴的片段、让用户补到真实文件（§4.14 的纪律）。daemon 没跑（或跑的是不认桥的旧版）时同样是「写入磁盘 + 下次启动生效」，答复会写明。
 - **启动即校验**：daemon 起来时先解析并校验二进制；不可用则 `[wemind/wechat-daemon] FATAL 大脑不可用：…` 并以退出码 78 退出（后台守护进程据此停止自动重启，不再每 5s 刷屏）；未知 agent 名也不再静默回退 kiro。
 
@@ -229,7 +231,7 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 | `WEMIND_BRAIN_BIN` | 覆盖二进制 |
 | `WEMIND_BRAIN_ARGS` | 覆盖启动参数（空格分隔、整段替换） |
 | `WEMIND_BRAIN_EXTRA_ARGS` | 追加启动参数（空格分隔，拼在预设参数之后） |
-| `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的 `sessionMode`（`0`/`false`/`off` 关闭，其它非空值 = 该 modeId） |
+| `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的 `sessionMode`（`0`/`false`/`off`/`no` 关闭，其它非空值 = 该 modeId） |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖配置目录环境变量名 |
 | `WEMIND_BRAIN_SHELL` | 是否经 shell 启动（npx/.cmd 类在 Windows 需要） |
 | `WEMIND_BRAIN_INHERIT` | 是否继承记忆（默认 1） |
@@ -258,7 +260,7 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 
 ### 验证接入
 
-启动 daemon 后给 bot 发消息，看 `~/.wemind/<key>/daemon.log` 应出现 `[wemind/wechat-daemon/acp] spawn ...` → `initialized` → `session/new` 或 `load`/`resume` → `session/prompt` → `prompt ok`。也可 `wemind brain` 看解析结果、`wemind brain check` 真起一个进程跑 ACP 握手（`initialize` + `session/new`；默认 60s，冷启动慢的 agent 仍可能误报）。
+启动 daemon 后给 bot 发消息，看 `~/.wemind/<key>/daemon.log` 应出现 `[wemind/wechat-daemon/acp] spawn ...` → `initialized` → `session/new` 或 `load`/`resume` → `session/prompt` → `prompt ok`。也可 `wemind brain` 看解析结果、`wemind brain check` 真起一个进程跑 ACP 握手（`initialize` + `session/new`；**预设声明了 `sessionMode` 时还会再发一次 `session/set_mode`**，失败不判失败，只在结论里附 `modeNote`「免审批模式可能不可用…」——验证 claude-code / codex 时这一步最关键；默认 60s，冷启动慢的 agent 仍可能误报）。
 
 ## 6.5 大脑 vs worker 的沙箱对比
 
@@ -278,13 +280,13 @@ worker 沙箱详见 [7. 远程任务 Worker](07-远程任务-Worker.md#worker-�
 
 | 检查项 | 怎么看 | 不满足时的影响 | 处置 |
 |---|---|---|---|
-| `session/load` | `initialize` / 实测 | 不支持 → `-32601` → 当前代码新建会话，**丢多轮上下文** | 用 `session/resume` 兜底，再失败才 `new` |
-| `session/resume` | `initialize.sessionCapabilities` | 也没有 → 无法自愈恢复 | 接受「重启即新会话」，或换 agent |
-| `image` | `initialize.promptCapabilities.image` | false → 带图 `prompt` 报 `-32602` | 在 `askBrain` 前拦截，或换 agent |
-| MCP 传输 | `mcpCapabilities` + 实测 | 不支持 ACP MCP → 动态 MCP 不可用 | 走 agent 自己配置文件，或先不做 |
-| 反向请求 | 跑一次 prompt，记录 `method`+`id` | 不应答 → 挂到超时 | 加 `session/request_permission` 应答器 |
-| 正文粒度 | 看 `agent_message_chunk` 数量 | committed-only → 心跳刷屏、首帧慢 | 调 `firstFrameMs` + `heartbeatMs` |
-| Windows 入口 | `Get-Command` / 实际文件 | `.cmd` 未经 shell → 启动失败 | `shell:true`，`binWin` 写实际文件名 |
+| `session/load` | 探针实测（`scripts/acp-probe.mjs`）；回包里的 `agentCapabilities` 代码不读 | 不支持 → `-32601` → 当前代码新建会话，**丢多轮上下文** | 预设写 `restore: "resume"` 用 `session/resume` 兜底，再失败才 `new` |
+| `session/resume` | 同上：实测 + 预设字段 | 也没有 → 无法自愈恢复 | 接受「重启即新会话」，或换 agent |
+| `image` | 探针带图跑一次 prompt；结论写进预设的 `images` | 预设 `images: false` → `planImageTurn()` 按「有文字只按文字答、无文字才拒绝」处理；即便漏到 `askBrainTurn`，也只会附一句「当前大脑不支持图片」而不带图 | 友好拒绝，或换 agent |
+| MCP 传输 | 探针传非空 `mcpServers` 实测；结论写进预设的 `mcpViaAcp` | 不支持 ACP MCP → 动态 MCP 不可用 | 走 agent 自己配置文件，或先不做 |
+| 反向请求 | 跑一次 prompt，记录 `method`+`id` | 不应答 → 挂到超时 | 应答器已在 `acp-reverse.ts` 统一（brain/worker/`brain check` 共用），一般无需再写 |
+| 正文粒度 | 看 `agent_message_chunk` 数量 | committed-only → 心跳刷屏、首帧慢 | 调 `firstFrameMs` + `heartbeatMs`（静默期心跳间隔） |
+| Windows 入口 | `Get-Command` / 实际文件 | `.cmd` 未经 shell → 启动失败 | 用 `spawnAgent()`（内部经 shell），`binWin` 写实际文件名 |
 
 **已实测反例（DSH 0.2.1-rc.2）**：无 `load`、有 `resume`、`image:false`、`mcp.http:true`。详见 [接入-DeepSeek](../接入方案/接入-DeepSeek.md) 附录。
 

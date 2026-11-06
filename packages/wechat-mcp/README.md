@@ -50,7 +50,11 @@
 
 > 上表为 description 的**简写转述**（`…` 表示省略），不是逐字原文；完整、准确的原文见 `src/index.ts`。工具说明**一律英文**（MCP 生态惯例 + 模型对 `MUST` / `wait=true` 这类强制约束的英文原文遵循度更高）；用户能看到的提示文案在 `tools/*.ts` 的 `message` 字段，均为中文。
 >
+> **`get_messages` 的两个入参**：`wait`（默认 `false`；`true` 时阻塞到有新消息，最长 7 天，**要求 MCP 客户端不设工具超时**）与 `timeout`（长轮询超时毫秒，默认 `10000`，范围 `1000–60000`；**`wait=true` 时忽略**）。Agent 通常只用 `wait=true`，这两个参数在 description 里会看到。
+>
 > 表中 `check_qrcode_status` 的 description 里 `npx -y @wemind/cli login` 是源码 description 的原文——不安装、临时运行 CLI 时这样写；全局安装后等价的命令是 `wemind login`。
+>
+> **登录态过期**：扫码登录后凭证会随平台策略过期。此时工具返回 `status: "session_expired"`，处理方式同 `check_qrcode_status` 的 expired 分支——先 `logout` 再调 `login_qrcode` 重新扫码，**不要**反复重试 `get_messages`。
 
 ## 使用流程
 
@@ -62,7 +66,9 @@
 
 ## 注意
 
-- 凭证存在 `~/.wemind/<account>/account.json`（**Windows 下为明文**，请用文件夹权限/磁盘加密保护）。
+- ⚠️ **同一个 bot token 只能有一个消费者**：本 MCP server 与 [`@wemind/cli`](https://www.npmjs.com/package/@wemind/cli) 的 daemon **二选一**。两边同时跑会互相抢消息、出现重复回复或丢消息。切换形态前先停掉另一个。
+- `get_messages` 只返回**登录者**（扫码登录这个 bot 的微信号）或登录者白名单（`allowFrom.json`）内的消息，其它发件人的消息会被过滤——这是兜底鉴权，不是权限配置入口。
+- 凭证存在 `~/.wemind/<account>/account.json`（**Windows 下为明文**，请用文件夹权限/磁盘加密保护）。账号目录由 `WECHAT_ACCOUNT`（默认 `default`）或 `WECHAT_DATA_DIR`（直接指定完整路径）决定；不设就用 `~/.wemind/default`。
 - **与 CLI 账号体系对接**：标准目录（默认 `~/.wemind/default`、未设 `WECHAT_DATA_DIR`）登录成功后会自动登记进 `~/.wemind/accounts.json`，`wemind list` / `start` 可直接看到；退登时按 botId 核对后注销条目。自定义 `WECHAT_DATA_DIR` 不登记（注册表指向 `~/.wemind/<key>`，登记会指错目录）。
 - iLink **不能主动发起对话**，只能在收到用户消息的会话上下文内回复。
 - 这是腾讯新开放的插件通道，官方保留随时停服的权利，勿用于关键业务；需较新微信客户端并启用 ClawBot 插件。

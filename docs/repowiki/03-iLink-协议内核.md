@@ -1,6 +1,8 @@
 # 3. iLink 协议内核（@wemind/wechat-ilink-core）
 
 > 上一页：[2. 系统架构](02-系统架构.md) ｜ 下一页：[4. MCP Server](04-MCP-Server.md)
+>
+> **最后核对**：2026-11-05
 
 协议内核是整个项目的地基：它封装了与腾讯 iLink 服务器通信的全部细节，对上提供纯粹、无状态依赖的 API。MCP server 和 daemon 都只依赖它。
 
@@ -10,22 +12,23 @@
 packages/wechat-ilink-core/src/
 ├── index.ts              # barrel 导出（统一出口）
 ├── config.ts             # ILINK_APP_ID 常量
+├── pkg-version.ts        # 读自身 package.json 的 version（MCP / CLI 的 version 命令都靠它）
 ├── api/
 │   ├── client.ts         # iLink HTTP 客户端（核心）
 │   ├── types.ts          # 完整协议类型定义
 │   ├── error-codes.ts    # iLink 业务错误码（ret/errcode）
 │   ├── transport-errors.ts  # 网络传输层错误分类
-│   ├── session-guard.ts  # 会话过期冷却
-│   └── session-guard.test.ts
+│   └── session-guard.ts  # 会话过期冷却
 ├── store/
 │   ├── account.ts        # 单账号凭证/状态持久化 + DATA_DIR 解析
 │   ├── accounts.ts       # 多账号注册表
-│   └── allow-from.ts     # 授权发件人清单（安全闸）
+│   ├── allow-from.ts     # 授权发件人清单（安全闸）
+│   └── file-lock.ts      # 跨进程写锁（accounts / allowFrom 的并发写保护）
 └── cdn/
     └── image.ts          # 收发图/文件的 AES 加解密 + CDN 上传下载
 ```
 
-`index.ts` 是一个 barrel 文件，把以上全部统一导出，消费方只需 `import { ... } from "@wemind/wechat-ilink-core"`。
+`index.ts` 是一个 barrel 文件，把 `config` / `pkg-version` / `api/*` / `store/account` / `store/accounts` / `store/allow-from` / `cdn/image` 统一导出，消费方只需 `import { ... } from "@wemind/wechat-ilink-core"`。注意 **`store/file-lock.ts` 不在 barrel 里**——它只供 core 内部（`accounts.ts` / `allow-from.ts`）使用，外部拿不到 `withFileLock`。core 共 9 个测试文件（`client` / `session-guard` / `transport-errors` / `image` / `pkg-version` / `account` / `accounts` / `allow-from` / `file-lock`），与源码同目录平铺；**`api/error-codes.ts` 没有对应测试**（它的分类逻辑由 `client.test.ts` 间接覆盖）。
 
 ## 3.2 HTTP 客户端（api/client.ts）
 
@@ -59,9 +62,9 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 ### 两个健壮性细节
 
-1. **超时与慢响应**：用 `AbortController` 控制超时，但要在**读完响应体后**才 `clearTimeout` —— 否则慢 body 不受超时保护，长轮询尤其可能无限阻塞。`getUpdates` / `pollQRStatus` 命中 `AbortError` 时不抛错，而是返回「空结果」让调用方继续轮询。
+1. **超时与慢响应**：用 `AbortController` 控制超时，但要在**读完响应体后**才 `clearTimeout` —— 否则慢 body 不受超时保护，长轮询尤其可能无限阻塞。`getUpdates` / `pollQRStatus` 命中**自身超时**的 `AbortError` 时不抛错，而是返回「空结果」让调用方继续轮询；但**调用方主动取消**（signal 由外部 abort）时 `getUpdates` 会把该错误重新抛出——MCP 的 `cancelled` 返回就依赖这一点。
 
-2. **HTTP 200 不等于成功**：iLink 即使 HTTP 200，响应体里也可能带非 0 的 `ret`/`errcode` 表示失败。所有「有语义响应体」的接口（`sendMessage` / `sendTyping` / `getConfig` / `getUploadUrl`）都走同一个 `throwIfErrorCode`，拿到非 0 错误码时抛 `ILinkError`（携带原始码 + 分类），避免「假成功」（消息其实没送达）；调用方不再需要自己重复校验。`throwIfErrorCode` **分别判断 `ret` 与 `errcode`**：`ret ?? errcode` 在 `ret=0`、`errcode=-14` 时会取到 0，把会话过期掩盖成成功。`getUpdates` 的 `errcode` 留给调用方处理（`-14` 要触发冷却），但 `ret≠0` 且无 `errcode` 时直接抛 `ILinkError`，否则会被当成「这轮没有新消息」静默空转。例外：`notifyStart` / `notifyStop` 是 best-effort，刻意只记日志不抛。防御性 JSON 解析失败时抛带 label 与响应片段的清晰错误，而非裸 `SyntaxError`；空/非 JSON 的成功响应（服务端部分接口无响应体）不会误报失败。HTTP 非 2xx 抛 `HttpStatusError`（带状态码），由 `classifyTransportError` 判可重试性。
+2. **HTTP 200 不等于成功**：iLink 即使 HTTP 200，响应体里也可能带非 0 的 `ret`/`errcode` 表示失败。所有「有语义响应体」的接口（`sendMessage` / `sendTyping` / `getConfig` / `getUploadUrl`）都走同一个 `throwIfErrorCode`，拿到非 0 错误码时抛 `ILinkError`（携带原始码 + 分类），避免「假成功」（消息其实没送达）；调用方不再需要自己重复校验。`throwIfErrorCode` **分别判断 `ret` 与 `errcode`**：`ret ?? errcode` 在 `ret=0`、`errcode=-14` 时会取到 0，把会话过期掩盖成成功。`getUpdates` 的 `errcode` 留给调用方处理（`-14` 要触发冷却），但 `ret≠0` 且无 `errcode` 时直接抛 `ILinkError`，否则会被当成「这轮没有新消息」静默空转。例外：`notifyStart` / `notifyStop` 是 best-effort，刻意只记日志不抛。**JSON 解析按接口分两类**：读类接口（`getUpdates` / `getConfig` / `getUploadUrl` / `fetchQRCode` / `pollQRStatus`）解析失败即抛带 label 与响应片段的清晰错误，而非裸 `SyntaxError`；写类接口（`sendMessage` / `sendTyping`）走 `tryParseJson`，空或非 JSON 响应一律返回 `null` 并**按成功处理**——HTTP 200 的代理错误页因此会被误判为「已送达」（已知局限，要根治需改代码）。HTTP 非 2xx 抛 `HttpStatusError`（带状态码），由 `classifyTransportError` 判可重试性。
 
 ## 3.3 协议类型（api/types.ts）
 
@@ -99,10 +102,12 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 ## 3.4 错误码体系（api/error-codes.ts）
 
-iLink 有两个语义不同的错误字段：
+iLink 有两个语义不同的错误字段，**它们不是按接口划分的**——同一个响应体里可能同时出现：
 
-- `ret`：发送/上传等 RPC 的返回码（`sendmessage` / `getuploadurl`）；
-- `errcode`：长轮询/会话类接口的错误码（`getupdates`）。
+- `ret`：RPC 返回码，发送/上传类（`sendmessage` / `getuploadurl`）最常见；
+- `errcode`：会话类错误码，`getupdates` 最常见，`sendTyping` / `getConfig` 的响应类型也声明了它。
+
+`throwIfErrorCode` 对两个字段**分别检查**，任何一个非 0 都抛；唯一例外是 `getUpdates` 的 `errcode` 留给调用方处理（`-14` 要触发冷却）。
 
 已知错误码：
 
@@ -142,14 +147,14 @@ API：`pauseSession` / `isSessionPaused` / `getRemainingPauseMs` / `clearSession
 
 ### 数据目录解析（store/account.ts）
 
-`DATA_DIR` 按优先级解析：
+`DATA_DIR` 按优先级解析（`store/account.ts`）：
 
 1. `WECHAT_DATA_DIR`：显式指定完整路径（最高优先级）；
-2. 否则 `~/.wemind/<account>`，`<account>` 取自 `WECHAT_ACCOUNT`（默认 `default`）。
+2. 否则 `path.join(WEMIND_ROOT, ACCOUNT_KEY)` —— `WEMIND_ROOT` 定义在 `store/accounts.ts`：`WEMIND_HOME` 非空则用它，否则 `~/.wemind`；`ACCOUNT_KEY` 取自 `WECHAT_ACCOUNT`（默认 `default`）。
 
-多账号即「不同 `WECHAT_ACCOUNT` → 不同目录 → 互相隔离」。
+多账号即「不同 `WECHAT_ACCOUNT`（或不同 `WECHAT_DATA_DIR`）→ 不同目录 → 互相隔离」。**设了 `WEMIND_HOME` 时凭证不在 `~/.wemind`**——按 `<WEMIND_HOME>/<账号>` 找。
 
-**原子写**：所有写入磁盘都用「先写临时文件再 rename」（同盘 rename 原子），避免写途崩溃/并发产生半截损坏文件；写/rename 失败时会清掉临时文件，不在数据目录里留 `*.tmp-*` 垃圾。**坏文件处理**：读取时若解析失败，不静默清空，而是备份坏文件（`.corrupt-<时间戳>`）+ 记日志，便于人工恢复。**错误不吞**：只有 `ENOENT`（文件不存在）才当作「首次运行」返回空；权限等 fs 错误会向上抛——否则调用方下一步 save 会覆盖掉真实凭证。删除类函数（`clearAccount` / `clearQrState`）返回布尔值表示是否真的删掉了；`clearAccount` 对非 ENOENT 的删除失败会**抛错**（调用方据此如实报告，不能把「删失败」与「本来就没登录」混为一谈），`clearQrState` 仍只记日志并返回 false。
+**原子写**：`account.ts` 的写入用「先写临时文件再 rename」（同盘 rename 原子），避免写途崩溃/并发产生半截损坏文件，写/rename 失败时会 `rmSync(tmp, { force: true })` 清掉临时文件。`accounts.ts` 与 `allow-from.ts` 也用同一套「临时文件 + rename」，但**没有失败清理**，异常时会留下 `*.tmp-<pid>-<时间戳>`（跨进程并发写由 `store/file-lock.ts` 的 `withFileLock` 串行化，锁文件为 `accounts.json.lock` / `allowFrom.json.lock`，带陈旧锁清理与超时）。**坏文件处理**：读取时若解析失败，不静默清空，而是备份坏文件（`.corrupt-<时间戳>`）+ 记日志，便于人工恢复。**错误不吞**：只有 `ENOENT`（文件不存在）才当作「首次运行」返回空；权限等 fs 错误会向上抛——否则调用方下一步 save 会覆盖掉真实凭证。删除类函数（`clearAccount` / `clearQrState`）返回布尔值表示是否真的删掉了；`clearAccount` 对非 ENOENT 的删除失败会**抛错**（调用方据此如实报告，不能把「删失败」与「本来就没登录」混为一谈），`clearQrState` 仍只记日志并返回 false。
 
 **文件权限**：`account.json`（bot token）、`state.json`（`context_token`）、`qr_login.json`（扫码态）在 POSIX 下都由原子写在 rename **之前**收紧为 `600`，不会出现先 0644 再 chmod 的窗口。**Windows 权限提示**：`chmod` 是 no-op，文件以明文存放；保存凭证时会有一次性告警，提示用文件夹权限或磁盘加密保护。
 
@@ -182,7 +187,7 @@ iLink 的图片/文件走微信 CDN，密文用 **AES-128-ECB（PKCS7）** 加�
 ### 收图：`downloadImage(img)`
 
 1. 从 `media.full_url` 或 `media.encrypt_query_param` 拼下载 URL；
-2. 解析 AES key（`resolveKey`：`ImageItem.aeskey`（hex，32 字符）优先，其次 `media.aes_key`（base64）），下载密文（20s 超时）；响应体用 `readBodyWithLimit()` 边读边计数，超过 20MB 立即取消（`content-length` 只作提前拒绝提示）；
+2. 解析 AES key（`resolveKey`：先看 `img.aeskey`（32 字符 hex，直接取用）；不满足再看 `img.media.aes_key`（base64，解出 16 字节直接用，或解出 32 字符 hex 字符串再转 hex），两者都不可用返回 `null`），下载密文（20s 超时）；响应体用 `readBodyWithLimit()` 边读边计数，超过 20MB 立即取消（`content-length` 只作提前拒绝提示）；
 3. AES-128-ECB 解密返回明文 Buffer。
 
 ### 发图/发文件：`sendImage` / `sendFile`

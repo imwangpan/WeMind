@@ -1,8 +1,10 @@
 # 4. MCP Server（@wemind/wechat-mcp）
 
 > 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. daemon](05-daemon.md)
+>
+> **最后核对**：2026-11-05
 
-MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `@wemind/cli`（命令 `wemind`），见 [`docs/发布与变更记录/发布-wemind-npm.md`](../发布与变更记录/发布-wemind-npm.md)）。
+MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `@wemind/cli`（命令 `wemind`），见 [`docs/发布与变更记录/如何发布新版本.md`](../发布与变更记录/如何发布新版本.md)）。
 
 ## 4.1 模块结构
 
@@ -14,7 +16,9 @@ packages/wechat-mcp/src/
     ├── login.ts      # login_qrcode / check_qrcode_status / logout
     ├── messages.ts   # get_messages（长轮询）
     ├── send.ts       # send_text_message
-    └── typing.ts     # send_typing
+    ├── typing.ts     # send_typing
+    ├── session-result.ts  # 会话过期（-14）的统一返回与恢复指引
+    └── tool-result.ts     # 6 个工具共用的返回体构造（JSON / 纯文本）
 ```
 
 ## 4.2 入口与生命周期（index.ts）
@@ -34,13 +38,26 @@ packages/wechat-mcp/src/
 | 工具                  | 说明                                                      | 代码 description（简要转述，非逐字原文）                                                                                                                                                                |
 | --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `login_qrcode`        | 取登录二维码（返回 URL，并在数据目录生成 PNG 与终端文本） | Get a WeChat login QR code. Scan it with WeChat to connect the bot. … You MUST show all three returned forms (image URL / PNG file / terminal text file) to the user.                                   |
-| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command instead. |
+| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command instead.（未安装 CLI 时可临时用 `npx -y @wemind/cli login`） |
 | `logout`              | 登出并清除已保存的凭证                                    | Log out the current WeChat bot session. … Clears saved credentials, runtime state and any pending QR login. Only call this when the user asks to log out or wants to switch accounts.                   |
-| `get_messages`        | 长轮询收消息（`wait=true` 阻塞直到收到）                  | Poll for new WeChat messages. Always call with `wait=true` to block until a message arrives.（后接 4 步 typing 工作流）                                                                                 |
-| `send_text_message`   | 发文本消息                                                | Send a text message to a WeChat user. … iLink bots cannot initiate conversations: if you have never received a message from that user, this call fails.                                                 |
+| `get_messages`        | 长轮询收消息（`wait=true` 阻塞直到收到，最长 7 天；图片/视频/文件只给占位符，语音带微信转写） | Poll for new WeChat messages. Always call with `wait=true` to block until a message arrives.（后接 4 步 typing 工作流）                                                                                 |
+| `send_text_message`   | 发文本消息（`state="generating"` 发进度、默认 `finish` 发最终答复） | Send a text message to a WeChat user. … iLink bots cannot initiate conversations: if you have never received a message from that user, this call fails.                                                 |
 | `send_typing`         | 打字状态（`typing` 显示 / `cancel` 取消）                 | Show or cancel the "typing..." indicator for a WeChat user. … Re-send status `typing` every 15-20 seconds while still working, because the indicator expires on its own.                                |
 
 每个工具用 `zod` schema 声明参数，工具描述（description）里写明用法与约束 —— 这些描述是引导 MCP 客户端正确编排的关键。6 个 description 统一为「做什么 → 何时调用/返回什么 → 硬约束」的空行分段格式（表格里是简写转述、以 `…` 标省略，完整原文见 `index.ts`），且**一律写英文**：MCP 生态惯例，且模型对 `MUST` / `wait=true` 这类强制约束的英文原文遵循度更高。用户能看到的提示文案在 `tools/*.ts` 的 `message` 字段，均为中文。
+
+### 入参与返回体
+
+| 工具 | 入参（`zod` schema） | 返回体关键字段 |
+| --- | --- | --- |
+| `login_qrcode` | 无 | 二维码三形式（URL / PNG 路径 / 终端文本路径）与引导文案；已登录时 `already_logged_in` |
+| `check_qrcode_status` | 无 | `status`：`wait` / `scaned` / `confirmed` / `expired` / `need_verifycode` / IDC 重定向 |
+| `logout` | 无 | 是否真的清除了凭证；删不掉时 `logout_failed` + 原因 |
+| `get_messages` | `wait`（布尔，默认 `false`）、`timeout`（1000–60000，默认 `10000`，`wait=true` 时忽略） | `{ message_count, messages[], cancelled? }`；`-14` 时 `session_expired`（含剩余冷却分钟） |
+| `send_text_message` | `to`、`text`（均必填非空）、`state`（`finish` 默认 / `generating`） | 发送结果；`-2` 退避重试一次后仍失败给可操作错误 |
+| `send_typing` | `to`、`status`（`typing` 默认 / `cancel`） | 打字状态结果 |
+
+所有工具都通过 `tools/tool-result.ts` 的 `jsonResult()` / `textResult()` 返回**单个 text content**（结构化结果用 `JSON.stringify(obj, null, 2)`）。
 
 ## 4.4 登录流程（tools/login.ts）
 
@@ -97,13 +114,13 @@ sequenceDiagram
 
 实现细节：
 
-- `wait=true` 时用 `LONG_POLL_MS=25s` 长轮询，最长等 7 天（`deadline`）；
+- `wait=true` 时用 `LONG_POLL_MS=25s` 长轮询，最长等 7 天（`deadline`）；`timeout` 参数可调（1000–60000，默认 10000；`wait=true` 时忽略）；
 - `POLL_FLOOR_MS=1000`：服务端快速返回空时补足地板间隔，防零间隔请求风暴；
 - 命中 errcode `-14` → `pauseSession` 并返回 `session_expired` 提示（含剩余冷却分钟数）；
 - 过滤 `message_type === 1`（USER）且 `message_id > lastMessageId` 去重；只放行登录者（`WECHAT_OWNER_ID` 或账号 `userId`）与 `allowFrom.json` 白名单里的发件人，游标仍按**所有**收到的消息推进（被过滤的消息不会每轮重复判断），`contextTokens[botId:from_user_id]` 只记放行者的；
 - `wait` 模式下瞬时网络错误退避 2s 重试，不让一次抖动终结长轮询；客户端取消信号会直接中止**在途**长轮询并返回 `cancelled`（核心里与超时共用一个 AbortController）；
 - 处理响应前**重新读一次** `state` 再做 load→改→save（全程同步）：长轮询可能持续很久，期间别的工具调用写入的 `context_token` 不会被旧 state 覆盖；
-- `formatMessage` 把消息格式化：text / `[Image: not downloaded…]` / `[Voice: 转写文本]` / `[File: 文件名 (not downloaded)]` / `[Video: not downloaded…]`，并处理 `ref_msg`（从 item 取，修复上游死代码）。媒体只给占位符是**明示的限制**：MCP 形态不下载图片/视频/文件（daemon 形态才有收图解密链路）。
+- `formatMessage` 把消息格式化：text / `[Image: not downloaded…]` / `[Voice: 转写文本]` / `[File: 文件名 (not downloaded)]` / `[Video: not downloaded…]`，并处理 `ref_msg`（从 item 取，修复上游死代码）。媒体只给占位符是**明示的限制**：MCP 形态不下载任何媒体。daemon 形态也只下载**图片**（解密后给大脑看图），文件与视频同样被跳过——不要把「daemon 能处理媒体」理解成「图片/视频/文件都能处理」。
 
 ## 4.6 发送与打字（tools/send.ts、tools/typing.ts）
 
@@ -111,42 +128,13 @@ sequenceDiagram
 
 **`send_typing`**：先 `getConfig` 取 `typing_ticket`（缺失视为失败、不带空 ticket 继续），再 `sendTyping` —— `status=1` 显示打字、`status=2` 取消。
 
+> **两个发送类工具的共同前置条件**：必须先收到该用户的消息（`context_token` 只从收到的消息里来），否则报 `InvalidParams`；`send_typing` 另外先检查会话冷却（`-14` 期间不发）。**会话过期（`-14`）的恢复**：`logout` 后重新 `login_qrcode`，或重启 MCP 客户端让它重新走登录流程；冷却期内任何发送都会失败。
+
 ## 4.7 接入示例
 
-该子包已发布到 npm。在 MCP 客户端配置里默认用 `npx -y @wemind/wechat-mcp` 按需拉起（无需 clone / 构建，下面的配置即此写法）；若想**先安装**到全局，用 `npm i -g @wemind/wechat-mcp`，得到 `wemind-mcp` 命令（Windows 为 `wemind-mcp.cmd`）。
+用户向的安装与客户端配置**只维护一份**：见 [`packages/wechat-mcp/README.md`](../../packages/wechat-mcp/README.md)。本节只保留维护者需要知道的打包事实（4.8）与形态选择（4.9），不再复制配置示例——两处维护必然漂移。
 
-GUI 客户端（Claude Desktop / Cursor 等）的 PATH 常不含 npm 全局 bin，Windows 上全局 bin 是 `.cmd`，直接写 `wemind-mcp` 反而容易 `spawn ENOENT`，所以下面的配置用 `npx` 写法。若已全局安装且客户端能找到全局 bin，也可以把 `command` 改成 `wemind-mcp`；PATH 找不到时用 `npm root -g` 定位写绝对路径，或直接沿用 `npx` 写法。
-
-```json
-// Claude Desktop / Cursor: claude_desktop_config.json / ~/.cursor/mcp.json
-{
-  "mcpServers": {
-    "wechat": { "command": "npx", "args": ["-y", "@wemind/wechat-mcp"] }
-  }
-}
-```
-
-```json
-// OpenCode: opencode.json（V2：server 定义在 mcp.servers 下）
-{
-  "mcp": {
-    "servers": {
-      "wechat": { "type": "local", "command": ["npx", "-y", "@wemind/wechat-mcp"] }
-    }
-  }
-}
-```
-
-本地开发（改了本仓源码）才需构建，并用绝对路径指向 `packages/wechat-mcp/dist/index.js`：
-
-```json
-{
-  "command": "node",
-  "args": ["/abs/path/WeMind/packages/wechat-mcp/dist/index.js"]
-}
-```
-
-> 设计意图：`@wemind/wechat-mcp` 是独立发布的**自包含子包**（tsdown 单文件、内核已内联），已于 2026-10 发布到公共 registry（`@wemind/wechat-mcp`，最新版本见 npm）——`npx -y @wemind/wechat-mcp` 即可接入（该包只有一个 bin `wemind-mcp`，npx 按「唯一 bin」规则自动解析）；也可先 `npm i -g @wemind/wechat-mcp` 安装成 `wemind-mcp` 命令（Windows 为 `wemind-mcp.cmd`）再在配置里指向它。不带版本号时解析 latest，首次或版本更新时需联网；要固定版本/离线可先全局安装，或写 `@版本号`。客户端 PATH 找不到全局 bin 时用 `npm root -g` 定位写绝对路径，或直接沿用 `npx` 写法。
+一句话版本：`npx -y @wemind/wechat-mcp` 即可接入（该包只有一个 bin `wemind-mcp`，npx 按「唯一 bin」规则自动解析）；也可先 `npm i -g @wemind/wechat-mcp` 再在配置里指向 `wemind-mcp`（Windows 为 `wemind-mcp.cmd`）。GUI 客户端的 PATH 常不含 npm 全局 bin，所以推荐 `npx` 写法。
 
 ## 4.8 打包发布（tsdown.config.ts）
 
@@ -154,15 +142,19 @@ MCP server 用 [tsdown](https://tsdown.dev/)（rolldown + oxc，tsup 的继任�
 
 - 输出 ESM、target node20、入口 `src/index.ts`，并用 `outExtensions` 强制输出 `dist/index.js`（而非默认 `.mjs`，保持 bin/main 引用不变）；
 - **`deps.alwaysBundle: ["@wemind/wechat-ilink-core"]`** —— 把内核内联进单一产物，发布时无需单独发布 core；
-- 其余运行时依赖（MCP SDK / zod / qrcode）保持 external，由使用者安装；
+- 其余运行时依赖（MCP SDK / zod / qrcode）保持 external，但**已声明在 `dependencies`**，安装包时由 npm / npx 一并装好；只有离线手工部署或自行重新打包时才需要单独准备；
 - **`dts: false`** —— 该包不对外暴露类型；关掉也避免 tsdown 加载 `typescript` 包（TypeScript 7.0 原生已不再暴露旧 JS API，否则启动即报错）；
 - 入口 shebang（`#!/usr/bin/env node`）由 rolldown 自动保留。
 
-`package.json` 标记 `publishConfig.access: public`，与 `wemind` 一起属于两个**已发布**的子包（`@wemind/wechat-mcp`、`wemind`）；`@wemind/wechat-ilink-core` 保持 `private`，只做内联。
+`package.json` 标记 `publishConfig.access: public`，与 `@wemind/cli`（命令 `wemind`）一起属于两个**已发布**的子包；`@wemind/wechat-ilink-core` 保持 `private`，只做内联。
+
+> ⚠️ **包名 ≠ 命令名**：daemon 的包是 `@wemind/cli`，命令是 `wemind`。`npx` 按包名解析，所以只能 `npx -y @wemind/cli`，**不能** `npx wemind`（根 `package.json` 虽叫 `wemind`，但它是 `private`、不发布）。
 
 ## 4.9 MCP 形态 vs Daemon 形态
 
-MCP 形态是**无状态的请求驱动**：WeMind 不主动做任何事，靠 MCP 客户端按工具描述自己编排长轮询和打字状态。多轮记忆、回复生成都由 MCP 客户端背后的模型负责。
+> ⚠️ **同一个 bot token 只能有一个消费者**：两种形态**二选一**，不能同时跑——否则互相抢消息、互相回环。装了 MCP 客户端又起了 daemon 的机器，先把其中一个停掉。
+
+MCP 形态是**不主动轮询的请求驱动**：没有后台进程，靠 MCP 客户端按工具描述自己编排长轮询和打字状态；多轮记忆、回复生成都由 MCP 客户端背后的模型负责。但**它并非无状态**——登录凭证、消息游标（`state.json`）、`context_token` 都持久化在数据目录里（见 4.5），同账号多个 MCP 客户端共用同一份 `DATA_DIR` 时会共享这些状态并可能互相干扰。
 
 如果你想要的是「一个自己跑起来、自带 AI 大脑、7×24 自动收发」的机器人，那是 daemon 形态 —— 见 [5. daemon](05-daemon.md)。
 

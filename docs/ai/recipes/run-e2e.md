@@ -1,6 +1,6 @@
 # 配方：端到端验收
 
-> **最后核对**：2026-11-02
+> **最后核对**：2026-11-05
 >
 > 目标：用最短路径证明「微信 → daemon → ACP 大脑 → 微信」真的通，而不是只看编译通过。
 > 前置：已构建、已登录一个 bot、`allowFrom` 包含你的微信（登录时自动写入，通常无需手动加）、至少一个 ACP agent 可用。
@@ -90,7 +90,7 @@ pwsh -NoProfile -File scripts/doctor.ps1
 wemind list
 ```
 
-> **在 VS Code 集成终端里跑 `npm test`**：VS Code 的「智能自动附加」会给 node 注入调试 bootloader（`NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` + `VSCODE_INSPECTOR_OPTIONS`），测试里起的真实子进程会偶发卡住/超时——用 `NODE_OPTIONS= npm test`（PowerShell：`$env:NODE_OPTIONS=$null` 后再跑）。1.2.0 起 daemon 自己的脱离式 spawn 已过 `debug-env.ts` 净化，1.3.0 起 `spawn-agent.ts` 给 ACP 子进程的环境也摘掉这段引导，都不受影响；受影响的是测试进程本身。
+> **在 VS Code 集成终端里跑 `npm test`**：VS Code 的「智能自动附加」会给 node 注入调试 bootloader（`NODE_OPTIONS=--require …/ms-vscode.js-debug/bootloader.js` + `VSCODE_INSPECTOR_OPTIONS`），测试里起的真实子进程会偶发卡住/超时——用 `NODE_OPTIONS= npm test`（PowerShell：`$env:NODE_OPTIONS=$null` 后再跑）。1.2.0 起 daemon 自己的脱离式 spawn 已过 `debug-env.ts` 净化，1.4.0 起 `spawn-agent.ts` 给 ACP 子进程的环境也摘掉这段引导（修复 `cbf9e26` 未进 1.3.0），都不受影响；受影响的是测试进程本身。
 
 > 下文的 `wemind` 指已发布的 CLI（`npm i -g @wemind/cli`，安装后用 `wemind version` 验证）。
 > 在仓库里跑源码版时等价于 `node packages/wechat-daemon/dist/cli.js <子命令>`；两种方式操作同一份 `~/.wemind/` 数据。
@@ -222,7 +222,7 @@ MCP
 | 11 | worker | 派发/中断/继续可用（多任务见 §7.1） |
 | 12 | 多账号 | 沙箱/会话隔离 |
 | 13 | 热切换 | 不重启 daemon 换大脑，在途回合跑完 |
-| 14 | 切换回滚 | 坏 bin 被拒，旧大脑继续答，`brain.json` 未变 |
+| 14 | 切换回滚 | 坏 bin（**存在但不是 ACP agent**）被拒，旧大脑继续答，`brain.json` 未变 |
 | 15 | 多任务并行 | 两条不同 agent 同时跑且都出结果 |
 | 16 | 任务上限 | 第三条被拒且提示清楚（CLI 答复＝拒绝原因，不是「已派发」） |
 | 17 | 中断续跑 | 重启后标「已中断」，回「继续」接上 |
@@ -240,9 +240,11 @@ MCP
 2. 切换到一个**已装且能起**的另一个 agent；
 3. 期望：答复两段（「正在切换…」+「已切换」）；`brain.json` 已更新；**daemon pid 不变**（没重启）；下一条消息由新大脑答。
 
-**② 切脑失败退回**：把目标 agent 的 bin 改成一个不存在的路径（`wemind brain set <agent 名> --bin <坏路径> --restart` 或手改 `brain.json` 的 `presets` 段），再切过去。
+**② 切脑失败退回**：把目标 agent 的 bin 改成一个**存在的可执行文件、但不是 ACP agent**（如 `cmd.exe` / `/bin/true`，或随便一个会立刻退出的程序）：`wemind brain set <agent 名> --bin <该文件绝对路径>`（**不要**手改 `brain.json`，也不要加 `--restart`），再 `wemind brain switch <该 agent 名>`。
 
-期望：答复写明「切换失败，已退回原来那个「旧大脑」」；`brain.json` **未被改写**；旧大脑**还能继续答**（下一条消息即验证）；`wemind brain` 显示的仍是旧大脑。
+> ⚠️ **别用「不存在的路径」做这一步**：`preflightSwitch()` 会用 `locateBin()` 先判二进制能否解析，解析不到就**直接回 `❌ 找不到…`**——既不 spawn、也不碰磁盘，走不到回滚分支。而 `brain set <agent> --bin <不存在路径> --restart` 更糟：它先把坏 bin **落盘**再重启，daemon 启动时 `seedSlots()` + `agentProblem()` 判定不可用 → 以 `BRAIN_CONFIG_EXIT_CODE = 78` 退出，后台守护进程按约定**停止自动重启**（`brain.json` 已被写坏，得手工改回来）。
+
+期望：答复写明「切换失败，已退回原来那个「旧大脑」」（`brain-switch.ts` 的 `runSwitch` 在 `warmup()` 抛错后 `restart()` 清半截进程并返回这句）；`brain.json` **未被改写**（持久化放在最后，成功才写）；旧大脑**还能继续答**（下一条消息即验证，会自动重建旧大脑并从磁盘恢复上下文）；`wemind brain` 显示的仍是旧大脑。收尾时把 `<agent 名>` 的 `--bin` 覆盖清掉（`wemind brain set <agent 名> --bin <原来的正确路径>`，或删 `brain.json` 的 `presets` 段）。
 
 **③ 多任务并行**：`任务 kiro：…` + `任务 opencode：…` 同时发出（或微信端 `任务 <agent 名>：正文` 两条）。
 
@@ -266,13 +268,13 @@ MCP
 
 **⑧ CLI 热切换**：daemon 在跑时执行 `wemind brain switch <agent 名>`、`wemind brain set <agent 名>`（纯 agent 名，应等价于热切换）、`wemind session new/list/rename/delete`。
 
-期望：全部经控制桥生效（`control-out/<id>.json` 有应答、`control-inbox/` 排空）；微信里 `会话列表` 能看到 CLI 改的名字；故意切到一个坏 bin 的 agent → 答复「已回滚」且 `brain.json` **未变**（`brain set` 这条会说清「没有写入磁盘」）。对**旧版** daemon：需要 daemon 执行的命令（`session new`/`resume`、`brain switch`、`brain set <agent 名>`）应在**发出前**拒绝并给出 `wemind stop <key> && wemind start <key>`，`session list`/`rename`/`delete`/`task-list` 照常（list 附一行说明）——两者都不算失败，算预期行为。
+期望：全部经控制桥生效（`control-out/<id>.json` 有应答、`control-inbox/` 排空）；微信里 `会话列表` 能看到 CLI 改的名字；**故意切到一个坏 bin 的 agent**（同 ②：指向一个存在但不是 ACP agent 的可执行文件，**不要**用不存在的路径，也不要带 `--restart`）→ 答复「已回滚」且 `brain.json` **未变**（`brain set` 这条会说清「没有写入磁盘」）。对**旧版** daemon：需要 daemon 执行的命令（`session new`/`resume`、`brain switch`、`brain set <agent 名>`）应在**发出前**拒绝并给出 `wemind stop <key> && wemind start <key>`，`session list`/`rename`/`delete`/`task-list` 照常（list 附一行说明）——两者都不算失败，算预期行为。
 
 **⑨ 切换窗口内 stop**：切换刚答复成功、约 1 秒内执行 `wemind stop <key>`，然后 `wemind list` / 任务管理器看有没有残留 ACP 子进程。
 
 期望：**已知窗口**，可能漏杀新起的 ACP 子进程——记录现象即可，不要当成新缺陷；下次 `start` 前手工确认没有孤儿。
 
-### 7.2 历史待实测清单（2026-10-28；结论见 7.3）
+### 7.2 历史待实测清单（结论见 7.3）
 
 下列问题当时**没有**静态答案。绝大部分已在 §7.3 实测并写进对应文档；本表保留作为复验清单，不要再把「表里还列着」当成「尚未测」——只剩 §7.3 中标明的少数未单独测项（如 `session/load` 途中强杀）仍开放（qoder 任务续跑已于 2026-10-27 实测）。
 
@@ -296,7 +298,7 @@ MCP
 | 2 | **`session/load` 回放**：opencode **857ms / 2 帧**、qoder **804ms / 3 帧**；DSH 无 `session/load`，`session/resume` **195ms / 0 帧**。回放帧在无 prompt 时本就被丢弃（`acp-brain.ts`），不会突然冒出旧正文；恢复等待远小于超时，不需要额外提示。 |
 | 3 | **冷启动**：DSH `initialize` **5834ms**（同进程第二次 2213ms）、`session/new` **50ms**；opencode `initialize` ~650ms、`session/new` ~800ms；qoder **1718ms / 1493ms**。全部远小于 `REQ_TIMEOUT=30s` → **暂不需要给 agent 加 `reqTimeoutMs`**。 |
 | 4 | **多任务并行推送到微信**：opencode + qoder 两条任务并行、结果都送达，**没有观察到限流型 `ret=-2`**。真机上出现的 `-2` 全部属于「daemon 重启后、用户下一条消息之前」的旧 `context_token`（见下方 7.4）——那条已修。 |
-| 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 wrapper+daemon+worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
+| 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 watchdog + daemon + worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
 | 6 | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。 |
 | 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑已实测（2026-10-27，1.1.78：`session/load ok`，STEP-A/STEP-B 产物齐全，见 `docs/接入方案/接入-Qoder.md` M3-3）。 |
 | 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 广告 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**广告 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 预设 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进沙箱（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
@@ -361,7 +363,7 @@ wemind brain set kiro --restart <key>   # 老写法：写入磁盘 + 重启 daem
 
 清空对话记忆（**不是**回滚，是重置）：
 
-- 删 `<数据目录>/brain-sessions.json`（当前会话表，权威）+ `<数据目录>/session-registry.json`（登记表，派生）+ `<数据目录>/brain-home/<agent>/sessions/`；
+- 删 `<数据目录>/brain-sessions.json`（当前会话表，权威）+ `<数据目录>/session-registry.json`（登记表，派生）+ **该 agent 配置目录下的会话库**——目录名是预设的 `configSubdir`（kiro 为空=沙箱根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`、pi 空=沙箱根），不是「agent 名」子目录；DSH 的会话库另在 `<账号目录>/agent-sessions/deepseek/`（`isolateSessions`），要一并删；
 - 单个会话不用删文件：微信里 `删除会话 <序号>` 即可（只删登记项，agent 侧存档仍在磁盘上）。
 
 清空任务侧：
