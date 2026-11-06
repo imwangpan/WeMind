@@ -49,7 +49,7 @@ vi.mock("@wemind/wechat-ilink-core", async (importOriginal) => {
     clearSessionPause: m.clearSessionPause,
   };
 });
-vi.mock("./acp-brain.js", () => ({
+vi.mock("./acp/acp-brain.js", () => ({
   askBrainTurn: m.askBrainTurn,
   newSession: m.newSession,
   restartForMcpChange: m.restartForMcpChange,
@@ -66,7 +66,7 @@ vi.mock("./agents/brain-agents.js", () => ({
   resolvePresetByName: m.resolvePresetByName,
 }));
 vi.mock("./agents/agent-slot.js", () => ({ getAgent: m.getAgent, setAgent: m.setAgent }));
-vi.mock("./brain-switch.js", () => ({
+vi.mock("./acp/brain-switch.js", () => ({
   preflightSwitch: m.preflightSwitch,
   switchBrain: m.switchBrain,
   switchInFlightTarget: m.switchInFlightTarget,

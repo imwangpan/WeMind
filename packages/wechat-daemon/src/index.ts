@@ -34,9 +34,9 @@ import type {
   SendMessageReq,
   ImageItem,
 } from "@wemind/wechat-ilink-core";
-import { askBrain, supportsImages, heartbeatMs } from "./acp-brain.js";
+import { askBrain, supportsImages, heartbeatMs } from "./acp/acp-brain.js";
 import { agentProblem, BRAIN_CONFIG_EXIT_CODE } from "./agents/brain-agents.js";
-import { switchInFlightTarget } from "./brain-switch.js";
+import { switchInFlightTarget } from "./acp/brain-switch.js";
 import { loadBrainConfig } from "./agents/brain-config.js";
 import { getAgent, seedSlots } from "./agents/agent-slot.js";
 import { writeBrainState } from "./agents/brain-state.js";

@@ -3,12 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { parseJsonc } from "./agents/sandbox/agent-mcp.js";
-import { agentEnv, authHint, prepareAgent, type ResolvedAgent } from "./agents/brain-agents.js";
-import { copyProfilePatch } from "./agents/profile-model.js";
-import { spawnAgent } from "./shared/process/spawn-agent.js";
-import { handleReverseRequest } from "./acp-reverse.js";
-import { LineDecoder } from "./shared/io/line-decoder.js";
+import { parseJsonc } from "../agents/sandbox/agent-mcp.js";
+import { agentEnv, authHint, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
+import { copyProfilePatch } from "../agents/profile-model.js";
+import { spawnAgent } from "../shared/process/spawn-agent.js";
+import { handleReverseRequest } from "./protocol/acp-reverse.js";
+import { LineDecoder } from "../shared/io/line-decoder.js";
 
 /**
  * 「大脑连通性自检」：真正起一个 ACP agent 进程并跑完 initialize / session/new 握手，用来证明「这个大脑不只是找得到，而且能说 ACP」——比单纯「文件存在」更硬的证据。

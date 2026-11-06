@@ -1,10 +1,10 @@
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
-import { getAgent, setAgent } from "./agents/agent-slot.js";
-import { resolvePresetByName, type ResolvedAgent } from "./agents/brain-agents.js";
-import { loadBrainConfig, updateBrainConfig } from "./agents/brain-config.js";
-import { ensureBrainHome } from "./agents/sandbox/mcp-sandbox.js";
-import { writeBrainState } from "./agents/brain-state.js";
+import { getAgent, setAgent } from "../agents/agent-slot.js";
+import { resolvePresetByName, type ResolvedAgent } from "../agents/brain-agents.js";
+import { loadBrainConfig, updateBrainConfig } from "../agents/brain-config.js";
+import { ensureBrainHome } from "../agents/sandbox/mcp-sandbox.js";
+import { writeBrainState } from "../agents/brain-state.js";
 import { beginSwitch, drainTurn, endSwitch, restart, warmup } from "./acp-brain.js";
 
 /**

@@ -2,11 +2,11 @@ import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_proce
 import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import { BRAIN_HOME, activeMcpServers } from "./agents/sandbox/mcp-sandbox.js";
-import { getAgent } from "./agents/agent-slot.js";
-import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "./agents/brain-agents.js";
-import { pidRecordOf, writePidRecords } from "./shared/process/pid-record.js";
-import { spawnAgent } from "./shared/process/spawn-agent.js";
+import { BRAIN_HOME, activeMcpServers } from "../agents/sandbox/mcp-sandbox.js";
+import { getAgent } from "../agents/agent-slot.js";
+import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
+import { pidRecordOf, writePidRecords } from "../shared/process/pid-record.js";
+import { spawnAgent } from "../shared/process/spawn-agent.js";
 import {
   backupCorruptSessionMap,
   brainSessionMapPath,
@@ -14,9 +14,9 @@ import {
   readSessionMapStrict,
   sessionKey,
   writeSessionMap,
-} from "./sessions/session-map.js";
-import { ensureEntry, markUsed, titleOf, touchEntry } from "./sessions/session-registry.js";
-import { stripHandoffPrefix } from "./sessions/handoff.js";
+} from "../sessions/session-map.js";
+import { ensureEntry, markUsed, titleOf, touchEntry } from "../sessions/session-registry.js";
+import { stripHandoffPrefix } from "../sessions/handoff.js";
 import {
   applyAcpModel,
   applyAcpSessionMode,
@@ -35,8 +35,8 @@ import {
   type AcpHost,
   type AcpPending,
   type AcpProgressEvent,
-} from "./acp-connection.js";
-import { LineDecoder } from "./shared/io/line-decoder.js";
+} from "./protocol/acp-connection.js";
+import { LineDecoder } from "../shared/io/line-decoder.js";
 
 /**
  * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。

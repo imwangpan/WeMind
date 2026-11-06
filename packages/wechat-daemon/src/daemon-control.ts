@@ -1,5 +1,5 @@
 import { DATA_DIR, clearSessionPause, loadAccount } from "@wemind/wechat-ilink-core";
-import { askBrainTurn, newSession, restartForMcpChange, resumeSession } from "./acp-brain.js";
+import { askBrainTurn, newSession, restartForMcpChange, resumeSession } from "./acp/acp-brain.js";
 import { agentConfigFor, loadBrainConfig } from "./agents/brain-config.js";
 import {
   presetAvailable,
@@ -8,7 +8,7 @@ import {
   type ResolvedAgent,
 } from "./agents/brain-agents.js";
 import { getAgent, setAgent } from "./agents/agent-slot.js";
-import { preflightSwitch, switchBrain, switchInFlightTarget } from "./brain-switch.js";
+import { preflightSwitch, switchBrain, switchInFlightTarget } from "./acp/brain-switch.js";
 import { renderHelp, type ChatCommand } from "./chat-commands.js";
 import type { ControlRequest } from "./control-bridge.js";
 import { currentSessionIdOf } from "./sessions/session-registry.js";

@@ -17,7 +17,7 @@ import {
  *
  * 为什么单独成模块（而不是写在 index.ts 的 handleControl 里）：
  *  - 恢复是**有副作用的两步**（严格恢复的 load → 成功才改当前会话记录），值得单独钉测试；
- *  - 依赖注入（`create`/`resume`）让测试不必起真 ACP 进程——ACP 侧的行为由 acp-switch.test.ts 用假 agent 覆盖，
+ *  - 依赖注入（`create`/`resume`）让测试不必起真 ACP 进程——ACP 侧的行为由 brain-switch.test.ts 用假 agent 覆盖，
  *    这里只验「顺序、失败不留痕、文案如实」。
  * 文案里的承诺必须与实现一致：恢复失败**不换当前会话记录**、删除**只删登记**（agent 侧归档不在我们手里）。
  */

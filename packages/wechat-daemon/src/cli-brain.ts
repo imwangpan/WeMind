@@ -15,7 +15,7 @@ import {
   brainConfigPath,
   type BrainConfig,
 } from "./agents/brain-config.js";
-import { checkAgent } from "./brain-check.js";
+import { checkAgent } from "./acp/brain-check.js";
 import { acpModelHint, acpOverrideHint } from "./agents/profile-model.js";
 import {
   aliveOurs,

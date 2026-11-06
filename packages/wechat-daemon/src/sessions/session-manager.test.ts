@@ -8,7 +8,7 @@ import { brainSessionMapPath, readSessionMap, writeSessionMap } from "./session-
 /**
  * 会话管理操作层（session-manager）：把「新会话 / 列表 / 恢复 / 重命名 / 删除」拼成答复。
  *
- * 这里**不**起 ACP 进程：`create`/`resume` 是注入的（真实现在 acp-brain，由 acp-switch.test.ts 用假 agent 覆盖）。
+ * 这里**不**起 ACP 进程：`create`/`resume` 是注入的（真实现在 acp-brain，由 brain-switch.test.ts 用假 agent 覆盖）。
  * 要钉死的是顺序与失败语义——尤其是「恢复失败**不**动当前会话记录」「删除**只**删登记」这两条对用户的承诺。
  * 所有用例显式传 dir（临时目录），不碰 DATA_DIR。
  */

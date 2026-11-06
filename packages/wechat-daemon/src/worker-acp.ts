@@ -31,7 +31,7 @@ import {
   type AcpHost,
   type AcpPending,
   type AcpProgressEvent,
-} from "./acp-connection.js";
+} from "./acp/protocol/acp-connection.js";
 import { LineDecoder } from "./shared/io/line-decoder.js";
 
 /**

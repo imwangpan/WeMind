@@ -1,7 +1,7 @@
 import { handleReverseRequest } from "./acp-reverse.js";
 import { waitForFrameQuiet } from "./acp-quiet.js";
-import type { ResolvedAgent } from "./agents/brain-agents.js";
-import { LineDecoder } from "./shared/io/line-decoder.js";
+import type { ResolvedAgent } from "../../agents/brain-agents.js";
+import { LineDecoder } from "../../shared/io/line-decoder.js";
 
 /**
  * ACP 连接的公共层（brain / worker 共用）：JSON-RPC 帧处理、请求超时、回合超时、模型与模式设置、回放静默。
