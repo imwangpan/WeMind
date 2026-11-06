@@ -35,7 +35,7 @@ const {
 } = await import("./acp-brain.js");
 const { getAgent, resetSlotsForTest, seedSlots, setAgent } = await import("./agent-slot.js");
 const { loadBrainConfig, saveBrainConfig } = await import("./brain-config.js");
-const { readPidRecords } = await import("./pid-record.js");
+const { readPidRecords } = await import("./shared/process/pid-record.js");
 const { loadRegistry } = await import("./session-registry.js");
 
 // 本文件起真子进程（Windows 上单次 0.5–0.7s，全量并发时更慢），默认 5s 会偶发不够：放宽到 20s（同 spawn-agent.test.ts）

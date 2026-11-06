@@ -40,7 +40,7 @@ import { switchInFlightTarget } from "./brain-switch.js";
 import { loadBrainConfig } from "./brain-config.js";
 import { getAgent, seedSlots } from "./agent-slot.js";
 import { writeBrainState } from "./brain-state.js";
-import { CLI_PID_MARKERS, otherOurProcessPid } from "./proc-identity.js";
+import { CLI_PID_MARKERS, otherOurProcessPid } from "./shared/process/proc-identity.js";
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
 import { isOwnerOnly } from "./chat-commands.js";
 import { ensureBrainHome } from "./mcp-sandbox.js";

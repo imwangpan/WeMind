@@ -4,7 +4,7 @@ import {
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
 
-import { stripVscodeDebugEnv } from "./debug-env.js";
+import { stripVscodeDebugEnv } from "../debug-env.js";
 
 /*
  * 启动 ACP agent 进程的**统一入口**。

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
-import { writeJsonAtomic } from "./atomic-json.js";
+import { writeJsonAtomic } from "./shared/io/atomic-json.js";
 
 /**
  * brainstorm/worker 共用的 session 映射键规则：`<agent>:<key>`。

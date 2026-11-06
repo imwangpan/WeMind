@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
-import { writeJsonAtomic } from "./atomic-json.js";
+import { writeJsonAtomic } from "./shared/io/atomic-json.js";
 import { formatWhen } from "./session-registry.js";
 
 /**

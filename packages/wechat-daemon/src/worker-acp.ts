@@ -5,7 +5,7 @@ import fs from "node:fs";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { WORKER_HOME, workerMcpServers } from "./worker-sandbox.js";
-import { spawnAgent } from "./spawn-agent.js";
+import { spawnAgent } from "./shared/process/spawn-agent.js";
 import {
   backupCorruptSessionMap,
   normalizeSessionMap,
@@ -32,7 +32,7 @@ import {
   type AcpPending,
   type AcpProgressEvent,
 } from "./acp-connection.js";
-import { LineDecoder } from "./line-decoder.js";
+import { LineDecoder } from "./shared/io/line-decoder.js";
 
 /**
  * worker ACP 连接：**一条连接＝一个 ACP agent 进程**；协议细节（帧处理/请求与回合超时/模型与模式设置/回放静默）与 brain 共用 `acp-connection.ts`，本模块只保留任务侧差异：

@@ -27,7 +27,7 @@ beforeAll(() => {
     "packages/wechat-daemon/package.json",
     JSON.stringify({ name: "@wemind/cli", version: "1.2.3" }),
   );
-  write("packages/wechat-daemon/src/version.ts", "// 调用方所在文件\n");
+  write("packages/wechat-daemon/src/shared/version.ts", "// 调用方所在文件\n");
 });
 
 afterAll(() => {
@@ -40,7 +40,7 @@ afterAll(() => {
 
 describe("readOwnVersion（从调用方位置向上查找自己的 package.json）", () => {
   it("dev 布局：src/ 下的调用方 → 命中自己包的 version（跳过 core 与仓库根的干扰项）", () => {
-    expect(readOwnVersion(url("packages/wechat-daemon/src/version.ts"), "@wemind/cli")).toBe(
+    expect(readOwnVersion(url("packages/wechat-daemon/src/shared/version.ts"), "@wemind/cli")).toBe(
       "1.2.3",
     );
   });
@@ -53,10 +53,13 @@ describe("readOwnVersion（从调用方位置向上查找自己的 package.json�
   it("name 不匹配时返回 undefined（绝不静默返回别人的版本）", () => {
     // 从 cli 的位置找 core 的名字 → 找不到（这正是「直接引用别人的 version.ts」会出错的场景）
     expect(
-      readOwnVersion(url("packages/wechat-daemon/src/version.ts"), "@wemind/wechat-ilink-core"),
+      readOwnVersion(
+        url("packages/wechat-daemon/src/shared/version.ts"),
+        "@wemind/wechat-ilink-core",
+      ),
     ).toBeUndefined();
     expect(
-      readOwnVersion(url("packages/wechat-daemon/src/version.ts"), "@wemind/wechat-mcp"),
+      readOwnVersion(url("packages/wechat-daemon/src/shared/version.ts"), "@wemind/wechat-mcp"),
     ).toBeUndefined();
   });
 
@@ -76,7 +79,7 @@ describe("readOwnVersion（从调用方位置向上查找自己的 package.json�
     expect(readOwnVersion(url("lonely/src/index.ts"), "@wemind/cli")).toBeUndefined();
     expect(readOwnVersion("https://example.com/not-a-file.ts", "@wemind/cli")).toBeUndefined();
     expect(readOwnVersion("", "@wemind/cli")).toBeUndefined();
-    expect(readOwnVersion(url("packages/wechat-daemon/src/version.ts"), "")).toBeUndefined();
+    expect(readOwnVersion(url("packages/wechat-daemon/src/shared/version.ts"), "")).toBeUndefined();
   });
 
   it("真实模块冒烟：用本测试文件的 import.meta.url 找 core 自己", () => {

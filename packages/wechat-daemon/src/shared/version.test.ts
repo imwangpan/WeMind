@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { CLI_PKG_NAME, CLI_VERSION, versionLine } from "./version.js";
 
-const pkgDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const pkgDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf-8")) as {
   name: string;
   version: string;
@@ -22,7 +22,7 @@ describe("CLI 版本号与包身份", () => {
 
   it("源文件里不再出现硬编码的版本号字面量", () => {
     // 防止有人「顺手」把 CLI_VERSION 改回 `= "1.2.3"`：那样版本号又会分裂成两处。
-    const src = fs.readFileSync(path.join(pkgDir, "src", "version.ts"), "utf-8");
+    const src = fs.readFileSync(path.join(pkgDir, "src", "shared", "version.ts"), "utf-8");
     expect(src).not.toMatch(/export const CLI_VERSION\s*=\s*["']\d+\.\d+\.\d+/);
   });
 

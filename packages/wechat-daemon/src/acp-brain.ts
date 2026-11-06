@@ -5,8 +5,8 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME, activeMcpServers } from "./mcp-sandbox.js";
 import { getAgent } from "./agent-slot.js";
 import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "./brain-agents.js";
-import { pidRecordOf, writePidRecords } from "./pid-record.js";
-import { spawnAgent } from "./spawn-agent.js";
+import { pidRecordOf, writePidRecords } from "./shared/process/pid-record.js";
+import { spawnAgent } from "./shared/process/spawn-agent.js";
 import {
   backupCorruptSessionMap,
   brainSessionMapPath,
@@ -36,7 +36,7 @@ import {
   type AcpPending,
   type AcpProgressEvent,
 } from "./acp-connection.js";
-import { LineDecoder } from "./line-decoder.js";
+import { LineDecoder } from "./shared/io/line-decoder.js";
 
 /**
  * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。

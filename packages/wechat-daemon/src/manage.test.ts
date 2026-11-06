@@ -14,7 +14,7 @@ import {
   deleteGuard,
   stopSummary,
 } from "./manage.js";
-import { isAlive } from "./proc-identity.js";
+import { isAlive } from "./shared/process/proc-identity.js";
 
 /*
  * 只测 POSIX 的后代收集：Windows 走 `taskkill /T`，没有对应逻辑。

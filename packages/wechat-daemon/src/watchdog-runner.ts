@@ -7,9 +7,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, accountDir } from "@wemind/wechat-ilink-core";
 import { BRAIN_CONFIG_EXIT_CODE } from "./brain-agents.js";
-import { stripVscodeDebugEnv } from "./debug-env.js";
-import { logLimitsFromEnv, RotatingLog } from "./log-rotate.js";
-import { CLI_PID_MARKERS, otherOurProcessPid } from "./proc-identity.js";
+import { stripVscodeDebugEnv } from "./shared/debug-env.js";
+import { logLimitsFromEnv, RotatingLog } from "./shared/io/log-rotate.js";
+import { CLI_PID_MARKERS, otherOurProcessPid } from "./shared/process/proc-identity.js";
 
 const RESTART_DELAY_MS = 5000;
 /** 连续崩溃上限（与 pm2 的默认 max_restarts 对齐）：只统计「短暂运行就崩」的连续次数。 */

@@ -7,7 +7,7 @@ import {
   listAccounts,
   loadAccount as readAccount,
 } from "@wemind/wechat-ilink-core";
-import { CLI_PID_MARKERS, isOurProcess } from "./proc-identity.js";
+import { CLI_PID_MARKERS, isOurProcess } from "./shared/process/proc-identity.js";
 import {
   awaitControlResponse,
   bridgePidOf,

@@ -2,7 +2,12 @@ import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { createConn, effectiveWorkerCwd, type WorkerConn } from "./worker-acp.js";
-import { pidRecordOf, writePidRecords, type PidRecord, type PidState } from "./pid-record.js";
+import {
+  pidRecordOf,
+  writePidRecords,
+  type PidRecord,
+  type PidState,
+} from "./shared/process/pid-record.js";
 import type { ResolvedAgent } from "./brain-agents.js";
 import { ensureWorkerHome } from "./worker-sandbox.js";
 

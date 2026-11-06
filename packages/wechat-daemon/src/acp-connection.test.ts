@@ -15,7 +15,7 @@ import {
   type AcpHost,
   type AcpPending,
 } from "./acp-connection.js";
-import { LineDecoder } from "./line-decoder.js";
+import { LineDecoder } from "./shared/io/line-decoder.js";
 
 function fakeAgent(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
   return { name: "fake", ...overrides } as ResolvedAgent;

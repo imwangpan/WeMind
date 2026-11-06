@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { isAlive } from "./proc-identity.js";
+import { isAlive } from "./shared/process/proc-identity.js";
 
 /**
  * 进程池的 IO 侧测试：用**假 ACP agent**（本文件写出的 node 脚本）真起进程，验「复用/并行/上限/回收/身份记录」。
@@ -31,7 +31,7 @@ const {
   WORKERS_PID_FILE,
   resetPoolForTest,
 } = await import("./worker-pool.js");
-const { readPidRecords } = await import("./pid-record.js");
+const { readPidRecords } = await import("./shared/process/pid-record.js");
 import type { ResolvedAgent } from "./brain-agents.js";
 
 const FAKE = path.join(root, "fake-worker.mjs");
