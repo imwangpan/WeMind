@@ -1,13 +1,13 @@
 import type { WeixinMessage } from "@wemind/wechat-ilink-core";
 import { MessageItemType } from "@wemind/wechat-ilink-core";
-import { authHint } from "./agents/brain-agents.js";
+import { authHint } from "../agents/brain-agents.js";
 import {
   parseChatCommand,
   parseTaskCommand,
   type ChatCommand,
   type TaskCommand,
-} from "./ipc/chat-commands.js";
-import { providerIssue, shouldResumeTask } from "./tasks/task-manager.js";
+} from "../ipc/chat-commands.js";
+import { providerIssue, shouldResumeTask } from "../tasks/task-manager.js";
 
 /**
  * 三档进度（按最终答案到达时间）：

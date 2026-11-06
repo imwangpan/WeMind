@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChatCommand } from "./ipc/chat-commands.js";
-import type { ResolvedAgent } from "./agents/brain-agents.js";
-import type { ControlRequest } from "./ipc/control-bridge.js";
+import type { ChatCommand } from "../ipc/chat-commands.js";
+import type { ResolvedAgent } from "../agents/brain-agents.js";
+import type { ControlRequest } from "../ipc/control-bridge.js";
 
 const m = vi.hoisted(() => ({
   agent: (name: string) =>
@@ -49,47 +49,47 @@ vi.mock("@wemind/wechat-ilink-core", async (importOriginal) => {
     clearSessionPause: m.clearSessionPause,
   };
 });
-vi.mock("./acp/acp-brain.js", () => ({
+vi.mock("../acp/acp-brain.js", () => ({
   askBrainTurn: m.askBrainTurn,
   newSession: m.newSession,
   restartForMcpChange: m.restartForMcpChange,
   resumeSession: m.resumeSession,
 }));
-vi.mock("./agents/brain-config.js", () => ({
+vi.mock("../agents/brain-config.js", () => ({
   loadBrainConfig: m.loadBrainConfig,
   agentConfigFor: m.agentConfigFor,
 }));
-vi.mock("./agents/brain-agents.js", () => ({
+vi.mock("../agents/brain-agents.js", () => ({
   ACP_AGENT_PRESETS: { gemini: {}, pi: {} },
   presetAvailable: m.presetAvailable,
   presetNames: m.presetNames,
   resolvePresetByName: m.resolvePresetByName,
 }));
-vi.mock("./agents/agent-slot.js", () => ({ getAgent: m.getAgent, setAgent: m.setAgent }));
-vi.mock("./acp/brain-switch.js", () => ({
+vi.mock("../agents/agent-slot.js", () => ({ getAgent: m.getAgent, setAgent: m.setAgent }));
+vi.mock("../acp/brain-switch.js", () => ({
   preflightSwitch: m.preflightSwitch,
   switchBrain: m.switchBrain,
   switchInFlightTarget: m.switchInFlightTarget,
 }));
-vi.mock("./sessions/session-registry.js", () => ({ currentSessionIdOf: m.currentSessionIdOf }));
-vi.mock("./sessions/session-manager.js", () => ({
+vi.mock("../sessions/session-registry.js", () => ({ currentSessionIdOf: m.currentSessionIdOf }));
+vi.mock("../sessions/session-manager.js", () => ({
   newSessionCmd: m.newSessionCmd,
   sessionsCmd: m.sessionsCmd,
   resumeSessionCmd: m.resumeSessionCmd,
   renameSessionCmd: m.renameSessionCmd,
   deleteSessionCmd: m.deleteSessionCmd,
 }));
-vi.mock("./agents/sandbox/mcp-sandbox.js", () => ({
+vi.mock("../agents/sandbox/mcp-sandbox.js", () => ({
   addMcp: m.addMcp,
   removeMcp: m.removeMcp,
   listMcp: m.listMcp,
 }));
-vi.mock("./sessions/handoff.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./sessions/handoff.js")>();
+vi.mock("../sessions/handoff.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../sessions/handoff.js")>();
   return { ...actual, saveHandoff: m.saveHandoff };
 });
-vi.mock("./tasks/worker-pool.js", () => ({ killIdle: m.killIdle }));
-vi.mock("./tasks/task-manager.js", () => ({
+vi.mock("../tasks/worker-pool.js", () => ({ killIdle: m.killIdle }));
+vi.mock("../tasks/task-manager.js", () => ({
   hasActiveTask: m.hasActiveTask,
   taskPoolSummary: m.taskPoolSummary,
 }));

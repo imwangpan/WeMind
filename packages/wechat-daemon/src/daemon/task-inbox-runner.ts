@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { taskInboxDir } from "./tasks/task-inbox.js";
+import { taskInboxDir } from "../tasks/task-inbox.js";
 
 /** 收件箱命令执行方：由 daemon 注入 task-manager 的真实实现（测试可注入假实现）。 */
 export type TaskInboxOps = {

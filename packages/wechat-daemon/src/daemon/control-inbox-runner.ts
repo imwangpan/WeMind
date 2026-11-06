@@ -8,7 +8,7 @@ import {
   sweepControlOut,
   writeControlResponse,
   type ControlRequest,
-} from "./ipc/control-bridge.js";
+} from "../ipc/control-bridge.js";
 
 export type ControlInboxDeps = {
   /** 执行一条已校验且未过期的请求；返回给 CLI 的文本（`❌` 开头表示失败）。 */

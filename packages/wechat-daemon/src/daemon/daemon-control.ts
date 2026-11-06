@@ -1,17 +1,17 @@
 import { DATA_DIR, clearSessionPause, loadAccount } from "@wemind/wechat-ilink-core";
-import { askBrainTurn, newSession, restartForMcpChange, resumeSession } from "./acp/acp-brain.js";
-import { agentConfigFor, loadBrainConfig } from "./agents/brain-config.js";
+import { askBrainTurn, newSession, restartForMcpChange, resumeSession } from "../acp/acp-brain.js";
+import { agentConfigFor, loadBrainConfig } from "../agents/brain-config.js";
 import {
   presetAvailable,
   presetNames,
   resolvePresetByName,
   type ResolvedAgent,
-} from "./agents/brain-agents.js";
-import { getAgent, setAgent } from "./agents/agent-slot.js";
-import { preflightSwitch, switchBrain, switchInFlightTarget } from "./acp/brain-switch.js";
-import { renderHelp, type ChatCommand } from "./ipc/chat-commands.js";
-import type { ControlRequest } from "./ipc/control-bridge.js";
-import { currentSessionIdOf } from "./sessions/session-registry.js";
+} from "../agents/brain-agents.js";
+import { getAgent, setAgent } from "../agents/agent-slot.js";
+import { preflightSwitch, switchBrain, switchInFlightTarget } from "../acp/brain-switch.js";
+import { renderHelp, type ChatCommand } from "../ipc/chat-commands.js";
+import type { ControlRequest } from "../ipc/control-bridge.js";
+import { currentSessionIdOf } from "../sessions/session-registry.js";
 import {
   deleteSessionCmd,
   newSessionCmd,
@@ -19,17 +19,17 @@ import {
   resumeSessionCmd,
   sessionsCmd,
   type SessionCtx,
-} from "./sessions/session-manager.js";
-import { addMcp, listMcp, removeMcp } from "./agents/sandbox/mcp-sandbox.js";
+} from "../sessions/session-manager.js";
+import { addMcp, listMcp, removeMcp } from "../agents/sandbox/mcp-sandbox.js";
 import {
   HANDOFF_PROMPT,
   HANDOFF_TTL_MS,
   HANDOFF_VERSION,
   saveHandoff,
-} from "./sessions/handoff.js";
-import { LONG_REPLY_THRESHOLD } from "./md-reply.js";
-import { hasActiveTask, taskPoolSummary } from "./tasks/task-manager.js";
-import { killIdle as killIdleConns } from "./tasks/worker-pool.js";
+} from "../sessions/handoff.js";
+import { LONG_REPLY_THRESHOLD } from "./messaging/md-reply.js";
+import { hasActiveTask, taskPoolSummary } from "../tasks/task-manager.js";
+import { killIdle as killIdleConns } from "../tasks/worker-pool.js";
 
 const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon]", ...a);
 

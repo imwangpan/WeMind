@@ -46,7 +46,7 @@ import { isOwnerOnly } from "./ipc/chat-commands.js";
 import { ensureBrainHome } from "./agents/sandbox/mcp-sandbox.js";
 import { syncFromPointerMap } from "./sessions/session-registry.js";
 import { clearControlDirs, markBridgeReady } from "./ipc/control-bridge.js";
-import { ControlInboxRunner } from "./control-inbox-runner.js";
+import { ControlInboxRunner } from "./daemon/control-inbox-runner.js";
 import { clearHandoff, handoffPrefix, loadHandoff, takeHandoffFor } from "./sessions/handoff.js";
 import {
   canSendImage,
@@ -55,13 +55,13 @@ import {
   planImageTurn,
   resolveImageBytes,
   type ImageFailure,
-} from "./image-reply.js";
-import { LONG_REPLY_THRESHOLD, buildMdReply } from "./md-reply.js";
-import { isAuthorizedSender } from "./access.js";
-import { handleControl, handleControlRequest } from "./daemon-control.js";
-import { shouldDeferTaskPush } from "./pending-push.js";
-import { SendPipeline } from "./send-pipeline.js";
-import { finishPollBatch } from "./poller-batch.js";
+} from "./daemon/messaging/image-reply.js";
+import { LONG_REPLY_THRESHOLD, buildMdReply } from "./daemon/messaging/md-reply.js";
+import { isAuthorizedSender } from "./daemon/access.js";
+import { handleControl, handleControlRequest } from "./daemon/daemon-control.js";
+import { shouldDeferTaskPush } from "./daemon/messaging/pending-push.js";
+import { SendPipeline } from "./daemon/messaging/send-pipeline.js";
+import { finishPollBatch } from "./daemon/messaging/poller-batch.js";
 import {
   dispatchTask,
   injectTask,
@@ -79,7 +79,7 @@ import {
   type TaskStateSnapshot,
 } from "./tasks/task-manager.js";
 import { clearTaskDirs, writeTaskAck } from "./tasks/task-inbox.js";
-import { scanTaskInbox } from "./task-inbox-runner.js";
+import { scanTaskInbox } from "./daemon/task-inbox-runner.js";
 import { killAll as killWorkerPool, sweep as sweepWorkerPool } from "./tasks/worker-pool.js";
 import { ensureWorkerHome } from "./agents/sandbox/worker-sandbox.js";
 
@@ -103,7 +103,7 @@ import {
   toolIcon,
   toolSummary,
   type TaskFacts,
-} from "./daemon-routing.js";
+} from "./daemon/daemon-routing.js";
 
 export {
   brainErrorMessage,
@@ -113,8 +113,8 @@ export {
   parseControl,
   parseTaskControl,
   shouldResumeInBrainQueue,
-} from "./daemon-routing.js";
-export type { TaskFacts } from "./daemon-routing.js";
+} from "./daemon/daemon-routing.js";
+export type { TaskFacts } from "./daemon/daemon-routing.js";
 
 async function setTyping(
   account: AccountData,
