@@ -37,7 +37,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
   }
 
   // 设置基底（settingsBase：Qoder / gemini 这类「设置与 MCP 同文件」的 agent）：与 daemon 沙箱一致地带模型/认证等非 MCP 设置。
-  // 必须剥掉 mcpServers——自检会在临时目录里真起 agent，带上真实 MCP 等于启动第二个 wechat 消费者（回环）。
+  // 必须剥掉 mcpServers——自检会在临时目录里真起 agent，带上真实 MCP 等于启动第二个微信收消息实例（回环）。
   if (ag.settingsBase && ag.realHome) {
     try {
       const parsed = parseJsonc(fs.readFileSync(path.join(ag.realHome, ag.settingsBase), "utf-8"));

@@ -66,7 +66,7 @@
 
 ## 注意
 
-- ⚠️ **同一个 bot token 只能有一个消费者**：本 MCP server 与 [`@wemind/cli`](https://www.npmjs.com/package/@wemind/cli) 的 daemon **二选一**。两边同时跑会互相抢消息、出现重复回复或丢消息。切换形态前先停掉另一个。
+- ⚠️ **同一个 bot token 只能有一个程序收消息**（同一份登录凭证不能同时被两个程序使用）：本 MCP server 与 [`@wemind/cli`](https://www.npmjs.com/package/@wemind/cli) 的 daemon **二选一**。两边同时跑会互相抢消息、出现重复回复或丢消息。切换形态前先停掉另一个。
 - `get_messages` 只返回**登录者**（扫码登录这个 bot 的微信号）或登录者白名单（`allowFrom.json`）内的消息，其它发件人的消息会被过滤——这是兜底鉴权，不是权限配置入口。
 - 凭证存在 `~/.wemind/<account>/account.json`（**Windows 下为明文**，请用文件夹权限/磁盘加密保护）。账号目录由 `WECHAT_ACCOUNT`（默认 `default`）或 `WECHAT_DATA_DIR`（直接指定完整路径）决定；不设就用 `~/.wemind/default`。
 - **与 CLI 账号体系对接**：标准目录（默认 `~/.wemind/default`、未设 `WECHAT_DATA_DIR`）登录成功后会自动登记进 `~/.wemind/accounts.json`，`wemind list` / `start` 可直接看到；退登时按 botId 核对后注销条目。自定义 `WECHAT_DATA_DIR` 不登记（注册表指向 `~/.wemind/<key>`，登记会指错目录）。

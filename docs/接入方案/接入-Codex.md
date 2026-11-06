@@ -122,3 +122,14 @@ wemind brain check
 $env:ACP_BIN = "codex-acp.cmd"; $env:ACP_SHELL = "1"; node scripts/acp-probe.mjs
 ```
 
+---
+
+## 6. 待实测
+
+以下条目在本文中没有通过记录，来自状态行、§2 探针结果与 §4 已知限制里已明确标注的「待复测 / 未做」项：
+
+- **真机带图一轮**：真机 E2E 只覆盖纯文本（worker 任务 #21、brain 微信单轮）；探针 C5 已验证图片能力，但微信侧发图的真机复测**待做**（§4 第 4 条）。
+- **冷重启后续聊**：杀掉 daemon 再起、追问上一轮上下文（`session/load`）**待复测**（§4 第 4 条）。
+- **`taskkill /T /F` 强杀恢复**：探针只验证了正常 `session/load`，强杀后的恢复 E2E **未做**（§2 C9；对应 [`docs/ai/已知坑.md`](../ai/已知坑.md)「仍未单独测」条）。
+- **适配器升级后重跑探针**：`codex-acp` 的 capabilities 与 mode id 随版本变化（本文实测基线 2.5.0、Codex CLI 0.165–0.166），升级后需按 §2 重新验证 `loadSession`、`image`、`availableModes` 含 `agent-full-access` 等结论是否仍成立（状态行与 §4 第 6 条）。
+

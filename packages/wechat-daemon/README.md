@@ -82,7 +82,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 - **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：`npm i -g <适配器包>` 后 `wemind brain set <agent 名>`；各适配器的安装命令、认证、沙箱与 MCP 差异见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - ⚠️ **daemon 会让大脑免确认执行工具**：9 个内置预设默认都免审批，能给这个 bot 发消息的人即可让大脑在本机执行任意工具（shell / 写文件）。微信平台限制决定了只有扫码登录这个 bot 的**登录者**能发消息；另有一道**发件人授权（allowFrom）兜底**：登录者自动写入，**勿清空**。想收紧权限见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - `account.json`（bot token）、`state.json`（`context_token`）、`qr_login.json` 在 POSIX 上统一 chmod 600；Windows 上都是明文，请用目录权限或磁盘加密。
-- 同一个 bot token **只能有一个消费者**：`wemind` daemon 与 `@wemind/wechat-mcp` 二选一，否则互相抢消息。
+- 同一个 bot token **只能有一个程序收消息**（同一份登录凭证不能同时被两个程序使用）：`wemind` daemon 与 `@wemind/wechat-mcp` 二选一，否则互相抢消息。
 
 ## 环境变量（常用）
 

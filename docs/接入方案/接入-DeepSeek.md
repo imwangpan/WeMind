@@ -1,6 +1,7 @@
 # 接入 DeepSeek（评估、实施与实测）
 
 > **状态**：官方 DSH **已接入，微信 brain + worker E2E 均通过**（2026-10-24，M1/M2 已实现）；初测 `dsh 0.2.1-rc.2`、2026-11-03 在 **0.2.1-rc.3** 上复测并修复两处真机故障：**会话库与别的 agent 共用沙箱根**（改用 `--patch` 把会话 root 隔离到账号数据目录）、**用户 `- id: acp` 的模型被桌面端目录淘汰**（`wemind brain` 给替换提示）。`initialize` / `session/new` / `prompt` / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 带图（-32602）/ stdio MCP 均已验。
+> **实测环境**：Windows 11；桌面端 `dsh 0.2.1-rc.2`（2026-11-03 复测于 `0.2.1-rc.3`）；隔离 `DSH_HOME`（复制 `.credentials.yaml`）；模型 `deepseek-account/deepseek-flash`。
 > **实测范围**：DSH 0.2.1-rc.2 / rc.3（M0 探针 + 微信 brain/worker E2E，见附录 A）｜ **最后核对**：2026-11-05。
 > **范围**：daemon 的常驻「大脑」（形态②，ACP）。MCP 客户端形态另见 §2.4。
 > **相关文档**：[接入-OpenCode.md](接入-OpenCode.md)（同类接入的实测样板）· [接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](../repowiki/06-ACP-大脑与沙箱.md)。
@@ -601,6 +602,67 @@ DSH 的会话在 `<账号目录>/agent-sessions/deepseek/{brain,worker}`（2026-
 - DSH 用户指令（`$DSH_HOME/AGENTS.md`）：<https://github.com/deepseek-ai/deepseek-harness/blob/HEAD/packages/context/agent-instructions/README.zh.md>
 - DSH 技能根目录（`$DSH_HOME/skills`、`~/.agents/skills`）：<https://github.com/deepseek-ai/deepseek-harness/blob/HEAD/packages/skill/skill-filesystem/README.zh.md>
 - ACP `session/request_permission` 响应形状：<https://agentclientprotocol.github.io/typescript-sdk/types/RequestPermissionResponse.html>
+
+---
+
+## 11. 安装与准备
+
+- **不需要另装 CLI**：DeepSeek Harness 桌面端已自带 `dsh`（`resources\runtime\cli\bin\dsh.cmd`，常见于 `$env:LOCALAPPDATA\Programs\DeepSeek Harness\...`，也可能装在其它的盘/目录）；初测版本 `0.2.1-rc.2`，2026-11-03 复测为 `0.2.1-rc.3`。
+- **只有 `dsh.cmd`（没有无扩展名的 `dsh`）**：agent 预设写 `binWin: "dsh.cmd"`，或用 `WEMIND_BRAIN_BIN` 指向实际的 `dsh.cmd` 绝对路径；否则 `onPath("dsh")` 找不到。
+- **也可以全局安装**：`npm i -g @deepseek-ai/dsh@0.2.1-rc.2`（§3.4 的安装行）；实测基线是 rc.2 / rc.3，Node 要求 ≥22（本机 Node 24 满足）。
+- **启动方式**：`dsh --profile acp`，stdio 上的纯 ACP JSON-RPC；`dsh --profile acp --help` 打印帮助后退出。
+- **凭据二选一**（详见 §7.1）：① 桌面登录态——`$DSH_HOME/.credentials.yaml`，`ensureBrainHome()` 按「新者胜」同步进沙箱，对应 `deepseek-account` 路由；② `DEEPSEEK_API_KEY`——必须对 daemon 进程可见，对应 `deepseek-official` 路由。
+- **首次自检**：`npm run build` → `wemind brain set deepseek --bin <dsh.cmd 绝对路径> --restart` → `wemind brain` → `wemind brain check`（60s 内）；`brain check` 不验证 prompt/模型，模型路由与上下文用 `scripts/acp-probe.mjs` 验证。
+
+## 12. 预设与沙箱
+
+`brain-agents.ts` 的 `ACP_AGENT_PRESETS.deepseek`（§5.3 M1）关键字段：
+
+- 启动：`bin: "dsh"`、`binWin: "dsh.cmd"`、`args: ["--profile", "acp"]`、`shell: true`。
+- 沙箱：`homeEnvVar: "DSH_HOME"`、`realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGENTS.md"]`、`credentialFiles: [".credentials.yaml"]`；`configSubdir` 留空（`DSH_HOME` 本身就是 home）。
+- 协议：`restore: "resume"`、`firstFrameMs: 60_000`、`heartbeatMs: 60_000`、`images: false`、`mcpViaAcp: true`。
+- 模型：`realProfile: "acp"`（原样复制真实 `profiles/acp/cordis.patch.yml`，缺 `- id: acp` 只提示不代改）、`model: '["deepseek-account","deepseek-flash"]'`（读不到真实 profile 默认值时的兜底）。
+- 会话：`isolateSessions: true`。
+- 权限：`envDefaults: { DSH_PERMISSION_MODE: "danger-full-access" }`（默认值，父进程同名变量优先）。
+
+**沙箱布局**（§5.2）：brain 的 `DSH_HOME=<数据目录>/brain-home`、cwd 为沙箱根；worker 的 `DSH_HOME=<数据目录>/worker-home`、cwd 为任务目录。
+
+**会话库**（§7.5）：2026-11-03 起在 `<账号目录>/agent-sessions/deepseek/{brain,worker}`；启动前 `prepareAgent()` 落盘 `session-root-<role>.patch.yml`，用 DSH 自己的 `--patch` 把 `session-persistence-jsonl.root` 指过去（用户 `--args` 里自带 `--patch` 时不再追加）。
+
+**记忆 / 技能**（§5.3 M4）：真实 `~/.dsh` 的 `skills` 以 junction、`AGENTS.md` 以复制进入沙箱；共享根 `~/.agents` 默认不受影响。
+
+**MCP**（§5.3 M3）：不写任何 MCP 配置文件，激活集由 `toAcpMcpServers()` 转成 `session/new|resume` 的 `mcpServers`；catalog 用 `WEMIND_MCP_CATALOG` 指向中立 kiro 格式文件；`wechat` 永久排除。
+
+## 13. 限制
+
+- **无 `session/load`**：DSH 只有 `session/resume`，`session/load` 返回 `-32601`；预设用 `restore: "resume"`，恢复失败才新建。
+- **不收图**：`promptCapabilities.image: false`，带图 `session/prompt` 返回 `-32602`；微信侧在 `askBrain` 前拦截并友好拒绝（纯图回「当前大脑暂不支持看图…」，带文字按文字回答并注明图片被忽略）。
+- **正文非逐 token**：以「已提交消息」为单位在回合末整段提交；纯推理阶段可能长时间没有 `agent_message_chunk`，靠 `firstFrameMs` / `heartbeatMs`（预设均 60s）兜底，否则会被判首帧超时或每 15s 发进度。
+- **MCP 只走 ACP**：不读 kiro 式 MCP 配置文件，`mcpServers` 随 `session/new|resume` 下发；catalog 需用 `WEMIND_MCP_CATALOG` 单独指向。
+- **权限没有 ACP 开关**：`dsh --profile acp --help` 只有 `-h`，ACP 不广告权限配置项（`set_config_option` 只认 `model` 与 `reasoning_effort`）；免审批只能靠 `DSH_PERMISSION_MODE`（官方 bundle 的默认值来源，文档正文未收录，升级后可能失效）。
+- **stdout 不纯**：会混入 `[llm-deepseek-account] model listing ...` 这类非 JSON 行，解析器必须容错。
+- **Windows 只有 `dsh.cmd`**：`onPath("dsh")` 找不到，`auto` 探测依赖预设的 `binWin: "dsh.cmd"`。
+- **Node ≥22**：仓库发布包声明 Node ≥20，旧环境起不来（§8 R8）。
+- **RC 快速迭代**：实测基线 rc.2 / rc.3；2026-11-05 查 registry 时 `latest` 已是 rc.5，rc.4 / rc.5 未实测，升级前先跑 `scripts/acp-probe.mjs`。
+- **默认路由与凭据**：`deepseek-official/deepseek-v4-flash` 需要 `DEEPSEEK_API_KEY`；桌面登录态只对 `deepseek-account` 有效，`magpie/*` 需要桌面端在运行（本机网关 `127.0.0.1:3425`）。
+- **沙箱边界有限**：DSH 的 Windows ACL 只限制普通 NTFS 写，不限制读/网络/进程可见性；预设 `danger-full-access` 连写限制也放开，靠 `allowFrom` 登录者白名单与专用 OS 账号兜底（§8 R9）。
+
+## 14. 验证
+
+- **构建与自检**（§7.2）：`npm run build` → `wemind brain set deepseek --bin <dsh.cmd 绝对路径> --restart` → `wemind brain`（应显示 `name=deepseek`、`bin=...dsh.cmd`、`home_env=DSH_HOME`）→ `wemind brain check`（真起进程跑 `initialize` + `session/new`，默认 60s 超时）。
+- **ACP 探针回归**（M0 / 附录 A）：`scripts/acp-probe.mjs`（`ACP_BIN` / `ACP_ARGS` 指到 dsh，`ACP_MODEL` + 两次 prompt）逐项记录 `initialize` 能力、`session/new` 的 `configOptions`、首帧与 `session/update` 类型、kill 后 `resume` 的上下文、反向请求、非空 `mcpServers`、图片 prompt。
+- **微信端到端**（§7.3）：发消息 → 日志 `spawn deepseek ... → initialized → session/new|resume → prompt ok` → 收到非空回复；杀 daemon 后追问仍走 `resume`；>30s 任务不被首帧超时杀掉且静默期不刷「还在思考」；「新会话」走 `session/new`；图片友好拒绝；`加载 <MCP>` 下一条生效且 `wechat` 仍被禁止；worker 派发 / `task-reply` / `task-stop` 正常。
+- **单测**（§5.3 M5）：`brain-agents.test.ts`（deepseek agent 断言，含 `mcpViaAcp`）、`agent-mcp.test.ts`（`toAcpMcpServers` 转换/跳过/预校验）；M5 全量 136 tests 通过。
+- **已验清单**：M0 探针、微信 brain E2E、worker E2E、M3 MCP、M4 记忆/技能、M5 多账号机制与失败路径，见附录 A。
+
+## 待实测
+
+- `@deepseek-ai/dsh` `0.2.1-rc.4` / `0.2.1-rc.5`：未实测（2026-11-05 查 registry 时 `latest` 已是 rc.5）；使用前先跑 `node scripts/acp-probe.mjs` 回归。
+- HTTP MCP：能力已广告（`mcpCapabilities.http: true`），未真机实测（stdio MCP 已验）。
+- 社区 `deepseek-acp@0.9.0`：未实测（附录 A「社区待跑」，image / load / 权限行为尚无法确认）；如选方案 B，先跑 `scripts/acp-probe.mjs`，不要直接上线。
+- 双真机微信账号：多账号机制已用双数据目录各跑一轮验证，双真机微信账号待需要时再验。
+- 官方后续打开 `image` 后：回归微信收图。
+- resource / prompt 范围：留待后续（§9）。
 
 ---
 

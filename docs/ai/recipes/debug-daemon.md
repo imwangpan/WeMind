@@ -11,8 +11,8 @@
 | 症状 | 先看 | 大概率原因 |
 |---|---|---|
 | `wemind start` 立刻退出 / 日志 `FATAL 大脑不可用`（exit 78） | `wemind brain` | agent 未知、二进制不在 PATH、`binWin` 写错（如只有 `dsh.cmd`） |
-| 日志 `another daemon is already running`（exit 75） | `wemind list` / `wemind stop <账号>` | 同账号已有另一个 daemon（直接 `wemind daemon`、两套 runner 并存、或旧实例还没退干净）；先停掉旧实例再启动，别让两个消费者抢同一个 bot token |
-| daemon 在跑，但微信完全没反应 | `daemon.log` 有无 `turn start` / `prompt ok` | 没登录、你（登录者）不在白名单 `allowFrom` 里（异常情况）、bot token 被另一个消费者抢走 |
+| 日志 `another daemon is already running`（exit 75） | `wemind list` / `wemind stop <账号>` | 同账号已有另一个 daemon（直接 `wemind daemon`、两套 runner 并存、或旧实例还没退干净）；先停掉旧实例再启动，别让两个程序用同一个 bot token 收消息 |
+| daemon 在跑，但微信完全没反应 | `daemon.log` 有无 `turn start` / `prompt ok` | 没登录、你（登录者）不在白名单 `allowFrom` 里（异常情况）、bot token 被另一个程序占用（两边抢消息） |
 | 反复「⏳ 响应中断了，正在自动重试…」 | `daemon.log` 的 `[wemind/wechat-daemon/acp]` | agent 启动失败、`initialize` 超时、参数不对、`.cmd` 没经 shell |
 | 只试一次就回「（这次没答上来：额度/余额不足…）」 | `brain error (try 1, provider：额度/余额不足)` | provider 侧的**永久**错误（余额/密钥/计费/模型不存在）不重试，按日志里的原因把账号或模型处理好（`providerIssue()` 认；限流仍走重试）；其中**密钥/鉴权**与**模型不可用**两类若是在本机改的登录态/模型配置，还要重启一次 daemon（`wemind stop && wemind start`，或 `wemind brain switch <同名 agent>`）才生效——运行中的 daemon 不重读 `brain.json`、不重新同步凭据 |
 | 回复突然停 / 「接近微信连续消息上限」 | 进度条数 | iLink 连发上限 ~10；回「继续」恢复 |
@@ -134,7 +134,7 @@ wemind brain check
 1. `wemind list` 确认账号 `运行中`；
 2. 确认你（登录者）在 `allowFrom` 白名单里（正常会自动写入）：`wemind allowlist <key>` 看清单、异常时 `wemind allow <key> <userId>` 加人；
 3. 看 `daemon.log` 有没有 `turn start`：
-   - 没有 → 消息没被拉取（登录/token/多消费者）；
+   - 没有 → 消息没被拉取（登录/token/别处也在收消息）；
    - 有但没有 `prompt ok` → ACP 层问题，转 3.3；
 4. 确认没有第二个 MCP/daemon 用同一 token（回环/抢消息）。
 
@@ -234,7 +234,7 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 
 1. **daemon 是升级前启动的旧版本**：**必须由它执行的**写命令（`session new`/`resume`、`brain switch|worker|handoff`）在**发出前**就拒绝，并给 `wemind stop <key> && wemind start <key>`；本来就是文件操作的 `session rename`/`delete` 照常直接改登记表（**不会**加说明行），`session list` 直接读登记表并附一行「按下次会用的那个大脑列」，`task-list`/`task-status` 从来不经过桥（读 `tasks.json`，只在 daemon 没跑时注明「上次记录」）。**按提示重启一次**即可——这不是故障。
 2. **`.bridge` 凭据对不上**：`control-out/.bridge` 里应是 daemon 自己的 pid，且等于 `daemon.pid`。手动改过/删过 `control-out/` 都会让它失配。
-3. **daemon 是手跑的老 dist**：`wemind list` 靠命令行特征认进程（`proc-identity.ts`）。用**相对路径**起 daemon（`node packages/wechat-daemon/dist/cli.js daemon`）在旧 dist 里会被判成「不是我们的进程」→ 显示「未运行」且桥拒绝。修法：`npm run build` 后重启（1.2.0 已补相对路径的特征，见 `AGENTS.md` §6）。
+3. **daemon 是手跑的老 dist**：`wemind list` 靠命令行特征认进程（`proc-identity.ts`）。用**相对路径**起 daemon（`node packages/wechat-daemon/dist/cli.js daemon`）在旧 dist 里会被判成「不是我们的进程」→ 显示「未运行」且桥拒绝。修法：`npm run build` 后重启（1.2.0 已补相对路径的特征，见 [`docs/ai/已知坑.md`](../已知坑.md)）。
 4. **真没跑**：`wemind start [<key|label>]`（省略 = 默认账号）；纯读命令（`session list`、`task-list`）不需要 daemon。
 
 现场证据：`control-inbox/` 若堆着请求文件 = daemon 没在扫（没跑/不认桥）；排空后 `control-out/<id>.json` 会给出 `ok` 与 `text`。请求带 `expiresAt`（CLI 等待截止）：过期请求只回「已超时、未执行」，不会在 CLI 放弃后照做；`session.new`/`resume` 排队拿到执行权后还会再查一次截止。

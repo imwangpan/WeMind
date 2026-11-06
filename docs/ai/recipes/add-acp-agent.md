@@ -52,6 +52,39 @@ node scripts/acp-probe.mjs
 
 ---
 
+## 0.5 产出物清单（闭集，缺一不可）
+
+接一个新 agent 必须同时产出下表 10 项。第 4–7 项由 `node scripts/check-agent-docs.mjs` 断言，其余由单测与审校覆盖。
+
+| # | 产出物 | 位置 | 由谁检查 |
+|---|---|---|---|
+| 1 | 预设 | `brain-agents.ts` 的 `ACP_AGENT_PRESETS` | 单测 |
+| 2 | 预设单测 | `brain-agents.test.ts` | `npm test` |
+| 3 | 沙箱单测（涉及沙箱时） | `sandbox-<name>.test.ts` | `npm test` |
+| 4 | 接入文档 | `docs/接入方案/接入-<Name>.md`，含 §0.6 的五类小节 + `## 待实测` | `check-agent-docs.mjs` |
+| 5 | 通用表加一行 | `docs/接入方案/接入其它-ACP-Agent.md` §5 | `check-agent-docs.mjs` |
+| 6 | 已知坑加一条 | [`docs/ai/已知坑.md`](../已知坑.md) | `check-agent-docs.mjs` |
+| 7 | 全库索引 | `docs/README.md`「各 agent 实测」行 + `llms.txt` | `check-agent-docs.mjs` |
+| 8 | AI 事实表 | `docs/ai/README.md` 事实状态表 | 人工 |
+| 9 | 安装提示（适配器类） | `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT` | 单测 |
+| 10 | 探针记录 | 文档「探针实测结论」小节，每条标来源档位 | 人工审校 |
+
+## 0.6 填空：能力结论与来源档位
+
+每条能力结论必须标注来源（三选一），并显式列出未验证项。**不能把三者都写成「实测」**：
+
+- `loadSession`：____（探针观测 / 源码核实 / 文档转述）
+- `image`：____
+- `mcpViaAcp`：____
+- `session/set_mode`：____
+- `replayOnLoad`：____
+- 会话恢复方式（load / resume / 无）：____
+- 未验证项：____（没有写「无」）
+
+> 三档能证明的东西不同：**探针观测**只证明「这条消息能跑通、回了什么」；**源码核实**才能回答「它内部怎么处理」；**文档转述**只是上游作者声称的行为。2026-11-05 审计里所有「探针看不到的语义」发现都来自源码核实，没有一条来自探针。
+
+---
+
 ## 1. 确认 4 件事
 
 | # | 信息 | 说明 | 示例（DSH） |

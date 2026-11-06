@@ -249,7 +249,113 @@ npm run build; npm run daemon
 
 ---
 
-## 4. 附录 A · M1 复现步骤与 harness
+## 4. 安装与准备
+
+> 本节把散落在 §3.2、§3.4 Step 7、附录 A / 附录 B 的前置条件归拢到一处，事实与结论不变。
+
+- **实测环境**：Windows 11 / Node ≥20 / OpenCode v2.0.29（M1）；2026-10-29 在 v2.0.32 上复测 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）。
+- **ACP 入口**：`opencode acp`；`opencode acp --login` 可跑登录。
+- **Windows 可执行文件**：PATH 上是 npm shim `opencode.cmd`，没有无扩展名的 `opencode`，`onPath("opencode.exe")` 也找不到；预设因此 `shell: true`，以裸名 `opencode` 交给 shell 解析。
+- **版本/目录核对**：`& $exe --version` 记录版本；`& $exe debug paths` 确认 config（`~/.config/opencode`）与 data（`~/.local/share/opencode`）分离。
+- **登录不是硬前置**：未登录任何 provider 时，仍可用 OpenCode 自带免费模型（`session/new` 默认 `opencode/nemotron-3.5-super-vl-free`）完成对话。
+- **设为大脑**：`wemind brain set opencode --restart`（写入磁盘持久）；一次性覆盖用 `$env:WEMIND_BRAIN = "opencode"`。
+- **握手自检**：`wemind brain check` 会真起进程跑 `initialize + session/new`；启动 daemon 后微信发消息，`~/.wemind/<acct>/daemon.log` 应出现 `[wemind/wechat-daemon/acp] spawn opencode acp … → initialized → session/new|session/load → prompt ok`。
+- **最快冒烟（不改代码，纯环境变量）**：
+
+```powershell
+$env:WEMIND_BRAIN_BIN     = "opencode"
+$env:WEMIND_BRAIN_ARGS    = "acp"
+$env:WEMIND_BRAIN_SHELL   = "1"
+$env:WEMIND_BRAIN_INHERIT = "0"
+npm run build; npm run daemon
+```
+
+> 此步 global 配置仍会合并，仅供打通链路；隔离要在 M2（沙箱）之后才生效。
+
+- **原生 `opencode.exe` 想跳过 shell**：须同时设 `WEMIND_BRAIN_SHELL=0` 与 `WEMIND_BRAIN_BIN=<绝对路径>`；只设 `WEMIND_BRAIN_BIN` 不会关掉预设的 `shell: true`。
+
+---
+
+## 5. 预设与沙箱
+
+`opencode` 是内置预设（`ACP_AGENT_PRESETS`），字段定义见 §3.4 Step 1；落地结果如下：
+
+| 项目 | 落地结果 | 依据 |
+|---|---|---|
+| 启动 | `opencode acp`；`shell: true`、`binWin: "opencode"` | §3.4 Step 1 / Step 7 |
+| 沙箱配置目录 | `XDG_CONFIG_HOME=<沙箱>` → 配置实到 `<沙箱>/opencode/`；`OPENCODE_CONFIG_DIR` 只「追加」、不替换 global，无法隔离，故不用 | §3.2、§3.3 |
+| MCP 文件 | `<沙箱>/opencode/opencode.json` 的 `mcp.servers`（`mcpFormat: "opencode"`） | §3.4 Step 3 |
+| MCP 激活 | brain 默认空 MCP；微信 `加载/卸载` 后写激活集，重启 ACP 生效；`mcp.servers` 条目原样透传 | §3.4 Step 3 |
+| MCP 目录（CATALOG） | 默认 `<realHome>/opencode.json`；**不**回退 `opencode.jsonc`——真实配置只有 `.jsonc` 时用 `WEMIND_MCP_CATALOG` 显式指过去 | §3.4 Step 3 |
+| worker | 继承全量 MCP、仅排除 `wechat`；路径同为 `<WORKER_CONFIG_DIR>/opencode.json` | §3.4 Step 5 |
+| 记忆/技能 | `skills` / `agents` / `commands` 目录 junction；`AGENTS.md` 单文件额外拷贝 | §3.4 Step 4 |
+| 模型基底 | 用户真实 `opencode.json`（去掉 `mcp` 段）作基底写入沙箱，继承 `model` 等设置；MCP 仍由沙箱权威 | §3.4 Step 6、§3.5 #3 |
+| 项目配置发现 | `OPENCODE_DISABLE_PROJECT_CONFIG=1`，不从 cwd 祖先目录发现用户 `opencode.json` | §3.4 Step 2 |
+| 数据/凭证 | `~/.local/share/opencode`，与配置分离；隔离配置不丢登录态，但该目录不按账号隔离 | §3.2 |
+
+补充：
+
+- **隔离与 MCP 端到端已实测**：`XDG_CONFIG_HOME=<dir>` 后 `opencode debug paths config` 输出 `<dir>/opencode`；ACP 的 `session/new` 采用该目录 `opencode.json` 的 `model`；放进 `mcp.servers` 的假 MCP 被实际拉起（标记文件被创建）→ `opencode acp` 完整读取 `<XDG>/opencode/opencode.json`。
+- **沙箱配置是生成物**：沙箱 `opencode.json` 每次启动由真实配置重新生成，手改沙箱那份下次启动即失效——改模型/设置请改真实那份。
+- **`opencode mcp list` 不代表 ACP 行为**：它连的是共享后台服务，不能用来判断 ACP 进程读了哪个配置目录。
+
+---
+
+## 6. 探针与实测
+
+### 6.1 探针入口
+
+复现步骤与 harness 见附录 A（§8）。通用探针 `scripts/acp-probe.mjs` 用 `ACP_BIN` / `ACP_ARGS` 指定 agent（`ACP_ARGS='["acp"]'`）；`ACP_TEST_IMAGE=1`、`ACP_TEST_MCP=…`、`ACP_HARD_KILL=1` 分别测图片、ACP MCP、强杀后 resume。早期只硬编码 `opencode acp` 的 `acp-smoke.mjs` / `acp-smoke2.mjs` 已删除。
+
+### 6.2 M1 结论（v2.0.29）
+
+用完全复刻 `acp-brain.ts` 组帧方式的最小客户端（换行分隔 JSON-RPC、`clientCapabilities:{}`）驱动 `opencode acp`，逐项结果见 §3.3，摘要：
+
+- `initialize` 返回 `protocolVersion:1`，`loadSession:true`、`promptCapabilities.image:true`、`mcpCapabilities.http:true` → 握手兼容、支持发图。
+- `session/new` 返回 `sessionId` 与 `configOptions`（`model` / `effort` / `mode`）。
+- `session/prompt` 以 `stopReason:end_turn` 结束，`agent_message_chunk` 流式拼出 `"OK"`。
+- `session/load` + 追问答出 `"PINEAPPLE"` → 崩溃重建后能恢复上下文。
+- 工具调用出现 `tool_call` / `tool_call_update`，任务正确完成 → 微信「步骤 N」进度可用。
+- **反向请求全程无**（无 `fs/*`、无 `session/request_permission`）→ 协议层无需为 OpenCode 改动。
+
+### 6.3 其他实测事实
+
+- `initialize` 还带 `sessionCapabilities.{additionalDirectories,close,delete,fork,list,resume}` 与 `_meta["opencode/child-session-updates"]`；WeMind 不理会，无副作用。
+- `session/update` 会出现 `available_commands_update`、`usage_update`、`user_message_chunk`；现有逻辑把它们当「活动」或忽略，不报错。
+- 2026-10-29（v2.0.32，run-e2e §7.3）：`session/delete` 可用；`session/load` 回放 2 帧 / 857ms；opencode + qoder 两条任务并行结果均送达、未见限流型 `ret=-2`；强杀后 `session/load` 能接回原任务会话。
+- 同轮记录冷启动 `initialize` 约 650ms、`session/new` 约 800ms（[`docs/ai/已知坑.md`](../ai/已知坑.md)），远小于 30s 请求超时。
+- brain 通道真机 E2E 已于 2026-10-29 通过（微信发消息 → `opencode acp` → 自动回复，见 [CHANGELOG](../发布与变更记录/CHANGELOG.md)）；worker 侧任务结果推送同轮通过。
+- 工具标题实测到 `call-4516d245-…` 这类形态（M1 输出）。
+
+---
+
+## 7. 限制
+
+- **配置隔离只走 `XDG_CONFIG_HOME`**：`OPENCODE_CONFIG_DIR` 是「追加」语义，单独设置不能替换默认 global，无法隔离；`OPENCODE_CONFIG` 只指定单文件；历史 issue 提示 `OPENCODE_CONFIG_DIR` 单独设置可能不加载其内 `opencode.json`。
+- **数据目录不按账号隔离**：登录态与后台服务都在 `~/.local/share/opencode`，同机多个 WeMind 账号共用；与 AGENTS.md §4.7「数据按账号隔离」的口径有出入（已知边界）。
+- **沙箱配置是生成物**：手改沙箱 `opencode.json` 会在下次启动被真实配置覆盖。
+- **CATALOG 只认单一文件名**：默认 `<realHome>/opencode.json`，不自动回退 `.jsonc`；真实配置只有 `opencode.jsonc` 时必须用 `WEMIND_MCP_CATALOG` 显式指定。
+- **模型由 OpenCode 决定**：预设不带 `model`，WeMind 默认不下发；`wemind brain set opencode --model …` 的 `configId` 是否被接受尚未实测（见「待实测」），下发失败会让该回合报错，稳妥做法是改真实 `opencode.json` 的 `model`。
+- **权限**：`opencode acp` 不接受 `--auto`（官方 issue #52216）；WeMind 在沙箱 `opencode.json` 写 `"permission": "allow"`（用户自己配了 permission 则保留用户的）。ACP 仍可能发 `session/request_permission`：宿主默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行；daemon 的 `allowFrom` 登录者白名单是兜底校验，勿关。
+- **共享后台服务**：`opencode acp` 是否复用全局 background server 未确认；多实例/生命周期需观察，必要时评估 `--standalone`。
+- **冷启动时延**：首帧阈值是否够用取决于机器（本机记录见 §6.3），按需放宽 `WECHAT_BRAIN_FIRST_FRAME_MS`。
+- **Code Mode 工具命名**：`tool_call.title` 文案可能影响微信「步骤 N」，必要时在 `toolSummary()` / `zhTool()` 增加 OpenCode 风格映射。
+- **同 agent 并发共用配置目录**：同一 agent 的两个 worker 进程共用一个配置目录；opencode 两条并发一轮样本未见互踩，长期风险仍在。
+- **形态①与形态②互斥**：同一 bot token 不要同时跑 MCP 形态与 daemon 形态（会抢消息、回环）。
+
+---
+
+## 待实测
+
+- **`session/set_config_option` 的 `model` 接受度**：`wemind brain set opencode --model '…'` 下发的 `configId` OpenCode 是否接受尚未实测（DSH/Qoder 已实测可用）；下发失败会让该回合报错。
+- **共享后台服务**：`opencode acp` 是否复用全局 background server 尚未确认，是否需要 `--standalone` 尚未评估。
+- **冷启动首帧阈值**：本机 2026-10-29 记录 `initialize` 约 650ms、`session/new` 约 800ms，但未覆盖慢机器；`WECHAT_BRAIN_FIRST_FRAME_MS` 是否需要放宽未验证。
+- **Code Mode 工具标题映射**：尚未逐类实测 `tool_call.title` 的 OpenCode 风格文案，`toolSummary()` / `zhTool()` 是否需要映射未验证（M1 只记录到 `call-4516d245-…` 形态）。
+- **同 agent 并发长期风险**：仅 2026-10-29 一轮样本（opencode 两条并发未见互踩），长期是否互踩仍待观察。
+
+---
+
+## 8. 附录 A · M1 复现步骤与 harness
 
 **复现**（Windows，PowerShell）：
 
@@ -296,7 +402,7 @@ REVERSE REQS : (none)
 
 ---
 
-## 5. 附录 B · OpenCode 相关事实速查
+## 9. 附录 B · OpenCode 相关事实速查
 
 | 项 | 值（实测 v2.0.29） |
 |---|---|

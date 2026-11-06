@@ -37,7 +37,7 @@ export function readProfileDefaultModel(realHome: string, profile: string): stri
 /**
  * 复制进沙箱前剔除「微信 MCP」条目（真实文件不动）。DSH 自己的 MCP 也写在 profile 里
  * （`- id: mcp-xxx` + `name: '@deepseek-ai/dsh-mcp-client'`）；如果用户在自己的 dsh 配置里挂过微信 MCP，
- * 原样复制会让沙箱里的 agent 用同一个 bot token 起第二个消费者（抢消息/回环）。
+ * 原样复制会让沙箱里的 agent 用同一个 bot token 起第二个收消息实例（抢消息/回环）。
  * 大脑与 worker 的 MCP 都由 WeMind 的激活集权威决定（`wechat` 永远不在里面），所以只剔这一种条目，其余原样保留。
  * 没有命中时返回**原文**（逐字节复制不受影响）。
  */

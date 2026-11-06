@@ -21,7 +21,7 @@ const realClaudeJson = path.join(root, ".claude.json");
 const claudeJson = {
   mcpServers: {
     wechat: { command: "wemind-mcp" },
-    // 改名后的同一条目：只按名字拦不住，必须按定义也拦（一个 token 一个消费者）
+    // 改名后的同一条目：只按名字拦不住，必须按定义也拦（单实例收消息）
     "my-wechat": { command: "wemind-mcp" },
     "npx-wechat": { command: "npx", args: ["-y", "@wemind/wechat-mcp"] },
     demo: { command: "node", args: ["demo-server.js"], env: { DEMO: "1" } },

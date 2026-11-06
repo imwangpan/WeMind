@@ -1,6 +1,6 @@
 # Daemon 后台常驻原理（详解）
 
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-06
 >
 > ⚠️ **三套常驻外壳，同一账号只用一套，默认不是本文的 PowerShell 版**：
 >
@@ -90,7 +90,7 @@ for (;;) {
 要点：
 
 - **单实例**：`acquireSingleton()` 用 `wrapper.pid` + `isOurProcess()` 校验（不只看 pid 是否存活，防重启后 pid 复用误判）；
-- **退出码 78 特判**：大脑配置错误重拉无益，停在循环外，避免每 5 秒刷一条日志；**退出码 75**（同账号已有 daemon）同理——另一个实例已经在消费同一个 bot token，重拉只会每 5 秒撞一次。
+- **退出码 78 特判**：大脑配置错误重拉无益，停在循环外，避免每 5 秒刷一条日志；**退出码 75**（同账号已有 daemon）同理——另一个实例已经在用同一个 bot token 收消息，重拉只会每 5 秒撞一次。
 - **连续崩溃上限**：短暂运行就崩的连续次数超过 `WEMIND_MAX_RESTARTS`（默认 50，与 pm2 对齐）就停止重拉，避免崩溃循环无限刷日志/耗 CPU；daemon 跑满 10 分钟视为稳定、计数清零。PowerShell 版同一套语义。
 - **跨平台**：不依赖 shell / Mutex / pm2，Windows 用 `windowsHide` 防闪窗；
 - **日志**：stdout/stderr 经管道由 `RotatingLog` 逐块追加进 `<数据目录>/daemon.log`，与 PowerShell 路线一致；运行中按 `WEMIND_LOG_MAX_MB`（默认 10MB）轮转、保留 `WEMIND_LOG_KEEP`（默认 3）份。

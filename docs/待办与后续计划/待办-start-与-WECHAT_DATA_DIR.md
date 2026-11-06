@@ -39,9 +39,9 @@
 2. `watchdogStart(key)` → `_watchdog` 进程内 `DATA_DIR` 解析成 `WECHAT_DATA_DIR` → `acquireSingleton()` 读到那里存活的 `wrapper.pid` → 写一行「已有实例在跑，本次退出」后 `return`；
 3. 而 CLI 已经把「已启动自带后台守护进程（账号 X，pid N）。日志：`accountDir(key)/daemon.log`」打印出来了——**连日志路径都是错的**（真实日志写进了 `WECHAT_DATA_DIR` 那个目录）。
 
-### ② 起错账号：用户要 B，实际消费的是 A 的 bot token
+### ② 起错账号：用户要 B，实际启动的是用 A 的 bot token 收消息的 daemon
 
-若 `WECHAT_DATA_DIR` 指向的目录没有正在跑的 daemon：`_watchdog` 照常拉起 `daemon`，它读的是**那个目录的 `account.json`**。于是「`wemind start B`」起了一个消费 **A 账号 token** 的 daemon，`daemon.pid` / `wrapper.pid` 也全落在那个目录。
+若 `WECHAT_DATA_DIR` 指向的目录没有正在跑的 daemon：`_watchdog` 照常拉起 `daemon`，它读的是**那个目录的 `account.json`**。于是「`wemind start B`」起了一个用 **A 账号 token** 收消息的 daemon，`daemon.pid` / `wrapper.pid` 也全落在那个目录。
 
 ### ③ 停不掉：`wemind stop B` 找不到它
 
@@ -94,7 +94,7 @@
    - `docs/使用指南/速查-数据目录与环境变量.md` §7（现只有「直跑 `wemind daemon`」的说明，要补「`wemind start` 会忽略它」）与 §9（环境变量怎么传给 daemon 的那节）；
    - `docs/repowiki/09-配置项与环境变量.md` 的 `WECHAT_DATA_DIR` 行；
    - `README.md` 环境变量表、`packages/wechat-daemon/README.md` 环境变量表（随 npm 包发布，硬性同步项）；
-   - `AGENTS.md` §6 已知坑（加一条）；
+   - `docs/ai/已知坑.md`（加一条）；
    - `docs/部署与运维/自启方案对比.md` §4.2 坑 2（改为「已记录待办」并链到本文）。
 4. **验收**
    - `npm run verify` 全绿；

@@ -2,7 +2,7 @@
 
 > 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. daemon](05-daemon.md)
 >
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-06
 
 MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `@wemind/cli`（命令 `wemind`），见 [`docs/发布与变更记录/如何发布新版本.md`](../发布与变更记录/如何发布新版本.md)）。
 
@@ -152,7 +152,7 @@ MCP server 用 [tsdown](https://tsdown.dev/)（rolldown + oxc，tsup 的继任�
 
 ## 4.9 MCP 形态 vs Daemon 形态
 
-> ⚠️ **同一个 bot token 只能有一个消费者**：两种形态**二选一**，不能同时跑——否则互相抢消息、互相回环。装了 MCP 客户端又起了 daemon 的机器，先把其中一个停掉。
+> ⚠️ **同一个 bot token 只能有一个程序收消息**（同一份登录凭证不能同时被两个程序使用）：两种形态**二选一**，不能同时跑——否则互相抢消息、互相回环。装了 MCP 客户端又起了 daemon 的机器，先把其中一个停掉。
 
 MCP 形态是**不主动轮询的请求驱动**：没有后台进程，靠 MCP 客户端按工具描述自己编排长轮询和打字状态；多轮记忆、回复生成都由 MCP 客户端背后的模型负责。但**它并非无状态**——登录凭证、消息游标（`state.json`）、`context_token` 都持久化在数据目录里（见 4.5），同账号多个 MCP 客户端共用同一份 `DATA_DIR` 时会共享这些状态并可能互相干扰。
 

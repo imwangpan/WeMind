@@ -157,7 +157,7 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 
 ---
 
-## 6. 常见问题
+## 6. 常见问题与限制
 
 | 现象 | 原因 / 处理 |
 |---|---|
@@ -168,6 +168,17 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 | 工具调用被拒 | `WEMIND_ACP_SESSION_MODE=0` 关掉了 `set_mode`，或模式不可用；恢复默认或设 `WEMIND_ACP_AUTO_ALLOW=1`（逐次放行，不是放宽沙箱） |
 | 连接慢 / 第一次回复慢 | 首次要起 SDK 与原生 Claude Code；实测首段正文 8–12s。npx 会更慢 |
 | `claude-agent-acp` 升级后行为变了 | 适配器 pre-1.0，能力/字段可能漂移；按 §8 重跑探针并更新 `brain-agents.ts` 注释与本文 |
+
+### 6.1 限制
+
+已确认的限制（均来自上文实测与预设配置）：
+
+- **必须全局安装，且 Node ≥22**：适配器是 daemon spawn 出来的子进程，继承 daemon 的 PATH 与 Node；`agentProblem()` 只查 PATH 上有没有 bin、**不查版本**，所以 Node 20 的 daemon 能通过 `wemind brain` 预检、却会在 spawn/握手时失败（§2.1）。
+- **`settings.json` / `plugins/` 不进沙箱**：你在 Claude Code 里设的 `hooks` / `permissions` 不会带到微信大脑，权限统一由 `sessionMode` 负责（§2.2、§3）。
+- **模型不由 WeMind 下发**：预设没有 `model` 字段，跟随 Claude Code 自身配置与 daemon 环境；要固定需 `wemind brain set claude-code --model "…"` 并应用（§2.2）。
+- **`bypassPermissions` 是全量放行**：消息一旦被 daemon 接受，AI 就能在运行 daemon 的机器上执行工具（含 shell / 写文件）；唯一能收紧的开关是 `WEMIND_ACP_SESSION_MODE=0`（§7）。
+- **首轮回复慢**：首次要起 SDK 与原生 Claude Code，实测首段正文 7.9–11.9s、一轮 prompt 8–12s（§4）。
+- **适配器是 pre-1.0**：能力/字段可能漂移，升级后必须按 §8 重新探针并同步预设注释与本文。
 
 ---
 
@@ -214,3 +225,15 @@ node scripts/acp-probe.mjs
 - 通用 ACP 指南：[`docs/接入方案/接入其它-ACP-Agent.md`](接入其它-ACP-Agent.md)
 - 探针：[`scripts/acp-probe.mjs`](../../scripts/acp-probe.mjs)
 - 配方：[`docs/ai/recipes/add-acp-agent.md`](../ai/recipes/add-acp-agent.md)
+
+---
+
+## 10. 待实测
+
+以下为正文与状态行已列出、尚未真机复测的项：
+
+1. **重启续聊**：杀 daemon 再起，追问上一轮 → 上下文还在（`session/load`）（§5.2）。
+2. **MCP 加载**：`加载 <MCP 名>` → 下条消息生效；`wechat` 仍被拒（§5.2）。
+3. **任务派发**：派一条任务（`任务 claude-code：…`）→ 跑通、结果送达（§5.2）。
+4. **长任务**：>30s 不因首帧误杀；进度不刷屏（§5.2）。
+5. **图片**：能力声明 `image: true`，本机用网关时 1×1 PNG 被上游以 `400 WorkBuddy: … replace the image` 拒绝，需换正常模型/网关再验（§4）。

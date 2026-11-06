@@ -2,7 +2,7 @@
 
 > 上一页：[5. daemon](05-daemon.md) ｜ 下一页：[7. 远程任务 Worker](07-远程任务-Worker.md)
 >
-> **最后核对**：2026-11-05 ｜ 代码以当前分支为准。
+> **最后核对**：2026-11-06 ｜ 代码以当前分支为准。
 
 daemon 的「大脑」是一个常驻的 AI agent 子进程，通过 ACP 协议驱动。本章讲清大脑的进程生命周期、会话管理、MCP 沙箱与记忆继承，以及如何换成别的 agent。
 
@@ -182,7 +182,7 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 
 > 一个被修复的坑：早期 brain 沙箱缺 `chat.defaultModel`，大脑用 kiro 默认模型而非用户配置的模型，导致「同样任务比直接用 kiro 问题多」。修复后继承真实 settings。**注意：换模型后旧 ACP 会话可能仍绑旧模型，需在微信发「新会话」重建。**
 
-`ensureBrainHome()` 启动时按顺序执行：`syncSettings`（含 `syncProfilePatch`——配了 `realProfile` 的 agent 把真实 `profiles/<名>/cordis.patch.yml` **原样复制**进沙箱（WeMind 不追加/合成条目；这份文件是用户自己的配置，DSH 的 `- id: acp` 这类覆盖由用户自己维护，缺时 `wemind brain` 只提示怎么补）；**唯独剔除用户自己挂的微信 MCP 条目**（`stripWechatMcpEntries`：跑 `wemind-mcp` 的、或 `serverName: wechat` 的 mcp-client——否则沙箱里的 agent 会抢同一个 bot token；真实文件不动、只记日志）；以及 `settingsBase` 基底生成）→ `applySandbox`（写 curated mcp.json；配了 `mcpViaAcp` 的 agent 如 DSH / Claude Code 跳过文件，改由 `activeMcpServers(ag)` 转成 ACP 声明随 `session/new|resume` 下发——**必须传正在启动的那个 agent**：热切换时槽位还指着旧大脑，用默认的 `getAgent("brain")` 会把旧 agent 的 catalog 发给新大脑）→ `mirrorRealKiro` → `syncCredentials`（`credentialFiles` 新者胜 + `identityFiles` 内容不同即覆盖）→ `applySettingsDefaults`（预设默认设置项，如 pi 的 `quietStartup`）。
+`ensureBrainHome()` 启动时按顺序执行：`syncSettings`（含 `syncProfilePatch`——配了 `realProfile` 的 agent 把真实 `profiles/<名>/cordis.patch.yml` **原样复制**进沙箱（WeMind 不追加/合成条目；这份文件是用户自己的配置，DSH 的 `- id: acp` 这类覆盖由用户自己维护，缺时 `wemind brain` 只提示怎么补）；**唯独剔除用户自己挂的微信 MCP 条目**（`stripWechatMcpEntries`：跑 `wemind-mcp` 的、或 `serverName: wechat` 的 mcp-client——否则沙箱里的 agent 会成为第二个收消息实例、抢同一个 bot token；真实文件不动、只记日志）；以及 `settingsBase` 基底生成）→ `applySandbox`（写 curated mcp.json；配了 `mcpViaAcp` 的 agent 如 DSH / Claude Code 跳过文件，改由 `activeMcpServers(ag)` 转成 ACP 声明随 `session/new|resume` 下发——**必须传正在启动的那个 agent**：热切换时槽位还指着旧大脑，用默认的 `getAgent("brain")` 会把旧 agent 的 catalog 发给新大脑）→ `mirrorRealKiro` → `syncCredentials`（`credentialFiles` 新者胜 + `identityFiles` 内容不同即覆盖）→ `applySettingsDefaults`（预设默认设置项，如 pi 的 `quietStartup`）。
 
 ## 6.4 可配置的 agent（brain-agents.ts）
 

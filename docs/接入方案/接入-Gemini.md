@@ -103,3 +103,12 @@ node scripts/acp-probe.mjs
 - 单测：`brain-agents.test.ts` 覆盖 gemini 预设字段、`--model` 追加到启动参数、默认 `settingsStrip`、OAuth 凭据清单；`sandbox-gemini.test.ts` 覆盖**带注释的**设置基底（保留 model/security/general、剥 `mcpServers`、关自动更新）、`.env` + OAuth 凭据 / `skills` / `GEMINI.md` 继承、大脑 curated MCP 与 `wechat` 拒绝、worker 全量 MCP 除 `wechat`；`acp-quiet.test.ts` 覆盖回放等待的静默/持续/上限三种路径。
 - 凭据/JSONC 回归（2026-11-02）：`sandbox-gemini.test.ts` 用**带 `//` 与 `/* */` 注释**的真实 settings.json 验证沙箱仍镜像 `model` / `security`、`加载 <MCP>` 仍能读到目录；OAuth 的 `oauth_creds.json` / `google_accounts.json` 同步进 brain 与 worker 沙箱。OAuth 登录的实机握手仍待有 Google 登录环境的机器复验（本机是 API key 用户）。
 - **微信真机 E2E（2026-11-01，已通过）**：新会话单轮 → `prompt ok 4757ms` → 微信收到「4」；杀 daemon 重启后追问 → `session/load` + `drained 20 replay frame(s)` → `prompt ok 3682ms` → 回复「4」（旧历史未混入）；热切换 gemini ↔ pi 两个方向都成功，切回 gemini 时 `session/load` + 再排空 34 帧，下一轮 `prompt ok 3540ms` → 回复「9」；worker 任务 #28 / #29 均由 gemini 执行（`prompt ok 4313ms` / `3215ms`）；之后又一次重启 + `session/load`（排空 40 帧）→ `prompt ok 3296ms` → 回复「7」。微信侧 `加载 <MCP>` 尚未单独复测（配置文件方式加载 MCP 已在探针验证）。
+
+## 7. 待实测
+
+- **微信侧 `加载 <MCP>`**：尚未单独复测（配置文件方式加载 MCP 已在探针验证，§3）。
+- **`extensions/` 的真实来源**：`extensions/` 不在继承清单里（WeMind 不复制、不 junction），但 Gemini 是否仍会从真实 home 读到扩展**待实测**——「没继承」不等于「不会加载」（§4）。
+- **OAuth 登录的实机握手**：本机是 API key 用户；OAuth 的 `oauth_creds.json` / `google_accounts.json` 已同步进 brain 与 worker 沙箱（单测覆盖），实机握手仍待有 Google 登录环境的机器复验（§6）。
+- **加密文件存储下的凭据复用**：显式开启 `GEMINI_FORCE_ENCRYPTED_FILE_STORAGE` 时，凭据可能落在系统钥匙串或 `gemini-credentials.json`，沙箱能否可靠复用**待实测**；这种部署目前建议改用 API key 或关闭该选项（§4）。
+
+> 升级 Gemini 后先按 §3 的命令重跑 `scripts/acp-probe.mjs`（含 `ACP_TEST_TOOL=1`）与 `wemind brain check`，再按新版本更新本节结论（§4「上游版本会变」）。

@@ -1,10 +1,24 @@
 #!/bin/sh
-# CI 会跑 format:check；提交前先查一遍，避免「本地全绿、Actions 红」。
-# 只读检查，不改工作区；失败时按提示跑 npm run format 再重新 add。
+# CI 会跑 format:check / 文档守卫；提交前先查一遍，避免「本地全绿、Actions 红」。
+# 只读检查，不改工作区；失败时按提示修复后重新 add。
 [ -d node_modules ] || exit 0
 
 if ! npm run --silent format:check; then
   echo ""
   echo "格式检查未通过：先运行 npm run format，再重新 git add 后提交。"
+  exit 1
+fi
+
+# 改了代码没改文档 → 在这里拦住。纯重构/只改注释/只改测试时用环境变量豁免：
+#   DOCS_IMPACT="none — Pure refactor" git commit ...
+if ! node scripts/doc-impact.mjs --check --staged; then
+  echo ""
+  echo "文档同步检查未通过：按上面清单同步文档，或按提示用 DOCS_IMPACT 豁免。"
+  exit 1
+fi
+
+if ! node scripts/check-agent-docs.mjs; then
+  echo ""
+  echo "接入文档完整性检查未通过：按上面缺口补齐（没有待测项就在「## 待实测」下写「无」）。"
   exit 1
 fi

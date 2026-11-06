@@ -90,3 +90,9 @@ node scripts/acp-probe.mjs
 - `wemind brain` / `wemind brain check`：2026-11-01 本机实测——`生效：name=pi bin=pi-acp.cmd args=[] shell=true home_env=PI_CODING_AGENT_DIR model=(agent 默认) session_mode=(无)`，`可选 agent` 含 pi，自动探测顺序仍不含 pi；`brain check` 握手成功（initialize + session/new，~2.1s）。
 - 单测：`brain-agents.test.ts` 覆盖预设字段、`requiresBins`（pi-acp 已装但 pi 缺失）、安装提示、`AUTO_PROBE_ORDER` 不含 pi；`sandbox-pi.test.ts` 覆盖 settings/auth/models 同步、`quietStartup` 默认值与用户值保留、MCP 排除 `wechat`/disabled；`pool-spawn.test.ts` 覆盖「按这条任务的 agent 备 worker 沙箱」。
 - 真机（2026-11-01）：worker 通道 `wemind task "只回复数字 2" --agent pi` → `prompt ok 7857ms` → 回复「2」；删掉 worker-home 里 pi 的 `settings.json`/`models.json` 后再次派发，`acquire` 按任务 agent 自动重建（`quietStartup: true`）。brain 通道：微信消息 → `session/load` → `prompt ok 9705ms` → 回复送达（启动横幅未混入回复）。热切换：`brain switch codex`（1.1s）→ `brain switch pi`（1.0s），daemon pid 不变，两个方向都 `session/load` 接回各自会话；未知 agent 被拒、`brain.json` 不变。热切换后微信再问一句 → `prompt ok 5006ms` → 回复「4」。微信「任务 pi：…」→ 任务 #27 → `prompt ok 6945ms` → 回复「3」。
+
+## 7. 待实测
+
+- **沙箱隔离不完整（尚停留在源码核对，未做真机验证）**：pi-acp 从真实 `homedir()` 读 `~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills`，不随 `PI_CODING_AGENT_DIR` 走；`settings.json` 原样复制会把其中的 `packages`/`extensions` 键一起带进沙箱。要彻底隔离需上游支持或额外剥离（WeMind 不替 agent 改配置，§4.14）——复现与判断依据见 §4「沙箱隔离不完整」。
+- **上游升级后复测（触发式）**：pi-acp 定位是 MVP，上游小版本可能快速变化；升级 pi-acp（实测基线 0.0.34）或 pi 本体（实测基线 1.4.0）后，重跑 §3 的探针（含 `ACP_TEST_TOOL=1` 漂移检测与 `ACP_TEST_IMAGE=1`）和 `wemind brain check`。若上游把工具调用改成逐次审批，探针会先红而不是微信第一条消息卡 30s 超时（§5 漂移检测）。
+- **审批机制变化的应对预案（假设，非当前事实）**：§5 的五步预案只在「上游真的改成逐次审批」时才需要验证；当前 pi 官方 security.md 明确不逐次审批，无需执行。

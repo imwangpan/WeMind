@@ -11,7 +11,7 @@ WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾
 
 常驻形态装完只需两步：`npm i -g @wemind/cli` → `wemind login --label 工作号 --start`（扫码登录并顺带常驻），之后 `wemind list` 看运行状态。
 
-> ⚠️ **一个 bot token 只能有一个消费者**：两种形态别同时跑，否则互相抢消息。
+> ⚠️ **同一个微信 bot 账号只能有一个程序收消息**（同一份登录凭证不能同时被两个程序使用）：两种形态别同时跑，否则互相抢消息。
 > ⚠️ **包名 ≠ 命令名**：装 `@wemind/cli`，敲 `wemind`。不安装、想临时跑一次时用 `npx -y @wemind/cli`（`npx` 按包名解析，写 `npx wemind` 不可用）。
 
 **下一步**：**[新手教程](docs/使用指南/新手教程.md)**（从零开始，含扫码、开机自启、常见问题）｜ **[安装详解](#安装两种形态二选一)** ｜ 遇到问题看 [常见问题](#常见问题)
@@ -270,6 +270,60 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 - 需要较新的微信客户端并启用 ClawBot 插件。
 
 ## daemon：脱离 IDE/终端常驻自动收发
+
+### 命令一览（自动生成）
+
+> 本表由 `node scripts/gen-docs-tables.mjs` 从 `manage.ts` 与 `chat-commands.ts` 生成，保证命令清单与代码一致。
+
+<!-- BEGIN:auto cli-commands -->
+**CLI 子命令**（`wemind <命令>`）
+
+| 命令 |
+|:---|
+| `adopt` |
+| `allow` |
+| `allowlist` |
+| `brain` |
+| `delete` |
+| `finalize` |
+| `help` |
+| `label` |
+| `list` |
+| `login` |
+| `logout` |
+| `revoke` |
+| `session` |
+| `set-default` |
+| `start` |
+| `stop` |
+| `task` |
+| `task-list` |
+| `task-reply` |
+| `task-status` |
+| `task-stop` |
+| `version` |
+
+**微信指令**
+
+| 指令 | 说明 |
+|:---|:---|
+| mcp | 列出可选/已激活的 MCP |
+| 加载 <名字> | 加载一个 MCP（下条消息生效） |
+| 卸载 <名字> | 卸载一个 MCP |
+| 新会话 [名字] | 清空上下文重开（可命名） |
+| 会话列表 [页] | 列出本人会话（← 当前 标当前） |
+| 恢复会话 <序号\|名字\|id前缀> | 切回旧会话（失败明确报错，不静默新建） |
+| 删除会话 <序号\|名字\|id前缀> | 只删登记（agent 侧的历史记录不动） |
+| AI / AI 列表 | 看可选 agent 与当前配置 |
+| 切换大脑 [agent 名\|auto] | 换对话大脑，不用重启（失败自动退回原来那个） |
+| 切换任务大脑 [agent 名\|auto] | 设默认任务大脑（本次运行内一直生效，不写 brain.json） |
+| 交接 | 生成当前会话摘要，切换后给新大脑接手 |
+| 帮助 | 这张表 |
+| 任务 [<agent 名>：]正文 | 派发新任务（有活跃任务时发给它）；带 agent 名就由它执行（只影响这一条） |
+| #<编号> 正文 | 给指定编号的任务回话（回任务都用它；无前缀消息走大脑） |
+| 任务列表 | 编号 / agent / 状态 / 轮次 / 已运行 |
+| 结束任务 [编号]、结束全部任务 | 结束任务（进程留着复用） |
+<!-- END:auto cli-commands -->
 
 > 📦 **作为 `wemind` CLI 使用**：本 daemon 已发布为 **`@wemind/cli`**，装完得到 **`wemind`** 命令（`wemind login` / `start` / `list` / `task`；常驻默认用自带后台守护进程，也可 `--runner pm2`）。`npm i -g @wemind/cli` 后即可全局使用；包名与命令名不同，不安装、临时跑一次时写 `npx -y @wemind/cli`（`npx` 按包名解析，`npx wemind` 不可用）。发布与版本约定见 [`docs/发布与变更记录/如何发布新版本.md`](docs/发布与变更记录/如何发布新版本.md)；也可以按下文从源码运行。面向最终用户的一步步指引见 **[新手教程](docs/使用指南/新手教程.md)**。
 
@@ -598,7 +652,7 @@ wemind version                      # 确认装上且版本正确
 这是微信**连续发送上限（约 10 条）**的保护：进度消息也占额度。回复「继续」即可接着来；长任务建议拆小。
 
 **两个 bot 抢消息 / 同一条消息回两遍**
-同一 bot token **只能有一个消费者**。检查是否同时跑了 `wemind` daemon 和 `@wemind/wechat-mcp`，或同一账号被启用了两套常驻（pm2 + 内置后台守护进程），二选一。
+同一 bot token **只能有一个程序收消息**。检查是否同时跑了 `wemind` daemon 和 `@wemind/wechat-mcp`，或同一账号被启用了两套常驻（pm2 + 内置后台守护进程），二选一。
 
 **改了代码/升级后行为没变**
 正在运行的 daemon 不会自动换代码：`wemind stop <账号> && wemind start <账号>`。

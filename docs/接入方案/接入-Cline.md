@@ -1,7 +1,7 @@
 # 接入 Cline CLI（原生 ACP 实测）
 
 > **状态**：M0–M3 全部完成 ✅（`cline` 是内置预设；M2 协议层无改动）。
-> **实测范围**：Cline CLI 3.0.74（M0 探针 + 微信真机 E2E，2026-10-31，见 §2 / §5）｜ **最后核对**：2026-11-05
+> **实测范围**：Cline CLI 3.0.74（M0 探针 + 微信真机 E2E，2026-10-31，见 §2 / §6）｜ **最后核对**：2026-11-05
 > **实测环境**：Windows 11 / Node 24 / Cline CLI 3.0.74（npm 全局安装）。结论**仅适用于 cline 3.0.74**。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](../ai/recipes/add-acp-agent.md) · [接入-Qoder.md](接入-Qoder.md)（同款「配置目录指到子目录」样板） · [接入-OpenCode.md](接入-OpenCode.md)（文件式 MCP 样板）
 
@@ -182,20 +182,37 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 
 ---
 
-## 5. 已知限制 / 待实测
+## 5. 已知限制
 
 1. **认证**：Cline ACP 只自动恢复 3 种 OAuth 登录；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）；OAuth 条目或文件不可用时才需要手动设置（见 §1.2）。
 2. **`session/close` 不存在**（`-32601`）：WeMind 目前不调用它，杀进程即可；若未来加「优雅关闭」，要对 Cline 跳过。
 3. **MCP 走 ACP 不支持**：`mcpViaAcp` 必须保持 `false`；改用 `CLINE_MCP_SETTINGS_PATH`。
 4. **OAuth token 单向同步**：沙箱内刷新不会回写真实 `providers.json`（见 §3）。API-key provider 不受影响。
 5. **图片不支持（实测）**：`initialize` 广告 `image:true`，但 3.0.74 ACP `prompt` 的 `de()` 只保留 `text` 块，image 被丢弃；预设显式 `images:false`，daemon 收到纯图片消息会直接回「当前大脑暂不支持看图」，不再让模型猜；带文字的消息只按文字回答并注明图片被忽略。
-6. **微信真机 E2E 已完成（2026-10-31）**：文本消息/回复、多轮上下文、重启后 `session/load`（PINEAPPLE）、worker 任务均通过。
-7. **同 agent 并发**：两个 worker 共用 `<worker-home>/cline`（与其它 agent 相同）；**假设/待实测**：Cline 的会话库据其源码是 SQLite，长期并发风险未验证（本轮只跑过单任务与双 agent 并发，没跑同 agent 双 worker 的长时间样本）。
-8. **「新会话」不隔离文件系统（暂缓项）**：Cline 作为工具型 agent，会在任务 cwd 内看到并操作文件；旧 session transcript 也落在 `brain-home/cline/data/sessions/`（**假设/待实测**：目录位置来自 Cline 的数据布局，本轮未逐个文件核实）。这是工具型 agent 的预期行为，WeMind 不额外改写 `.clineignore` 或搬移其数据目录；需要强隔离时请把任务 `--cwd` 指到独立目录。
+6. **同 agent 并发**：两个 worker 共用 `<worker-home>/cline`（与其它 agent 相同）；**假设/待实测**：Cline 的会话库据其源码是 SQLite，长期并发风险未验证（本轮只跑过单任务与双 agent 并发，没跑同 agent 双 worker 的长时间样本）。
+7. **「新会话」不隔离文件系统（暂缓项）**：Cline 作为工具型 agent，会在任务 cwd 内看到并操作文件；旧 session transcript 也落在 `brain-home/cline/data/sessions/`（**假设/待实测**：目录位置来自 Cline 的数据布局，本轮未逐个文件核实）。这是工具型 agent 的预期行为，WeMind 不额外改写 `.clineignore` 或搬移其数据目录；需要强隔离时请把任务 `--cwd` 指到独立目录。
 
 ---
 
-## 6. 为什么不用 npx / 适配器？
+## 6. 验证记录
+
+- **M0 探针（3.0.74，2026-10-31，§2 Q1–Q6）**：`initialize` 返回 `loadSession:true`、`promptCapabilities.image:true`（`audio:false`、`embeddedContext:false`）、`authMethods: cline / cline-pass / openai-codex`；`session/new` 需先有登录态，返回 `modes`（`plan`/`act`）、`models` 与 `configOptions`（`model` / `mode` / `auto_approve`）；prompt 首帧 **4.1s**、首字 **4.4s**，帧类型 `agent_thought_chunk` / `agent_message_chunk` / `session_info_update`；**0 反向请求**；硬杀后 `session/load` 成功、`PINEAPPLE` 上下文保留（首字 2.1s），`session/close` 回 `-32601`。同批测出两个否定结论：图片在 ACP `prompt` 被丢弃（`images:false`）、`session/new.mcpServers` 不生效（MCP 走配置文件）。
+- **微信真机 E2E（2026-10-31，已通过）**：文本消息/回复、多轮上下文、重启后 `session/load`（`PINEAPPLE`）、worker 任务均通过。状态行记 M0–M3 全部完成 ✅，M2 协议层无改动。
+- **认证与模型（2026-10-31 真机）**：自定义 provider 由 `clineCredentialEnv()` 从 `providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）；缺 `models.json` 时 `session/new` 回退 `gpt-4o`、第一条 prompt 报 `magpie knows no model "gpt-4o"`，补齐 `models.json` 后修复（§3）。
+
+---
+
+## 7. 待实测
+
+以下条目在本文中没有通过记录，来自状态行与 §5 中已明确标注的「假设 / 待实测」项：
+
+- **同 agent 双 worker 的长时间并发样本**：本轮只跑过单任务与双 agent 并发，没跑同 agent 双 worker 的长时间样本；Cline 的会话库据其源码是 SQLite，长期并发风险**未验证**（§5 第 6 条）。
+- **旧 session transcript 的实际落盘位置**：`brain-home/cline/data/sessions/` 来自 Cline 数据布局的**假设**，本轮未逐个文件核实（§5 第 7 条）。
+- **升级 Cline 后重跑探针**：本文结论（含图片被丢弃、`session/new.mcpServers` 不生效、`session/close` 回 `-32601`）仅适用于 **3.0.74**（状态行），升级后需按 §2 重新验证。
+
+---
+
+## 8. 为什么不用 npx / 适配器？
 
 - Cline **原生 ACP**，没有适配器需求；`cline-acp` 已归档，装它反而多一层 gRPC 桥。
 - 对**必须用适配器**的 agent（claude-code / codex / pi），预设现在统一用**全局安装**的适配器二进制（`claude-agent-acp` / `codex-acp` / `pi-acp`），不再默认 `npx -y …`；但 daemon 是长期驻留进程，npx 的代价仍然是：

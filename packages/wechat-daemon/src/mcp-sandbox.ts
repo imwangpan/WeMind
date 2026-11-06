@@ -278,7 +278,7 @@ function syncSettingsBase(ag: ResolvedAgent): void {
  *  **原样复制**——这份文件是用户自己的配置，WeMind 只镜像、不合成（`- id: acp` 这类覆盖由用户自己维护，
  *  缺失时 `wemind brain` 会提示怎么补；见 `profile-model.ts` 的 `acpOverrideHint`），这样「终端 dsh」与「微信大脑」行为一致。
  *  按内容同步（桌面端更新后覆盖）；**唯独剔除用户自己挂的微信 MCP 条目**（`stripWechatMcpEntries`）：
- *  沙箱里的 MCP 只能是 WeMind 的激活集（`wechat` 永远不在里面），否则 agent 会拿同一个 bot token 起第二个消费者。 */
+ *  沙箱里的 MCP 只能是 WeMind 的激活集（`wechat` 永远不在里面），否则 agent 会拿同一个 bot token 起第二个收消息实例。 */
 function syncProfilePatch(ag: ResolvedAgent): void {
   if (!ag.realProfile || !ag.realHome || !ag.inherit) return;
   if (path.resolve(BRAIN_HOME) === path.resolve(ag.realHome)) return; // 沙箱就是真实目录时不自我覆盖

@@ -6,7 +6,10 @@
 
 - [docs/README.md](docs/README.md): documentation index, grouped by reader and topic.
 - [AGENTS.md](AGENTS.md): first-entry map for AI agents — invariants, commands, known traps.
-- [docs/ai/README.md](docs/ai/README.md): compressed context pack, data flows, verified-vs-assumed facts.
+- [docs/ai/README.md](docs/ai/README.md): compressed context pack, data flows, verified-vs-assumed facts, task-to-source map.
+- [docs/ai/代码地图.md](docs/ai/代码地图.md): per-file responsibilities for ~35 key modules (split out of AGENTS.md §2).
+- [docs/ai/已知坑.md](docs/ai/已知坑.md): known pitfalls and doc/code mismatches (split out of AGENTS.md §6; search, do not read top-to-bottom).
+- [docs/ai/验收清单.md](docs/ai/验收清单.md): acceptance checklist by change type (split out of AGENTS.md §7).
 - [docs/ai/术语表.md](docs/ai/术语表.md): glossary and Chinese/English writing conventions.
 - [docs/ai/recipes/](docs/ai/recipes/): task recipes.
 
@@ -43,15 +46,20 @@
 
 - [docs/机制与协议说明/本地双入口-命令派发与查看回复.md](docs/机制与协议说明/本地双入口-命令派发与查看回复.md): **current** file-bridge protocol between CLI and daemon (`task-inbox/` / `task-out/` + control bridge), with the 2026-06/2026-10 evolution timeline.
 
+## Design
+
+- [docs/设计文档/文档守卫设计.md](docs/设计文档/文档守卫设计.md): current design of the three documentation guards (`doc-impact`, `check-agent-docs`, `gen-docs-tables`) — architecture, 12 rules, entry points, limits, maintenance guide.
+
 ## Historical (archived, not current behavior)
 
-- [docs/设计文档/](docs/设计文档/): Plan C design, MVP, CLI-ization design.
-- [docs/审查与质量记录/](docs/审查与质量记录/): 2026-11-02 audit snapshot, 2026-11-04 archive list, 2026-11-05 source-layout refactor design, and the 2026-11-05 audit lessons + doc-guard design (`doc-impact` / `check-agent-docs` / `gen-docs-tables`, not implemented).
+- [docs/设计文档/](docs/设计文档/): Plan C design, MVP, CLI-ization design (historical); the current doc-guard design is listed above.
+- [docs/审查与质量记录/](docs/审查与质量记录/): 2026-11-02 audit snapshot, 2026-11-04 archive list, 2026-11-05 source-layout refactor design (not implemented), and the 2026-11-05 audit lessons.
 - [docs/待办与后续计划/](docs/待办与后续计划/): deferred work — task numbering and record size (describes current behavior), and `wemind start` inheriting `WECHAT_DATA_DIR` (known bug, fix designed but not applied).
 
 ## Agent integration
 
 - [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md): generic ACP brain guide.
+- [docs/接入方案/接入-Kiro.md](docs/接入方案/接入-Kiro.md): Kiro CLI native ACP — v2 engine (`acp --trust-all-tools`, 2.37.1 real check) and v3 engine (`--agent-engine v3`, sandbox `permissions.yaml` allow-all, probe-level handshake 2026-11-03); v3 real WeChat turn still pending.
 - [docs/接入方案/接入-OpenCode.md](docs/接入方案/接入-OpenCode.md): OpenCode integration, with real M1 measurements.
 - [docs/接入方案/接入-DeepSeek.md](docs/接入方案/接入-DeepSeek.md): DeepSeek/DSH evaluation, 0.2.1-rc.2 measurements, plan.
 - [docs/接入方案/接入-Qoder.md](docs/接入方案/接入-Qoder.md): Qoder CLI integration — preset, sandbox `settingsBase`, `.auth` credential sync, M0–M3 measurements (images, dynamic MCP, worker interrupt/resume, memory inheritance).

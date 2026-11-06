@@ -30,6 +30,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # doc-impact 需要 merge-base（origin/main），浅克隆拿不到。
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -37,6 +40,14 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
+      - name: Check agent docs
+        run: node scripts/check-agent-docs.mjs
+      - name: Check generated doc tables
+        run: node scripts/gen-docs-tables.mjs --check
+      - name: Check docs impact
+        env:
+          DOCS_IMPACT_MESSAGE: ${{ github.event.pull_request.body }}
+        run: node scripts/doc-impact.mjs --check --base "origin/${{ github.base_ref || 'main' }}"
       - name: Check docs links
         shell: pwsh
         run: ./scripts/check-docs.ps1

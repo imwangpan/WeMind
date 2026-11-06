@@ -93,6 +93,16 @@ describe("parseControlRequest（唯一入口校验）", () => {
     expect(JSON.stringify(r)).not.toContain("cmd.exe");
   });
 
+  it("id 只允许安全字符：../、盘符、路径分隔符一律拒绝（AGENTS.md §4.11）", () => {
+    // id 会直接拼成 control-out/<id>.json；不校验就能借 ../ 覆盖账号数据。
+    for (const bad of ["../escape", "a/b", "C:\\x", "x:y", "..", "a b", ""]) {
+      expect(parseControlRequest({ id: bad, kind: "session.new" })).toBeNull();
+    }
+    for (const good of ["x1", "a.b_c-d", newRequestId()]) {
+      expect(parseControlRequest({ id: good, kind: "session.new" })).not.toBeNull();
+    }
+  });
+
   it("expiresAt：合法数值保留，非法值丢弃（旧 CLI 不传 = 不设截止）", () => {
     expect(parseControlRequest({ id: "x", kind: "session.new", expiresAt: 12345 })!.expiresAt).toBe(
       12345,

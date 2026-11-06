@@ -220,6 +220,22 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 
 ## 5. 内置 agent
 
+> 预设清单（名称/二进制/启动参数）由 `node scripts/gen-docs-tables.mjs` 从 `brain-agents.ts` 自动生成；状态、限制与接入文档见本节下方的手写表。
+
+<!-- BEGIN:auto presets -->
+| 预设 | 二进制 | 启动参数 |
+|:---|:---|:---|
+| `kiro` | `kiro-cli` | `acp --trust-all-tools` |
+| `gemini` | `gemini` | `--acp --approval-mode yolo --skip-trust` |
+| `opencode` | `opencode` | `acp` |
+| `deepseek` | `dsh` | `--profile acp` |
+| `qoder` | `qodercli` | `--acp --yolo` |
+| `cline` | `cline` | `--acp --auto-approve true` |
+| `pi` | `pi-acp` | `—` |
+| `claude-code` | `claude-agent-acp` | `—` |
+| `codex` | `codex-acp` | `—` |
+<!-- END:auto presets -->
+
 ACP agent 分两类，接入方式不同：
 
 - **原生 ACP**：CLI 自带 ACP 模式，加个参数直接起（如 kiro、Gemini、Cline）。
