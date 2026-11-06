@@ -39,6 +39,15 @@ packages/
   wechat-ilink-core/    iLink HTTP 客户端、类型、错误码、会话守卫、账号/状态、收发图加解密（私有，不发布）
   wechat-mcp/           MCP server，6 个工具（已发布到 npm，bin: wemind-mcp）
   wechat-daemon/        常驻 daemon + ACP 大脑 + worker + CLI（发布包 @wemind/cli，命令 wemind）
+    src/                入口 cli.ts / index.ts + 8 个一级目录（按需再分二级）
+      daemon/           消息路由、控制指令、收件箱；messaging/ 外发管线与回复
+      acp/              常驻大脑、热切换、自检；protocol/ 连接层与反向请求
+      agents/           预设/配置/状态/槽位；sandbox/ 沙箱与 MCP
+      tasks/            任务表、worker 客户端与进程池
+      sessions/         会话指令、登记表（store/view）、交接
+      cli/              参数解析/分派、账号与进程生命周期；subcommands/ 主题命令
+      ipc/              控制桥、指令表与解析
+      shared/           通用工具；process/ 进程身份与 spawn，io/ 原子写与日志
 docs/
   README.md             全库文档总索引（按读者与主题分组；新增/移动文档后必须同步）
   repowiki/             完整技术 wiki（人读；AI 可按需检索）
@@ -46,10 +55,10 @@ docs/
   接入方案/              9 篇各 agent 实测 + 1 篇通用接入指南（`接入其它-ACP-Agent.md`）
   使用指南/              新手教程、速查、远程任务使用指南
   部署与运维/            daemon 常驻原理、跨平台常驻 pm2
-  设计文档/              历史：方案 C 总设计 / MVP / CLI 化设计；现行：文档守卫设计（已实施）
+  设计文档/              历史：方案 C 总设计 / MVP / CLI 化设计；现行：文档守卫设计、源码目录分层设计（均已实施）
   机制与协议说明/        本地双入口文件桥（现行机制 + 2026-06/2026-10 演进记录，正文标注现行口径）
   待办与后续计划/        暂缓项（非历史：描述的是当前行为与未做的改进）
-  审查与质量记录/        历史：2026-11-02 全局审查快照、2026-11-04 归档清单、2026-11-05 源码目录重构方案（设计稿，未实施）、2026-11-05 审计经验
+  审查与质量记录/        历史：2026-11-02 全局审查快照、2026-11-04 归档清单、2026-11-05 源码目录重构初稿（已被设计文档取代）、2026-11-05 审计经验
   发布与变更记录/        发版手册、CHANGELOG
 scripts/                常驻外壳（run-daemon.ps1 / pm2）、doctor、发布守卫（prepack-guard / check-version）、文档守卫（doc-impact / check-agent-docs / gen-docs-tables）
 .worktrees/             git worktree 检出目录（每分支一个子目录；不入库；约定见 §4.16）
@@ -79,7 +88,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 
 ## 4. 不可违背的约束（改代码前必读）
 
-> 每条末尾的**守卫**标注：哪份测试/脚本能自动发现这条被违反。标「未覆盖」的只能靠评审。守卫文件都在 `packages/wechat-daemon/src/*.test.ts` 或 `scripts/`。
+> 每条末尾的**守卫**标注：哪份测试/脚本能自动发现这条被违反。标「未覆盖」的只能靠评审。守卫文件都在 `packages/wechat-daemon/src/**/*.test.ts` 或 `scripts/`。
 
 1. **单实例收消息**：同一个 bot token 同时只能有一个程序收消息；MCP 形态与 daemon 形态二选一；brain 的 MCP 沙箱永久禁止 `wechat`（防它把消息发回自己）；**按名字之外还按定义判**——改名条目只要 command/args/url 里跑 `wemind-mcp` 或 `@wemind/wechat-mcp` 同样被拒（`isWechatMcpServer()`，brain 与 worker 共用）。agent 自己配置文件里的微信 MCP 也在此约束内：DSH 的 `cordis.patch.yml` 复制进沙箱前剔除并告警（真实文件不动，`stripWechatMcpEntries`）。**守卫**：`agent-mcp.test.ts`、`sandbox-*.test.ts`。
 2. **ACP 是最小方法集，不是「所有 agent 都一样」**：

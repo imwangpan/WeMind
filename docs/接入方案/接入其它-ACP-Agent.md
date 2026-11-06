@@ -47,8 +47,8 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 
 - `packages/wechat-daemon/src/agents/brain-presets.ts` —— agent 表（本文主角的数据）；
 - `packages/wechat-daemon/src/agents/brain-agents.ts` —— 预设解析/探测逻辑；
-- `packages/wechat-daemon/src/acp-brain.ts` —— ACP 客户端（协议层；缺 load/反向请求时需要改）；
-- `packages/wechat-daemon/src/worker-acp.ts` —— worker 的 ACP 客户端；协议层（帧分类、超时、模型与模式、回放静默）brain 与 worker 共用 `acp-connection.ts`，只有进程生命周期与会话持久化各自实现。
+- `packages/wechat-daemon/src/acp/acp-brain.ts` —— ACP 客户端（协议层；缺 load/反向请求时需要改）；
+- `packages/wechat-daemon/src/tasks/worker-acp.ts` —— worker 的 ACP 客户端；协议层（帧分类、超时、模型与模式、回放静默）brain 与 worker 共用 `acp/protocol/acp-connection.ts`，只有进程生命周期与会话持久化各自实现。
 
 ---
 

@@ -273,7 +273,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 
 ### 命令一览（自动生成）
 
-> 本表由 `node scripts/gen-docs-tables.mjs` 从 `manage.ts` 与 `chat-commands.ts` 生成，保证命令清单与代码一致。
+> 本表由 `node scripts/gen-docs-tables.mjs` 从 `cli/manage.ts` 与 `ipc/chat-command-specs.ts` 生成，保证命令清单与代码一致。
 
 <!-- BEGIN:auto cli-commands -->
 **CLI 子命令**（`wemind <命令>`）

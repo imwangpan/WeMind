@@ -458,15 +458,15 @@ agent 用 `realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGEN
 |---|---|---|
 | `packages/wechat-daemon/src/agents/brain-presets.ts` | 新增 `deepseek` agent（`binWin: "dsh.cmd"`）；`AcpAgentPreset` 增 `model?` / `restore?` / `firstFrameMs?` / `heartbeatMs?` / `images?` / `credentialFiles?` / `identityFiles?` / `mcpViaAcp?` / `isolateSessions?`；解析侧 `ResolvedAgent` 透传与 `prepareAgent()` 落盘在 `agents/brain-agents.ts`；`AUTO_PROBE_ORDER` 末尾加 `deepseek` | M1 / 2026-11-03 |
 | `packages/wechat-daemon/src/agents/profile-model.ts` | `acpModelHint()`：`- id: acp` 的 model 不在 provider 目录时给替换提示（`wemind brain` 输出） | 2026-11-03 |
-| `packages/wechat-daemon/src/acp-brain.ts` / `worker-acp.ts` / `brain-check.ts` | 起进程前调 `prepareAgent(ag)`（DSH 的 `--patch` 文件必须先存在） | 2026-11-03 |
-| `packages/wechat-daemon/src/acp-brain.ts` | `session/set_config_option` 选 model；`session/resume` 兜底；反向请求应答器；首帧按配置覆盖；图片能力拦截；导出 `supportsImages`/`heartbeatMs` | M2 |
-| `packages/wechat-daemon/src/worker-acp.ts` | 同步上述协议项（独立副本） | M2 |
+| `packages/wechat-daemon/src/acp/acp-brain.ts` / `tasks/worker-acp.ts` / `acp/brain-check.ts` | 起进程前调 `prepareAgent(ag)`（DSH 的 `--patch` 文件必须先存在） | 2026-11-03 |
+| `packages/wechat-daemon/src/acp/acp-brain.ts` | `session/set_config_option` 选 model；`session/resume` 兜底；反向请求应答器；首帧按配置覆盖；图片能力拦截；导出 `supportsImages`/`heartbeatMs` | M2 |
+| `packages/wechat-daemon/src/tasks/worker-acp.ts` | 同步上述协议项（独立副本） | M2 |
 | `packages/wechat-daemon/src/index.ts` | 静默心跳按 agent 配置放宽（`heartbeatMs`；`progressMode` 未实现）；收到图片但 agent `images: false` 时友好提示 | M2 |
-| `packages/wechat-daemon/src/brain-check.ts` | 默认超时 20s → 60s（**无可用的 env 覆盖**，只能改代码） | M2 |
+| `packages/wechat-daemon/src/acp/brain-check.ts` | 默认超时 20s → 60s（**无可用的 env 覆盖**，只能改代码） | M2 |
 | `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts` | `toAcpMcpServers()` 三种格式转换 | M3 |
 | `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | `mcpViaAcp` 时跳过文件写入/`syncKiroSettings`；暴露 `activeMcpServers()` | M3 |
-| `packages/wechat-daemon/src/brain-agents.test.ts` | agent 断言 | M5 |
-| `packages/wechat-daemon/src/agent-mcp.test.ts` | 转换单测 | M5 |
+| `packages/wechat-daemon/src/agents/brain-agents.test.ts` | agent 断言 | M5 |
+| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.test.ts` | 转换单测 | M5 |
 | `docs/接入方案/接入-DeepSeek.md` | 本文（已补真机实测附录） | M0/M5 |
 | `docs/接入方案/接入其它-ACP-Agent.md` / `README.md` | agent 表 + 使用说明 | M5 |
 

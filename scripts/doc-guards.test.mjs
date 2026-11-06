@@ -108,7 +108,7 @@ describe("doc-impact 规则匹配", () => {
   it("规则声明 files 时只看这些目录", () => {
     const outside = match(["M packages/wechat-mcp/src/foo-store.ts"]).map((h) => h.rule.id);
     expect(outside).not.toContain("data-file");
-    const inside = match(["M packages/wechat-daemon/src/task-store.ts"]).map((h) => h.rule.id);
+    const inside = match(["M packages/wechat-daemon/src/tasks/task-store.ts"]).map((h) => h.rule.id);
     expect(inside).toContain("data-file");
   });
 

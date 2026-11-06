@@ -49,7 +49,7 @@
 ## Design
 
 - [docs/设计文档/文档守卫设计.md](docs/设计文档/文档守卫设计.md): current design of the three documentation guards (`doc-impact`, `check-agent-docs`, `gen-docs-tables`) — architecture, 12 rules, entry points, limits, maintenance guide.
-- [docs/设计文档/源码目录分层设计.md](docs/设计文档/源码目录分层设计.md): reviewed design for layering `packages/wechat-daemon/src/` into 8 subsystem directories with 6 subdirectories, splitting data/stateless modules, and per-directory doc-sync workflow (pending implementation).
+- [docs/设计文档/源码目录分层设计.md](docs/设计文档/源码目录分层设计.md): implemented design layering `packages/wechat-daemon/src/` into 8 subsystem directories with 6 subdirectories, splitting data/stateless modules, and the per-directory doc-sync workflow.
 
 ## Historical (archived, not current behavior)
 
@@ -88,8 +88,8 @@
 - `packages/wechat-daemon/`: daemon, ACP brain, worker, CLI. Published as `@wemind/cli` (bin `wemind`).
 - `packages/wechat-daemon/src/agents/brain-presets.ts`: `ACP_AGENT_PRESETS` (the 9 built-in agent presets).
 - `packages/wechat-daemon/src/agents/brain-agents.ts`: `resolveAgent()`, `agentProblem()`.
-- `packages/wechat-daemon/src/acp-brain.ts`: resident ACP client (brain).
-- `packages/wechat-daemon/src/worker-acp.ts`: resident ACP client (worker).
+- `packages/wechat-daemon/src/acp/acp-brain.ts`: resident ACP client (brain).
+- `packages/wechat-daemon/src/tasks/worker-acp.ts`: resident ACP client (worker).
 - `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts`: brain sandbox + MCP activation.
 - `packages/wechat-daemon/src/index.ts`: message routing, turn orchestration, progress budget.
 

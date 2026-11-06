@@ -242,8 +242,8 @@ npm run build; npm run daemon
 | `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts`（新） | MCP 格式纯函数：`readMcpServers`/`withMcpServers`/`parseJsonc` |
 | `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | 按 agent 分派配置目录与 MCP 格式；opencode 继承 `model` 基底；`inheritFiles` 支持 |
 | `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | 同上（worker 策略：继承全量 MCP 除 wechat） |
-| `packages/wechat-daemon/src/acp-brain.ts` / `worker-acp.ts` | 注入配置里的 `env`（`%HOME%` → 沙箱） |
-| `packages/wechat-daemon/src/agent-mcp.test.ts` / `brain-agents.test.ts`（新） | 单测 |
+| `packages/wechat-daemon/src/acp/acp-brain.ts` / `tasks/worker-acp.ts` | 注入配置里的 `env`（`%HOME%` → 沙箱） |
+| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.test.ts` / `agents/brain-agents.test.ts`（新） | 单测 |
 | `scripts/acp-probe.mjs` | M1 回归 harness（当时的 `acp-smoke.mjs`/`acp-smoke2.mjs` 只硬编码 `opencode acp`，已并入通用探针后删除） |
 | `README.md` / `docs/接入方案/接入其它-ACP-Agent.md` | 文档更新 |
 
