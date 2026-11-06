@@ -60,7 +60,7 @@ export const RULES = [
     trigger: (diffLines) =>
       diffLines.some(
         (line) =>
-          /^\+packages\/wechat-daemon\/src\/(manage|chat-commands|cli|cli-dispatch)\.ts\t/.test(line) &&
+          /^\+packages\/wechat-daemon\/src\/(?:[\w-]+\/)*(manage|chat-commands|chat-command-specs|cli|cli-dispatch)\.ts\t/.test(line) &&
           /case\s+["'][\w-]+["']/.test(line),
       ),
     docs: [

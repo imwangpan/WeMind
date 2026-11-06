@@ -49,7 +49,7 @@ export { resolveTaskCwd, taskAckOutcome } from "./cli-task.js";
 import { readPidRecords, recordMarkers } from "./shared/process/pid-record.js";
 import { BRAIN_RUNTIME_FILE, readBrainState } from "./agents/brain-state.js";
 import { CLI_VERSION, versionLine } from "./shared/version.js";
-import { renderHelp } from "./chat-commands.js";
+import { renderHelp } from "./ipc/chat-commands.js";
 
 /**
  * WeMind 多账号管理 CLI。

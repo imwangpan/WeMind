@@ -6,7 +6,7 @@ import {
   parseTaskCommand,
   type ChatCommand,
   type TaskCommand,
-} from "./chat-commands.js";
+} from "./ipc/chat-commands.js";
 import { providerIssue, shouldResumeTask } from "./tasks/task-manager.js";
 
 /**

@@ -17,8 +17,8 @@ vi.mock("@wemind/wechat-ilink-core", async (importOriginal) => {
     accountDir: (key: string) => `${m.home}/${key}`,
   };
 });
-vi.mock("./control-bridge.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./control-bridge.js")>();
+vi.mock("./ipc/control-bridge.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ipc/control-bridge.js")>();
   return {
     ...actual,
     bridgePidOf: m.bridgePidOf,

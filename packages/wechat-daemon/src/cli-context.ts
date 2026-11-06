@@ -16,7 +16,7 @@ import {
   writeControlRequest,
   type ControlKind,
   type ControlRequest,
-} from "./control-bridge.js";
+} from "./ipc/control-bridge.js";
 import { resolveAgent } from "./agents/brain-agents.js";
 import { loadBrainConfig } from "./agents/brain-config.js";
 

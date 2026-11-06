@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChatCommand } from "./chat-commands.js";
+import type { ChatCommand } from "./ipc/chat-commands.js";
 import type { ResolvedAgent } from "./agents/brain-agents.js";
-import type { ControlRequest } from "./control-bridge.js";
+import type { ControlRequest } from "./ipc/control-bridge.js";
 
 const m = vi.hoisted(() => ({
   agent: (name: string) =>

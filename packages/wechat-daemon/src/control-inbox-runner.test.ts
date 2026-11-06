@@ -8,7 +8,7 @@ import {
   readControlResponse,
   writeControlRequest,
   type ControlRequest,
-} from "./control-bridge.js";
+} from "./ipc/control-bridge.js";
 import { ControlInboxRunner } from "./control-inbox-runner.js";
 
 const dirs: string[] = [];

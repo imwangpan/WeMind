@@ -203,7 +203,9 @@ export function generateAll() {
   const envVars = collectEnvVars();
   const presets = parsePresetRows(readText("packages/wechat-daemon/src/agents/brain-presets.ts"));
   const cli = collectCliCommands(readText("packages/wechat-daemon/src/manage.ts"));
-  const wechat = collectWechatCommands(readText("packages/wechat-daemon/src/chat-commands.ts"));
+  const wechat = collectWechatCommands(
+    readText("packages/wechat-daemon/src/ipc/chat-command-specs.ts"),
+  );
   return {
     "env-vars": renderEnvVarsTable(envVars),
     presets: renderPresetsTable(presets),

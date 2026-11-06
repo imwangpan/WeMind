@@ -9,8 +9,8 @@ import {
 } from "./agents/brain-agents.js";
 import { getAgent, setAgent } from "./agents/agent-slot.js";
 import { preflightSwitch, switchBrain, switchInFlightTarget } from "./acp/brain-switch.js";
-import { renderHelp, type ChatCommand } from "./chat-commands.js";
-import type { ControlRequest } from "./control-bridge.js";
+import { renderHelp, type ChatCommand } from "./ipc/chat-commands.js";
+import type { ControlRequest } from "./ipc/control-bridge.js";
 import { currentSessionIdOf } from "./sessions/session-registry.js";
 import {
   deleteSessionCmd,
