@@ -79,11 +79,19 @@ const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-empty-"));
 const profileHome = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-profile-"));
 const clineHome = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-cline-home-"));
 const kiroV3Home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-kiro-v3-"));
+// v2 分支的测试必须钉住引擎：否则本机装了 kiro-cli ≥3 时 resolveKiroV3 会按版本走 v3，用例随开发机而红。
+const kiroV2Home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-kiro-v2-"));
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-scratch-"));
 fs.mkdirSync(path.join(kiroV3Home, "settings"), { recursive: true });
 fs.writeFileSync(
   path.join(kiroV3Home, "settings", "cli.json"),
   JSON.stringify({ "chat.agentEngine": "v3", "acp.agentEngine": "v3" }),
+  "utf-8",
+);
+fs.mkdirSync(path.join(kiroV2Home, "settings"), { recursive: true });
+fs.writeFileSync(
+  path.join(kiroV2Home, "settings", "cli.json"),
+  JSON.stringify({ "acp.agentEngine": "v2" }),
   "utf-8",
 );
 fs.mkdirSync(path.join(profileHome, "profiles", "acp"), { recursive: true });
@@ -118,6 +126,7 @@ afterAll(() => {
   fs.rmSync(profileHome, { recursive: true, force: true });
   fs.rmSync(clineHome, { recursive: true, force: true });
   fs.rmSync(kiroV3Home, { recursive: true, force: true });
+  fs.rmSync(kiroV2Home, { recursive: true, force: true });
   fs.rmSync(scratch, { recursive: true, force: true });
   if (saved.WEMIND_BRAIN_REAL_HOME === undefined) delete process.env.WEMIND_BRAIN_REAL_HOME;
 });
@@ -224,6 +233,7 @@ describe("resolveAgent agent", () => {
   it("extraArgs：追加在预设参数之后（保留 ACP 子命令）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
+    process.env.WEMIND_BRAIN_REAL_HOME = kiroV2Home; // 钉住 v2 引擎（见 kiroV2Home 注释）
     expect(resolveAgent({ agent: "kiro", extraArgs: ["--foo", "--bar"] }).args).toEqual([
       "acp",
       "--trust-all-tools",
@@ -234,9 +244,9 @@ describe("resolveAgent agent", () => {
 
   it("WEMIND_BRAIN_EXTRA_ARGS：一次性追加（空格分隔），不替换预设", () => {
     clearVars();
-    process.env.WEMIND_BRAIN = "kiro";
+    process.env.WEMIND_BRAIN = "qoder";
     process.env.WEMIND_BRAIN_EXTRA_ARGS = "--a --b";
-    expect(resolveAgent().args).toEqual(["acp", "--trust-all-tools", "--a", "--b"]);
+    expect(resolveAgent().args).toEqual(["--acp", "--yolo", "--a", "--b"]);
   });
 
   it("args 与 extraArgs 同时给：extraArgs 拼在整段 args 后面", () => {
@@ -301,8 +311,11 @@ describe("resolveAgent agent", () => {
 
   it("免审批默认：各预设用自己 agent 的机制（flag / env / 会话模式），不是统一开关", () => {
     clearVars();
-    // kiro / qoder：启动 flag 就是免审批（已是默认，防止被误改）
+    // kiro / qoder：启动 flag 就是免审批（已是默认，防止被误改）；
+    // 引擎固定到 v2，否则装了 kiro-cli ≥3 的开发机会走 v3（此时免审批在 permissions.yaml，不是 flag）
+    process.env.WEMIND_BRAIN_REAL_HOME = kiroV2Home;
     expect(resolveAgent({ agent: "kiro" }).args).toEqual(["acp", "--trust-all-tools"]);
+    process.env.WEMIND_BRAIN_REAL_HOME = emptyRealHome;
     expect(resolveAgent({ agent: "qoder" }).args).toEqual(["--acp", "--yolo"]);
     // gemini：--acp 取代废弃的 --experimental-acp；yolo + skip-trust（未信任目录会把 yolo 静默降回 default）
     expect(resolveAgent({ agent: "gemini" }).args).toEqual([

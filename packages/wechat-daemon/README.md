@@ -54,6 +54,8 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `wemind login [--label 名] [--start] [--runner builtin\|pm2]`                                       | 扫码登录；`--start` 顺带拉起常驻                                                                                                                                                                                                                             |
 | `wemind list`                                                                                       | 账号、别名、运行状态、当前大脑、worker 池                                                                                                                                                                                                                    |
 | `wemind start / stop <key\|label>`                                                                  | 启停某账号的常驻                                                                                                                                                                                                                                             |
+| `wemind start --all \| <key1> <key2>…`                                                              | 启动所有 / 指定的多个账号（单账号失败不影响其余）                                                                                                                                                                                                            |
+| `wemind autostart install\|status\|uninstall [--key <key>\|--label 名]`                             | 开机自启：默认所有已登记账号；检测到 PM2 优先用 PM2，否则用计划任务 / systemd / LaunchAgent                                                                                                                                                                  |
 | `wemind brain [show\|set\|unset\|check]`                                                            | 查看 / 设置（写入磁盘）/ 清除 / 自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`）；只加启动开关用 `--extra-args "…"`（追加，保留预设的 ACP 模式参数），`--args "…"` 是整段替换（漏掉 `acp` 会握手超时，`wemind brain` 会警告；`--args ""` 清空） |
 | `wemind brain switch <agent 名\|auto>`                                                              | **热切换对话大脑**：daemon 在跑也不重启、不打断在途回合；失败自动回滚。`--worker` 设默认任务大脑；`wemind brain handoff` 生成交接摘要                                                                                                                        |
 | `wemind session new [名字] / list / resume <ref> / rename <ref> <名> / delete <ref> [<key\|label>]` | 会话管理：新建 / 列表 / 严格恢复 / 改名 / 删除（`ref` = 序号、名字或 id 前缀；省略账号 = 默认账号）                                                                                                                                                          |
@@ -69,12 +71,12 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 
 `wemind start` 默认用**自带的跨平台后台守护进程**（builtin）：后台拉起 `wemind _watchdog`，它循环执行 `wemind daemon`，进程退出后自动重拉。也可以用 `--runner pm2`（或 `WEMIND_RUNNER=pm2`）交给 pm2，两者语义一致。进程树、pid 记录、日志轮转等细节见 [部署与运维](../../docs/repowiki/10-部署与运维.md)。
 
-开机自启分两种写法，**别混用**：
+**开机自启**：`wemind autostart install`（默认所有已登记账号，`--key`/`--label` 只装一个）。检测到 PM2 时优先用 PM2 托管（实例名 `wemind-<key>`）；否则用系统原生触发器：
 
-- **Windows**：启动文件夹 / 计划任务里执行一次 `wemind start <账号>` 即可——它拉起后台守护进程后立刻退出，重拉由 builtin watchdog 负责。
-- **Linux systemd / macOS launchd**：`ExecStart` / `ProgramArguments` 必须写 **`wemind daemon`（前台常驻）**，**不要写 `wemind start`**——后者会立刻退出，systemd/launchd 会以为服务挂了并反复重启，还可能和 builtin watchdog 双跑抢同一个 token。完整 unit / plist 示例见 [新手教程](../../docs/使用指南/新手教程.md)。
+- **Windows**：登录触发的计划任务（当前用户，不需要管理员），触发 `wemind start --all`，重拉交给 builtin watchdog；计划任务被拒时自动降级为 `HKCU\...\Run`。装了 PM2 时任务名改为 `wemind-autostart-pm2`，动作是 `start --all --runner pm2`（Windows 的 `pm2 startup` 不原生支持）。
+- **Linux systemd / macOS launchd**：单元**必须写 `wemind daemon`（前台常驻）**，**不要写 `wemind start`**——后者会立刻退出，supervisor 会以为服务挂了并反复重启；本平台的 supervisor 自己负责重拉。
 
-**同一账号只用一套常驻方案**——两种 runner（builtin / pm2）同时跑会抢同一个 bot token。
+`wemind autostart status` 查看当前方式（`none` / `native-only` / `pm2-only` / `mixed`）；两套同时存在会抢同一个 bot token，`install` 会让你选择只保留一套。**同一账号只用一套常驻方案**——builtin / pm2 / 系统触发器不要重复配置。源码仓库的 `scripts/run-daemon.ps1` 默认也是薄壳（转 `wemind start`，重拉交给内置 watchdog）；`-Mode shell` 才启用旧的 PowerShell 循环，与它也**只用一套**。
 
 ## 数据与安全
 
@@ -89,7 +91,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | 变量                                                                                  | 含义                                                                                                                     |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `WEMIND_HOME`                                                                         | 数据根目录，默认 `~/.wemind`                                                                                             |
-| `WECHAT_ACCOUNT` / `WECHAT_DATA_DIR`                                                  | 指定账号 / 指定完整数据目录（多账号隔离）                                                                                |
+| `WECHAT_ACCOUNT` / `WECHAT_DATA_DIR`                                                  | 指定账号 / 指定完整数据目录（多账号隔离）。`WECHAT_DATA_DIR` **只对 `wemind daemon` 直跑生效**；`start` / `login --start` / pm2 runner / 自启忽略它 |
 | `WEMIND_RUNNER`                                                                       | `builtin`（默认）或 `pm2`                                                                                                |
 | `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_EXTRA_ARGS` | 一次性覆盖大脑选择与启动参数（`ARGS` 整段替换、`EXTRA_ARGS` 追加；持久化请用 `wemind brain set`）                        |
 | `WEMIND_ACP_AUTO_ALLOW=1`                                                             | 放行 ACP agent 的一次性权限请求（默认为拒绝）                                                                            |

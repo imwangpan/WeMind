@@ -8,7 +8,19 @@
 
 <!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
 
-（暂无）
+### Added
+
+- **`wemind autostart install|status|uninstall`（2026-11-07）**：跨平台开机自启统一入口。默认给所有已登记账号安装，`--key` / `--label` 只装一个。检测到 PM2 时优先用 PM2（实例名 `wemind-<key>`，复用现有声明；Windows 用登录任务 `wemind-autostart-pm2` 执行 `start --all --runner pm2`，因为 `pm2 startup` 不原生支持 Windows）；否则生成系统原生触发器：Windows 登录触发的计划任务（当前用户、不限时长；受管机器拒建时降级 `HKCU\...\Run`）、Linux systemd 用户单元、macOS LaunchAgent。安装时把 node / cli.js 的路径 `realpath` 到真实位置，避开 fnm 的临时 `fnm_multishells` 联接。两种配置并存（`mixed`）时要求人工确认后只留一套。若机器上还有旧版启动文件夹 `wemind*.vbs` / `.bat` 项，需手动删除：`autostart` 不会自动清理，旧项会在登录时再执行 `wemind start` 并接管 daemon。Windows 原生方案已通过真机验收；Linux/macOS 分支尚未真机验证。详见 [开机自启](../部署与运维/开机自启.md)。
+- **`wemind start --all` 与 `wemind start <key1> <key2>…`**：一次启动所有 / 指定的多个账号；单个账号失败不影响其余，最后汇总并以退出码反映失败。Windows 原生自启触发时执行的就是它。
+
+### Fixed
+
+- **P0：`wemind start` 不再继承 `WECHAT_DATA_DIR`（2026-11-07）**：此前环境里残留该变量时，`wemind start <key>` 会报告「已启动」但实际静默空转 / 起错账号 / `stop` 停不掉。现在 `start`、`login --start`、pm2 runner 统一经 `shared/launcher-env.ts` 的 `launcherEnv()` 丢弃该变量、强制 `WECHAT_ACCOUNT`，并在它指向非预期目录时向 stderr 打迁移指引；Windows 自启任务走 `start`，Linux/macOS 自启单元用 `Environment=WECHAT_DATA_DIR=` 空值覆盖。`wemind daemon` 直跑保留一次性覆盖语义。实现见 `shared/launcher-env.ts`，测试见 `launcher-env.test.ts`。
+
+### Changed
+
+- **源码外壳 `scripts/run-daemon.ps1` 默认改为薄壳（2026-11-07）**：默认执行 `wemind start`（重拉交给内置 `_watchdog`），源码开发者与发布版共用同一套 watchdog 实现；`-Mode shell` 保留旧的 PowerShell 监督循环（命名 Mutex、每次重拉前轮转日志），`-DryRun` 只打印将执行的命令。已有计划任务若想保持旧行为，给脚本加 `-Mode shell`。新增 `-Account <key>` / `-All` 选择账号。
+- **移除未使用的 `commander` 依赖**：`autostart` 子命令改用手写解析（与 `manage.ts` 一致），`@wemind/cli` 的运行时依赖只剩 `qrcode`。
 
 ## [1.5.1] 源码目录分层（2026-11-06）
 
@@ -33,10 +45,10 @@
   - **Windows 平台事实**：`TaskSettings.Hidden` 只表示「不在计划任务列表显示」，**不是**隐藏窗口；`ExecutionTimeLimit` 默认 **PT72H**（不显式设 0 会在三天后被杀）；`.lnk` 的 `SetShowCmd` 只接受 1/3/7，没有 `SW_HIDE`；VBScript 弃用三阶段（Phase 1 已发生 → Phase 2 约 2027 → Phase 3 无日期），且 `WScript.Shell`（`wshom.ocx`）与 `vbscript.dll` 是两个不同组件。
   - **常驻层归属**：开机触发器补上 macOS `launchd`（原文只写「计划任务/VBS/systemd」）；pm2 不属于触发器层，已从该层移除。
 - **新增文档（均为设计稿/待办，未实施，不改变现行行为）**：
-  - [`docs/部署与运维/自启方案对比.md`](../部署与运维/自启方案对比.md) —— 两条路线（源码开发者 / 发布版用户）的开机自启方案对比、多账号 `wemind start --all`、`wemind service install` 设计，含实施排期 P1–P6 与待实测清单。
+  - `docs/部署与运维/自启方案对比.md`（已于 2026-11-07 并入 [开机自启](../部署与运维/开机自启.md)后删除）—— 两条路线（源码开发者 / 发布版用户）的开机自启方案对比、多账号 `wemind start --all`、`wemind service install` 设计，含实施排期 P1–P6 与待实测清单。
   - `docs/审查与质量记录/方案-源码目录重构-2026-11-05.md` —— `packages/wechat-daemon/src/` 117 个文件平铺的分层方案（单独分支实施；该初稿已于 2026-11-06 实施后删除，现行设计见 [源码目录分层设计](../设计文档/源码目录分层设计.md)）。
   - [`docs/审查与质量记录/审查-2026-11-05-经验与约束.md`](../审查与质量记录/审查-2026-11-05-经验与约束.md) —— 审计经验与「让规范不绿就红」的三层约束设计（`doc-impact` / `check-agent-docs` / `gen-docs-tables` 三个守卫脚本）。
-  - [`docs/待办与后续计划/待办-start-与-WECHAT_DATA_DIR.md`](../待办与后续计划/待办-start-与-WECHAT_DATA_DIR.md) —— `wemind start` 继承 `WECHAT_DATA_DIR` 导致的三种静默失败形态与修法（暂缓）。
+  - `docs/待办与后续计划/待办-start-与-WECHAT_DATA_DIR.md`（已于 2026-11-07 修复后删除）—— `wemind start` 继承 `WECHAT_DATA_DIR` 导致的三种静默失败形态与修法。
   - [`docs/README.md`](../README.md) —— 全库文档总索引（按读者与主题分组）；[`docs/ai/术语表.md`](../ai/术语表.md) —— 术语含义与中英写作口径。
 - **文档结构整理**：`docs/发布与变更记录/发布-wemind-npm.md` 并入《如何发布新版本》后删除；`docs/历史文档清单-2026-11-04.md` 移入 `docs/审查与质量记录/`；全库去掉文档头部的「适用版本」字段，改为「最后核对」日期 + 实测环境。
 - 源码侧仅一处注释修正（`brain-agents.ts` 的 `applySessionMode` → `applyAcpSessionMode`，与实际函数名对齐），**无行为变化**。

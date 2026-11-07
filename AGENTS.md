@@ -1,6 +1,6 @@
 # AGENTS.md — WeMind 的 AI 协作者入口
 
-> **最后核对**：2026-11-06 ｜ 本文档及全库文档描述当前分支的最新代码，不绑定已发布版本号 ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
+> **最后核对**：2026-11-08 ｜ 本文档及全库文档描述当前分支的最新代码，不绑定已发布版本号 ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
 >
 > 这份文件写给 AI agent，也写给人。**首轮读 §0–§4**；已知坑、验收清单、单文件职责都按需查（链接在 §5）。不要一上来通读 `docs/repowiki/`。
 
@@ -54,13 +54,13 @@ docs/
   ai/                   AI 上下文包 + 代码地图 + 任务配方 + 术语表（先读这里）
   接入方案/              9 篇各 agent 实测 + 1 篇通用接入指南（`接入其它-ACP-Agent.md`）
   使用指南/              新手教程、速查、远程任务使用指南
-  部署与运维/            daemon 常驻原理、跨平台常驻 pm2
+  部署与运维/            daemon 常驻原理、开机自启（现行）、跨平台常驻 pm2
   设计文档/              历史：方案 C 总设计 / MVP / CLI 化设计；现行：文档守卫设计、源码目录分层设计（均已实施）
   机制与协议说明/        本地双入口文件桥（现行机制 + 2026-06/2026-10 演进记录，正文标注现行口径）
   待办与后续计划/        暂缓项（非历史：描述的是当前行为与未做的改进）
   审查与质量记录/        历史：2026-11-02 全局审查快照、2026-11-04 归档清单、2026-11-05 审计经验
   发布与变更记录/        发版手册、CHANGELOG
-scripts/                常驻外壳（run-daemon.ps1 / pm2）、doctor、发布守卫（prepack-guard / check-version）、文档守卫（doc-impact / check-agent-docs / gen-docs-tables）
+scripts/                常驻外壳（run-daemon.ps1 默认薄壳 / -Mode shell 旧循环）、pm2、doctor、发布守卫（prepack-guard / check-version）、文档守卫（doc-impact / check-agent-docs / gen-docs-tables）
 .worktrees/             git worktree 检出目录（每分支一个子目录；不入库；约定见 §4.16）
 ```
 
@@ -75,6 +75,9 @@ npm run build / typecheck / test / lint
 npm run verify       # 提交前统一自检（CI 同口径：含三个文档守卫 + 相对链接）
 npm run doc-impact / doc-impact:check / check:agent-docs / docs:tables / docs:tables:check   # 文档守卫
 wemind login --label 名 --start / list / start|stop <key|label>
+wemind start --all | <key1> <key2>…      # 启动所有 / 指定的多个账号（原生自启触发时用 --all）
+wemind autostart install|status|uninstall [--key <key>|--label 名]   # 开机自启：装/看/卸
+pwsh -File scripts/run-daemon.ps1 [-All | -Account <key>] [-Mode shell] [-DryRun]   # 源码外壳：默认转 wemind start；-Mode shell 为旧循环
 wemind brain / brain check / brain switch <agent> [--worker] / brain handoff
 wemind brain set <agent> --extra-args "…"   # 只追加参数；--args 是整段替换，漏掉 ACP 模式参数会握手超时
 wemind session list|new|resume|rename|delete / task-list|task-reply|task-stop
@@ -114,6 +117,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
     - 反例（按缺陷处理）：改参数没更新 `--help`/README；新环境变量只写在代码注释；改了行为却没有覆盖它的测试；只跑 lint/test 漏 `format:check`。
     - **守卫**：`npm run doc-impact:check`、`scripts/check-agent-docs.mjs`、`scripts/gen-docs-tables.mjs --check`（自身用例在 `scripts/doc-guards.test.mjs`）；「有没有为这次行为写测试」没有自动检查，靠评审。
 16. **worktree 一律放仓库根 `.worktrees/`**：每个分支一个子目录（如 `.worktrees/gemini`），不要建在其它位置；合并或放弃后 `git worktree remove <路径>` + `git branch -d <分支>`，不留残留。**守卫**：未覆盖。
+17. **开机自启（`wemind autostart`）的三条边界**：① 系统触发器只执行 `start` / `daemon`，**绝不执行 `autostart install`**（登录时再跑一遍安装会递归）；② Windows 触发器跑 `wemind start --all`，重拉交给内置 watchdog；Linux systemd / macOS launchd **本身就是 supervisor**，单元必须跑 `wemind daemon`（前台常驻）——跑 `start` 会被判「服务已退出」并无限重拉；③ 启动器（`start` / `login --start` / pm2 / watchdog）一律经 `launcherEnv()` 构造子进程环境：**丢弃 `WECHAT_DATA_DIR`**、强制 `WECHAT_ACCOUNT`；`wemind daemon` 直跑保留该变量的一次性覆盖语义。源码外壳 `scripts/run-daemon.ps1` 默认是 cli 薄壳（转 `wemind start`，因此同样丢弃该变量）；只有 `-Mode shell` 直接跑 `cli.js daemon`，保留覆盖语义。检测到 PM2 时优先用 PM2（实例名 `wemind-<key>`；Windows 另装登录任务 `wemind-autostart-pm2` 跑 `start --all --runner pm2`），没有才装系统触发器；两套并存时必须人工确认后只留一套。**守卫**：`launcher-env.test.ts`、`autostart.test.ts`、`windows-autostart.test.ts`、`pm2-detector.test.ts`、`run-daemon-script.test.ts`。
 
 ---
 

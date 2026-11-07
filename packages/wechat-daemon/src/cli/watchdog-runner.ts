@@ -8,6 +8,7 @@ import path from "node:path";
 import { DATA_DIR, accountDir } from "@wemind/wechat-ilink-core";
 import { BRAIN_CONFIG_EXIT_CODE } from "../agents/brain-agents.js";
 import { stripVscodeDebugEnv } from "../shared/debug-env.js";
+import { launcherEnv, stableExecPath } from "../shared/launcher-env.js";
 import { logLimitsFromEnv, RotatingLog } from "../shared/io/log-rotate.js";
 import { CLI_PID_MARKERS, otherOurProcessPid } from "../shared/process/proc-identity.js";
 
@@ -89,7 +90,10 @@ export async function runWatchdog(): Promise<void> {
     process.exit(0);
   });
 
-  const cliPath = process.argv[1]; // 当前 cli.js（本进程即 `node cli.js _watchdog`）
+  // 当前 cli.js 与 node 的稳定路径：wrapper 可能由 fnm 的临时 shell 联接启动，
+  // 若这个 shell 已退出，直接拿 process.execPath / argv[1] 的联接路径重拉会失败。
+  const nodePath = stableExecPath(process.execPath);
+  const cliPath = stableExecPath(process.argv[1] ?? "");
   const maxRestarts =
     Number(process.env.WEMIND_MAX_RESTARTS) > 0
       ? Number(process.env.WEMIND_MAX_RESTARTS)
@@ -98,7 +102,7 @@ export async function runWatchdog(): Promise<void> {
   for (;;) {
     const startedAt = Date.now();
     rotator.writeLine(`[wemind/wechat-daemon/wrapper] start daemon ${new Date().toISOString()}`);
-    const child: ChildProcess = spawn(process.execPath, [cliPath, "daemon"], {
+    const child: ChildProcess = spawn(nodePath, [cliPath, "daemon"], {
       // WECHAT_ACCOUNT 已在本进程环境中；同时摘掉 VS Code 终端注入的调试引导（后台守护进程若本身被注入过，daemon 不能再被带坏，见 debug-env.ts）
       env: stripVscodeDebugEnv(process.env),
       stdio: ["ignore", "pipe", "pipe"], // stdout/stderr 由 rotator 合并进 daemon.log（可轮转）
@@ -146,12 +150,14 @@ export async function runWatchdog(): Promise<void> {
 
 /** 从 manage 脱离式启动某账号的后台守护进程（方案 b：builtin runner）。 */
 export function watchdogStart(key: string, cliPath: string): { ok: boolean; msg: string } {
-  const child = spawn(process.execPath, [cliPath, "_watchdog"], {
+  // 先解析到稳定路径：fnm 的 fnm_multishells 联接会在 shell 退出后消失，之后 wrapper 重拉 daemon 就找不到 node 了。
+  const child = spawn(stableExecPath(process.execPath), [stableExecPath(cliPath), "_watchdog"], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
     // 脱离出的后台守护进程拿不到 VS Code 的调试器，带着 bootloader 注入会被「等调试器」卡死 → 摘掉（见 debug-env.ts）
-    env: stripVscodeDebugEnv({ ...process.env, WECHAT_ACCOUNT: key }),
+    // 同时应用 launcherEnv()：丢弃 WECHAT_DATA_DIR 污染，强制按 key 寻址（P0 Bug Fix）
+    env: stripVscodeDebugEnv(launcherEnv(key)),
   });
   child.unref();
   return {

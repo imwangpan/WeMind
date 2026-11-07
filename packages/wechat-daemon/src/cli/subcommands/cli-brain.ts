@@ -169,8 +169,12 @@ async function cmdBrainSet(
   if (opts.restart) {
     const dpid = readPid(dir, "daemon.pid");
     if (aliveOurs(dpid)) {
-      deps.startDaemon(key);
-      lines.push(`已重启 daemon（账号 ${key}）。`);
+      const r = deps.startDaemon(key);
+      lines.push(
+        r.ok
+          ? `已重启 daemon（账号 ${key}）。`
+          : `重启 daemon 失败（账号 ${key}），原因见上方输出。`,
+      );
     } else {
       lines.push(`daemon 未在运行，未重启（用 wemind start ${key} 启动）。`);
     }
@@ -218,7 +222,7 @@ async function cmdBrainCheck(key: string): Promise<string> {
 
 export type BrainCliDeps = {
   /** `--restart` 重启账号 daemon：由入口注入，避免 CLI 模块反向依赖 manage.ts。 */
-  startDaemon: (key: string) => void;
+  startDaemon: (key: string) => { ok: boolean; msg: string };
 };
 
 /** brain 子命令派发：show（默认）/ set / unset / check / switch / handoff。 */

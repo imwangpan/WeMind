@@ -132,7 +132,7 @@ function killProcessTrees(pids: number[]): void {
   }
 }
 /** 启动某账号的 daemon（方案 a：委托 pm2 常驻，跑 `wemind daemon`，注入 WECHAT_ACCOUNT）。 */
-export function startDaemon(key: string, runner?: string): void {
+export function startDaemon(key: string, runner?: string): { ok: boolean; msg: string } {
   // 用 process.argv[1]（即正在执行的 cli.js 绝对路径），而不是 dirname(import.meta.url)：
   // 发布后 tsdown 把 manage.ts 内联进 dist/cli.js，两者恰好相同；但若将来拆成多 chunk，argv[1] 才是「用户装的那个 bin」，dirname(import.meta.url) 可能是 dist/chunks/ 下。
   const cliPath =
@@ -143,6 +143,7 @@ export function startDaemon(key: string, runner?: string): void {
   const r = useRunner === "pm2" ? pm2Start(key, cliPath) : watchdogStart(key, cliPath);
   if (!r.ok) process.exitCode = 1; // runner 起不来时别让「已启动」的文案配一个成功退出码
   console.log(r.msg);
+  return r;
 }
 
 export type StopResult = {

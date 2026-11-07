@@ -12,6 +12,7 @@ import {
 import { cmdBrain } from "./subcommands/cli-brain.js";
 import { cmdLogin, finalizeStaging } from "./subcommands/cli-login.js";
 import { cmdSession, cmdSessionCurrent } from "./subcommands/cli-session.js";
+import { cmdAutostart } from "./subcommands/autostart.js";
 import { pickKey, resolveKey } from "./cli-context.js";
 import {
   cmdTask,
@@ -21,7 +22,15 @@ import {
   cmdTaskStop,
   parseTaskId,
 } from "./subcommands/cli-task.js";
-import { cmdAdopt, cmdDelete, cmdList, cmdLogout, cmdStart } from "./account-commands.js";
+import {
+  cmdAdopt,
+  cmdDelete,
+  cmdList,
+  cmdLogout,
+  cmdStart,
+  cmdStartAll,
+  cmdStartKeys,
+} from "./account-commands.js";
 import { startDaemon, stopDaemon } from "./process-lifecycle.js";
 import { CLI_VERSION, versionLine } from "../shared/version.js";
 import { renderHelp } from "../ipc/chat-commands.js";
@@ -49,8 +58,11 @@ const LEGACY_STAGING = path.join(WEMIND_ROOT, ".staging");
 export async function runManage(argv: string[]): Promise<void> {
   const cmd = argv.shift();
   const rest = [...argv];
+  // autostart 的 --key / --label 是**子命令参数**：跳过下面的全局开关解析，否则会被 takeValue("--label") 抽走。
+  const isAutostart = cmd === "autostart";
   // 取开关值：缺值（`--cwd` 后面没东西，或紧跟另一个开关）直接报错——以前会静默当成「没写」，用默认值继续跑。
   const takeValue = (flag: string): string | undefined => {
+    if (isAutostart) return undefined;
     const i = rest.indexOf(flag);
     if (i < 0) return undefined;
     const v = rest[i + 1];
@@ -59,7 +71,7 @@ export async function runManage(argv: string[]): Promise<void> {
     return v;
   };
   const label = takeValue("--label");
-  const si = rest.indexOf("--start");
+  const si = isAutostart ? -1 : rest.indexOf("--start");
   const autoStart = si >= 0;
   if (autoStart) rest.splice(si, 1);
   const cwd = takeValue("--cwd");
@@ -69,6 +81,9 @@ export async function runManage(argv: string[]): Promise<void> {
   const agentKey = takeValue("--agent");
 
   switch (cmd) {
+    case "autostart":
+      await cmdAutostart(rest);
+      break;
     case "version":
     case "--version":
     case "-v":
@@ -93,7 +108,12 @@ export async function runManage(argv: string[]): Promise<void> {
       console.log(cmdAdopt(rest[0], label));
       break;
     case "start":
-      console.log(cmdStart(rest[0], runner));
+      // --all / all / 全部：遍历注册表逐个启动（自启触发时用的就是它）
+      // 多个 key/label：逐个启动（Windows 计划任务只装部分账号时用）
+      if (["--all", "all", "全部"].includes((rest[0] ?? "").toLowerCase()))
+        console.log(cmdStartAll(runner));
+      else if (rest.length > 1) console.log(cmdStartKeys(rest, runner));
+      else console.log(cmdStart(rest[0], runner));
       break;
     case "stop": {
       const k = pickKey(rest[0]); // 省略账号 = 默认账号（答复带上解析到的账号，避免「静默换目标」）
@@ -197,7 +217,12 @@ export function helpText(): string {
   login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动登记（--start 顺带启动 daemon）
   list                           列出账号、别名、运行状态（含 brain 进程与 worker 池）
   start [key|label]              启动某账号的 daemon（省略 = 默认账号）
+  start --all | <key1> <key2>…   启动所有 / 指定的多个账号（开机自启触发时用 --all）
   stop [key|label]               停止某账号的 daemon（连带 brain 与全部 worker 进程树；省略 = 默认账号）
+  autostart install [--all|--key <key>|--label 名]
+                                 安装开机自启（默认所有账号；检测到 PM2 优先用 PM2，否则用系统触发器）
+  autostart status               查看自启方式与冲突（none / native-only / pm2-only / mixed）
+  autostart uninstall            移除自启（PM2 实例与计划任务/systemd/LaunchAgent 一并清理）
   brain set <agent 名|auto> [--bin X] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]
                                  改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--extra-args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用；--extra-args 追加在预设参数后，不会漏掉 ACP 子命令）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况

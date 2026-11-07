@@ -37,8 +37,8 @@
 ## Deployment and release
 
 - [docs/部署与运维/daemon-常驻原理.md](docs/部署与运维/daemon-常驻原理.md): three-layer process tree, watchdog, singleton guard, self-healing.
+- [docs/部署与运维/开机自启.md](docs/部署与运维/开机自启.md): current autostart guide — `wemind autostart`, native triggers + builtin watchdog, PM2 preferred when installed.
 - [docs/部署与运维/跨平台常驻-pm2.md](docs/部署与运维/跨平台常驻-pm2.md): cross-platform persistence with pm2.
-- [docs/部署与运维/自启方案对比.md](docs/部署与运维/自启方案对比.md): autostart options compared (design draft, not implemented) — multi-account `wemind start --all`, planned `wemind service install`.
 - [docs/发布与变更记录/如何发布新版本.md](docs/发布与变更记录/如何发布新版本.md): release runbook for both packages — versions, CI, verification, rollback, invariants, first-release record.
 - [docs/发布与变更记录/CHANGELOG.md](docs/发布与变更记录/CHANGELOG.md): changelog.
 

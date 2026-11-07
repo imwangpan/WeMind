@@ -7,7 +7,7 @@
  *
  * 轮转只能用 `appendFileSync` 这种「每次打开→写→关闭」的写法：Windows 上无法重命名一个
  * 仍被写入进程持有的文件。内置 watchdog 因此把子进程 stdout/stderr 接成管道，由它逐块追加，
- * 轮转时文件没有打开句柄；`scripts/run-daemon.ps1` 则在每次重拉前（子进程已退出）轮转。
+ * 轮转时文件没有打开句柄；`scripts/run-daemon.ps1 -Mode shell` 则在每次重拉前（子进程已退出）轮转。
  */
 import fs from "node:fs";
 

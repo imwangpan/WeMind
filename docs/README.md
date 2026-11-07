@@ -1,6 +1,6 @@
 # WeMind 文档总索引
 
-> **最后核对**：2026-11-06
+> **最后核对**：2026-11-08
 >
 > 全库文档按**读者与场景**分组。不知道从哪开始，就按下面的「你是」表选入口；要找某个具体机制，看「按主题」。
 
@@ -14,7 +14,7 @@
 | **只想用 MCP 形态** | [packages/wechat-mcp/README.md](../packages/wechat-mcp/README.md) → [repowiki 04](repowiki/04-MCP-Server.md) | 挂到 Claude Desktop / Cursor / OpenCode |
 | **想用常驻 daemon** | [packages/wechat-daemon/README.md](../packages/wechat-daemon/README.md) → [使用指南-远程任务](使用指南/使用指南-远程任务（worker）.md) | `npm i -g @wemind/cli`，命令 `wemind` |
 | **想换 AI 大脑** | [接入其它 ACP Agent](接入方案/接入其它-ACP-Agent.md) → 各 agent 的接入文档 | 9 个内置预设 + 通用接入流程 |
-| **要部署 / 长期运维** | [daemon 常驻原理](部署与运维/daemon-常驻原理.md) → [跨平台常驻（pm2）](部署与运维/跨平台常驻-pm2.md) → [repowiki 10](repowiki/10-部署与运维.md) | 后台守护、开机自启、多账号、日志轮转 |
+| **要部署 / 长期运维** | [daemon 常驻原理](部署与运维/daemon-常驻原理.md) → [开机自启](部署与运维/开机自启.md) → [跨平台常驻（pm2）](部署与运维/跨平台常驻-pm2.md) → [repowiki 10](repowiki/10-部署与运维.md) | 后台守护、开机自启、多账号、日志轮转 |
 | **要改这个仓库** | [AGENTS.md](../AGENTS.md) → [repowiki 11 开发指南](repowiki/11-开发指南.md) → [系统架构](repowiki/02-系统架构.md) | 硬约束、构建、测试、代码地图 |
 | **要发版** | [如何发布新版本](发布与变更记录/如何发布新版本.md) | 两个包的版本号、CI、验收与常见坑 |
 | **AI 编码助手** | [AGENTS.md](../AGENTS.md) → [docs/ai/README.md](ai/README.md) → [术语表](ai/术语表.md) → [任务配方](ai/recipes/) | 压缩上下文、术语口径、按任务的操作步骤 |
@@ -41,8 +41,8 @@
 ### 部署与运维
 
 - [daemon 常驻原理](部署与运维/daemon-常驻原理.md) —— 三层进程、后台守护、单实例、自愈
+- [开机自启](部署与运维/开机自启.md) —— **现行方案**：`wemind autostart`、系统触发器 + 内置 watchdog、PM2 优先
 - [跨平台常驻（pm2）](部署与运维/跨平台常驻-pm2.md) —— Windows / Linux / macOS 统一常驻
-- [自启方案对比](部署与运维/自启方案对比.md) —— 开机自启各方案优劣势、多账号 `--all`、`wemind service install`（**设计稿，未实施**）
 
 ### 发布与变更
 
@@ -71,7 +71,7 @@
 
 - [设计文档](设计文档/) —— 历史的方案 C 总设计、MVP、CLI 化设计（3 篇，均已加存档声明）；现行的《文档守卫设计》见上一节
 - [审查与质量记录](审查与质量记录/) —— 2026-11-02 全局审查快照、[2026-11-04 归档清单](审查与质量记录/历史文档清单-2026-11-04.md)、[2026-11-05 审计经验](审查与质量记录/审查-2026-11-05-经验与约束.md)（历史记录，方案已实施）
-- [待办与后续计划](待办与后续计划/) —— 暂缓项（[任务编号与记录体积](待办与后续计划/待办-任务编号与记录体积.md)、[`wemind start` 与 `WECHAT_DATA_DIR`](待办与后续计划/待办-start-与-WECHAT_DATA_DIR.md)）
+- [待办与后续计划](待办与后续计划/) —— 暂缓项（[任务编号与记录体积](待办与后续计划/待办-任务编号与记录体积.md)）
 
 ---
 

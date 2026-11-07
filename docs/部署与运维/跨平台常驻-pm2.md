@@ -1,8 +1,8 @@
 # 跨平台常驻方案（pm2）
 
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-08
 
-WeMind 的 daemon 本体是纯 Node.js，**跨平台**；常驻外壳有三套实现：**builtin**（`wemind start` 默认，跨平台零依赖）、**pm2**（`--runner pm2` 或 `WEMIND_RUNNER=pm2`）、**PowerShell 版后台守护进程**（`scripts/run-daemon.ps1`，Windows 源码开发者）。本文说明 pm2 这套：**Windows / Linux / macOS 通用**，适合想用成熟进程管理器统一管理多账号的场景。
+WeMind 的 daemon 本体是纯 Node.js，**跨平台**；常驻外壳有三套实现：**builtin**（`wemind start` 默认，跨平台零依赖）、**pm2**（`--runner pm2` 或 `WEMIND_RUNNER=pm2`）、**PowerShell 版后台守护进程**（`scripts/run-daemon.ps1 -Mode shell`，Windows 源码开发者；脚本默认是转 builtin 的薄壳）。本文说明 pm2 这套：**Windows / Linux / macOS 通用**，适合想用成熟进程管理器统一管理多账号的场景。
 
 > 配置文件：仓库根的 `ecosystem.config.cjs`（多账号动态生成）。
 > 常驻底层原理见 [daemon-常驻原理.md](daemon-常驻原理.md)。
@@ -13,7 +13,7 @@ WeMind 的 daemon 本体是纯 Node.js，**跨平台**；常驻外壳有三套�
 
 pm2 是 Node 生态的进程管理器，**一个工具同时顶替**常驻外壳要手写的所有东西：
 
-| 能力 | builtin `_watchdog` / `run-daemon.ps1` | pm2 |
+| 能力 | builtin `_watchdog` / `run-daemon.ps1`（默认薄壳或 `-Mode shell`） | pm2 |
 |------|----------------|-----|
 | 崩溃自动重拉（后台守护进程） | 各自的重拉循环（5s） | `autorestart`（内置） |
 | 开机自启 | 系统计划任务 / systemd / launchd | `pm2 startup` + `pm2 save` |
@@ -22,7 +22,7 @@ pm2 是 Node 生态的进程管理器，**一个工具同时顶替**常驻外壳
 | 多账号 | 每账号一条链（`run-all-daemons.ps1`） | `ecosystem.config.cjs` 按账号生成多 app |
 | 日志 | `RotatingLog` / `*>> daemon.log` | `out_file`/`error_file`（已指到各账号 `daemon.log`） |
 
-所以 Linux/macOS 上本来就有 builtin（无需 pm2）；pm2 的价值在于**跨平台统一、多账号集中管理**。在 Windows 上 pm2 也能替代 `run-daemon.ps1`（自启那一步稍特殊，见 §4）。
+所以 Linux/macOS 上本来就有 builtin（无需 pm2）；pm2 的价值在于**跨平台统一、多账号集中管理**。在 Windows 上 pm2 也能替代 `run-daemon.ps1`（后者默认也是薄壳转 builtin，自启那一步稍特殊，见 §4）。
 
 ---
 
@@ -72,17 +72,20 @@ pm2 startup              # 打印一条命令；按提示用 sudo 执行它（�
 
 ### Windows（pm2 自启较特殊）
 
-pm2 官方对 Windows 开机自启支持不完善（`pm2 startup` 不原生支持 Windows）。三选一：
+pm2 官方对 Windows 开机自启支持不完善（`pm2 startup` 不原生支持 Windows）。现在由 `wemind autostart install` 统一处理：
 
-1. **继续用现成的计划任务**，但把它执行的命令换成 `pm2 resurrect`（最省心，复用 §daemon-常驻原理 里的计划任务方式）：
-   ```powershell
-   pm2 start ecosystem.config.cjs; pm2 save
-   # 计划任务（登录触发）执行： pm2 resurrect
-   ```
-2. 用社区方案 [pm2-installer](https://github.com/jessety/pm2-installer)（把 pm2 装成 Windows 服务）。
-3. **干脆不用 pm2**，Windows 仍用原来的 `scripts/run-daemon.ps1` + 计划任务（见 README「Windows 登录自启」）——功能等价。
+```powershell
+wemind autostart install
+```
 
-> 简言之：**Linux/macOS 用 pm2 一条龙；Windows 可用 pm2 跑但自启建议仍走计划任务（执行 `pm2 resurrect`），或直接沿用原 PowerShell 方案。**
+检测到 pm2 时，它会：
+
+1. 按声明启动 `wemind-<key>` 实例（等价于 `pm2 start`）并 `pm2 save`；
+2. 创建登录计划任务 `wemind-autostart-pm2`，默认动作是 `wemind start --all --runner pm2`（只装部分账号时是 `start <key…> --runner pm2`）——pm2 守护进程按需启动、按声明重建实例后再 `pm2 save`。这条命令内部仍要调用 `pm2`，所以 **`pm2` 必须在登录环境的 PATH 中**（npm 全局安装通常已经在用户 PATH 里）。
+
+不再需要手工把计划任务命令写成 `pm2 resurrect`。若坚持手工方式，仍可让计划任务执行 `pm2 resurrect`，但同一账号只能保留一套触发器；`wemind autostart status` 会显示 `mixed` 并提示处理。
+
+> 简言之：**Linux/macOS 用 pm2 一条龙；Windows 用 `wemind autostart install` 生成 `wemind-autostart-pm2` 登录任务，或干脆不用 pm2、让内置 watchdog 托管。**
 
 ---
 
@@ -114,12 +117,12 @@ pm2 save                       # 保存当前列表（改动后记得存，否�
 
 ## 7. 与其它常驻方案的互斥（重要）
 
-**不要对同一账号同时跑两套常驻**（pm2 / builtin `_watchdog` / `run-daemon.ps1` 任意两套）——会出现两个 daemon 抢同一 token、互相打架。二选一：
+**不要对同一账号同时跑两套常驻**（pm2 / builtin `_watchdog` / `run-daemon.ps1 -Mode shell` 任意两套）——会出现两个 daemon 抢同一 token、互相打架。二选一：
 
-- 用 pm2 → 先 `wemind stop <账号>`（它会杀掉 builtin 后台守护进程），并确保没有 `run-daemon.ps1` 在跑、原计划任务「wemind-daemon」已删除；
+- 用 pm2 → 先 `wemind stop <账号>`（它会杀掉 builtin 后台守护进程），并确保没有 `run-daemon.ps1 -Mode shell` 在跑、原计划任务「wemind-daemon」已删除；`run-daemon.ps1` 默认的 cli 薄壳最终也走 builtin，与 `wemind start` 等价；
 - 用 builtin 或原 PowerShell 方案 → 不要 `pm2 start`。
 
-builtin 的 `wrapper.pid` 单实例守卫与 PowerShell 版的命名 Mutex 都**只防自己那一套重复**，不感知 pm2，所以互斥要靠你在两套之间二选一。
+builtin 的 `wrapper.pid` 单实例守卫与 PowerShell（`-Mode shell`）的命名 Mutex 都**只防自己那一套重复**，不感知 pm2，所以互斥要靠你在两套之间二选一。
 
 ---
 
@@ -186,5 +189,5 @@ loginctl enable-linger $USER                                # 允许未登录也
 
 - **业务代码零改动**即跨平台；本方案只加常驻外壳。
 - **Linux/macOS**：不装 pm2 也能用 builtin（`wemind start <账号>`）；要集中管理就用 `pm2 start ecosystem.config.cjs && pm2 save && pm2 startup`，或写 systemd/launchd unit。
-- **Windows**：默认 builtin；也可用 pm2（自启走计划任务执行 `pm2 resurrect`），或源码开发者的 `run-daemon.ps1` + 计划任务。
+- **Windows**：默认 builtin；装了 pm2 时 `wemind autostart install` 会创建登录任务 `wemind-autostart-pm2`（执行 `start --all --runner pm2`），源码开发者也可用 `run-daemon.ps1`（默认薄壳转 builtin）或 `-Mode shell` + 计划任务。
 - **同一账号只用一套**常驻方案，别叠加。

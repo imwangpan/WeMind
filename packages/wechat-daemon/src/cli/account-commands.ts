@@ -133,6 +133,49 @@ export function cmdDelete(sel: string): string {
 
 export function cmdStart(sel?: string, runner?: string): string {
   const key = pickKey(sel); // 省略账号 = 默认账号
-  startDaemon(key, runner);
-  return `已启动 daemon（账号 ${key}）。用 list 查看运行状态。`;
+  const r = startDaemon(key, runner);
+  return r.ok
+    ? `已启动 daemon（账号 ${key}）。用 list 查看运行状态。`
+    : `启动 daemon 失败（账号 ${key}），原因见上方输出。`;
+}
+
+/** 逐个启动并汇总；单个失败不阻断其余（自启场景宁可部分可用）。 */
+function startKeys(keys: string[], runner?: string): string {
+  const started: string[] = [];
+  const failed: string[] = [];
+  for (const key of keys) {
+    // startDaemon 内部逐个打印结果（成功/失败原因），这里只负责统计
+    const r = startDaemon(key, runner);
+    if (r.ok) started.push(key);
+    else failed.push(key);
+  }
+  const parts = [`已启动 ${started.length}/${keys.length} 个账号的 daemon`];
+  if (started.length) parts.push(`成功：${started.join(", ")}`);
+  if (failed.length) {
+    parts.push(`失败：${failed.join(", ")}`);
+    process.exitCode = 1;
+  }
+  return `${parts.join("；")}。用 list 查看运行状态。`;
+}
+
+/**
+ * 启动**所有已登记账号**（`wemind start --all`）。开机自启的原生触发器触发时执行的就是它。
+ * 单个账号失败不影响其余账号，最后汇总并以退出码 1 反映失败。
+ */
+export function cmdStartAll(runner?: string): string {
+  const accs = listAccounts();
+  if (!accs.length) return "（无已登记账号）。用 `login` 添加。";
+  return startKeys(
+    accs.map((a) => a.key),
+    runner,
+  );
+}
+
+/**
+ * 启动指定的多个账号（`wemind start <key1> <key2> …`；Windows 计划任务在只装部分账号时用）。
+ * 先全部解析再启动：任一 key/label 无效就整条命令失败，避免「一半起来了」的半成品状态。
+ */
+export function cmdStartKeys(sels: string[], runner?: string): string {
+  const keys = sels.map((s) => resolveKey(s));
+  return startKeys([...new Set(keys)], runner);
 }

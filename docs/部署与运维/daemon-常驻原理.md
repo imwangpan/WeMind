@@ -1,12 +1,12 @@
 # Daemon 后台常驻原理（详解）
 
-> **最后核对**：2026-11-06
+> **最后核对**：2026-11-08
 >
-> ⚠️ **三套常驻外壳，同一账号只用一套，默认不是本文的 PowerShell 版**：
+> ⚠️ **三套常驻外壳，同一账号只用一套**：
 >
 > - **发布版（`npm i -g @wemind/cli`）默认 builtin runner**：`wemind start` → detached `cli.js _watchdog`（Node 写的后台守护进程）→ 循环跑 `cli.js daemon`。零依赖、跨平台。见 §2'。
 > - **pm2 runner**：`wemind start --runner pm2`（或 `WEMIND_RUNNER=pm2`），或源码开发者的 `ecosystem.config.cjs`。见 [跨平台常驻-pm2.md](跨平台常驻-pm2.md)。
-> - **源码开发者（Windows）** 才用本文详述的 `scripts/run-daemon.ps1`（PowerShell 版后台守护进程 + 命名 Mutex）。
+> - **源码开发者（Windows）的 `scripts/run-daemon.ps1`**：默认是**薄壳**——定位 node 与仓库根后执行 `wemind start`，常驻仍由 builtin `_watchdog` 负责（源码与发布版走同一条代码路径）；`-Mode shell` 才启用旧的 PowerShell 监督循环（独立实现 + 命名 Mutex）。
 >
 > 三套的**设计思想相同**（外层后台守护进程 + 5s 重拉 + 单实例守卫 + pid 链），只是实现语言不同。**同一账号只能用一套**。
 
@@ -18,7 +18,7 @@
 >
 > - `packages/wechat-daemon/src/cli/watchdog-runner.ts` —— **builtin 后台守护进程**（发布版默认；`cli.js _watchdog`）
 > - `packages/wechat-daemon/src/cli/pm2-runner.ts` —— pm2 runner（`wemind start --runner pm2`）
-> - `scripts/run-daemon.ps1` —— PowerShell 版后台守护进程（源码开发者，Windows）
+> - `scripts/run-daemon.ps1` —— 源码仓库的启动/常驻外壳：默认薄壳转 `wemind start`，`-Mode shell` 保留 PowerShell 后台守护进程（源码开发者，Windows）
 > - `scripts/run-all-daemons.ps1` —— 多账号批量启动（PowerShell 路线）
 > - `packages/wechat-daemon/src/index.ts` —— daemon 本体（poller/worker 循环）
 > - `packages/wechat-daemon/src/acp/acp-brain.ts` —— 大脑 ACP 子进程
@@ -29,13 +29,13 @@
 ## 1. 整体进程树
 
 ```
-开机触发器（同一台机器只用一个：Windows 计划任务 / Windows 启动文件夹 VBS / Linux systemd / macOS launchd）
+开机触发器（同一台机器只用一个：Windows 计划任务 / HKCU Run 键 / Linux systemd / macOS launchd；`wemind autostart install` 生成）
         │ 只负责「拉起一次」并脱离 shell
         ▼
    ① 后台守护进程（三选一，同一账号只用一套）
-        · builtin：cli.js _watchdog   ← 发布版默认（跨平台，零依赖）
+        · builtin：cli.js _watchdog   ← 发布版默认（跨平台，零依赖；run-daemon.ps1 默认也走它）
         · pm2：    pm2 start wemind-<key>
-        · 源码：   pwsh run-daemon.ps1（Windows，见 §2）
+        · 源码：   pwsh run-daemon.ps1 -Mode shell（Windows，见 §2）
         │  while: 跑 node daemon; 退出后睡 5s 再跑
         ▼
    node  <cli.js> daemon            ← ② daemon 本体（业务，常驻）
@@ -48,7 +48,7 @@
 
 | 文件               | 属于                      | 写入者                                            | 用途                                                                                                                                                                                                                    |
 | ------------------ | ------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wrapper.pid`      | ① 后台守护进程            | `watchdog-runner.ts`（builtin）/ `run-daemon.ps1` | 管理命令据此停掉它（否则停了 daemon 会被立刻重拉）；兼作单实例守卫                                                                                                                                                      |
+| `wrapper.pid`      | ① 后台守护进程            | `watchdog-runner.ts`（builtin，含 `run-daemon.ps1` 默认的 cli 模式）/ `run-daemon.ps1 -Mode shell` | 管理命令据此停掉它（否则停了 daemon 会被立刻重拉）；兼作单实例守卫                                                                                                                                                      |
 | `daemon.pid`       | ② daemon                  | `index.ts` 启动时                                 | 精确定位本账号 node 进程                                                                                                                                                                                                |
 | `brain.pid`        | ③ 大脑                    | `acp-brain.ts` spawn 后                           | 区分「bot 的大脑」与用户自己日常用的 agent，便于清理                                                                                                                                                                    |
 | `workers.pid.json` | ③' worker（可能多条并存） | `worker-pool.ts` / `worker-acp.ts` spawn 后       | 远程任务进程的**记录**（每条含起进程时真实用的 bin/args，供逐条身份校验；单条为对象、多条为数组）；`stop` 时一并清理（漏了会留下孤儿进程占着会话）。旧账号只有裸整数 `worker.pid`，仍按「配置算特征串」的老办法兼容读取 |
@@ -104,11 +104,27 @@ for (;;) {
 
 ---
 
-## 2. 第①层（源码开发者，Windows）：PowerShell 后台守护进程
+## 2. 第①层（源码开发者，Windows）：run-daemon.ps1
 
 > 仅当你在**仓库里从源码跑**、且想用计划任务自启时才需要本节。发布版用户请用 §2'。
 
-`run-daemon.ps1` 的本质是一个**永不结束的监督循环（supervisor / watchdog）**：
+`run-daemon.ps1` 有两种模式（`-Mode`）：
+
+### 2.1 cli（默认）：薄壳，复用 builtin watchdog
+
+只做三件事：
+
+1. 定位仓库根（`$PSScriptRoot` 反推）与 node 绝对路径（PATH 优先；fnm / nvm / Volta 兜底，并把 node 所在目录前置进 PATH，供 ACP agent 解析）；
+2. 选账号：`-Account <key>` > `WECHAT_ACCOUNT` > CLI 默认账号；`-All` 传 `start --all`；
+3. 执行 `node dist/cli.js start [<key>|--all]` 后退出。
+
+常驻、5s 重拉、连续崩溃上限、单实例守卫全部由 `watchdog-runner.ts` 的 `_watchdog` 负责——源码开发者与发布版**跑的是同一条代码路径**，只保留一份 watchdog 实现。`-DryRun` 只打印将执行的命令，不启动进程（自检与测试用）。
+
+### 2.2 shell：旧的 PowerShell 监督循环
+
+`-Mode shell` 才进入下面这套独立实现；升级前的老计划任务若想保持原行为，加上该参数即可。
+
+`run-daemon.ps1 -Mode shell` 的本质是一个**永不结束的监督循环（supervisor / watchdog）**：
 
 ```powershell
 while ($true) {
@@ -128,9 +144,9 @@ while ($true) {
 
 这就是「daemon 崩了会自动恢复」的来源。**职责分离**：node 只管业务逻辑，保活完全交给外层后台守护进程。daemon 进程内部不做自重启。
 
-> 关于「防挂起」规范的澄清：`run-daemon.ps1` 里**故意**用前台阻塞 `& node` + `Start-Sleep`——它的职责就是守着 node。这不违反项目的「shell 防挂起」约定，因为那条约定约束的是「临时在交互 shell 里跑的命令」，而它本身是被计划任务/VBS 以脱离方式启动的长期监督进程。
+> 关于「防挂起」规范的澄清：`run-daemon.ps1 -Mode shell` 里**故意**用前台阻塞 `& node` + `Start-Sleep`——它的职责就是守着 node。这不违反项目的「shell 防挂起」约定，因为那条约定约束的是「临时在交互 shell 里跑的命令」，而它本身是被计划任务以脱离方式启动的长期监督进程。
 
-启动时它还做几件准备：
+`-Mode shell` 启动时它还做几件准备：
 
 - **设 UTF-8 编码**（`[Console]::OutputEncoding` / `$OutputEncoding`）：否则 node/kiro-cli 的中文输出按系统 GBK 代码页解码会乱码（早期踩过）。
 - **定位仓库**：用 `$PSScriptRoot` 反推仓库根（脚本在 `<repo>/scripts/`），可移植，不写死路径。
@@ -139,9 +155,11 @@ while ($true) {
 
 ---
 
-## 3. 单实例守卫（源码路线：命名 Mutex）
+## 3. 单实例守卫（`-Mode shell`：命名 Mutex）
 
-如果计划任务、手动启动、多次登录叠加，可能同时跑起多个守护循环 → 多个 daemon 抢同一个 token、互相打架（早期的坑①）。为此 `run-daemon.ps1` 启动时用**命名 Mutex** 做单实例守卫：
+> cli 模式（默认）不自己管单实例——`wemind start` 拉起的 builtin watchdog 用 `wrapper.pid` + 进程身份校验守卫；两套互不感知，所以**同一账号不要同时用 cli 与 shell 模式**。
+
+如果计划任务、手动启动、多次登录叠加，可能同时跑起多个 shell 守护循环 → 多个 daemon 抢同一个 token、互相打架（早期的坑①）。为此 `run-daemon.ps1 -Mode shell` 启动时用**命名 Mutex** 做单实例守卫：
 
 ```powershell
 $dataKey  = WECHAT_DATA_DIR 或 "account:<WECHAT_ACCOUNT>" 或 "account:default"
@@ -187,38 +205,50 @@ if (-not $createdNew) { 记日志「已有实例在跑」; exit 0 }   # 抢不�
 
 ## 6. 第〇层：开机自启（怎么第一次被拉起）
 
-**先确认你是哪条路线**——本节默认写的是**源码开发者（Windows）** 的 `run-daemon.ps1`；发布版用户（`npm i -g @wemind/cli`）**没有 `scripts/` 目录**，照本节会注册一个指向不存在文件的任务、开机静默失败。发布版的自启写法见 [使用指南/新手教程.md](../使用指南/新手教程.md) 的「开机自启」一节（Windows 启动文件夹 `.bat` 调 `wemind start`；Linux systemd / macOS launchd 用 `wemind daemon`）。
+**现行做法（所有平台、安装版与源码版一致）：`wemind autostart install`**——默认给所有已登记账号装；`--key` / `--label` 只装一个。它按平台生成触发器，检测到 PM2 时优先用 PM2：
 
-`run-daemon.ps1` 自己不会开机自动出现，需要一个系统级触发器：
+| 平台 | 触发器 | 触发后执行 | 谁负责重拉 |
+|------|--------|------------|------------|
+| Windows | 登录触发的计划任务（当前用户，不需要管理员；被受管策略拒绝时降级 `HKCU\...\Run`） | `wemind start --all`（只装部分账号时是 `start <key…>`） | 内置 `_watchdog` |
+| Linux | `~/.config/systemd/user/wemind@<key>.service` | `wemind daemon`（前台常驻） | systemd（`Restart=always`） |
+| macOS | `~/Library/LaunchAgents/dev.wemind.<key>.plist` | `wemind daemon`（前台常驻） | launchd（`KeepAlive`） |
+| 任意（装了 PM2） | pm2 自身（`wemind-<key>` 实例） | `wemind daemon`（声明 `args: "daemon"`） | pm2 |
+
+> **触发器绝不能执行 `wemind autostart install`**——每次登录都会重新安装一遍。Windows 触发器只执行 `start --all`（只装部分账号时是 `start <key…>`）；Linux/macOS 的 supervisor 本身负责重拉，单元里写 `wemind start` 会立刻退出并被无限重启。
+>
+> 装完用 `wemind autostart status` 核对（`none` / `native-only` / `pm2-only` / `mixed`）。`mixed` 表示系统触发器与 PM2 各拉了一份，会抢同一个 bot token——重新跑 `install` 会让你选择只保留一种。详见 [开机自启](开机自启.md)。
+
+**旧方式（仅源码开发者手动配置，仍可用）**：`run-daemon.ps1` 自己不会开机自动出现，需要一个系统级触发器。默认 cli 模式下它是薄壳，动作推荐直接覆盖全部账号：
 
 **首选：计划任务（登录触发）**
 
 ```powershell
 $pwsh    = "C:\Program Files\PowerShell\7\pwsh.exe"          # 必须 PS7 全路径
 $wrapper = "<仓库绝对路径>\scripts\run-daemon.ps1"
-$action  = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`""
+$action  = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`" -All"
 Register-ScheduledTask -TaskName "wemind-daemon" `
   -Action $action `
   -Trigger (New-ScheduledTaskTrigger -AtLogOn) `
   -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew) -Force
 ```
 
+- `-All`：启动所有已登记账号（等价 `wemind start --all`）；只起一个账号用 `-Account <key>`，交给 CLI 默认账号则省略；
 - `-AtLogOn`：登录即触发；
-- `ExecutionTimeLimit = 0`：不限时长（否则计划任务会在若干小时后杀掉常驻进程）；
-- `MultipleInstances IgnoreNew`：配合 `run-daemon.ps1` 的 Mutex 双保险，防重复实例；
+- `ExecutionTimeLimit = 0`：不限时长（否则计划任务默认 72 小时后杀掉常驻进程）；
+- `MultipleInstances IgnoreNew`：防重复触发。cli 模式的真正单实例守卫是 builtin watchdog 的 `wrapper.pid`；`-Mode shell` 才是脚本自己的 Mutex；
 - 计划任务的 `Execute` 必须用 **PS7 全路径**，不要用 `pwsh`（依赖 PATH）或 WindowsApps 执行别名（在非交互上下文常解析失败）。
 
-**退路：启动文件夹 + VBS**（环境禁建计划任务时）
+**退路：启动文件夹 + `.bat`**（环境禁建计划任务时）
 
-在 `shell:startup`（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`）放一个 `.vbs`，用 `WScript.Shell.Run` 以隐藏窗口调 `pwsh ... -File scripts/run-daemon.ps1`。VBS 的 `Run` 能彻底脱离，不残留控制台窗口。
+在 `shell:startup`（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`）放一个 `.bat`，内容为 `wemind start --all`（安装版）或 `pwsh -File "<仓库>\scripts\run-daemon.ps1" -All`（源码版）。**不要用 `.vbs`**（项目已弃用）。注意这条退路会出现在「任务管理器 → 启动」里，且与 `wemind autostart install` 的注册表退路**不要重复**。
 
-> **为什么一定要「脱离」启动**：无论计划任务、VBS 还是 `Start-Process`，目的都是让后台守护进程（及其子孙 node/kiro-cli）**不继承启动者的 stdout 管道**。否则启动它的那个 shell 会一直等管道 EOF → 「看似卡住」。这也是本项目「shell 防挂起」规范的根因。
+> **为什么一定要「脱离」启动**：无论计划任务、Run 键还是 `Start-Process`，目的都是让后台守护进程（及其子孙 node/kiro-cli）**不继承启动者的 stdout 管道**。否则启动它的那个 shell 会一直等管道 EOF → 「看似卡住」。这也是本项目「shell 防挂起」规范的根因。
 
 ---
 
 ## 7. 多账号：每账号一条独立链
 
-`run-all-daemons.ps1` 读账号注册表 `<WEMIND_HOME>/accounts.json`（默认 `~/.wemind/accounts.json`），为每个账号起一条独立的守护链：
+`run-all-daemons.ps1` 读账号注册表 `<WEMIND_HOME>/accounts.json`（默认 `~/.wemind/accounts.json`），为每个账号起一条独立的启动链（默认 cli 模式：每个 wrapper 转 `wemind start <key>`，重拉交给各账号自己的 builtin watchdog）：
 
 ```powershell
 foreach ($key in $accounts) {
@@ -228,9 +258,9 @@ foreach ($key in $accounts) {
 }
 ```
 
-- 每账号不同 `WECHAT_ACCOUNT` → 不同数据目录 + 不同 Mutex + 不同日志 → **完全独立、可共存、互不抢 token**。
+- 每账号不同 `WECHAT_ACCOUNT` → 不同数据目录 + 不同单实例守卫（cli：builtin watchdog 的 `wrapper.pid`；shell：命名 Mutex）+ 不同日志 → **完全独立、可共存、互不抢 token**。
 - 多账号必须用 `Start-Process -Environment` **显式传** `WECHAT_ACCOUNT`，靠 `$env:` 继承不可靠（坑⑯相关）。
-- 重复运行安全：已在跑的账号会被该账号守护进程的 Mutex 守卫挡掉。
+- 重复运行安全：已在跑的账号会被该账号的单实例守卫挡掉（cli：builtin watchdog；shell：Mutex）。
 
 ---
 
@@ -257,7 +287,7 @@ foreach ($key in $accounts) {
 | 大脑（agent）假死/超时             | ③ acp-brain    | 杀进程 → 下条消息重建 + `session/load`/`resume` 恢复上下文                       |
 | 网络抖动 `getUpdates fetch failed` | ② poller       | try/catch + 2s 后重试，不崩                                                      |
 | 登录会话过期 `-14`                 | ② daemon       | 暂停 1 小时，等重新登录后自动恢复                                                |
-| 重复启动 / 多实例                  | ① 单实例守卫   | 抢不到锁的守护进程直接退出                                                       |
+| 重复启动 / 多实例                  | ① 单实例守卫   | builtin watchdog 的 `wrapper.pid` 守卫 / shell 模式的命名 Mutex 让重复实例直接退出 |
 | 开机没起来                         | 〇 触发器      | 检查计划任务是否存在/启用、PS7 路径、`ExecutionTimeLimit=0`                      |
 | 开机没起来（陈旧 pid 被复用）      | 〇/① pid 文件  | pid 存活还须**身份校验**确属本程序，否则后台守护进程会误判「已有实例」而静默退出 |
 
@@ -265,4 +295,4 @@ foreach ($key in $accounts) {
 
 ## 10. 一句话总结
 
-> **开机触发器负责「开机拉起一次」并脱离 shell**——Windows 用计划任务（首选）或启动文件夹 VBS（禁建任务时的退路）、Linux 用 systemd、macOS 用 launchd；**同一台机器只选一个**。后台守护进程（builtin `_watchdog` / pm2 / `run-daemon.ps1`）的循环负责「崩了再拉」；node 的三个 `while(true)`（poller + fastWorker + worker）负责「自己不退」；单实例守卫（wrapper.pid 身份校验 / Mutex / pm2 app 名）负责「不重复」；pid 文件链负责「能精确停」。五者叠起来 = 稳定的后台常驻。**
+> **开机触发器负责「开机拉起一次」并脱离 shell**——Windows 用计划任务（首选）或 `HKCU\...\Run`（禁建任务时的退路）、Linux 用 systemd、macOS 用 launchd；**同一台机器只选一个**。后台守护进程（builtin `_watchdog`，`run-daemon.ps1` 默认薄壳最终也走它 / pm2 / `run-daemon.ps1 -Mode shell`）的循环负责「崩了再拉」；node 的三个 `while(true)`（poller + fastWorker + worker）负责「自己不退」；单实例守卫（wrapper.pid 身份校验 / Mutex / pm2 app 名）负责「不重复」；pid 文件链负责「能精确停」。五者叠起来 = 稳定的后台常驻。**

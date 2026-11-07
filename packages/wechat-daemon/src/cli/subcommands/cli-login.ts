@@ -58,7 +58,7 @@ function openFile(p: string): void {
 
 export type LoginCliDeps = {
   /** 登录成功后自动启动（`--start`）：由入口注入，模块不反向依赖 manage.ts。 */
-  startDaemon: (key: string, runner?: string) => void;
+  startDaemon: (key: string, runner?: string) => { ok: boolean; msg: string };
 };
 
 /**
@@ -230,8 +230,9 @@ async function loginInto(
       console.log(msg);
       await unpauseIfRunning(key);
       if (autoStart) {
-        deps.startDaemon(key, runner);
-        console.log(`已启动 daemon（账号 ${key}）。`);
+        const r = deps.startDaemon(key, runner);
+        if (r.ok) console.log(`已启动 daemon（账号 ${key}）。`);
+        else console.error(`启动 daemon 失败（账号 ${key}），原因见上方输出。`);
       } else {
         console.log(`启动：wemind start ${key}`);
       }

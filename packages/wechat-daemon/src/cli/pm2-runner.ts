@@ -9,6 +9,7 @@ import { accountDir } from "@wemind/wechat-ilink-core"; // 与 daemon 自身用�
 
 import { BRAIN_CONFIG_EXIT_CODE } from "../agents/brain-agents.js";
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
+import { launcherEnv, stableExecPath } from "../shared/launcher-env.js";
 
 /*
  * 统一用「单条命令字符串 + shell」调用 pm2，而不是 spawnSync(cmd, args[], { shell: true })。
@@ -36,7 +37,7 @@ export function pm2Available(): boolean {
   }
 }
 
-/** 账号的 daemon 日志路径，与 run-daemon.ps1 / ecosystem 方式一致：`~/.wemind/<key>/daemon.log`。 */
+/** 账号的 daemon 日志路径，与 run-daemon.ps1 -Mode shell / ecosystem 方式一致：`~/.wemind/<key>/daemon.log`。 */
 function daemonLogPath(key: string): string {
   return path.join(accountDir(key), "daemon.log");
 }
@@ -63,7 +64,7 @@ export function buildAppDeclaration(
     interpreter: "node",
     cwd: os.homedir(), // 不继承 `pm2 start` 时的 shell 目录（换了目录再 start 行为才一致）
     autorestart: true,
-    restart_delay: 5000, // 与 builtin 后台守护进程 / run-daemon.ps1 的 5s 重拉一致
+    restart_delay: 5000, // 与 builtin 后台守护进程 / run-daemon.ps1 -Mode shell 的 5s 重拉一致
     max_restarts: 50, // 防崩溃风暴
     stop_exit_codes: [BRAIN_CONFIG_EXIT_CODE, DAEMON_ALREADY_RUNNING_EXIT_CODE], // 78 = 大脑配置错误；75 = 同账号已有实例，重拉无益
     out_file: logPath,
@@ -103,8 +104,13 @@ export function pm2Start(key: string, cliPath: string): { ok: boolean; msg: stri
   const name = `wemind-${key}`;
   // 已存在同名进程则先删，确保按最新声明重启
   pm2Run(`delete ${name}`, { quiet: true });
-  const decl = writeAppDeclaration(key, cliPath, log);
-  const r = pm2Run(`start "${decl}"`, { env: { ...process.env, WECHAT_ACCOUNT: key } });
+  // pm2 会长期保存这个脚本路径；fnm 的临时 shell 联接不能写进声明。
+  const decl = writeAppDeclaration(key, stableExecPath(cliPath), log);
+
+  // 应用 launcherEnv()：丢弃 WECHAT_DATA_DIR 污染，强制按 key 寻址（P0 Bug Fix）
+  const cleanEnv = launcherEnv(key);
+
+  const r = pm2Run(`start "${decl}"`, { env: cleanEnv });
   if (r.status !== 0) {
     return { ok: false, msg: `pm2 启动失败（exit=${r.status}），声明文件：${decl}` };
   }
@@ -114,7 +120,7 @@ export function pm2Start(key: string, cliPath: string): { ok: boolean; msg: stri
     msg:
       `已用 pm2 启动 ${name}（日志：${log}）。\n` +
       "  崩溃 5s 重拉、退出码 78（大脑配置错误）与 75（同账号已有实例）不再重启，与自带后台守护进程一致。\n" +
-      "  开机自启（首次）：执行 `pm2 startup`——Linux/macOS 按提示操作；Windows 用计划任务跑 `pm2 resurrect`。",
+      "  开机自启：运行 `wemind autostart install`（检测到 PM2 时用它托管；Linux/macOS 也可按 `pm2 startup` 提示操作）。",
   };
 }
 

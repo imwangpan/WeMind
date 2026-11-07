@@ -1,6 +1,6 @@
 # WeMind 多账号自启脚本：读取 <WEMIND_HOME>/accounts.json，为每个已登记账号起一个 daemon wrapper。
 # 根目录与 core 一致：WEMIND_HOME > ~/.wemind。WECHAT_DATA_DIR 是「单账号覆盖」，不能用于多账号——这里会提示并从子进程环境中移除，避免所有账号共用同一目录。
-# 各账号 mutex 独立 → 重复运行安全（已在跑的会被 run-daemon.ps1 的单实例守卫挡掉）。
+# 各账号单实例守卫独立（默认 cli 模式：builtin watchdog 的 wrapper.pid；-Mode shell：命名 Mutex）→ 重复运行安全。
 $ErrorActionPreference = "Continue"
 $root = if ($env:WEMIND_HOME) { $env:WEMIND_HOME } else { Join-Path $env:USERPROFILE ".wemind" }
 $reg = Join-Path $root "accounts.json"

@@ -41,7 +41,7 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 | **想直接上手配置** | [安装（两种形态）](#安装两种形态二选一) · [MCP 客户端配置](#快速开始) · [挂到 Claude Desktop](#claude-desktop) · [挂到 Cursor](#cursor--其他-mcp-客户端) |
 | **想换 AI 大脑** | [切换大脑 Agent](#切换大脑-agent通用化) · [接入其它 ACP Agent](docs/接入方案/接入其它-ACP-Agent.md) · [OpenCode](docs/接入方案/接入-OpenCode.md) · [DeepSeek](docs/接入方案/接入-DeepSeek.md) · [Qoder](docs/接入方案/接入-Qoder.md) |
 | **想用远程任务** | [使用指南-远程任务](docs/使用指南/使用指南-远程任务（worker）.md) · [本地双入口](docs/机制与协议说明/本地双入口-命令派发与查看回复.md) |
-| **运维 / 部署** | [部署与运维](docs/repowiki/10-部署与运维.md) · [跨平台常驻（pm2）](docs/部署与运维/跨平台常驻-pm2.md) · [数据目录与环境变量速查](docs/使用指南/速查-数据目录与环境变量.md) |
+| **运维 / 部署** | [部署与运维](docs/repowiki/10-部署与运维.md) · [开机自启](docs/部署与运维/开机自启.md) · [跨平台常驻（pm2）](docs/部署与运维/跨平台常驻-pm2.md) · [数据目录与环境变量速查](docs/使用指南/速查-数据目录与环境变量.md) |
 | **想改这个仓库 / 贡献代码** | [开发指南](docs/repowiki/11-开发指南.md) · [系统架构](docs/repowiki/02-系统架构.md) · [发版手册](docs/发布与变更记录/如何发布新版本.md) |
 | **维护者 / 发布新版本** | [如何发布新版本](docs/发布与变更记录/如何发布新版本.md) —— 两个包的版本号、CI 流程、验收与常见坑 |
 | **AI 编码助手**（帮我改这个仓库的 agent） | 先读 [AGENTS.md](AGENTS.md) → [docs/ai/README.md](docs/ai/README.md) → [术语表](docs/ai/术语表.md)（写作口径）与 [任务配方](docs/ai/recipes/) |
@@ -238,7 +238,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain-runtime.json`                          | daemon 实际生效的大脑（agent/source/bin/args；启动/热切换写入，stop 清掉）——`wemind list` 在运行时据此显示真实 agent |
 | `pm2.app.json`                                | **仅 `--runner pm2`**：pm2 的 app 声明（5s 重拉 / 最多 50 次 / 退出码 78（大脑配置错误）与 75（同账号已有实例）停手 / 日志合并到 `daemon.log`）    |
 
-**多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<key>` 切换（→ `~/.wemind/<key>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。**`<key>` 不能随手起名**：它由 `wemind login` 从 botId 派生并登记进 `~/.wemind/accounts.json`（`wemind list` 可查）；写一个没登记过的名字，daemon 会去一个不存在的目录找凭证。日常用 `wemind start <key|label>` 选账号即可，不必手设这个变量。
+**多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<key>` 切换（→ `~/.wemind/<key>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录（**仅 `wemind daemon` 直跑生效**；`wemind start` 按 key 寻址、会忽略它）。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。**`<key>` 不能随手起名**：它由 `wemind login` 从 botId 派生并登记进 `~/.wemind/accounts.json`（`wemind list` 可查）；写一个没登记过的名字，daemon 会去一个不存在的目录找凭证。日常用 `wemind start <key|label>` 选账号即可，不必手设这个变量。
 
 > **重置**：删 `account.json`+`state.json` = 退出登录重新扫码；清空对话记忆要删 `brain-sessions.json` + 该 agent 配置目录下的会话库（kiro/pi 是 `brain-home/sessions/`，opencode/qoder/gemini/cline 等按各自的 `configSubdir`，DSH 是 `agent-sessions/deepseek/{brain,worker}/`）。
 
@@ -283,6 +283,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 | `adopt` |
 | `allow` |
 | `allowlist` |
+| `autostart` |
 | `brain` |
 | `delete` |
 | `finalize` |
@@ -356,7 +357,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WEMIND_RUNNER`                                         | `wemind start` 的常驻外壳：`builtin`（默认，自带后台守护进程）/ `pm2`；与 `--runner` 等价                                |
 | `WECHAT_OWNER_ID`                                       | 登录者覆盖（默认 = 扫码登录该 bot 的微信号 user id；常规用配对授权 allowFrom，见上）                                                |
 | `WECHAT_ACCOUNT`                                        | 账号 key，决定状态子目录 `~/.wemind/<key>/`（默认 `default`）。**必须是 `wemind login` 登记过的 key**（见上文「多账号」），日常用 `wemind start <key\|label>` 即可 |
-| `WECHAT_DATA_DIR`                                       | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则                                                                           |
+| `WECHAT_DATA_DIR`                                       | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则。**只对 `wemind daemon` 直跑有效**：`wemind start` / `login --start` / pm2 / 自启一律忽略它（并按账号 key 寻址），检测到时会向 stderr 打迁移指引 |
 | `WEMIND_HOME`                                           | 数据根目录（默认 `~/.wemind`）                                                                                                      |
 | `WECHAT_BRAIN_HOME`                                     | brain 沙箱目录（默认 `<数据目录>/brain-home`）                                                                                      |
 | `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS`          | 大脑单回合空闲/硬超时（默认 120000 / 900000；重任务实测需 ~6.5min）                                                                 |
@@ -384,7 +385,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WEMIND_HANDOFF_TTL_MS`                                 | 交接摘要的有效期（默认 86400000，即 24h；过期不带上）                                                                               |
 | `WEMIND_SESSION_LOG_MAX` / `WEMIND_SESSION_PAGE_SIZE`   | 会话登记表每个「登录者 · 大脑」保留的条数上限（默认 50）/ 会话列表每页条数（默认 10）                                              |
 | `WEMIND_MAX_RESTARTS`                                   | 后台守护进程的**连续崩溃**重拉上限（默认 50；跑满 10 分钟视为稳定、计数清零），超限停止自动重启（pm2 由 `max_restarts` 管）        |
-| `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                 | `daemon.log` 单文件上限（默认 10MB）/ 轮转保留份数（默认 3；`0` = 不留历史）。内置 watchdog 运行中轮转，`run-daemon.ps1` 每次重拉前轮转；pm2 runner 交给 `pm2-logrotate` |
+| `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                 | `daemon.log` 单文件上限（默认 10MB）/ 轮转保留份数（默认 3；`0` = 不留历史）。内置 watchdog 运行中轮转；`run-daemon.ps1 -Mode shell` 每次重拉前轮转；pm2 runner 交给 `pm2-logrotate` |
 | 大脑 agent 选择 / 记忆继承                              | 见下方「切换大脑 Agent」与 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
 
 限制：
@@ -547,33 +548,37 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 - 当大脑最终回复正文**超过阈值**（默认 1500 字，`WECHAT_REPLY_FILE_THRESHOLD` 可覆盖）时，daemon 不再把长文拆成多条文本，而是作为**单个 `.md` 文件**发送：一条消息、规避连续发送上限、阅读完整。
 - 文件名由**内容生成合适标题**（取首个 Markdown 标题或首个非空行，清洗为合法文件名）；正文若无标题则在文件内前置一个 H1。发文件失败时**兜底回退为文本**。
 
-### Windows 登录自启
+### 开机自启（`wemind autostart`）
 
-**安装版（`npm i -g @wemind/cli`）**：计划任务/启动文件夹只需执行一次 `wemind start <账号>`。`wemind start` 会拉起自带后台守护进程（`wemind _watchdog`）后立即返回，崩溃重拉由它负责；重复执行安全（会先停旧实例）。例如启动文件夹放一个 `.bat`：
-
-```bat
-@echo off
-wemind start 我的号
-```
-
-**源码开发者**：优先用计划任务（PS7 全路径、登录触发、崩溃重拉由 `scripts/run-daemon.ps1` 的循环负责）：
+所有平台统一一条命令：
 
 ```powershell
-$pwsh = "C:\Program Files\PowerShell\7\pwsh.exe"
-$wrapper = "<仓库绝对路径>\scripts\run-daemon.ps1"
-$action = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`""
-Register-ScheduledTask -TaskName "wemind-daemon" -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew) -Force
+wemind autostart install                  # 所有已登记账号
+wemind autostart install --label 工作号    # 只装一个（也可 --key <key>）
+wemind autostart status                   # 当前方式与冲突（none / native-only / pm2-only / mixed）
+wemind autostart uninstall                # 卸载
 ```
 
-若环境禁止创建计划任务（提示「拒绝访问」），改用**启动文件夹**自启：在
-`shell:startup`（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`）放一个
-`.vbs`，用 `WScript.Shell.Run` 以隐藏窗口调用上面的 `pwsh ... -File scripts/run-daemon.ps1`。
+**用哪种方式**：
 
-> **注意 · 安装版没有 `scripts/`**：上面的 `run-daemon.ps1` 只存在于源码仓库；用 npm 安装的 CLI 请直接用 `wemind start`（自带后台守护进程），不要去找仓库脚本。
+- **装了 PM2** → 优先用 PM2 托管（实例名 `wemind-<key>`，崩溃 5s 重拉、退出码 75/78 不再重拉）。Linux/macOS 首次按提示执行一次 `pm2 startup` / `pm2 save`（只提示一次）；**Windows 上 `pm2 startup` 不原生支持**，`install` 会装一个登录任务 `wemind-autostart-pm2`，执行 `wemind start --all --runner pm2`。
+- **没装 PM2** → 系统原生触发器：
+  - **Windows**：登录触发的计划任务，以**当前用户**运行（不需要管理员），不限运行时长，触发 `wemind start --all`，崩溃重拉交给内置 watchdog；计划任务被受管策略拒绝时自动降级为 `HKCU\...\Run`（同样不需要管理员）。
+  - **Linux**：`~/.config/systemd/user/wemind@<key>.service`，单元跑 `wemind daemon`（systemd 自己负责重拉）；要让服务在登出后继续运行，按提示执行一次 `loginctl enable-linger <用户>`。
+  - **macOS**：`~/Library/LaunchAgents/dev.wemind.<key>.plist`，跑 `wemind daemon`（launchd 自己负责重拉）。
+- **两套配置同时存在**会拉起同一个账号两次、抢同一个 bot token；`install` 会检测到并让你选择只保留哪一种，或全部清空重装。
 
-> **注意 · node 由版本管理器管理时**：若 `node` 由 **fnm / nvm / Volta** 这类「只往交互 shell 注入 PATH」的工具管理，登录任务/服务（`-NoProfile`、无 shell 注入）的持久 PATH 里通常**没有 node**：`run-daemon.ps1` 会找不到它，且 daemon 拉起的大脑（如 `opencode acp`）也解析不到。`scripts/run-daemon.ps1` 已内置回退（fnm `%APPDATA%\fnm\aliases\default`、Volta、`C:\Program Files\nodejs`）并把命中目录**前置进 PATH**；若安装位置不在其中，请改脚本候选或直接用绝对路径的 node 启动。另：PS7 若只以 WindowsApps 别名存在（无 `C:\Program Files\PowerShell\7\pwsh.exe`），优先走上面的 VBS 退路。
+手动一次拉起多个账号：`wemind start --all`，或 `wemind start <key1> <key2>`。
 
-> 常驻底层原理（三层进程树、后台守护进程循环、单实例 Mutex、开机自启、多账号隔离、pid 链与故障恢复）详见 [docs/部署与运维/daemon-常驻原理.md](docs/部署与运维/daemon-常驻原理.md)。
+> **触发器只执行 `start` / `daemon`，不会再次执行 `autostart install`**：Windows 的 watchdog 负责重拉，Linux/macOS 的 supervisor 负责重拉，层次不重叠。
+
+> **源码开发者**：同样可直接用 `wemind autostart install`——它记录的是当前正在执行的 `node` + `cli.js` 绝对路径（源码版即仓库的 `dist/cli.js`）。仓库里的 `scripts/run-daemon.ps1` **默认是薄壳**（转 `wemind start`，重拉交给内置 watchdog）；`-Mode shell` 保留旧的 PowerShell 监督循环。两者对同一账号**只用一套**。
+
+> **node 由 fnm / nvm / Volta 管理时**：自启用 `node` 的绝对路径启动 daemon，本身不受影响；但 daemon 拉起的 ACP agent（尤其 npm 全局安装的 `.cmd`）仍靠登录会话的 PATH。若这些版本管理器只往交互 shell 注入 PATH，请把全局 bin 目录加进**系统/用户持久 PATH**，或用 `wemind brain set <agent> --bin "<绝对路径>"` 指定。
+
+> **环境变量**：Windows 计划任务继承登录用户的环境（`setx` 设置的值可用）；Linux systemd / macOS launchd **不会读取 shell 配置**，API key 等请写进服务单元（systemd `Environment=` / `EnvironmentFile=`，launchd `EnvironmentVariables`）。只在当前终端临时 `export` / `$env:` 的值不会带过去。
+
+> 常驻底层原理（三层进程树、后台守护进程循环、单实例守卫、开机自启、多账号隔离、pid 链与故障恢复）详见 [docs/部署与运维/daemon-常驻原理.md](docs/部署与运维/daemon-常驻原理.md)。
 >
 > **跨平台（Windows/Linux/macOS）常驻**：用 pm2 + 根目录 `ecosystem.config.cjs` 即可，详见 [docs/部署与运维/跨平台常驻-pm2.md](docs/部署与运维/跨平台常驻-pm2.md)。上面的 PowerShell 方案为 Windows 专用，二者对同一账号**只用一套**。
 
@@ -629,7 +634,7 @@ wemind login --label 工作号 --start
 - **环境变量是进程级的，不是账号级的**：`WEMIND_BRAIN`、API key、`WEMIND_MAX_WORKERS` 等由启动 daemon 的 shell 提供，同一 shell 启动的 N 个账号会一起继承——`WEMIND_BRAIN` 会同时压过每个账号的 `brain.json`（重启后都回到它指的大脑），`WEMIND_MAX_WORKERS` 是**每个 daemon 各自**的上限（N 个账号合计最多 N × 值）。用 `scripts/run-all-daemons.ps1` 拉起多账号时可设 `WEMIND_MAX_WORKERS_TOTAL`，脚本会按账号数均分后注入每个子进程（只覆盖它拉起的 daemon，已在运行的需重启）；单独 `wemind start` 的账号仍各按自己的值。要按账号取不同值，就分开环境启动；持久的大脑选择用各账号的 `wemind brain set`。
 - **少数 agent 仍会读真实 home**：微信消息、会话表、任务表与沙箱本身都是按账号隔离的，但有个别 agent 不支持把配置目录指到沙箱——`codex` 的适配器没有沙箱配置目录（认证/配置取真实 `~/.codex`）；`pi` 经 `pi-acp` 读真实 `~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills`；`qoder` 的 `memory/` 是指向真实 `~/.qoder/memory` 的 junction。**同一台机器上多个账号由不同的人使用**时，要意识到这些数据是共享的；同一个人自用多账号不受影响。详见 [repowiki 06](docs/repowiki/06-ACP-大脑与沙箱.md#少数-agent-的真实-home-仍跨账号共享)。
 
-**自启全部账号**：`scripts/run-all-daemons.ps1` 读注册表为每个账号起一个 daemon（各账号单实例守卫，重复运行安全）。**开机自启要你自己配**：仓库不带现成的 `.vbs`——按上节「Windows 登录自启」在 `shell:startup` 放一个 `.vbs`，让它调用 `scripts/run-all-daemons.ps1`，开机才会拉起所有已登记账号。（`scripts/` 只在源码检出里，npm 安装的包没有它。）
+**自启全部账号**：`wemind autostart install` 默认就是所有已登记账号（见上文「开机自启」）。装「全部」时 Windows 原生任务用 `start --all`，之后新登录的账号下次登录也会被拉起；当初只装了部分账号的，重新跑一次 `install`。源码仓库里的 `scripts/run-all-daemons.ps1` 也能一次性手动拉起全部账号（各账号单实例守卫，重复运行安全）。
 
 ## 常见问题
 
