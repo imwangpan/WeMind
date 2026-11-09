@@ -8,6 +8,10 @@
 
 <!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
 
+### Added
+
+- **GitHub Copilot CLI 原生 ACP agent**：新增显式选择的 `copilot` 预设，Windows 使用 `copilot.cmd`；在隔离的 `COPILOT_HOME` 中同步登录配置、skills 与指令，通过 ACP 激活 MCP 并排除 `wechat`；Copilot `config.json` 也纳入敏感附件拦截。Copilot CLI 1.0.107 的本机 ACP 探针已验证会话、工具和 MCP 调用；真实微信 brain/worker E2E 尚待验证。
+
 ## [1.6.0] 多媒体收发与账号运维增强（2026-11-09）
 
 ### Added

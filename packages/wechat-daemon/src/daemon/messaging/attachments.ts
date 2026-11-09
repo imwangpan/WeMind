@@ -75,7 +75,8 @@ function isUnderRoot(file: string, root: string): boolean {
 
 /**
  * agent 配置文件可能含网关 token / 默认 provider：除了 brain-home/worker-home（都在数据目录下），
- * 各 preset 的 `realHome` 原件同样不能外发（如 `~/.claude/settings.json`、`~/.pi/agent/models*.json`）。
+ * 各 preset 的 `realHome` 原件同样不能外发（如 `~/.copilot/config.json`、`~/.claude/settings.json`、
+ * `~/.pi/agent/models*.json`）。
  */
 function isUnderAgentConfigRoot(file: string): boolean {
   const roots: string[] = [DATA_DIR];
@@ -111,7 +112,10 @@ export function isSensitiveFilePath(file: string): boolean {
   if (/(^|[._-])(secrets?|credentials?|creds?|tokens?|passwords?)([._-]|$)/.test(base)) return true;
   // 沙箱/真实 home 里的 agent 配置可能含默认 provider/网关地址与 token；
   // pi 的 settings.json / models*.json、claude 的 settings.json 尤其如此。
-  if ((base === "settings.json" || /^models.*\.json$/.test(base)) && isUnderAgentConfigRoot(file))
+  if (
+    (base === "config.json" || base === "settings.json" || /^models.*\.json$/.test(base)) &&
+    isUnderAgentConfigRoot(file)
+  )
     return true;
   // 数据目录根下的控制桥/任务/日志文件同样属于内部状态。
   try {
