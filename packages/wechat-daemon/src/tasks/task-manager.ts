@@ -434,7 +434,8 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
     try {
       const onProgress = PROGRESS
         ? (ev: WorkerProgressEvent) => {
-            if (ev.type === "tool") push(task.userId, `🔧 ${labelOf(task)} 正在调用工具…`);
+            if (ev.type === "tool" && ev.phase !== "end")
+              push(task.userId, `🔧 ${labelOf(task)} 正在调用工具…`);
           }
         : undefined;
       wasResume = task.strictResume === true;

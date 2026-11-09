@@ -45,11 +45,12 @@
     "access": "public"
   },
   "dependencies": {
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "silk-wasm": "^3.7.1"
   },
   "devDependencies": {
-    "@wemind/wechat-ilink-core": "*",
     "@types/qrcode": "^1.5.5",
+    "@wemind/wechat-ilink-core": "*",
     "tsdown": "^0.22.3"
   }
 }

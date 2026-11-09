@@ -200,4 +200,11 @@ describe("isFastLane（控制/任务指令不排在大脑回合后面）", () =>
     for (const t of ["你好", "帮我写个脚本", "问大脑 任务列表", "问大脑 #2 继续", "  "])
       expect(isFastLane(t, noTasks), t).toBe(false);
   });
+
+  it("带附件的消息一律走大脑（快车道不消费附件，避免静默丢弃）", () => {
+    expect(isFastLane("新会话", noTasks, 1)).toBe(false);
+    expect(isFastLane("任务：读一下", noTasks, 2)).toBe(false);
+    expect(isFastLane("继续", { awaiting: 1, active: true, interrupted: 0 }, 1)).toBe(false);
+    expect(isFastLane("帮助", noTasks, 0)).toBe(true);
+  });
 });

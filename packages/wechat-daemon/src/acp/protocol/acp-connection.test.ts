@@ -204,6 +204,56 @@ describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
     );
     expect(events.filter((e) => e.type === "tool").at(-1)?.detail).toBe("npm test --watch");
   });
+
+  it("工具进度：首帧 start、终态 end；重复终态不重复发", () => {
+    const { host, turn } = fakeHost();
+    const tools: Array<{ phase?: string; toolCallId?: string; status?: string }> = [];
+    beginAcpTurn(turn, "s1", (ev) => {
+      if (ev.type === "tool") tools.push(ev);
+    });
+    const frame = (update: Record<string, unknown>) =>
+      handleAcpFrame({ method: "session/update", params: { sessionId: "s1", update } }, host);
+
+    frame({ sessionUpdate: "tool_call", toolCallId: "t1", title: "bash", kind: "execute" });
+    expect(tools).toEqual([expect.objectContaining({ phase: "start", toolCallId: "t1" })]);
+
+    frame({ sessionUpdate: "tool_call_update", toolCallId: "t1", status: "in_progress" });
+    expect(tools).toHaveLength(1);
+
+    frame({ sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" });
+    frame({ sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" });
+    expect(tools).toEqual([
+      expect.objectContaining({ phase: "start", toolCallId: "t1" }),
+      expect.objectContaining({ phase: "end", toolCallId: "t1", status: "completed" }),
+    ]);
+    expect(turn.endedTools.has("t1")).toBe(true);
+  });
+
+  it("首帧就是终态时补一个 end；没有 toolCallId 时用 title 兜底", () => {
+    const { host, turn } = fakeHost();
+    const tools: Array<{ phase?: string; toolCallId?: string; status?: string }> = [];
+    beginAcpTurn(turn, "s1", (ev) => {
+      if (ev.type === "tool") tools.push(ev);
+    });
+    handleAcpFrame(
+      {
+        method: "session/update",
+        params: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "tool_call",
+            title: "read file",
+            kind: "read",
+            status: "failed",
+          },
+        },
+      },
+      host,
+    );
+    expect(tools.map((t) => t.phase)).toEqual(["start", "end"]);
+    expect(tools.every((t) => t.toolCallId === "read file")).toBe(true);
+    expect(tools[1]?.status).toBe("failed");
+  });
 });
 
 describe("requestAcp（写帧 / 超时）", () => {

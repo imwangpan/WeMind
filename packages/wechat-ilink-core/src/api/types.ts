@@ -38,6 +38,10 @@ export const MessageItemType = {
   VOICE: 3,
   FILE: 4,
   VIDEO: 5,
+  /** 工具调用开始（官方 2.4.10 用于进度展示）。 */
+  TOOL_CALL_START: 11,
+  /** 工具调用结果（官方 2.4.10 用于进度展示）。 */
+  TOOL_CALL_RESULT: 12,
 } as const;
 
 /**
@@ -145,11 +149,37 @@ export interface VideoItem {
   thumb_width?: number;
 }
 
+/** 引用片段元数据（proto: PartialText）：用户只引用了原消息的一段文字。 */
+export interface PartialText {
+  start: string;
+  end: string;
+  startindex: number;
+  endindex: number;
+  quotemd5: string;
+}
+
 /** 被引用/回复的原消息（proto: RefMessage）。挂在 MessageItem.ref_msg 上，不在 WeixinMessage 上。 */
 export interface RefMessage {
   message_item?: MessageItem;
   /** 摘要标题。 */
   title?: string;
+  /** 服务端消息 ID；新客户端可能只下发 ID、不下发被引用的正文。 */
+  svr_id?: string;
+  /** 只引用了原消息的一段文字时的元数据。 */
+  partial_text?: PartialText;
+}
+
+/** 工具调用开始 item（proto: ToolCallStartItem）。 */
+export interface ToolCallStartItem {
+  tool_name?: string;
+  tool_call_id?: string;
+}
+
+/** 工具调用结果 item（proto: ToolCallResultItem）。status 常见值：completed / failed / blocked。 */
+export interface ToolCallResultItem {
+  tool_name?: string;
+  tool_call_id?: string;
+  status?: string;
 }
 
 export interface MessageItem {
@@ -168,13 +198,15 @@ export interface MessageItem {
   voice_item?: VoiceItem;
   file_item?: FileItem;
   video_item?: VideoItem;
+  tool_call_start_item?: ToolCallStartItem;
+  tool_call_result_item?: ToolCallResultItem;
 }
 
 /** 统一消息体（proto: WeixinMessage）。收发都用它。 */
 export interface WeixinMessage {
   seq?: number;
-  /** 消息 ID（去重/游标用：只处理 message_id > lastMessageId 的入站消息）。 */
-  message_id?: number;
+  /** 消息 ID（uint64；wire 上是数字，客户端在 JSON.parse 前转成字符串以免精度丢失）。 */
+  message_id?: string;
   from_user_id?: string;
   to_user_id?: string;
   client_id?: string;
@@ -188,6 +220,8 @@ export interface WeixinMessage {
   /** 见 MessageState（发送时：进度用 GENERATING、最终用 FINISH）。 */
   message_state?: number;
   item_list?: MessageItem[];
+  /** 本轮运行 ID（官方 2.4.10 新增；工具进度/引用缓存可用）。 */
+  run_id?: string;
   /**
    * 会话上下文令牌。发消息（回复）必须带它，否则发送被拒。
    * [实测] 关键规律（曾长期被误解，已纠正）：
@@ -229,6 +263,8 @@ export interface SendMessageReq {
 
 /** SendMessage 响应（proto 为空体；实际响应体可能带 ret/errcode 表示失败，见 sendMessage 实现）。 */
 export interface SendMessageResp {
+  /** 服务端分配的消息 ID（uint64，按字符串无损解析；出站引用缓存要用）。 */
+  message_id?: string;
   ret?: number;
   errcode?: number;
   errmsg?: string;
@@ -343,8 +379,10 @@ export interface ServerState {
   updatesBuf: string;
   /** 各会话最新 context_token，key = `${botId}:${userId}`（[实测] 发送时取最新缓存值，规避 ret=-2）。 */
   contextTokens: Record<string, string>;
-  /** 已处理的最大 message_id，用于入站去重。 */
-  lastMessageId: number;
+  /** 已处理的最大 message_id（uint64 字符串），用于入站去重。 */
+  lastMessageId: string;
+  /** 最近处理过的 message_id（防止迁移期/乱序造成重复处理；环形保留）。 */
+  seenMessageIds?: string[];
 }
 
 /** 本地暂存的扫码登录态（qr_login.json）。 */

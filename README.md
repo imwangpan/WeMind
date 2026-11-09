@@ -366,6 +366,10 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_CONSEC_SEND_LIMIT`                              | bot 在用户回复前可连续发送的消息数上限（默认 10）。达「上限-2」后发提示并等待「继续」，留最后一条给答案                             |
 | `WECHAT_MIN_SEND_GAP_MS`                                | 两条发送之间的最小间隔，规避发送限流（默认 1500）                                                                                   |
 | `WECHAT_REPLY_FILE_THRESHOLD`                           | 回复正文超过此字符数则转 .md 文件发送（默认 1500）                                                                                  |
+| `WECHAT_INBOUND_MEDIA_MAX_MB`                           | 入站文件/视频/语音单文件下载上限（默认 100；图片另有 20MB 上限）                                                                    |
+| `WECHAT_OUTBOUND_FILE_MAX_MB`                           | 出站文件/视频单文件上限（默认 25）                                                                                                  |
+| `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`         | `brain-home/media/inbound` 保留天数 / 总量上限（默认 7 天 / 256MB；启动时清理）                                                      |
+| `WECHAT_TOOL_PROGRESS_ITEMS`                            | 是否发结构化工具进度 item（默认开；`0` = 只发文本「步骤 N」）                                                                        |
 | `WEMIND_ILINK_BASE`                                     | iLink API / 登录基础 URL（默认 `https://ilinkai.weixin.qq.com`）                                                                    |
 | `WECHAT_CDN_BASE_URL`                                   | 媒体 CDN 基础 URL（默认 `https://novac2c.cdn.weixin.qq.com/c2c`）                                                                   |
 | `ILINK_CLIENT_VERSION`                                  | 对外声明的 iLink 客户端版本（默认 `2.4.3`，随官方升级可改，免动代码）                                                               |
@@ -536,12 +540,14 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 >
 > **pi 已内置（探针级实测 + 真机 E2E，2026-11-01）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，**Node ≥22.19**——它的 engines 要求，比适配器的 ≥20 更严）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 隔离沙箱（`settings.json` / `auth.json` / `models*.json` 原样同步，`skills/` junction、`AGENTS.md` 复制）；MCP 走 pi 自己的 `<沙箱根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动横幅用 pi 自己的 `quietStartup` 在沙箱里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入方案/接入-pi.md](docs/接入方案/接入-pi.md)**。
 
-### 收发图片
+### 收发消息与媒体
 
+- **收文本 / 图片 / 语音 / 文件 / 视频**：daemon 支持 iLink 的这五类 item；引用某条消息时，被引用的内容作为 `[引用消息] …` 前缀一起交给大脑。表情包、位置、小程序、合并转发等类型协议里没有，会明确告知不支持而不是静默丢。
 - **收图**（用户发图 → 大脑看图）：daemon 下载并 AES-128-ECB 解密入站图片，作为 ACP image 块喂给大脑——**前提是该 agent 真正接受图片**（kiro / opencode / qoder / gemini / claude-code / codex / pi 支持；DSH 官方 0.2.1-rc.2 与 **Cline 3.0.74** 实测不可用，带图会被友好拒绝；Cline 虽广告 `image:true`，但 ACP prompt 只保留 text 块。claude-code 的 ACP `promptCapabilities.image: true`，但本机网关对实测用的 1×1 PNG 报 400，属上游限制）。
+- **收文件 / 视频 / 语音**：文件、视频和无微信转写的语音下载到 `<账号目录>/brain-home/media/inbound/`，prompt 里给大脑本地绝对路径（brain 的 cwd 就是 `brain-home`）。有微信转写的语音直接当文本，**不下载、也不算附件**（语音里的「结束任务」「继续」等指令照常生效）；无转写时用 `silk-wasm` 转 24kHz WAV，失败保留原始 SILK 并如实说明。媒体默认保留 7 天、总量 256MB，可调（见下方环境变量）。
 - **发图**（大脑发图 → 用户）：大脑在回复里用 **Markdown 图片语法 `![](图片的 http 链接或本地文件绝对路径)`**，或直接给出**裸图片 URL**，daemon 会自动把它下载/读取后作为图片消息发出，并把剩余文字另发。大脑本身不会文生图，但能发：联网搜到的图、本地已有的图、自己用代码渲染保存的图表。底层走 `getUploadUrl` + AES-128-ECB 加密上传 CDN（`no_need_thumb`，免缩略图）。**URL 只接受公网 http(s)**：本机/内网/回环（`localhost`、私有 IP、链路本地、IPv6 映射）以及重定向到这些地址的请求一律拒绝（重定向逐跳校验、最多 3 跳）；本地文件绝对路径仍然可用。
-- **发文件 / 视频**：core `sendFile` 按扩展名自动判类型（图/视频/文件），组装 `image_item / video_item / file_item`，上传链路与发图同构。
-- **收语音**（语音输入）：用户发语音 → 直接取 `voice_item.text`（微信侧已做语音转文字）当文本喂大脑，**零依赖**（无需 SILK 解码/外接 ASR）。**发语音**（bot 语音回复）暂不做（需 TTS + SILK，且语音回复体验通常不如文本）。
+- **发文件 / 视频**：大脑回复里写显式 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`，daemon 读取本地文件并作为文件/视频消息发出（不是扫描普通链接；路径含 `)` 时用 `[附件](<路径>)`）。**允许任意本地绝对路径**，但读取前会 `realpath` 并拒绝凭证/状态类文件（`account.json`、`state.json`、`.env`、密钥、控制桥/任务目录，以及各 agent 的登录态：`.credentials.json/.yaml`、`.auth/`、`oauth_creds.json`、`providers.json`，连同沙箱/真实 agent home 下的 `settings.json`/`models*.json`），**拒绝 UNC/网络路径**（`\\server\share`、`file://host/...`，含软链接目标）与 **Windows NTFS 数据流**（`文件::$DATA`）；单文件默认上限 25MB。硬链接无法从路径区分，属已接受风险。失败或额度不足时，最终文字里会保留原路径。
+- **发语音**（bot 语音回复）暂不做（需 TTS + SILK，且语音回复体验通常不如文本）；大脑要表达音频时按文件发。
 
 ### 长回复自动转 .md 文件
 

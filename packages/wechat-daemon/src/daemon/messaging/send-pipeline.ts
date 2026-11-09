@@ -1,4 +1,4 @@
-import { MessageState } from "@wemind/wechat-ilink-core";
+import { MessageState, type MessageItem, type MediaKind } from "@wemind/wechat-ilink-core";
 
 import { PENDING_PUSH_MAX_TRIES, PendingPushes } from "./pending-push.js";
 
@@ -16,6 +16,21 @@ export type SendPipelineDeps = {
   ) => Promise<void>;
   /** 发一张图；失败直接抛错（图片无法挂起补发）。 */
   sendImage: (to: string, ctx: string | undefined, image: Buffer) => Promise<void>;
+  /** 发一个文件/视频；失败直接抛错（媒体无法挂起补发）。 */
+  sendFile: (
+    to: string,
+    ctx: string | undefined,
+    data: Buffer,
+    fileName: string,
+    kind: MediaKind,
+  ) => Promise<void>;
+  /** 发一个结构化 item（工具进度 11/12 等）；失败时调用方可用文本回退。 */
+  sendItem: (
+    to: string,
+    ctx: string | undefined,
+    item: MessageItem,
+    state?: number,
+  ) => Promise<void>;
   /** 把长回复作为 .md 文件发出；失败直接抛错（本类会回退为文本）。 */
   sendFileMd: (to: string, ctx: string | undefined, text: string) => Promise<void>;
   /** 分类记录发送错误（会话过期要暂停账号等）。 */
@@ -126,17 +141,18 @@ export class SendPipeline {
     return this.replyChain;
   }
 
-  /**
-   * 发一张图片：与文本共用串行链和最小间隔，避免图片与进度/任务推送并发乱序。
-   * 返回是否发出——图片无法像文本那样挂起补发（没有可重放的文本），失败由调用方在文字里附原链接。
-   */
-  async sendImageOrdered(to: string, ctx: string | undefined, image: Buffer): Promise<boolean> {
+  /** 媒体发送的公共串行编排：与文本共用串行链和最小间隔，失败返回 false。 */
+  private async sendMediaOrdered(
+    to: string,
+    sender: () => Promise<void>,
+    label: string,
+  ): Promise<boolean> {
     let ok = true;
     this.trackInflight(to, 1);
     const task = this.replyChain
       .then(async () => {
         await this.waitGap();
-        await this.deps.sendImage(to, ctx, image).catch((e) => {
+        await sender().catch((e) => {
           ok = false;
           this.deps.onSendError(e);
         });
@@ -144,12 +160,62 @@ export class SendPipeline {
       })
       .catch((e) => {
         ok = false;
-        this.deps.log("send image chain error:", String(e));
+        this.deps.log(`${label} chain error:`, String(e));
       })
       .finally(() => this.trackInflight(to, -1));
     this.replyChain = task;
     await task;
     return ok;
+  }
+
+  /**
+   * 发一张图片：与文本共用串行链和最小间隔，避免图片与进度/任务推送并发乱序。
+   * 返回是否发出——图片无法像文本那样挂起补发（没有可重放的文本），失败由调用方在文字里附原链接。
+   */
+  sendImageOrdered(to: string, ctx: string | undefined, image: Buffer): Promise<boolean> {
+    return this.sendMediaOrdered(to, () => this.deps.sendImage(to, ctx, image), "send image");
+  }
+
+  /** 发一个文件/视频；语义与 sendImageOrdered 相同。 */
+  sendFileOrdered(
+    to: string,
+    ctx: string | undefined,
+    data: Buffer,
+    fileName: string,
+    kind: MediaKind,
+  ): Promise<boolean> {
+    return this.sendMediaOrdered(
+      to,
+      () => this.deps.sendFile(to, ctx, data, fileName, kind),
+      "send file",
+    );
+  }
+
+  /**
+   * 发一个结构化进度 item；失败时回退成一条文本进度（同一串行位，不额外占额度）。
+   * 返回是否至少有一种形式发出。
+   */
+  async sendItemOrdered(
+    to: string,
+    ctx: string | undefined,
+    item: MessageItem,
+    fallbackText?: string,
+  ): Promise<boolean> {
+    return this.sendMediaOrdered(
+      to,
+      async () => {
+        try {
+          // 进度 item 与文本进度一样用 GENERATING：FINISH 会结束当前发送窗口，最终答案可能发不出去。
+          await this.deps.sendItem(to, ctx, item, MessageState.GENERATING);
+        } catch (e) {
+          // 回退成功就不算投递失败；真正失败由 sendMediaOrdered 统一交给 onSendError。
+          if (!fallbackText) throw e;
+          this.deps.log("send item failed, fallback to text:", String(e));
+          await this.deps.sendText(to, ctx, fallbackText, MessageState.GENERATING);
+        }
+      },
+      "send item",
+    );
   }
 
   /**

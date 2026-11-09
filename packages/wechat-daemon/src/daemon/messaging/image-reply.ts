@@ -31,10 +31,13 @@ export interface ImageFailure {
   reason: ImageFailureReason;
 }
 
-/** 图片也占一条连发额度；始终给最终文字留最后一条。 */
-export function canSendImage(sentCount: number, limit: number): boolean {
+/** 图片/文件/视频都占一条连发额度；始终给最终文字留最后一条。 */
+export function canSendMedia(sentCount: number, limit: number): boolean {
   return sentCount < limit - 1;
 }
+
+/** 兼容旧调用名（图片）。 */
+export const canSendImage = canSendMedia;
 
 export type ImageTurnPlan =
   | { kind: "ok" }

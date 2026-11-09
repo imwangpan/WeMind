@@ -11,6 +11,8 @@ type Harness = {
   sent: Array<{ to: string; text: string; state: number; ctx?: string; at: number }>;
   files: Array<{ to: string; text: string }>;
   images: Array<{ to: string; bytes: Buffer }>;
+  attachments: Array<{ to: string; fileName: string; kind: string; bytes: Buffer }>;
+  items: Array<{ to: string; type?: number; ctx?: string }>;
   errors: unknown[];
   logs: string[];
   advanced: () => number;
@@ -23,6 +25,8 @@ function harness(overrides: Partial<SendPipelineDeps> = {}): Harness {
   const sent: Harness["sent"] = [];
   const files: Harness["files"] = [];
   const images: Harness["images"] = [];
+  const attachments: Harness["attachments"] = [];
+  const items: Harness["items"] = [];
   const errors: unknown[] = [];
   const logs: string[] = [];
   let sendText: SendPipelineDeps["sendText"] = async (to, ctx, text, state) => {
@@ -36,6 +40,12 @@ function harness(overrides: Partial<SendPipelineDeps> = {}): Harness {
       sendText(to, ctx, text, state, fallbackToken),
     sendImage: async (to, _ctx, bytes) => {
       images.push({ to, bytes });
+    },
+    sendFile: async (to, _ctx, bytes, fileName, kind) => {
+      attachments.push({ to, fileName, kind, bytes });
+    },
+    sendItem: async (to, ctx, item) => {
+      items.push({ to, type: item.type, ctx });
     },
     sendFileMd: (to, ctx, text) => sendFileMd(to, ctx, text),
     onSendError: (e) => errors.push(e),
@@ -56,6 +66,8 @@ function harness(overrides: Partial<SendPipelineDeps> = {}): Harness {
     sent,
     files,
     images,
+    attachments,
+    items,
     errors,
     logs,
     advanced: () => now,
@@ -195,6 +207,71 @@ describe("SendPipeline：任务推送让位", () => {
     h.pipeline.flushDeferredTaskPushes("u2", "tok", true);
     expect(h.pipeline.pendingCount("u2")).toBe(1);
     expect(h.pipeline.pendingCount("u2") + h.pipeline.pendingCount("u1")).toBe(2);
+  });
+});
+
+describe("SendPipeline：文件/视频与结构化进度 item", () => {
+  it("文件/视频按文件名与 kind 发送，并与文本共用串行链", async () => {
+    const h = harness();
+    await h.pipeline.sendFileOrdered("u1", "ctx", Buffer.from("v"), "clip.mp4", "video");
+    await h.pipeline.sendOrdered("u1", "ctx", "后一条");
+    expect(h.attachments).toEqual([
+      { to: "u1", fileName: "clip.mp4", kind: "video", bytes: Buffer.from("v") },
+    ]);
+    expect(h.sent.map((s) => s.text)).toEqual(["后一条"]);
+  });
+
+  it("文件发送失败返回 false 并交给错误处理器", async () => {
+    const h = harness({
+      sendFile: async () => {
+        throw new Error("upload failed");
+      },
+    });
+    await expect(
+      h.pipeline.sendFileOrdered("u1", "ctx", Buffer.from("x"), "a.bin", "file"),
+    ).resolves.toBe(false);
+    expect(h.errors).toHaveLength(1);
+  });
+
+  it("进度 item 以 GENERATING 发送，返回 true", async () => {
+    const states: number[] = [];
+    const h = harness({
+      sendItem: async (to, _ctx, item, state) => {
+        h.items.push({ to, type: item.type, ctx: _ctx });
+        states.push(state ?? -1);
+      },
+    });
+    await expect(
+      h.pipeline.sendItemOrdered(
+        "u1",
+        "ctx",
+        { type: 11, tool_call_start_item: { tool_name: "read" } },
+        "读取文件",
+      ),
+    ).resolves.toBe(true);
+    expect(h.items).toEqual([{ to: "u1", type: 11, ctx: "ctx" }]);
+    expect(states).toEqual([MessageState.GENERATING]);
+    expect(h.sent).toHaveLength(0);
+  });
+
+  it("item 失败时回退为同状态的文本进度；没有回退文本则返回 false", async () => {
+    const h = harness({
+      sendItem: async () => {
+        throw new Error("item unsupported");
+      },
+    });
+    await expect(h.pipeline.sendItemOrdered("u1", "ctx", { type: 11 }, "读取文件")).resolves.toBe(
+      true,
+    );
+    expect(h.sent).toEqual([
+      { to: "u1", text: "读取文件", state: MessageState.GENERATING, ctx: "ctx", at: 1000 },
+    ]);
+    expect(h.errors).toHaveLength(0); // 回退成功不算投递失败
+    expect(h.logs.some((l) => l.includes("fallback to text"))).toBe(true);
+
+    await expect(h.pipeline.sendItemOrdered("u1", "ctx", { type: 12 })).resolves.toBe(false);
+    expect(h.sent).toHaveLength(1);
+    expect(h.errors).toHaveLength(1);
   });
 });
 

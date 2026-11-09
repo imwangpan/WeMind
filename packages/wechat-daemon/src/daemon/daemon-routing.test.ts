@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { MessageItemType, type WeixinMessage } from "@wemind/wechat-ilink-core";
 
 import {
+  extractInbound,
   extractText,
+  formatQuote,
+  isFastLane,
+  shouldResumeInBrainQueue,
   PROGRESS_ACK_DELAY_MS,
   PROGRESS_NOTICE_GAP_MS,
   PROGRESS_SECOND_NOTICE_MS,
@@ -41,6 +45,95 @@ describe("extractText（入站消息文本提取）", () => {
     expect(extractText(msg([{ type: MessageItemType.IMAGE }]))).toBe("");
     expect(extractText(msg([]))).toBe("");
     expect(extractText(msg(undefined))).toBe("");
+  });
+});
+
+describe("extractInbound（文本 + 附件 + 引用）", () => {
+  it("按 item 收集文本与各类附件；有转写的语音只算文本、不算附件", () => {
+    const parts = extractInbound(
+      msg([
+        { type: MessageItemType.TEXT, text_item: { text: "看看这些" } },
+        { type: MessageItemType.IMAGE, image_item: { aeskey: "a".repeat(32) } },
+        { type: MessageItemType.VOICE, voice_item: { text: "语音转写", playtime: 1200 } },
+        {
+          type: MessageItemType.FILE,
+          file_item: { file_name: "报告.pdf", media: { aes_key: "k" } },
+        },
+        { type: MessageItemType.VIDEO, video_item: { play_length: 3 } },
+      ]),
+    );
+    expect(parts.text).toBe("看看这些\n语音转写");
+    expect(parts.attachments.map((a) => a.kind)).toEqual(["image", "file", "video"]);
+    expect(parts.unsupportedTypes).toEqual([]);
+  });
+
+  it("无转写语音：text 为空但附件仍保留，交给 worker 下载/转码", () => {
+    const parts = extractInbound(
+      msg([{ type: MessageItemType.VOICE, voice_item: { media: { aes_key: "k" } } }]),
+    );
+    expect(parts.text).toBe("");
+    expect(parts.attachments).toEqual([
+      { kind: "voice", item: expect.objectContaining({ media: { aes_key: "k" } }) },
+    ]);
+  });
+
+  it("未知 item 类型进 unsupportedTypes；工具进度 item 11/12 只忽略、不报不支持", () => {
+    const parts = extractInbound(
+      msg([
+        { type: 99, text_item: { text: "x" } },
+        { type: MessageItemType.TOOL_CALL_START, tool_call_start_item: { tool_name: "x" } },
+      ]),
+    );
+    expect(parts.unsupportedTypes).toEqual([99]);
+  });
+
+  it("引用消息：内联 title + 正文；只有 svr_id 时给「未缓存」占位", () => {
+    const inline = extractInbound(
+      msg([
+        {
+          type: MessageItemType.TEXT,
+          text_item: { text: "同意" },
+          ref_msg: {
+            title: "原消息标题",
+            message_item: { type: MessageItemType.TEXT, text_item: { text: "原文内容" } },
+          },
+        },
+      ]),
+    );
+    expect(inline.quote).toMatchObject({ body: "原消息标题 | 原文内容" });
+    expect(formatQuote(inline.quote)).toBe("[引用消息] 原消息标题 | 原文内容");
+
+    const idOnly = extractInbound(
+      msg([
+        {
+          type: MessageItemType.TEXT,
+          text_item: { text: "同意" },
+          ref_msg: { svr_id: "123" },
+        },
+      ]),
+    );
+    expect(idOnly.quote).toEqual({ body: undefined, svrId: "123" });
+    expect(formatQuote(idOnly.quote)).toBe("[引用消息内容未缓存]");
+  });
+
+  it("带任何附件都不把「继续」类短句交给旧任务", () => {
+    const tasks = { awaiting: 1, active: true, interrupted: 0 };
+    expect(shouldResumeInBrainQueue("继续", 1, tasks)).toBe(false);
+    expect(shouldResumeInBrainQueue("继续", 0, tasks)).toBe(true);
+  });
+
+  it("有转写的语音不算附件：语音里的「结束任务」仍走快车道", () => {
+    const parts = extractInbound(
+      msg([{ type: MessageItemType.VOICE, voice_item: { text: "结束任务 2" } }]),
+    );
+    expect(parts.attachments).toEqual([]);
+    expect(
+      isFastLane(
+        parts.text,
+        { awaiting: 0, active: false, interrupted: 0 },
+        parts.attachments.length,
+      ),
+    ).toBe(true);
   });
 });
 
