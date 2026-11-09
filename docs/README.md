@@ -13,7 +13,7 @@
 | **第一次用 WeMind** | [新手教程](使用指南/新手教程.md) → [速查：数据目录与环境变量](使用指南/速查-数据目录与环境变量.md) | 从扫码登录到微信聊天，一步步来 |
 | **只想用 MCP 形态** | [packages/wechat-mcp/README.md](../packages/wechat-mcp/README.md) → [repowiki 04](repowiki/04-MCP-Server.md) | 挂到 Claude Desktop / Cursor / OpenCode |
 | **想用常驻 daemon** | [packages/wechat-daemon/README.md](../packages/wechat-daemon/README.md) → [使用指南-远程任务](使用指南/使用指南-远程任务（worker）.md) | `npm i -g @wemind/cli`，命令 `wemind` |
-| **想换 AI 大脑** | [接入其它 ACP Agent](接入方案/接入其它-ACP-Agent.md) → 各 agent 的接入文档 | 9 个内置预设 + 通用接入流程 |
+| **想换 AI 大脑** | [接入其它 ACP Agent](接入方案/接入其它-ACP-Agent.md) → 各 agent 的接入文档 | 10 个内置预设 + 通用接入流程 |
 | **要部署 / 长期运维** | [daemon 常驻原理](部署与运维/daemon-常驻原理.md) → [开机自启](部署与运维/开机自启.md) → [跨平台常驻（pm2）](部署与运维/跨平台常驻-pm2.md) → [repowiki 10](repowiki/10-部署与运维.md) | 后台守护、开机自启、多账号、日志轮转 |
 | **要改这个仓库** | [AGENTS.md](../AGENTS.md) → [repowiki 11 开发指南](repowiki/11-开发指南.md) → [系统架构](repowiki/02-系统架构.md) | 硬约束、构建、测试、代码地图 |
 | **要发版** | [如何发布新版本](发布与变更记录/如何发布新版本.md) | 两个包的版本号、CI、验收与常见坑 |
@@ -31,7 +31,7 @@
 
 ### 接入方案（面向想换大脑的用户 / 维护者）
 
-- [接入其它-ACP-Agent](接入方案/接入其它-ACP-Agent.md) —— **先读这篇**：判断某个 agent 能不能接、通用配置方式、9 个内置预设总表
+- [接入其它-ACP-Agent](接入方案/接入其它-ACP-Agent.md) —— **先读这篇**：判断某个 agent 能不能接、通用配置方式、10 个内置预设总表；另有 [Copilot CLI 专页](接入方案/接入-Copilot.md)
 - 各 agent 实测： [Kiro](接入方案/接入-Kiro.md) · [OpenCode](接入方案/接入-OpenCode.md) · [DeepSeek](接入方案/接入-DeepSeek.md) · [Qoder](接入方案/接入-Qoder.md) · [Cline](接入方案/接入-Cline.md) · [Gemini](接入方案/接入-Gemini.md) · [Claude Code](接入方案/接入-ClaudeCode.md) · [Codex](接入方案/接入-Codex.md) · [pi](接入方案/接入-pi.md)
 
 ### RepoWiki（面向开发者的完整技术 wiki）

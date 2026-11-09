@@ -14,6 +14,7 @@
 ### 已适配的 Agent CLI
 
 - 原生支持 ACP：`kiro-cli` / `opencode` / `gemini` / `DeepSeek Harness` / `qodercli` / `cline` 等；未显示配置时自动按以下顺序自动探测： `opencode → cline → qoder → gemini → deepseek → kiro`；
+- `copilot` 原生支持 ACP，但不参与探测（安装不代表已登录），需显式 `wemind brain set|switch copilot`。
 - 适配器类：`claude-code` / `codex` / `pi` 不参与探测，要显式 `wemind brain set|switch`。
 
 ### 其它
@@ -82,7 +83,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 
 - 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标（读到哪条消息了）、`allowFrom.json` 授权清单、`brain-home/` 大脑沙箱、`agent-sessions/`（agent 自己的会话库；目前 DSH 的 `deepseek/{brain,worker}` 在这里，不再写 `brain-home/sessions`）、`daemon.log` 日志。
 - **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：`npm i -g <适配器包>` 后 `wemind brain set <agent 名>`；各适配器的安装命令、认证、沙箱与 MCP 差异见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
-- ⚠️ **daemon 会让大脑免确认执行工具**：9 个内置预设默认都免审批，能给这个 bot 发消息的人即可让大脑在本机执行任意工具（shell / 写文件）。微信平台限制决定了只有扫码登录这个 bot 的**登录者**能发消息；另有一道**发件人授权（allowFrom）兜底**：登录者自动写入，**勿清空**。想收紧权限见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
+- ⚠️ **daemon 会让大脑免确认执行工具**：10 个内置预设默认都免审批，能给这个 bot 发消息的人即可让大脑在本机执行工具（shell / 写文件）；Copilot 预设仅使用 `--allow-all-tools`，不启用 `--allow-all`。微信平台限制决定了只有扫码登录这个 bot 的**登录者**能发消息；另有一道**发件人授权（allowFrom）兜底**：登录者自动写入，**勿清空**。想收紧权限见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - `account.json`（bot token）、`state.json`（`context_token`）、`qr_login.json` 在 POSIX 上统一 chmod 600；Windows 上都是明文，请用目录权限或磁盘加密。
 - 同一个 bot token **只能有一个程序收消息**（同一份登录凭证不能同时被两个程序使用）：`wemind` daemon 与 `@wemind/wechat-mcp` 二选一，否则互相抢消息。
 
@@ -94,6 +95,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `WECHAT_ACCOUNT` / `WECHAT_DATA_DIR`                                                  | 指定账号 / 指定完整数据目录（多账号隔离）。`WECHAT_DATA_DIR` **只对 `wemind daemon` 直跑生效**；`start` / `login --start` / pm2 runner / 自启忽略它 |
 | `WEMIND_RUNNER`                                                                       | `builtin`（默认）或 `pm2`                                                                                                |
 | `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_EXTRA_ARGS` | 一次性覆盖大脑选择与启动参数（`ARGS` 整段替换、`EXTRA_ARGS` 追加；持久化请用 `wemind brain set`）                        |
+| `COPILOT_HOME`                                                                       | 仅运行 Copilot CLI 时由 WeMind 给子进程设置，指向隔离沙箱；不要手动固定                                                   |
 | `WEMIND_ACP_AUTO_ALLOW=1`                                                             | 放行 ACP agent 的一次性权限请求（默认为拒绝）                                                                            |
 | `WEMIND_ACP_SESSION_MODE`                                                             | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off`/`no` 关闭，其它值 = 该 modeId                              |
 | `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                                               | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate` |

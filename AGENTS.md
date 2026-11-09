@@ -1,6 +1,6 @@
 # AGENTS.md — WeMind 的 AI 协作者入口
 
-> **最后核对**：2026-11-08 ｜ 本文档及全库文档描述当前分支的最新代码，不绑定已发布版本号 ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
+> **最后核对**：2026-11-09 ｜ 本文档及全库文档描述当前分支的最新代码，不绑定已发布版本号 ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
 >
 > 这份文件写给 AI agent，也写给人。**首轮读 §0–§4**；已知坑、验收清单、单文件职责都按需查（链接在 §5）。不要一上来通读 `docs/repowiki/`。
 
@@ -97,6 +97,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 2. **ACP 是最小方法集，不是「所有 agent 都一样」**：
    - `session/load` 不是通用能力；DSH 只有 `session/resume`，缺失时退化为 `session/new`。
    - **image / restore / mcpViaAcp 来自 `agents/brain-presets.ts` 的配置字段，不来自 `initialize` 回包**（`acp-brain.ts` 从不解析 `agentCapabilities`）。接新 agent 必须人工跑一次 `scripts/acp-probe.mjs` 并把结论写进预设。
+   - Copilot CLI 原生 ACP 但不参与 `AUTO_PROBE_ORDER`（安装不代表已登录）；其 stdio MCP 探针实测可用，即使 `initialize` 只广告 HTTP/SSE；图片能力仍依赖模型实测。
    - 反向请求统一走 `acp-reverse.ts`（brain / worker / `brain check` 三处共用）：权限默认拒绝，未知 method 回 `-32601`；可信部署设 `WEMIND_ACP_AUTO_ALLOW=1` 只放行一次性权限。三处必须共用同一实现，否则会「微信能跑、`brain check` 超时」。**守卫**：`acp-reverse.test.ts`、`brain-agents.test.ts`。
 3. **brain 是一个 ACP 进程、worker 是 N 个（进程池）**：帧处理/超时/模型与模式等协议细节在 `acp-connection.ts`（两边共用，改一处两边生效）；生命周期与会话持久化各自实现（`acp-brain.ts` 常驻 + `brain-sessions.json`；`worker-acp.ts` 每连接实例 + `worker-sessions.json`），改这些要两边看。**守卫**：`acp-connection.test.ts`、`brain-switch.test.ts`、`worker-pool.test.ts`。
 4. **MCP 按 agent 分派**：kiro 读 `settings/mcp.json`；opencode 读 `opencode.json` 的 `mcp.servers`；qoder 读 `settings.json` 的 `mcpServers`；gemini 读 `<沙箱>/.gemini/settings.json` 的 `mcpServers`；cline 读沙箱 `cline/mcp.json`；pi 读沙箱根 `mcp.json`（kiro 格式）；DSH 与 Claude Code 走 ACP `session/new` 的 `mcpServers`（Claude Code 的目录是真实 `~/.claude.json`；codex 的适配器不消费 stdio MCP）。**不要让 A 读 B 的配置文件**。**守卫**：`sandbox-*.test.ts`、`agent-mcp.test.ts`。

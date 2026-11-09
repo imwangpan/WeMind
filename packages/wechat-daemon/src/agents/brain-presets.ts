@@ -58,7 +58,7 @@ export const DEFAULT_SETTINGS_STRIP = ["mcpServers", "enabledPlugins", "provider
 
 /**
  * 已知 ACP agent。
- * - 内置 9 个预设都**至少过了探针级实测**（kiro / opencode / deepseek / qoder / cline / gemini 另有真机使用或 E2E 记录）。
+ * - 内置 10 个预设都**至少过了探针级实测**（kiro / opencode / deepseek / qoder / cline / gemini 另有真机使用或 E2E 记录）。
  * - 包名/参数/ACP 能力仍随上游版本变化：升级 agent 后按 docs/接入其它-ACP-Agent.md 复验；自定义 agent 需自行核对官方参数。
  * - 区别两类：① **原生 ACP**（CLI 自带 ACP 模式，直接起，如 kiro、gemini）；② **需适配器**（CLI 本身不说 ACP，要起一个适配器进程，如 Claude Code、Codex）。
  */
@@ -100,6 +100,24 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     modelArg: "--model",
     replayOnLoad: true,
     shell: true,
+  },
+  // GitHub Copilot CLI（原生 ACP，1.0.107 探针实测）。
+  // - COPILOT_HOME 指向独立沙箱；只同步 config.json 登录元数据、skills 与 copilot-instructions.md，不继承用户 MCP/插件/hooks。
+  // - 用户 MCP 目录是 ~/.copilot/mcp-config.json；stdio MCP 经 session/new 实测可调用（尽管 initialize 只广告 http/sse）。
+  // - --allow-all-tools 免除工具审批，但不启用 --allow-all 的路径/URL 放宽；默认 auto 不探测，避免「已安装但未登录」导致误选。
+  copilot: {
+    name: "copilot",
+    bin: "copilot",
+    binWin: "copilot.cmd",
+    args: ["--acp", "--no-auto-update", "--allow-all-tools"],
+    shell: true,
+    homeEnvVar: "COPILOT_HOME",
+    realHome: path.join(os.homedir(), ".copilot"),
+    inheritDirs: ["skills"],
+    inheritFiles: ["copilot-instructions.md"],
+    credentialFiles: ["config.json"],
+    catalogFile: "mcp-config.json",
+    mcpViaAcp: true,
   },
   // OpenCode：原生 ACP（`opencode acp`）。
   // - Windows 上是 npm shim（PATH 只有 opencode.cmd），故 shell:true + 裸名 binWin。

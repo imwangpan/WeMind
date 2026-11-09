@@ -27,7 +27,7 @@ import { ACP_AGENT_PRESETS, DEFAULT_SETTINGS_STRIP, type AcpAgentPreset } from "
  *  - `WEMIND_ACP_SESSION_MODE` 覆盖预设的会话模式（`session/set_mode`）：`0`/`false`/`off` 关掉该调用，其它非空值 = 用该 modeId
  *  - `KIRO_CLI_BIN`            旧的 kiro 专用覆盖（仅 kiro agent、且未设 WEMIND_BRAIN_BIN 时仍生效）
  *  ② 账号级持久配置（`<数据目录>/brain.json`，见 brain-config.ts）：顶层 = 对话大脑，`worker` 段 = 任务 worker（缺省跟随顶层）；每段可带 `agent` / `bin` / `args` / `shell` / `homeEnvVar`，另有按 agent 名存启动覆盖的 `presets` 段。写入磁盘后任何入口重启都能复现，切换用 `wemind brain set <agent 名>`。
- *  ③ `auto`（未配置时的兜底）：按 AUTO_PROBE_ORDER 取第一个二进制可解析的 agent；一个都没有则标记 unavailable，由启动校验明确报错（不再「静默跑起来、第一条消息才炸」）。
+ *  ③ `auto`（未配置时的兜底）：按 AUTO_PROBE_ORDER 取第一个二进制可解析的 agent；Copilot 虽是原生 ACP，也因安装不代表已登录而要求显式选择。一个都没有则标记 unavailable，由启动校验明确报错（不再「静默跑起来、第一条消息才炸」）。
  *  另：未知的 `WEMIND_BRAIN` 值不再静默回退 kiro，而是 `known:false`，交由启动校验报错。
  *
  * 角色（role）：同一份 agent 表既是「对话大脑」也是「任务 worker」的来源；`resolveAgent()` = 对话大脑，
@@ -53,7 +53,7 @@ function onPathAny(exe: string): string | null {
 }
 
 /**
- * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的 agent。只收纳**原生 ACP 且二进制可直接判定**的 agent——适配器类（`claude-code` 走 `claude-agent-acp`、`codex` 走 `codex-acp`、`pi` 走 `pi-acp`）不参与自动探测：它们是独立安装的桥接进程、各有自己的认证，误选中会让「装了但没登录」的机器静默换脑；显式选用（`wemind brain set|switch <名>`）更安全。顺序按本机实测的启动耗时排（暖启动：opencode ~1.7s、cline ~2.0s、qoder ~2.5s、gemini ~4.3s）；kiro 与 deepseek 在该轮实测中未握手成功（kiro `session/new` 超时、deepseek 旧会话 artifact 布局错误），暂排最后，修复后可再前移。
+ * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的 agent。只收纳**适合无配置自动选择的原生 ACP**；Copilot 虽原生支持 ACP，但认证独立于二进制安装，故与适配器一样只允许显式选择（`wemind brain set|switch <名>`）。适配器（`claude-code` / `codex` / `pi`）也不参与自动探测。顺序按本机实测的启动耗时排（暖启动：opencode ~1.7s、cline ~2.0s、qoder ~2.5s、gemini ~4.3s）；kiro 与 deepseek 在该轮实测中未握手成功（kiro `session/new` 超时、deepseek 旧会话 artifact 布局错误），暂排最后，修复后可再前移。
  */
 export const AUTO_PROBE_ORDER = [
   "opencode",

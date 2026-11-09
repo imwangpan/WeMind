@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **最后核对**：2026-11-08
+> **最后核对**：2026-11-09
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -126,6 +126,7 @@ poller（长轮询，不被大脑阻塞）
 | `claude-code` 预设已内置（探针级实测 + 真机微信单轮 E2E） | ✅ 探针级实测 + 真机微信单轮 E2E 已通过（2026-10-31；重启续聊 / MCP / 任务待复测） | 全局 `npm i -g @agentclientprotocol/claude-agent-acp`（Node ≥22；`binWin=claude-agent-acp.cmd` + `shell: true`）+ `CLAUDE_CONFIG_DIR` 沙箱（`~/.claude.json` 一并隔离）+ `mcpViaAcp`（目录 `~/.claude.json`；`initialize` 只声明 http/sse，**stdio 实测可用**）+ `sessionMode bypassPermissions`（适配器不解析 CLI flag）；`loadSession: true`、`sessionCapabilities.resume/close/delete/fork/list`；**不在** `AUTO_PROBE_ORDER`（独立安装、各有认证），只能显式选用。见 `docs/接入方案/接入-ClaudeCode.md` |
 | `codex` 预设存在且已实测 | ✅ 代码/实测（探针 + 真机 E2E） | 适配器 `@agentclientprotocol/codex-acp` 2.5.0（**全局安装**，口径同 claude-code）：`load`/图片/`set_mode`/`set_config_option(model)` ✅、工具调用 0 反向请求；**stdio MCP ❌**（`mcpCapabilities.acp=false`）→ 不开 `mcpViaAcp`；心跳 60s；**没有沙箱配置目录**（只有 cwd 指向沙箱根）；**不在** `AUTO_PROBE_ORDER`，只能显式选用；真机 E2E：worker 与 brain 通道均通过（见 [接入-Codex.md](../接入方案/接入-Codex.md)） |
 | `pi` 预设已内置 | ✅ 代码/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务） | 社区适配器 `pi-acp`（**全局安装**）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent`，先登录/配好模型；只装适配器会被 `agentProblem()` 提前拒绝）；`PI_CODING_AGENT_DIR` 沙箱根、`settings.json`/`auth.json`/`models*.json` 同步、`skills/` junction + `AGENTS.md` 复制；MCP 走 `<沙箱根>/mcp.json`（kiro 格式，`pi mcp list` 实测）、`mcpViaAcp: false`（pi-acp 只存不读）；免审批无需开关；`loadSession: true`/图片 ✅/0 反向请求；**不在** `AUTO_PROBE_ORDER`；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动横幅（`## Context` / `## Skills`，用户显式设过则保留）；worker 沙箱在每次派发前按该任务的 agent 重备（`worker-pool.acquire` → `ensureWorkerHome(ag)`，否则派到非默认 agent 时拿空配置跑）；沙箱隔离不完整（pi-acp 从真实 `homedir()` 读 session-map/prompts/skills）。见 [接入-pi.md](../接入方案/接入-pi.md) |
+| `copilot` 预设已内置（Copilot CLI 1.0.107） | ✅ ACP 探针级实测（Windows，2026-11-09；WeChat E2E 待验证） | 原生 `copilot --acp --no-auto-update --allow-all-tools`，Windows `copilot.cmd` 经 shell 启动；`COPILOT_HOME` 沙箱同步 `config.json`、`skills/` 与 `copilot-instructions.md`；MCP 从真实 `~/.copilot/mcp-config.json` 读目录，经 ACP `mcpServers` 传递，stdio 工具实测可调用且排除 `wechat`；`loadSession: true`、强杀后恢复成功；图片 prompt 被接受但本次 Auto 模型拒绝 PNG 后退化文本重试；**不在** `AUTO_PROBE_ORDER`，需显式选择（安装不代表已登录）。见 [接入-Copilot.md](../接入方案/接入-Copilot.md) |
 | Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |
 | Qoder 可免 `--bin` 绝对路径 | ✅ 代码 | `fallbackBinPaths` 兜底 `~/.qoder/bin/qodercli/qodercli.exe`；**auto 探测也认它**（`presetAvailable()` → `presetBinPath()` 先 `onPath()` 再 `fallbackBinPaths`，2026-11-05 核对） |
 | Qoder 用户记忆落点 | ✅ 实测 | `~/.qoder/memory/`；已 junction 进沙箱（写入回流真实目录）。`skills/agents/commands`/`AGENTS.md` 在 1.1.78 不存在 |

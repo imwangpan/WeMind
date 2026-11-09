@@ -36,7 +36,7 @@ packages/wechat-daemon/src/
 │       ├── acp-reverse.ts    # 反向请求应答器（权限默认拒绝；未知 method 回 -32601）
 │       └── acp-quiet.ts      # 恢复会话后等回放帧安静（200ms 静默窗口 / 最多 3s）
 ├── agents/                   # agent 预设、配置状态与沙箱
-│   ├── brain-presets.ts      # AcpAgentPreset 类型与 9 个内置预设（纯数据，无 IO）
+│   ├── brain-presets.ts      # AcpAgentPreset 类型与 10 个内置预设（纯数据，无 IO）
 │   ├── brain-agents.ts       # resolveAgent、agentProblem、派生配置落盘（→ 第 6 章）
 │   ├── brain-config.ts       # brain.json 读写
 │   ├── brain-state.ts        # brain-runtime.json：daemon 实际生效的大脑

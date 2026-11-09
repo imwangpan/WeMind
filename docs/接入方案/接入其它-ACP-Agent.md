@@ -1,6 +1,6 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-> **最后核对**：2026-11-05 ｜ **状态**：内置 9 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**。
+> **最后核对**：2026-11-09 ｜ **状态**：内置 10 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**、**Copilot CLI 已探针级实测（1.0.107，Windows，2026-11-09；WeChat E2E 待验证）**。
 >
 > 本文说明如何把 WeMind daemon 的「大脑」从默认的 `auto` 换成另一个 ACP agent（默认 `auto` 按 `opencode → cline → qoder → gemini → deepseek → kiro` 探测已安装者，kiro 排最后）。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 
@@ -167,7 +167,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
 };
 ```
 
-> **适配器类不要加进 `AUTO_PROBE_ORDER`**：`claude-code` / `codex` / `pi` 都是显式选用（装好适配器 ≠ 已登录，参与探测会让「装了但没登录」的机器静默换脑）。原生 ACP 才追加到探测顺序末尾。
+> **不要因二进制存在就一律加入 `AUTO_PROBE_ORDER`**：`claude-code` / `codex` / `pi` 是适配器，`copilot` 虽是原生 ACP，但二进制存在都不代表运行账号已登录；这四者均显式选用，避免「装了但没登录」的机器静默换脑。其它原生 ACP 按实际启动条件与耗时决定是否加入。
 
 然后构建并选用（推荐写入磁盘持久）：
 
@@ -228,6 +228,7 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 |:---|:---|:---|
 | `kiro` | `kiro-cli` | `acp --trust-all-tools` |
 | `gemini` | `gemini` | `--acp --approval-mode yolo --skip-trust` |
+| `copilot` | `copilot` | `--acp --no-auto-update --allow-all-tools` |
 | `opencode` | `opencode` | `acp` |
 | `deepseek` | `dsh` | `--profile acp` |
 | `qoder` | `qodercli` | `--acp --yolo` |
@@ -254,13 +255,15 @@ ACP agent 分两类，接入方式不同：
 | `codex` | OpenAI Codex | 需适配器（官方维护） | ✅ **已内置/已实测（探针级 + 真机 E2E：worker 与 brain 通道均通过）**：`load` ✅、图片 ✅、`set_mode` ✅、`set_config_option(model)` ✅、工具调用 0 反向请求；**stdio MCP ❌**（适配器 `mcpCapabilities.acp=false`，实测传进去的工具模型也看不到 → 不开 `mcpViaAcp`，微信侧「加载/卸载 MCP」对它无效）。2026-11-01 真机：切 worker 后 `wemind task` 由 codex 执行（`prompt ok 4436ms`，回话正常）；切 brain 后微信单轮 `prompt ok 2962ms`、回复送达。**没有沙箱配置目录**（只有 cwd 指向沙箱根） | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**先 `npm i -g` 全局安装**；Windows 上装出来的是 **`codex-acp.cmd`**，故预设 `binWin: "codex-acp.cmd"` + `shell: true`）。免审批：env `INITIAL_AGENT_MODE=agent-full-access`（预设 `envDefaults`）+ `session/set_mode {modeId:"agent-full-access"}`；codex 的 `--yolo` 不被适配器转发。详见 [接入-Codex.md](接入-Codex.md) |
 | `pi` | pi coding agent | 需适配器（社区 `pi-acp`） | ✅ **已内置/探针级实测 + 真机 E2E（2026-11-01）**：`load` ✅、图片 ✅、首帧 0–3ms、有 thought/tool 帧、工具调用 0 反向请求、强杀后 `session/load` 上下文保留；`ACP_TEST_TOOL=1` 漂移检测通过（标记文件落盘、0 个权限请求）。**沙箱隔离不完整**：pi-acp 从真实 `homedir()` 读 `~/.pi/pi-acp/session-map.json`、`~/.pi/agent/prompts`、`~/.agents/skills` | `pi-acp`（**先 `npm i -g pi-acp`**；Windows 上是 `pi-acp.cmd`，故 `binWin: "pi-acp.cmd"` + `shell: true`）+ **`requiresBins: ["pi"]`**：另需 `npm i -g @earendil-works/pi-coding-agent` 并在终端里 `pi` 登录；只装适配器会被 `agentProblem()` 提前拒绝。`PI_CODING_AGENT_DIR` 指到沙箱根；MCP 走 `<沙箱根>/mcp.json`（kiro 格式，`mcpViaAcp: false`）；免审批无需开关。详见 [接入-pi.md](接入-pi.md) |
 
+| `copilot` | GitHub Copilot CLI | 原生（`--acp`） | ✅ **已内置/探针级实测（1.0.107，Windows，2026-11-09）**：`loadSession` 与强杀后恢复成功；`--allow-all-tools` 下工具调用无权限反向请求；stdio MCP 经 `session/new.mcpServers` 实际调用成功（尽管 `initialize` 只广告 http/sse）；图片 prompt 被接受，但本次 Auto 模型拒绝 PNG 后退化为文本重试；WeChat E2E 待验证 | `copilot --acp --no-auto-update --allow-all-tools`；Windows npm shim 为 `copilot.cmd`，预设经 shell 启动；`COPILOT_HOME` 指到沙箱，`config.json` 同步认证状态，`skills/` 和 `copilot-instructions.md` 继承；MCP 目录为真实 `~/.copilot/mcp-config.json`，经 ACP 提供，`wechat` 排除；不在 `AUTO_PROBE_ORDER`（安装不代表已登录）。详见 [接入-Copilot.md](接入-Copilot.md) |
+
 > **kiro v2 / v3（2026-11-03）**：预设 `kiroEngine: true`。引擎判定顺序：启动参数 `--agent-engine`（`v2`/`v3`，含 `=` 写法）→ 真实 `settings/cli.json` 的 `acp.agentEngine` → `kiro-cli --version` 主版本 ≥3 → 其余 v2。2.37.1 的 `kiro-cli acp --help` 原文是「`v2` when neither is set」；「CLI ≥3 默认 v3」是**假设/待实测**，只作兜底。`--agent-engine` 还接受 `v1`，未验证、WeMind 按 v2 处理（保留 v2 参数）。`chat.agentEngine` 只影响交互式 chat、**不影响 `acp`**（官方文档原话），别拿它推断。v3 时 WeMind 自动剔除 v2 专属的 `--trust-all-tools` / `-a` / `--trust-tools`（v3 会拒绝这些参数，表现为握手超时），补 `--agent-engine v3`，并在两个沙箱的 `settings/permissions.yaml` 写入 `rules: - capability: all / effect: allow`；真实设置里已有这份文件就原样同步、不覆盖用户规则。`_meta.kiro.policyPreset` 是**假方案**：2026-11-03 实测多种写法（`["allow-all"]` / `["allow_all"]` / `["trust-all"]` / `["all"]`）都不生效——权限请求照发、写文件仍被拒。v3 免审批的权威位置是 agent 自己的 **permissions 策略文件**，不是 ACP 元数据。
 >
-> **内置预设默认免审批**（2026-10-30 起）：每个 agent 用**自己官方**的机制——kiro v2 `--trust-all-tools`（v3 见上条：`settings/permissions.yaml`）、gemini `--approval-mode yolo (+ --skip-trust)`、qoder `--yolo`、cline `--auto-approve true`、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`，官方 issue #52216）、DSH `DSH_PERMISSION_MODE=danger-full-access`（`envDefaults`：daemon 进程已设同名变量时以你的为准）、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`（`INITIAL_AGENT_MODE` 兜底 + `set_mode`）、pi 无需任何开关（官方默认不逐次审批，也没有要切的 `session/set_mode`）。**这不是统一开关**：写进 `--args` 的 CLI flag 只在 agent 真的解析它时才有效（claude-code / codex / pi 适配器都不解析）。想收紧：审批类环境变量（`DSH_PERMISSION_MODE`、`INITIAL_AGENT_MODE`）在 daemon 环境里设了就不被预设覆盖；`WEMIND_ACP_SESSION_MODE=0/false/off/no` 关掉 `session/set_mode`。边缘情况（各 agent 的 ask 规则、MCP 工具审批）仍可能发 `session/request_permission`：WeMind 默认**拒绝**，要全放行设 `WEMIND_ACP_AUTO_ALLOW=1`——它只是「每次自动点允许」，不放宽沙箱。**「免审批」≠「最高权限」**：DSH/codex 还有沙箱层，默认预设已把两层都放开。
+> **内置预设默认免审批**（2026-10-30 起）：每个 agent 用**自己官方**的机制——kiro v2 `--trust-all-tools`（v3 见上条：`settings/permissions.yaml`）、gemini `--approval-mode yolo (+ --skip-trust)`、qoder `--yolo`、cline `--auto-approve true`、Copilot `--allow-all-tools`（允许工具但不启用 `--allow-all` 的路径/URL 放宽）、opencode 沙箱 `opencode.json` 的 `"permission": "allow"`（`opencode acp` 不接受 `--auto`，官方 issue #52216）、DSH `DSH_PERMISSION_MODE=danger-full-access`（`envDefaults`：daemon 进程已设同名变量时以你的为准）、claude-code `session/set_mode bypassPermissions`、codex `agent-full-access`（`INITIAL_AGENT_MODE` 兜底 + `set_mode`）、pi 无需任何开关（官方默认不逐次审批，也没有要切的 `session/set_mode`）。**这不是统一开关**：写进 `--args` 的 CLI flag 只在 agent 真的解析它时才有效（claude-code / codex / pi 适配器都不解析）。想收紧：审批类环境变量（`DSH_PERMISSION_MODE`、`INITIAL_AGENT_MODE`）在 daemon 环境里设了就不被预设覆盖；`WEMIND_ACP_SESSION_MODE=0/false/off/no` 关掉 `session/set_mode`。边缘情况（各 agent 的 ask 规则、MCP 工具审批）仍可能发 `session/request_permission`：WeMind 默认**拒绝**，要全放行设 `WEMIND_ACP_AUTO_ALLOW=1`——它只是「每次自动点允许」，不放宽沙箱。**「免审批」≠「最高权限」**：DSH/codex 还有沙箱层，默认预设已把两层都放开。
 
-> ⚠️ 9 个内置预设**都至少过了探针级实测**，但包名/参数/ACP 能力会随上游版本变化：**升级 agent 后按 §8 复验**，不要拿旧结论当当前事实。逐项：`kiro`/`opencode`/`deepseek`/`qoder`/`cline` 已真机长期使用；`gemini` 已过**探针级实测 + 真机 E2E**（0.66.0，2026-11-01：load/图片/MCP/yolo；brain 单轮、重启 `session/load`、热切换、worker；见 [接入-Gemini.md](接入-Gemini.md)）；`claude-code` 已过**探针级实测 + 真机微信单轮 E2E**（2026-10-31；重启续聊 / MCP / 任务待复测）；`codex` 已过**探针级实测 + 真机 E2E**（2026-11-01：worker 与 brain 通道均通、切脑回切已验；发图 / 冷重启待复测）；`pi` 已过**探针级实测 + 真机 E2E**（2026-11-01：brain 单轮、热切换、微信「任务 pi：…」派发）。
+> ⚠️ 10 个内置预设**都至少过了探针级实测**，但包名/参数/ACP 能力会随上游版本变化：**升级 agent 后按 §8 复验**，不要拿旧结论当当前事实。逐项：`kiro`/`opencode`/`deepseek`/`qoder`/`cline` 已真机长期使用；`gemini` 已过**探针级实测 + 真机 E2E**（0.66.0，2026-11-01：load/图片/MCP/yolo；brain 单轮、重启 `session/load`、热切换、worker；见 [接入-Gemini.md](接入-Gemini.md)）；`claude-code` 已过**探针级实测 + 真机微信单轮 E2E**（2026-10-31；重启续聊 / MCP / 任务待复测）；`codex` 已过**探针级实测 + 真机 E2E**（2026-11-01：worker 与 brain 通道均通、切脑回切已验；发图 / 冷重启待复测）；`pi` 已过**探针级实测 + 真机 E2E**（2026-11-01：brain 单轮、热切换、微信「任务 pi：…」派发）；`copilot` 已过**ACP 探针级实测**（1.0.107，Windows，2026-11-09：工具、stdio MCP 与强杀后恢复；WeChat E2E 待验证）。
 >
-> `auto` 只探测 6 个原生预设（`opencode → cline → qoder → gemini → deepseek → kiro`）；三个适配器（`claude-code` / `codex` / `pi`）**不参与**（独立安装、各有认证，误选中会让「装了但没登录」的机器静默换脑），要显式指定：`wemind brain set|switch <agent 名>`、一次性的 `WEMIND_BRAIN=<agent 名>`，或微信「切换大脑 <agent 名>」。
+> `auto` 只探测 6 个原生预设（`opencode → cline → qoder → gemini → deepseek → kiro`）；三个适配器（`claude-code` / `codex` / `pi`）以及原生 `copilot` **不参与**（安装不代表已登录，误选中会让机器启动失败），要显式指定：`wemind brain set|switch <agent 名>`、一次性的 `WEMIND_BRAIN=<agent 名>`，或微信「切换大脑 <agent 名>」。
 
 **适配器类的准备工作**：
 
@@ -300,7 +303,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 - `configSubdir` 决定 agent 配置目录相对沙箱根的位置（kiro 与 pi 空=沙箱根；opencode `opencode`；claude-code `claude`；gemini `.gemini`——它的 `GEMINI_CLI_HOME` 是「家目录」，配置目录在 `<它>/.gemini`）；
 - `mcpFormat` / `mcpConfigFile` / `catalogFile` 决定 MCP 文件的结构与路径（kiro：`settings/mcp.json` 的 `mcpServers`；opencode：`opencode.json` 的 `mcp.servers`；pi：沙箱根 `mcp.json` 的 `mcpServers`；gemini：配置目录 `settings.json` 的 `mcpServers`）。
 
-因此：**kiro、opencode、qoder、cline、pi、gemini 现已开箱支持「微信里动态加载/卸载 MCP」**（qoder 用 `QODER_CONFIG_DIR` + `settings.json` 的 `mcpServers`，沙箱实测生效；cline 用文件式 MCP：`CLINE_MCP_SETTINGS_PATH` → `cline/mcp.json`；pi 用 `<沙箱根>/mcp.json`，`pi mcp list` 实测可识别；gemini 用 `<沙箱>/.gemini/settings.json`，探针实测 MCP 工具可调用）；**DSH 与 Claude Code 走 `mcpViaAcp: true`**——不写配置文件，激活集由 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发（DSH 已真机验证；Claude Code 探针实测 stdio MCP 可用）。其它 agent 若格式不同，则是上述 agent 配置字段填对即可；实在不同再按其约定适配。
+因此：**kiro、opencode、qoder、cline、pi、gemini 现已开箱支持「微信里动态加载/卸载 MCP」**（qoder 用 `QODER_CONFIG_DIR` + `settings.json` 的 `mcpServers`，沙箱实测生效；cline 用文件式 MCP：`CLINE_MCP_SETTINGS_PATH` → `cline/mcp.json`；pi 用 `<沙箱根>/mcp.json`，`pi mcp list` 实测可识别；gemini 用 `<沙箱>/.gemini/settings.json`，探针实测 MCP 工具可调用）；**DSH、Claude Code 与 Copilot 走 `mcpViaAcp: true`**——不写配置文件，激活集由 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发（DSH 已真机验证；Claude Code 与 Copilot 探针实测 stdio MCP 可用）。其它 agent 若格式不同，则是上述 agent 配置字段填对即可；实在不同再按其约定适配。
 
 - 若该 agent 也用「某个 HOME 环境变量 + 兼容结构」，设对 `homeEnvVar` 即可，MCP 挂载大概率可用；
 - 该 agent 完全不需要配置目录时，把 `homeEnvVar` 留空，仅做隔离 cwd。
@@ -323,7 +326,7 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 
 - **kiro 已预置**：`realHome=~/.kiro`，`inheritDirs=steering,memories,skills,agents,powers,tasks,extensions`。
 - **qoder 已预置**：`realHome=~/.qoder`，`inheritDirs=memory,skills,agents,commands`，`inheritFiles=AGENTS.md`。M3 实测：`memory/`（用户画像/偏好）存在并以 junction 与日常使用共享，大脑可读到真实记忆；`skills/agents/commands` 与 `AGENTS.md` 在 Qoder 1.1.78 不存在，当前是空操作，保留以便上游新增后自动生效。
-- **并非「其它 agent 默认不继承」**：9 个内置预设里 **8 个**都配了 `inheritDirs`（只有 codex 例外——适配器不认沙箱配置目录，无从继承）。记忆机制差异靠**按 agent 配置**吸收：**单文件式记忆用 `inheritFiles`**（opencode 的 `AGENTS.md`、Claude Code 的 `CLAUDE.md`、gemini 的 `GEMINI.md`），**目录式用 `inheritDirs`**（kiro 的 `steering/memories/skills/...`、cline 的 `rules/skills/agents`、qoder 的 `memory/skills/agents/commands`）。接新 agent 时按它自己的目录布局填这两个字段即可，不需要改继承机制。
+- **并非「其它 agent 默认不继承」**：10 个内置预设里 **9 个**都配了 `inheritDirs`（只有 codex 例外——适配器不认沙箱配置目录，无从继承）。记忆机制差异靠**按 agent 配置**吸收：**单文件式记忆用 `inheritFiles`**（opencode 的 `AGENTS.md`、Claude Code 的 `CLAUDE.md`、gemini 的 `GEMINI.md`、Copilot 的 `copilot-instructions.md`），**目录式用 `inheritDirs`**（kiro 的 `steering/memories/skills/...`、cline 的 `rules/skills/agents`、qoder 的 `memory/skills/agents/commands`）。接新 agent 时按它自己的目录布局填这两个字段即可，不需要改继承机制。
 - **Claude Code 已预置**：`realHome=~/.claude`，`inheritDirs=skills,agents,commands`，`inheritFiles=CLAUDE.md`；`settings.json` / `plugins/` 不继承（插件可自带 MCP，且 settings 常含网关凭据）。
 - 仅当目标 agent 用「配置目录 + 目录式记忆」模型时此继承才直接可用。
 

@@ -52,6 +52,7 @@ const VARS = [
   "KIRO_CLI_BIN",
   "CLINE_PROVIDER",
   "CLINE_API_KEY",
+  "COPILOT_HOME",
 ];
 
 const saved: Record<string, string | undefined> = {};
@@ -138,6 +139,7 @@ describe("ACP 模式参数检查（D）", () => {
     expect(acpModeTokens("qoder")).toEqual(["--acp"]);
     expect(acpModeTokens("cline")).toEqual(["--acp"]);
     expect(acpModeTokens("gemini")).toEqual(["--acp"]);
+    expect(acpModeTokens("copilot")).toEqual(["--acp"]);
     expect(acpModeTokens("deepseek")).toEqual(["acp"]); // `--profile acp` 的值
     expect(acpModeTokens("claude-code")).toEqual([]); // 适配器本体就是 ACP server，args 为空
     expect(acpModeTokens("codex")).toEqual([]); // 适配器本体就是 ACP，args 为空
@@ -157,6 +159,29 @@ describe("ACP 模式参数检查（D）", () => {
 });
 
 describe("resolveAgent agent", () => {
+  it("Copilot：原生 ACP + 独立沙箱、认证元数据和 stdio MCP 目录", () => {
+    clearVars();
+    delete process.env.WEMIND_BRAIN_REAL_HOME;
+    process.env.WEMIND_BRAIN = "copilot";
+    const ag = resolveAgent();
+    expect(ag.name).toBe("copilot");
+    expect(ag.bin).toBe(process.platform === "win32" ? "copilot.cmd" : "copilot");
+    expect(ag.args).toEqual(["--acp", "--no-auto-update", "--allow-all-tools"]);
+    expect(ag.shell).toBe(true);
+    expect(ag.homeEnvVar).toBe("COPILOT_HOME");
+    expect(ag.realHome).toBe(path.join(os.homedir(), ".copilot"));
+    expect(agentEnv(ag, path.join(os.tmpdir(), "copilot-home")).COPILOT_HOME).toBe(
+      path.join(os.tmpdir(), "copilot-home"),
+    );
+    expect(ag.inheritDirs).toEqual(["skills"]);
+    expect(ag.inheritFiles).toEqual(["copilot-instructions.md"]);
+    expect(ag.credentialFiles).toEqual(["config.json"]);
+    expect(ag.catalogFile).toBe("mcp-config.json");
+    expect(ag.mcpViaAcp).toBe(true);
+    expect(ag.images).toBe(true);
+    expect(AUTO_PROBE_ORDER).not.toContain("copilot");
+  });
+
   it("显式 kiro：沿用 kiro 约定（沙箱根 / settings/mcp.json / 格式 kiro）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
@@ -893,6 +918,7 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
     expect(names).toContain("deepseek");
     expect(names).toContain("opencode");
     expect(names).toContain("cline");
+    expect(names).toContain("copilot");
     expect(names).not.toContain("auto"); // auto 只是「自动探测」开关，不是 agent，不进列表
   });
 
