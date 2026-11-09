@@ -119,9 +119,11 @@ describe("resolveAttachment（读取与安全闸）", () => {
     const r = resolveAttachment({ src: sensitive }, undefined, { allowSensitive: true });
     expect(r.data.toString()).toBe("secret");
     expect(r.sensitiveBypassed).toBe(true);
-    expect(() =>
-      resolveAttachment({ src: `${sensitive}::$DATA` }, undefined, { allowSensitive: true }),
-    ).toThrow(/NTFS 数据流/);
+    if (process.platform === "win32") {
+      expect(() =>
+        resolveAttachment({ src: `${sensitive}::$DATA` }, undefined, { allowSensitive: true }),
+      ).toThrow(/NTFS 数据流/);
+    }
     expect(() =>
       resolveAttachment({ src: "file://attacker/share/x.pdf" }, undefined, {
         allowSensitive: true,
