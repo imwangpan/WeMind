@@ -2,7 +2,7 @@
 
 > 上一页：[2. 系统架构](02-系统架构.md) ｜ 下一页：[4. MCP Server](04-MCP-Server.md)
 >
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-09
 
 协议内核是整个项目的地基：它封装了与腾讯 iLink 服务器通信的全部细节，对上提供纯粹、无状态依赖的 API。MCP server 和 daemon 都只依赖它。
 
@@ -16,19 +16,23 @@ packages/wechat-ilink-core/src/
 ├── api/
 │   ├── client.ts         # iLink HTTP 客户端（核心）
 │   ├── types.ts          # 完整协议类型定义
+│   ├── message-id.ts     # uint64 消息 ID：无损 JSON 解析、比较、去重环
 │   ├── error-codes.ts    # iLink 业务错误码（ret/errcode）
 │   ├── transport-errors.ts  # 网络传输层错误分类
 │   └── session-guard.ts  # 会话过期冷却
+├── messaging/
+│   └── send-item.ts      # 发单个结构化 item（工具进度 11/12 等）
 ├── store/
 │   ├── account.ts        # 单账号凭证/状态持久化 + DATA_DIR 解析
 │   ├── accounts.ts       # 多账号注册表
 │   ├── allow-from.ts     # 授权发件人清单（安全闸）
 │   └── file-lock.ts      # 跨进程写锁（accounts / allowFrom 的并发写保护）
 └── cdn/
-    └── image.ts          # 收发图/文件的 AES 加解密 + CDN 上传下载
+    ├── image.ts          # 收发图/文件的 AES 加解密 + CDN 上传下载
+    └── media.ts          # 通用入站媒体下载（语音/文件/视频，按 media.aes_key）
 ```
 
-`index.ts` 是一个 barrel 文件，把 `config` / `pkg-version` / `api/*` / `store/account` / `store/accounts` / `store/allow-from` / `cdn/image` 统一导出，消费方只需 `import { ... } from "@wemind/wechat-ilink-core"`。注意 **`store/file-lock.ts` 不在 barrel 里**——它只供 core 内部（`accounts.ts` / `allow-from.ts`）使用，外部拿不到 `withFileLock`。core 共 9 个测试文件（`client` / `session-guard` / `transport-errors` / `image` / `pkg-version` / `account` / `accounts` / `allow-from` / `file-lock`），与源码同目录平铺；**`api/error-codes.ts` 没有对应测试**（它的分类逻辑由 `client.test.ts` 间接覆盖）。
+`index.ts` 是一个 barrel 文件，把 `config` / `pkg-version` / `api/*` / `store/account` / `store/accounts` / `store/allow-from` / `cdn/image` / `cdn/media` / `messaging/send-item` 统一导出，消费方只需 `import { ... } from "@wemind/wechat-ilink-core"`。注意 **`store/file-lock.ts` 不在 barrel 里**——它只供 core 内部（`accounts.ts` / `allow-from.ts`）使用，外部拿不到 `withFileLock`。新增的 `api/message-id.ts`、`cdn/media.ts`、`messaging/send-item.ts` 都有与源码同目录的测试；core 的测试文件与源码平铺，`api/error-codes.ts` 没有独立测试（由 `client.test.ts` 间接覆盖）。
 
 ## 3.2 HTTP 客户端（api/client.ts）
 
@@ -51,8 +55,9 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 | 函数 | 端点 | 作用 | 超时 |
 |------|------|------|------|
-| `getUpdates` | `ilink/bot/getupdates` | 长轮询收消息（携带游标 `get_updates_buf`） | 默认 35s |
-| `sendMessage` | `ilink/bot/sendmessage` | 发消息（文本/图片/文件） | 15s |
+| `getUpdates` | `ilink/bot/getupdates` | 长轮询收消息（携带游标 `get_updates_buf`；uint64 ID 无损解析） | 默认 35s |
+| `sendMessage` | `ilink/bot/sendmessage` | 发消息（文本/图片/文件/视频；返回解析后的响应，`message_id` 为字符串） | 15s |
+| `sendItem` | `ilink/bot/sendmessage` | 发单个结构化 item（工具进度 11/12 等），每次只放一个 item | 15s |
 | `sendTyping` | `ilink/bot/sendtyping` | 打字状态（显示/取消） | 15s |
 | `getConfig` | `ilink/bot/getconfig` | 取 `typing_ticket`（sendTyping 必需） | 15s |
 | `getUploadUrl` | `ilink/bot/getuploadurl` | 取 CDN 上传地址（发图/发文件） | 15s |
@@ -64,7 +69,7 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 1. **超时与慢响应**：用 `AbortController` 控制超时，但要在**读完响应体后**才 `clearTimeout` —— 否则慢 body 不受超时保护，长轮询尤其可能无限阻塞。`getUpdates` / `pollQRStatus` 命中**自身超时**的 `AbortError` 时不抛错，而是返回「空结果」让调用方继续轮询；但**调用方主动取消**（signal 由外部 abort）时 `getUpdates` 会把该错误重新抛出——MCP 的 `cancelled` 返回就依赖这一点。
 
-2. **HTTP 200 不等于成功**：iLink 即使 HTTP 200，响应体里也可能带非 0 的 `ret`/`errcode` 表示失败。所有「有语义响应体」的接口（`sendMessage` / `sendTyping` / `getConfig` / `getUploadUrl`）都走同一个 `throwIfErrorCode`，拿到非 0 错误码时抛 `ILinkError`（携带原始码 + 分类），避免「假成功」（消息其实没送达）；调用方不再需要自己重复校验。`throwIfErrorCode` **分别判断 `ret` 与 `errcode`**：`ret ?? errcode` 在 `ret=0`、`errcode=-14` 时会取到 0，把会话过期掩盖成成功。`getUpdates` 的 `errcode` 留给调用方处理（`-14` 要触发冷却），但 `ret≠0` 且无 `errcode` 时直接抛 `ILinkError`，否则会被当成「这轮没有新消息」静默空转。例外：`notifyStart` / `notifyStop` 是 best-effort，刻意只记日志不抛。**JSON 解析按接口分两类**：读类接口（`getUpdates` / `getConfig` / `getUploadUrl` / `fetchQRCode` / `pollQRStatus`）解析失败即抛带 label 与响应片段的清晰错误，而非裸 `SyntaxError`；写类接口（`sendMessage` / `sendTyping`）走 `tryParseJson`，空或非 JSON 响应一律返回 `null` 并**按成功处理**——HTTP 200 的代理错误页因此会被误判为「已送达」（已知局限，要根治需改代码）。HTTP 非 2xx 抛 `HttpStatusError`（带状态码），由 `classifyTransportError` 判可重试性。
+2. **HTTP 200 不等于成功**：iLink 即使 HTTP 200，响应体里也可能带非 0 的 `ret`/`errcode` 表示失败。所有「有语义响应体」的接口（`sendMessage` / `sendTyping` / `getConfig` / `getUploadUrl`）都走同一个 `throwIfErrorCode`，拿到非 0 错误码时抛 `ILinkError`（携带原始码 + 分类），避免「假成功」（消息其实没送达）；调用方不再需要自己重复校验。`throwIfErrorCode` **分别判断 `ret` 与 `errcode`**：`ret ?? errcode` 在 `ret=0`、`errcode=-14` 时会取到 0，把会话过期掩盖成成功。`getUpdates` 的 `errcode` 留给调用方处理（`-14` 要触发冷却），但 `ret≠0` 且无 `errcode` 时直接抛 `ILinkError`，否则会被当成「这轮没有新消息」静默空转。例外：`notifyStart` / `notifyStop` 是 best-effort，刻意只记日志不抛。**JSON 解析按接口分两类**：读类接口（`getUpdates` / `getConfig` / `getUploadUrl` / `fetchQRCode` / `pollQRStatus`）解析失败即抛带 label 与响应片段的清晰错误，而非裸 `SyntaxError`；写类接口（`sendMessage` / `sendTyping`）走 `tryParseJsonResp`，空或非 JSON 响应一律返回 `{}` 并**按成功处理**——HTTP 200 的代理错误页因此会被误判为「已送达」（已知局限，要根治需改代码）。两类解析都先经过 `parseJsonWithLosslessIds`：它给 `message_id` / `msg_id` / `svr_id` 这类 uint64 字段的**裸数字加引号**再 `JSON.parse`，因此 `sendMessage` 的响应 `message_id` 与 `getUpdates` 的游标都是字符串，不会丢精度。HTTP 非 2xx 抛 `HttpStatusError`（带状态码），由 `classifyTransportError` 判可重试性。
 
 ## 3.3 协议类型（api/types.ts）
 
@@ -75,12 +80,14 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 | 枚举 | 取值 | 含义 |
 |------|------|------|
 | `MessageType` | `USER=1` / `BOT=2` | 消息方向（入站为 USER） |
-| `MessageItemType` | `TEXT=1` / `IMAGE=2` / `VOICE=3` / `FILE=4` / `VIDEO=5` | 消息项类型 |
+| `MessageItemType` | `TEXT=1` / `IMAGE=2` / `VOICE=3` / `FILE=4` / `VIDEO=5` / `TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12` | 消息项类型（工具进度 item 见下方约定） |
 | `MessageState` | `NEW=0` / `GENERATING=1` / `FINISH=2` | 消息状态（见下方关键约定） |
 | `TypingStatus` | `TYPING=1` / `CANCEL=2` | 打字状态 |
 | `UploadMediaType` | `IMAGE=1` / `VIDEO=2` / `FILE=3` / `VOICE=4` | 上传媒体类型 |
 
 **`MessageState` 的关键约定**：发送进度/中间消息必须用 `GENERATING`，仅最终答案用 `FINISH`。因为 `FINISH` 会结束当前回合（关闭该 context 的发送窗口），如果进度也用 `FINISH` 会提前关掉会话。这是排查「重任务收不到结果」时纠正的关键认知（详见 [5. daemon](05-daemon.md)）。
+
+**工具进度 item 的状态是假设/待实测**：官方 `@tencent-weixin/openclaw-weixin@2.4.10` 的协议里有 `TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，其示例用 `FINISH`；WeMind 受上面「进度必须 GENERATING」的既有约束，统一用 `GENERATING` 发送（`sendItem` 的 `state` 可覆盖）。若真机确认客户端不显示，改 `send-pipeline.ts` 的 `sendItemOrdered` 即可；发送失败会回退为文本进度。
 
 ### `context_token`：最易被误解的字段
 
@@ -92,13 +99,17 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 ### 消息体与引用
 
-`WeixinMessage` 是统一消息体（收发都用）。一条消息的 `item_list` 是 `MessageItem[]`，每项是 text/image/voice/file/video 之一。
+`WeixinMessage` 是统一消息体（收发都用）。一条消息的 `item_list` 是 `MessageItem[]`，每项是 text/image/voice/file/video/工具进度之一。**ID 字段是 uint64**（`WeixinMessage.message_id`、部分回包的 `msg_id`/`svr_id`），JS 里必须按字符串处理（见 §3.2）。
 
-**`ref_msg`（引用/回复的原消息）挂在 `MessageItem` 上，不在 `WeixinMessage` 上** —— 上游原实现读 `WeixinMessage.ref_msg` 恒为 `undefined`（死代码），本项目修复为逐项查找。
+**`ref_msg`（引用/回复的原消息）挂在 `MessageItem` 上，不在 `WeixinMessage` 上** —— 上游原实现读 `WeixinMessage.ref_msg` 恒为 `undefined`（死代码），本项目修复为逐项查找。当前支持**内联引用**：`title` + `message_item` 的文本拼成 `[引用消息] …`；只有 `svr_id` 时给「引用消息内容未缓存」占位，不查缓存。
+
+### 消息 ID（api/message-id.ts）
+
+iLink 的 `message_id` 会到 `7525…` 量级（超过 `Number.MAX_SAFE_INTEGER`），直接 `JSON.parse` 会把相邻 ID 舍入成同一个数。`parseJsonWithLosslessIds()` 在解析前只给 `message_id` / `msg_id` / `svr_id` 的**裸整数**加引号（不碰字符串内容、不碰 `seq` 等普通数字；按完整 JSON number token 读取，`1.5`/`7.0e2` 这类非整数原样保留，改写失败时退回原始文本解析以免通道停摆）；`compareMessageIds()` / `maxMessageId()` 用 BigInt 比较（非数字串退化为字典序），`normalizeMessageId()` 迁移旧版数字游标，`rememberMessageId()` 维护有上限的去重环。`state.json` 的 `lastMessageId` 现在是字符串、`seenMessageIds` 是字符串数组。
 
 ### 本地（非协议）类型
 
-除协议类型外，还定义了写入磁盘用的本地类型：`AccountData`（账号凭证）、`ServerState`（运行状态：游标 + contextTokens + lastMessageId）、`QrLoginState`（扫码暂存态）。
+除协议类型外，还定义了写入磁盘用的本地类型：`AccountData`（账号凭证）、`ServerState`（运行状态：游标 + contextTokens + `lastMessageId: string` + `seenMessageIds?: string[]`）、`QrLoginState`（扫码暂存态）。
 
 ## 3.4 错误码体系（api/error-codes.ts）
 
@@ -180,9 +191,9 @@ API：`pauseSession` / `isSessionPaused` / `getRemainingPauseMs` / `clearSession
 
 授权语义见 [8. 数据存储与多账号](08-数据存储与多账号.md#授权与安全)。
 
-## 3.8 收发图与文件（cdn/image.ts）
+## 3.8 收发图与文件（cdn/image.ts、cdn/media.ts）
 
-iLink 的图片/文件走微信 CDN，密文用 **AES-128-ECB（PKCS7）** 加解密。机制借鉴官方 openclaw-weixin。CDN 基础 URL 默认 `https://novac2c.cdn.weixin.qq.com/c2c`（`WECHAT_CDN_BASE_URL` 覆盖）。
+iLink 的图片/文件/视频/语音走微信 CDN，密文用 **AES-128-ECB（PKCS7）** 加解密。机制借鉴官方 openclaw-weixin。CDN 基础 URL 默认 `https://novac2c.cdn.weixin.qq.com/c2c`（`WECHAT_CDN_BASE_URL` 覆盖）。
 
 ### 收图：`downloadImage(img)`
 
@@ -190,13 +201,23 @@ iLink 的图片/文件走微信 CDN，密文用 **AES-128-ECB（PKCS7）** 加�
 2. 解析 AES key（`resolveKey`：先看 `img.aeskey`（32 字符 hex，直接取用）；不满足再看 `img.media.aes_key`（base64，解出 16 字节直接用，或解出 32 字符 hex 字符串再转 hex），两者都不可用返回 `null`），下载密文（20s 超时）；响应体用 `readBodyWithLimit()` 边读边计数，超过 20MB 立即取消（`content-length` 只作提前拒绝提示）；
 3. AES-128-ECB 解密返回明文 Buffer。
 
+### 收语音/文件/视频：`downloadMediaBuffer()`
+
+通用入站媒体下载（`cdn/media.ts`），与图片同一套 CDN/AES 机制，差异在 key 来源与上限：
+
+- key 只来自 `media.aes_key`（base64 原始 16 字节，或 base64 的 32 字符 hex）；图片的 `image_item.aeskey` 仍优先（通过 `imageAeskey` 参数传入）；
+- 默认上限 `WECHAT_INBOUND_MEDIA_MAX_MB=100`；`allowPlain` 为 true 时无 key 也按明文返回（仅供明确不需要解密的场景）；
+- 无 `full_url` / `encrypt_query_param` 或 key 解析失败时抛带 label 的清晰错误。
+
+daemon 侧的文件/视频落盘与语音转码见 [5. daemon](05-daemon.md#收发富媒体与消息类型)。
+
 ### 发图/发文件：`sendImage` / `sendFile`
 
 发送链路：`getUploadUrl` 取上传地址 → AES-128-ECB 加密 → POST 上传 CDN（拿响应头 `x-encrypted-param`，3 次重试，4xx 不重试）→ 组装媒体引用 → `sendMessage` 发出。`no_need_thumb: true` 免缩略图（无需 sharp/jimp）。
 
 `classifyMediaByName(name)` 按扩展名判类型（image/video/file），`sendFile` 据此组装对应的 `image_item` / `video_item` / `file_item`。类型识别与 item 组装借鉴自 wxclawbot-cli 与 wechat-robot-go（均 MIT）。
 
-> 收发图在 daemon 形态下的上层编排（从大脑回复里提取图片引用、收图喂给大脑看）见 [5. daemon](05-daemon.md#收发富媒体)。
+> 收发图 / 文件 / 视频 / 语音在 daemon 形态下的上层编排（从大脑回复里提取媒体引用、入站媒体落盘与喂给大脑）见 [5. daemon](05-daemon.md#收发富媒体与消息类型)。
 
 ---
 

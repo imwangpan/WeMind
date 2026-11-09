@@ -1,4 +1,12 @@
-import type { WeixinMessage } from "@wemind/wechat-ilink-core";
+import type {
+  FileItem,
+  ImageItem,
+  MessageItem,
+  RefMessage,
+  VideoItem,
+  VoiceItem,
+  WeixinMessage,
+} from "@wemind/wechat-ilink-core";
 import { MessageItemType } from "@wemind/wechat-ilink-core";
 import { authHint } from "../agents/brain-agents.js";
 import {
@@ -93,16 +101,121 @@ export function brainErrorMessage(e: unknown, agentName?: string): string {
   }
 }
 
-export function extractText(msg: WeixinMessage): string {
-  return (msg.item_list ?? [])
-    .map((it) => {
-      if (it.type === MessageItemType.TEXT) return it.text_item?.text ?? "";
-      if (it.type === MessageItemType.VOICE) return it.voice_item?.text ?? ""; // 微信侧语音转文字（省事路）
+/** 一条入站消息里可交给大脑的附件（图片/语音/文件/视频）。 */
+export type InboundAttachment =
+  | { kind: "image"; item: ImageItem }
+  | { kind: "voice"; item: VoiceItem }
+  | { kind: "file"; item: FileItem }
+  | { kind: "video"; item: VideoItem };
+
+/** 引用消息的轻量上下文（首期只做内联内容，不查本地缓存）。 */
+export type QuoteContext = {
+  /** 被引用消息的正文摘要（text/voice 转写/文件名/媒体占位）。 */
+  body?: string;
+  /** 服务端消息 ID；没有正文时用于提示「未缓存」。 */
+  svrId?: string;
+};
+
+export type InboundParts = {
+  text: string;
+  attachments: InboundAttachment[];
+  quote?: QuoteContext;
+  /** 当前 daemon 不认识、也没有任何可用内容的 item 类型（给用户明确提示，不再静默丢）。 */
+  unsupportedTypes: number[];
+};
+
+/** 从被引用的 item 里提取一句可读正文（不下载媒体）。 */
+function quotedItemText(item: MessageItem | undefined): string {
+  if (!item) return "";
+  switch (item.type) {
+    case MessageItemType.TEXT:
+      return item.text_item?.text ?? "";
+    case MessageItemType.VOICE:
+      return item.voice_item?.text ?? "";
+    case MessageItemType.IMAGE:
+      return "[图片]";
+    case MessageItemType.FILE:
+      return item.file_item?.file_name ? `[文件: ${item.file_item.file_name}]` : "[文件]";
+    case MessageItemType.VIDEO:
+      return "[视频]";
+    default:
       return "";
-    })
-    .filter((s) => s)
-    .join("\n")
-    .trim();
+  }
+}
+
+function quoteFrom(ref: RefMessage | undefined): QuoteContext | undefined {
+  if (!ref) return undefined;
+  const parts: string[] = [];
+  if (ref.title?.trim()) parts.push(ref.title.trim());
+  const body = quotedItemText(ref.message_item);
+  if (body) parts.push(body);
+  return {
+    body: parts.length ? parts.join(" | ") : undefined,
+    svrId: ref.svr_id?.trim() || ref.message_item?.msg_id?.trim() || undefined,
+  };
+}
+
+/**
+ * 把一条 WeixinMessage 拆成文本、附件和引用上下文。
+ * 纯文本/语音转写走 text；媒体附件保留原 item，由 worker 下载（不阻塞 poller）。
+ */
+export function extractInbound(msg: WeixinMessage): InboundParts {
+  const textParts: string[] = [];
+  const attachments: InboundAttachment[] = [];
+  const unsupportedTypes: number[] = [];
+  let quote: QuoteContext | undefined;
+
+  for (const it of msg.item_list ?? []) {
+    if (!quote && it.ref_msg) quote = quoteFrom(it.ref_msg);
+    switch (it.type) {
+      case MessageItemType.TEXT:
+        if (it.text_item?.text) textParts.push(it.text_item.text);
+        break;
+      case MessageItemType.VOICE: {
+        // 微信侧语音转文字（省事路）：有转写就只当文本，不再算附件——否则会误触发下载提示，
+        // 还会把「结束任务」「继续」这类语音指令挡在快车道/任务续跑之外。
+        const transcript = it.voice_item?.text?.trim();
+        if (transcript) textParts.push(transcript);
+        else if (it.voice_item) attachments.push({ kind: "voice", item: it.voice_item });
+        break;
+      }
+      case MessageItemType.IMAGE:
+        if (it.image_item) attachments.push({ kind: "image", item: it.image_item });
+        break;
+      case MessageItemType.FILE:
+        if (it.file_item) attachments.push({ kind: "file", item: it.file_item });
+        break;
+      case MessageItemType.VIDEO:
+        if (it.video_item) attachments.push({ kind: "video", item: it.video_item });
+        break;
+      case MessageItemType.TOOL_CALL_START:
+      case MessageItemType.TOOL_CALL_RESULT:
+        // 工具进度 item 一般只出现在 BOT 方向；若服务端回显，忽略即可（不是用户内容）。
+        break;
+      default:
+        if (typeof it.type === "number") unsupportedTypes.push(it.type);
+        break;
+    }
+  }
+
+  return {
+    text: textParts.join("\n").trim(),
+    attachments,
+    quote,
+    unsupportedTypes,
+  };
+}
+
+export function extractText(msg: WeixinMessage): string {
+  return extractInbound(msg).text;
+}
+
+/** 把引用上下文拼成 prompt 前缀；没有引用时返回空串。 */
+export function formatQuote(quote: QuoteContext | undefined): string {
+  if (!quote) return "";
+  if (quote.body) return `[引用消息] ${quote.body}`;
+  if (quote.svrId) return "[引用消息内容未缓存]";
+  return "";
 }
 
 /** 工具标题中文化（无 purpose 时的兜底）。 */
@@ -193,20 +306,22 @@ export type TaskFacts = { awaiting: number; active: boolean; interrupted: number
 /**
  * 这条消息是否走**快车道**：控制指令与任务指令不经过大脑，不该排在一条十几分钟的大脑回合后面。
  * 「继续」类短句在确实有可续跑任务时也走快车道；问大脑前缀永远走大脑。
+ * 带附件的消息一律走大脑：控制/任务指令目前不消费附件，放快车道会静默丢掉用户发来的文件。
  * 注意：切脑 / 会话 / 交接也在快车道，但它们要操作同一个 ACP 连接，仍会在 ACP 门口等当前回合结束——那是语义要求，不是排队阻塞。
  */
-export function isFastLane(text: string, tasks: TaskFacts): boolean {
+export function isFastLane(text: string, tasks: TaskFacts, attachmentCount = 0): boolean {
+  if (attachmentCount > 0) return false;
   const t = (text ?? "").trim();
   if (!t || parseBrainEscape(t)) return false;
   if (parseControl(t) || parseTaskControl(t)) return true;
   return shouldResumeTask(t, tasks);
 }
 
-/** 大脑队列里的无编号消息是否该交给任务：只有「继续」类短句 + 确实有可续跑任务；带图片的消息永远给大脑。 */
+/** 大脑队列里的无编号消息是否该交给任务：只有「继续」类短句 + 确实有可续跑任务；带任何媒体的消息永远给大脑。 */
 export function shouldResumeInBrainQueue(
   text: string,
-  imageCount: number,
+  mediaCount: number,
   tasks: TaskFacts,
 ): boolean {
-  return imageCount === 0 && shouldResumeTask(text, tasks);
+  return mediaCount === 0 && shouldResumeTask(text, tasks);
 }

@@ -17,6 +17,14 @@ vi.mock("@wemind/wechat-ilink-core", () => ({
   SESSION_EXPIRED_ERRCODE: -14,
   // 枚举是纯数据，照抄真实取值（不桩成函数，避免测试与协议常量脱节）
   MessageType: { NONE: 0, USER: 1, BOT: 2 },
+  // ID 比较/取最大值：测试里的 fixture 仍用 number，所以按字符串再转 BigInt。
+  compareMessageIds: (a: string | number, b: string | number) => {
+    const x = BigInt(String(a));
+    const y = BigInt(String(b));
+    return x < y ? -1 : x > y ? 1 : 0;
+  },
+  maxMessageId: (a: string | number, b: string | number) =>
+    BigInt(String(a)) >= BigInt(String(b)) ? String(a) : String(b),
 }));
 
 import { getMessages } from "./messages.js";
@@ -166,8 +174,8 @@ describe("getMessages", () => {
     });
     const r = await getMessages({});
     expect(parse(r).message_count).toBe(0);
-    const saved = m.saveState.mock.calls.at(-1)![0] as { lastMessageId: number };
-    expect(saved.lastMessageId).toBe(9);
+    const saved = m.saveState.mock.calls.at(-1)![0] as { lastMessageId: string };
+    expect(saved.lastMessageId).toBe("9");
   });
 
   it("allowFrom 白名单里的发件人放行（与 daemon 同一道兜底校验）", async () => {

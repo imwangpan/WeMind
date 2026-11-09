@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { WEMIND_ROOT } from "./accounts.js";
+import { normalizeMessageId } from "../api/message-id.js";
 import type { AccountData, ServerState, QrLoginState } from "../api/types.js";
 
 /**
@@ -128,11 +129,23 @@ export function clearAccount(dir: string = DATA_DIR): boolean {
 
 /** 空状态：唯一来源，避免 loadState/resetState 各写一份、将来加字段时漏改。 */
 function emptyState(): ServerState {
-  return { updatesBuf: "", contextTokens: {}, lastMessageId: 0 };
+  return { updatesBuf: "", contextTokens: {}, lastMessageId: "0", seenMessageIds: [] };
 }
 
+/**
+ * 读 state 时做一次迁移：旧版本把 lastMessageId 存成 number（uint64 已丢精度），
+ * 这里转成字符串继续用；seenMessageIds 统一成字符串数组。
+ */
 export function loadState(dir: string = DATA_DIR): ServerState {
-  return readJson<ServerState>(path.join(dir, FILES.state)) ?? emptyState();
+  const raw = readJson<ServerState>(path.join(dir, FILES.state));
+  if (!raw) return emptyState();
+  return {
+    ...raw,
+    lastMessageId: normalizeMessageId(raw.lastMessageId),
+    seenMessageIds: Array.isArray(raw.seenMessageIds)
+      ? raw.seenMessageIds.filter((id): id is string => typeof id === "string")
+      : [],
+  };
 }
 
 export function saveState(state: ServerState, dir: string = DATA_DIR): void {

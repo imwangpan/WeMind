@@ -12,7 +12,17 @@ import { LineDecoder } from "../../shared/io/line-decoder.js";
  */
 
 export type AcpProgressEvent =
-  | { type: "tool"; kind?: string; purpose?: string; title?: string; detail?: string }
+  | {
+      type: "tool";
+      /** start = 工具开始；end = 收到终态 tool_call_update（completed/failed/blocked）。 */
+      phase?: "start" | "end";
+      toolCallId?: string;
+      status?: string;
+      kind?: string;
+      purpose?: string;
+      title?: string;
+      detail?: string;
+    }
   | { type: "answer" }
   | { type: "thinking" }
   | { type: "activity" };
@@ -68,6 +78,7 @@ export type AcpTurnState = {
   thoughtStarted: boolean;
   seenUpdateTypes: Set<string>;
   seenTools: Set<string>;
+  endedTools: Set<string>;
 };
 
 export type AcpHost = {
@@ -90,6 +101,7 @@ export function newTurnState(): AcpTurnState {
     thoughtStarted: false,
     seenUpdateTypes: new Set(),
     seenTools: new Set(),
+    endedTools: new Set(),
   };
 }
 
@@ -110,6 +122,7 @@ export function beginAcpTurn(
   turn.thoughtStarted = false;
   turn.seenUpdateTypes.clear();
   turn.seenTools.clear();
+  turn.endedTools.clear();
 }
 
 export function acpTurnText(turn: AcpTurnState, sessionId: string): string {
@@ -205,24 +218,43 @@ export function handleAcpFrame(f: Record<string, any>, host: AcpHost): void {
       (u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") &&
       turn.currentOnProgress
     ) {
-      const tid = String(u.toolCallId ?? u.title ?? ""); // 每个工具调用只上报一次
-      if (tid && !turn.seenTools.has(tid)) {
-        turn.seenTools.add(tid);
-        const purpose =
-          typeof u.rawInput?.__tool_use_purpose === "string"
-            ? clipDetail(u.rawInput.__tool_use_purpose)
-            : undefined;
+      const tid = String(u.toolCallId ?? u.title ?? ""); // 每个工具调用只上报一次 start
+      const status = typeof u.status === "string" ? u.status : undefined;
+      const purpose =
+        typeof u.rawInput?.__tool_use_purpose === "string"
+          ? clipDetail(u.rawInput.__tool_use_purpose)
+          : undefined;
+      const emit = (ev: AcpProgressEvent) => {
         try {
-          turn.currentOnProgress({
-            type: "tool",
-            kind: u.kind,
-            purpose,
-            title: u.title,
-            detail: toolDetail(u.rawInput),
-          });
+          turn.currentOnProgress?.(ev);
         } catch {
           /* ignore */
         }
+      };
+      if (tid && !turn.seenTools.has(tid)) {
+        turn.seenTools.add(tid);
+        emit({
+          type: "tool",
+          phase: "start",
+          toolCallId: tid,
+          kind: u.kind,
+          purpose,
+          title: u.title,
+          detail: toolDetail(u.rawInput),
+        });
+        // 少数 agent 第一帧就带终态：补一个 end，保证结果 item 不丢。
+        if (status && ["completed", "failed", "blocked"].includes(status)) {
+          turn.endedTools.add(tid);
+          emit({ type: "tool", phase: "end", toolCallId: tid, status, title: u.title });
+        }
+      } else if (
+        tid &&
+        status &&
+        ["completed", "failed", "blocked"].includes(status) &&
+        !turn.endedTools.has(tid)
+      ) {
+        turn.endedTools.add(tid);
+        emit({ type: "tool", phase: "end", toolCallId: tid, status, title: u.title });
       }
     }
   }

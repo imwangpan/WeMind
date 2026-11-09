@@ -3,10 +3,12 @@ import crypto from "node:crypto";
 import { ILINK_APP_ID } from "../config.js";
 import { ILinkError } from "./error-codes.js";
 import { HttpStatusError } from "./transport-errors.js";
+import { parseJsonWithLosslessIds } from "./message-id.js";
 import type {
   BaseInfo,
   GetUpdatesResp,
   SendMessageReq,
+  SendMessageResp,
   QRCodeResponse,
   QRStatusResponse,
   SendTypingReq,
@@ -106,22 +108,22 @@ async function apiFetch(params: {
   }
 }
 
-/** 宽松解析：空响应体或非 JSON 返回 null（部分接口成功时无响应体）。 */
-function tryParseJson<T>(raw: string): T | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
 /** 防御性解析 API JSON 响应：失败抛带 label 与响应片段的清晰错误，而非裸 SyntaxError（畸形/代理 HTML/截断响应不致以晦涩错误打断调用方）。 */
 function parseJsonResp<T>(raw: string, label: string): T {
   try {
-    return JSON.parse(raw) as T;
+    return parseJsonWithLosslessIds<T>(raw, label);
   } catch {
     throw new Error(`${label}：响应不是合法 JSON（${raw.slice(0, 120)}）`);
+  }
+}
+
+/** sendMessage 的成功响应可能为空/非 JSON（历史上 iLink 如此）；只有明确错误码才失败。 */
+function tryParseJsonResp<T>(raw: string, label: string): T | null {
+  if (!raw) return null;
+  try {
+    return parseJsonWithLosslessIds<T>(raw, label);
+  } catch {
+    return null;
   }
 }
 
@@ -190,7 +192,7 @@ export async function sendMessage(params: {
   token?: string;
   body: SendMessageReq;
   timeoutMs?: number;
-}): Promise<void> {
+}): Promise<SendMessageResp> {
   const raw = await apiFetch({
     baseUrl: params.baseUrl,
     endpoint: "ilink/bot/sendmessage",
@@ -200,7 +202,9 @@ export async function sendMessage(params: {
     label: "sendMessage",
   });
   // 空/非 JSON 响应视为成功（历史上 iLink 成功时可能无响应体）；只有明确拿到非 0 错误码才抛。
-  throwIfErrorCode("sendMessage", tryParseJson(raw));
+  const resp = tryParseJsonResp<SendMessageResp>(raw, "sendMessage");
+  throwIfErrorCode("sendMessage", resp);
+  return resp ?? {};
 }
 
 /** 取 CDN 上传地址（发图/发文件用）。返回 upload_full_url 或 upload_param。 */
@@ -311,7 +315,7 @@ export async function sendTyping(params: {
     label: "sendTyping",
   });
   // 与 sendMessage 同理：HTTP 200 也可能带非 0 ret，不校验会让「打字中」显示成假成功。
-  throwIfErrorCode("sendTyping", tryParseJson(raw));
+  throwIfErrorCode("sendTyping", tryParseJsonResp(raw, "sendTyping"));
 }
 
 /**

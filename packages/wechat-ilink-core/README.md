@@ -8,15 +8,18 @@
 
 | 模块 | 提供 |
 |---|---|
-| `api/client` | iLink CGI：`getUpdates`（长轮询收）/ `sendMessage`（发）/ `getConfig` / `sendTyping` / `notifyStart` / `notifyStop` / `fetchQRCode` / `pollQRStatus` |
-| `api/types` | 协议类型（照抄 proto），每个字段附官方含义 + 实测注释 |
+| `api/client` | iLink CGI：`getUpdates`（长轮询收）/ `sendMessage`（发，返回解析后的 `SendMessageResp`）/ `getConfig` / `sendTyping` / `notifyStart` / `notifyStop` / `fetchQRCode` / `pollQRStatus` |
+| `api/types` | 协议类型（照抄 proto），每个字段附官方含义 + 实测注释；含工具进度 item 与 `ref_msg` 引用 |
+| `api/message-id` | uint64 消息 ID：`parseJsonWithLosslessIds`（解析前给 ID 加引号）、`compareMessageIds` / `maxMessageId` / `normalizeMessageId` / `rememberMessageId` |
 | `api/error-codes` | `ILinkError` / `classifyILinkCode` / `describeILinkCode`（`ret=-2` 参数错误、`errcode=-14` 会话过期） |
 | `api/session-guard` | `-14` 会话过期后的进程内冷却（fail-closed，避免对死会话狂打） |
 | `api/transport-errors` | 网络层错误分类（timeout/dns/tls/connection/network/http，判定是否可重试；`HttpStatusError` 携带状态码，429/5xx 可重试） |
-| `store/account` | `account.json` / `state.json` / `qr_login.json` 持久化（**原子写**，POSIX 下 rename 前收紧为 600）、数据目录解析（`WECHAT_ACCOUNT` / `WECHAT_DATA_DIR`） |
+| `messaging/send-item` | `sendItem`：每次 `sendmessage` 只发一个结构化 item（工具进度 11/12 等） |
+| `store/account` | `account.json` / `state.json` / `qr_login.json` 持久化（**原子写**，POSIX 下 rename 前收紧为 600）、数据目录解析（`WECHAT_ACCOUNT` / `WECHAT_DATA_DIR`）；`state.lastMessageId` 为字符串、`seenMessageIds` 为去重环 |
 | `store/accounts` | 多账号注册表（`~/.wemind/accounts.json`） |
 | `store/allow-from` | 发件人授权清单（allowFrom，配对授权） |
 | `cdn/image` | CDN 媒体 AES-128-ECB 加解密：`downloadImage`（收图）/ `sendImage` / `sendFile`（发图/文件/视频） |
+| `cdn/media` | 通用入站媒体下载：`downloadMediaBuffer`（语音/文件/视频，按 `media.aes_key` 解密，默认上限 `WECHAT_INBOUND_MEDIA_MAX_MB=100`） |
 
 ## 安装
 

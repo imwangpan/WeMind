@@ -101,7 +101,7 @@ describe.skipIf(process.platform === "win32")("POSIX 文件权限", () => {
   it("account.json / state.json / qr_login.json 全部收紧为 600（都含凭证类数据）", () => {
     const dir = tmpDir();
     saveAccountTo(dir, ACCOUNT);
-    saveState({ updatesBuf: "b", contextTokens: { "bot:u": "ct" }, lastMessageId: 1 }, dir);
+    saveState({ updatesBuf: "b", contextTokens: { "bot:u": "ct" }, lastMessageId: "1" }, dir);
     saveQrState({ qrcode: "q", qrcodeUrl: "u", createdAt: 1 }, dir);
 
     for (const f of ["account.json", "state.json", "qr_login.json"]) {
@@ -170,25 +170,46 @@ describe("state 读写", () => {
     expect(loadState(tmpDir())).toEqual({
       updatesBuf: "",
       contextTokens: {},
-      lastMessageId: 0,
+      lastMessageId: "0",
+      seenMessageIds: [],
     });
   });
 
   it("save → load 往返一致", () => {
     const dir = tmpDir();
-    const state = { updatesBuf: "buf", contextTokens: { "bot:u": "ct" }, lastMessageId: 9 };
+    const state = {
+      updatesBuf: "buf",
+      contextTokens: { "bot:u": "ct" },
+      lastMessageId: "7525055299038555001",
+      seenMessageIds: ["7525055299038555001"],
+    };
     saveState(state, dir);
     expect(loadState(dir)).toEqual(state);
   });
 
+  it("旧版 number 游标迁移成字符串，且不丢已存的整数位", () => {
+    const dir = tmpDir();
+    fs.writeFileSync(
+      path.join(dir, "state.json"),
+      JSON.stringify({ updatesBuf: "b", contextTokens: {}, lastMessageId: 7525055299038555000 }),
+      "utf-8",
+    );
+    expect(loadState(dir).lastMessageId).toBe("7525055299038555000");
+  });
+
   it("resetState 回到空状态（保留其它文件）", () => {
     const dir = tmpDir();
-    saveState({ updatesBuf: "buf", contextTokens: { a: "b" }, lastMessageId: 3 }, dir);
+    saveState({ updatesBuf: "buf", contextTokens: { a: "b" }, lastMessageId: "3" }, dir);
     saveAccountTo(dir, ACCOUNT);
 
     resetState(dir);
 
-    expect(loadState(dir)).toEqual({ updatesBuf: "", contextTokens: {}, lastMessageId: 0 });
+    expect(loadState(dir)).toEqual({
+      updatesBuf: "",
+      contextTokens: {},
+      lastMessageId: "0",
+      seenMessageIds: [],
+    });
     expect(loadAccount(dir)).toEqual(ACCOUNT);
   });
 
@@ -217,7 +238,7 @@ describe("qr_login 状态", () => {
   it("账号/状态/二维码三份文件互不干扰", () => {
     const dir = tmpDir();
     saveAccountTo(dir, ACCOUNT);
-    saveState({ updatesBuf: "b", contextTokens: {}, lastMessageId: 1 }, dir);
+    saveState({ updatesBuf: "b", contextTokens: {}, lastMessageId: "1" }, dir);
     saveQrState({ qrcode: "q", qrcodeUrl: "u", createdAt: 1 }, dir);
 
     expect(fs.readdirSync(dir).sort()).toEqual(["account.json", "qr_login.json", "state.json"]);

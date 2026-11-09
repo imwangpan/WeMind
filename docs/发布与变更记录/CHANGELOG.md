@@ -10,14 +10,19 @@
 
 ### Added
 
+- **daemon 支持更多微信消息类型（2026-11-09）**：入站新增**语音（无转写时 SILK→WAV）、文件、视频**，并把引用消息做成**内联引用**（`[引用消息] 标题 | 正文`；只有 `svr_id` 时给「内容未缓存」占位）。文件/视频/无转写语音下载解密后存 `<BRAIN_HOME>/media/inbound`，prompt 里给本地绝对路径；目录默认保留 7 天 / 总量 256MB（`WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`）。出站新增**文件/视频**：brain 用显式 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)` 触发（路径含 `)` 用 `[附件](<...>)`），读取前过 realpath、敏感文件 denylist（含各 agent 登录态与 `.auth/`、brain-home/worker-home 与真实 agent home 下的 `settings.json`/`models*.json`）、拒绝 UNC/网络路径（含软链接目标）与 Windows NTFS 数据流、单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）。硬链接无法从路径区分，属已接受风险。有微信转写的语音只算文本、**不算附件**（语音里的控制/续跑指令照常生效）。**发语音仍不支持**（需 TTS + SILK）。相关测试：`attachments.test.ts`、`media-store.test.ts`、`voice.test.ts`、`send-pipeline.test.ts`、`daemon-routing.test.ts`。
+- **结构化工具进度 item（2026-11-09）**：iLink 的 `TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12` 现在用于工具进度（`WECHAT_TOOL_PROGRESS_ITEMS=0` 可关闭）；发送失败自动回退为文本「步骤 N」。ACP 连接层新增 `phase: start|end` 与终态去重，工具开始/结束可分别上报；start 每 15s 最多一条，end 与自己的 start 成对发（不受该间隔限制），没发过 start 的工具不发 end；额度上限/等待「继续」期间没真正发出的 start 不占步骤号。
 - **`wemind autostart install|status|uninstall`（2026-11-07）**：跨平台开机自启统一入口。默认给所有已登记账号安装，`--key` / `--label` 只装一个。检测到 PM2 时优先用 PM2（实例名 `wemind-<key>`，复用现有声明；Windows 用登录任务 `wemind-autostart-pm2` 执行 `start --all --runner pm2`，因为 `pm2 startup` 不原生支持 Windows）；否则生成系统原生触发器：Windows 登录触发的计划任务（当前用户、不限时长；受管机器拒建时降级 `HKCU\...\Run`）、Linux systemd 用户单元、macOS LaunchAgent。安装时把 node / cli.js 的路径 `realpath` 到真实位置，避开 fnm 的临时 `fnm_multishells` 联接。两种配置并存（`mixed`）时要求人工确认后只留一套。若机器上还有旧版启动文件夹 `wemind*.vbs` / `.bat` 项，需手动删除：`autostart` 不会自动清理，旧项会在登录时再执行 `wemind start` 并接管 daemon。Windows 原生方案已通过真机验收；Linux/macOS 分支尚未真机验证。详见 [开机自启](../部署与运维/开机自启.md)。
 - **`wemind start --all` 与 `wemind start <key1> <key2>…`**：一次启动所有 / 指定的多个账号；单个账号失败不影响其余，最后汇总并以退出码反映失败。Windows 原生自启触发时执行的就是它。
 
 ### Fixed
 
+- **P0：uint64 消息 ID 丢精度（2026-11-09）**：iLink 的 `message_id` 会超过 JS 安全整数，原先 `JSON.parse` 会把相邻 ID 舍入成同一个数，导致游标比较漏消息/重复处理。现在 core 在解析前给 `message_id`/`msg_id`/`svr_id` 的裸整数加引号（`parseJsonWithLosslessIds`；按完整 JSON number token 读取，小数/指数原样保留，改写失败退回原始文本解析，避免通道停摆），`state.lastMessageId` 改存字符串并新增最近 200 条 `seenMessageIds` 去重环；MCP `get_messages` 同步改用 `compareMessageIds`/`maxMessageId`。旧数字游标首次读取时自动迁移。测试：`message-id.test.ts`、`client.test.ts`、`account.test.ts`、`messages.test.ts`。
 - **P0：`wemind start` 不再继承 `WECHAT_DATA_DIR`（2026-11-07）**：此前环境里残留该变量时，`wemind start <key>` 会报告「已启动」但实际静默空转 / 起错账号 / `stop` 停不掉。现在 `start`、`login --start`、pm2 runner 统一经 `shared/launcher-env.ts` 的 `launcherEnv()` 丢弃该变量、强制 `WECHAT_ACCOUNT`，并在它指向非预期目录时向 stderr 打迁移指引；Windows 自启任务走 `start`，Linux/macOS 自启单元用 `Environment=WECHAT_DATA_DIR=` 空值覆盖。`wemind daemon` 直跑保留一次性覆盖语义。实现见 `shared/launcher-env.ts`，测试见 `launcher-env.test.ts`。
 
 ### Changed
+
+- **带附件的消息不再走快车道（2026-11-09）**：控制/任务指令只消费文本，进快车道会静默丢掉附件；现在 `isFastLane()` 收到附件数 > 0 时一律把消息交给对话大脑。要给任务传文件，目前只能把路径写进任务正文。
 
 - **源码外壳 `scripts/run-daemon.ps1` 默认改为薄壳（2026-11-07）**：默认执行 `wemind start`（重拉交给内置 `_watchdog`），源码开发者与发布版共用同一套 watchdog 实现；`-Mode shell` 保留旧的 PowerShell 监督循环（命名 Mutex、每次重拉前轮转日志），`-DryRun` 只打印将执行的命令。已有计划任务若想保持旧行为，给脚本加 `-Mode shell`。新增 `-Account <key>` / `-All` 选择账号。
 - **移除未使用的 `commander` 依赖**：`autostart` 子命令改用手写解析（与 `manage.ts` 一致），`@wemind/cli` 的运行时依赖只剩 `qrcode`。

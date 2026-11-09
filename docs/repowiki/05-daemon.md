@@ -2,28 +2,31 @@
 
 > 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md)
 >
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-09
 
 daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。本章聚焦 daemon 本体（`index.ts`）的运行逻辑；大脑、worker、沙箱在后续章节展开。
 
 ## 5.1 模块全景
 
-`src/` 是 **8 个一级目录 + 6 个二级目录**下的 63 个源文件（另有 60 个与源码同目录的测试）；下表按目录给出每个文件的职责。分层设计与迁移记录见 [`docs/设计文档/源码目录分层设计.md`](../设计文档/源码目录分层设计.md)。
+`src/` 是 **8 个一级目录 + 6 个二级目录**下的 72 个源文件（另有 70 个与源码同目录的测试）；下表按目录给出每个文件的职责。分层设计与迁移记录见 [`docs/设计文档/源码目录分层设计.md`](../设计文档/源码目录分层设计.md)。
 
 ```
 packages/wechat-daemon/src/
 ├── cli.ts                    # bin 入口（wemind）：分发 daemon / _watchdog / 其余给 cli/manage
 ├── index.ts                  # 主入口 runDaemon：poller / 快车道 / 大脑三个循环、消息路由、回合编排、进度节流
 ├── daemon/                   # 微信侧本体：路由、控制、收件箱
-│   ├── daemon-routing.ts     # 纯路由判定：快车道 / 控制与任务指令 / 错误分类与提示
+│   ├── daemon-routing.ts     # 纯路由判定：入站 item 解析（文本/附件/引用）、快车道 / 控制与任务指令 / 错误分类与提示
 │   ├── daemon-control.ts     # 微信控制指令与控制桥请求的分派（两入口共用实现）
 │   ├── access.ts             # 发件人兜底鉴权（登录者 + allowFrom）
 │   ├── control-inbox-runner.ts # 控制桥收件箱扫描（单条串行/过期不执行/失败必写应答）
 │   ├── task-inbox-runner.ts  # 任务收件箱扫描（时间序/先删后做/出错回 ack）
 │   └── messaging/            # 外发与回复
-│       ├── send-pipeline.ts  # 外发管线：串行链、节流、连发预算、旧 token 挂起/补发、任务推送让位
+│       ├── send-pipeline.ts  # 外发管线：串行链、节流、连发预算、旧 token 挂起/补发、任务推送让位、媒体/item 发送
 │       ├── pending-push.ts   # 旧 token 期间失败外发的内存挂起队列（下一条消息到达后补发）
 │       ├── poller-batch.ts   # 一批消息的计数重置与「全部做完」判定
+│       ├── attachments.ts    # 出站附件：显式 [附件/文件/视频] 语法、realpath、敏感文件 denylist、拒绝网络路径、大小上限
+│       ├── media-store.ts    # 入站媒体落盘：安全文件名、media/inbound 写入、TTL/总量清理
+│       ├── voice.ts          # 无转写语音：SILK → 24kHz WAV（silk-wasm 动态加载，失败返回 null）
 │       ├── md-reply.ts       # 长回复转 .md 文件
 │       ├── image-reply.ts    # 从大脑回复提取图片引用并决定能否发图
 │       └── image-url.ts      # 回复里图片 URL 的识别与规整
@@ -101,7 +104,7 @@ graph TD
     B2 --> C["loadAccount（未登录则 exit 1）"]
     C --> D["解析登录者 owner（WECHAT_OWNER_ID 或扫码登录者）<br/>→ addAllowFrom(owner) 种入白名单（迁移老账号）"]
     D --> E["写 daemon.pid + 注册 exit/SIGINT/SIGTERM 清理<br/>+ 全局 unhandledRejection / uncaughtException（只记录不退出）"]
-    E --> F["ensureBrainHome() + ensureWorkerHome()<br/>准备两个沙箱"]
+    E --> F["ensureBrainHome() + ensureWorkerHome()<br/>准备两个沙箱；按 TTL/总量清理 brain-home/media/inbound"]
     F --> G["notifyStart 通知上线"]
     G --> H["接入 setTaskPush / setTaskTyping / setTaskStateSink / setTaskAckSink"]
     H --> I["clearTaskDirs + 启动 task-inbox 扫描定时器(1s)"]
@@ -131,10 +134,13 @@ while true:
   getUpdates(25s 长轮询)  ← 网络错误 catch + 2s 重试，不崩
   errcode -14? → pauseSession 1h
   更新游标 get_updates_buf
-  过滤 USER 且 message_id > lastMessageId
+  过滤 USER 且 compareMessageIds(message_id, lastMessageId) > 0
   先登记本批所有最新 context_token（worker 发送时取最新）
-  逐条：鉴权 → 提取文本/图片 → 重置发送配额 → 按 isFastLane 分拣到 fastQueue / msgQueue → 唤醒对应循环
+  逐条：seenMessageIds 去重 → 鉴权 → extractInbound（文本/附件/引用/未知 item）→ 重置发送配额
+        → 按 isFastLane(text, facts, 附件数) 分拣到 fastQueue / msgQueue → 唤醒对应循环
 ```
+
+`message_id` 是 uint64：poller 用字符串比较（`compareMessageIds`/`maxMessageId`），并把最近处理过的 200 个 ID 存进 `state.seenMessageIds`（防同一批/服务端重放时重复处理；**不要**指望它在旧 number 游标刚迁移时补历史——那时环是空的，防重放主防线是持久化的 `updatesBuf`）。**带附件的消息不进快车道**：控制/任务指令不消费附件，放快车道会静默丢文件，所以 `isFastLane` 收到附件数 > 0 时直接返回 false。
 
 poller 对每条消息**先鉴权再处理**，并把所有最新 token 实时写进 `state.contextTokens`，这样即使大脑在处理旧消息，新消息的 token 也不会丢。
 
@@ -190,7 +196,7 @@ graph TD
     C4B -->|否| H6["handleMessage → brain（默认）"]
 ```
 
-三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时存在 interrupted）才交给任务侧（`shouldResumeTask()`，2026-11-02 起）；多条可续跑任务时会回编号清单让你指明，不替你选。任务出完结果后不会再接管日常消息。**图片的归属要分两个队列看**：`msgQueue` 一侧由 `shouldResumeInBrainQueue()` 判，带图（`imageCount > 0`）一律给 brain；但 `isFastLane()` **只看文本**——一条「继续」+ 图片会进 `fastQueue`，出队后按续跑 `injectTask` 只带文本，**图片被静默丢弃**（已知边界，2026-11-05 核对代码确认）。要带图就别用「继续」这种短句。
+三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时存在 interrupted）才交给任务侧（`shouldResumeTask()`，2026-11-02 起）；多条可续跑任务时会回编号清单让你指明，不替你选。任务出完结果后不会再接管日常消息。**带任何附件（图片/文件/视频/无转写语音）的消息一律给 brain**：`shouldResumeInBrainQueue()` 与 `isFastLane()` 都把附件数纳入判断——控制/任务指令目前只消费文本，进快车道或任务侧会静默丢掉用户刚发的文件。**有微信转写的语音是纯文本，不算附件**（`extractInbound` 只把无转写语音放进 `attachments`），所以语音版「结束任务」「继续」照常生效。引用消息作为内联前缀进入 brain prompt（`[引用消息] 标题 | 正文`；只有 `svr_id` 时写「引用消息内容未缓存」）。纯未知 item 类型会收到明确提示（列出 type），不静默丢。
 
 **命令层（1.2.0 起）**：解析与帮助**同表驱动**（`chat-commands.ts` 的 `COMMAND_SPECS`），中文与斜杠双轨、`/ai` 是统一入口前缀（`/ai` 列可选、`/ai brain X`、`/ai task X`），中文（`切换大脑`、`切换任务大脑`）与旧斜杠（`/brain`、`/worker`）是等价别名。`帮助`/`/help` 按角色裁剪（非登录者看不到「仅登录者」命令）。
 
@@ -216,7 +222,7 @@ graph TD
 
 ## 5.5 回合编排（handleMessage）
 
-`handleMessage` 是处理一条「给大脑的消息」的完整编排，串起打字保活、延迟确认、进度反馈、收图、调用大脑、重试、发图、长回复转文件。
+`handleMessage` 是处理一条「给大脑的消息」的完整编排，串起打字保活、延迟确认、进度反馈、入站媒体、调用大脑、重试、发图/文件、长回复转文件。
 
 ```mermaid
 graph TD
@@ -224,14 +230,17 @@ graph TD
     KA --> ACK["第 5s 即时确认：此前没有任何可见进度才发 🤖 收到，正在处理…"]
     ACK --> N15["第 15s 第二条：正文已开始→✍️ 正在整理回复…<br/>否则→⏳ 还在处理中…（距上一条非确认进度 ≥5s）"]
     N15 --> HB["heartbeat 定时器 15s 静默心跳"]
-    HB --> IMG{"有入站图片?"}
-    IMG -->|是| DL["下载+解密图片 → base64"]
-    IMG -->|否| RUN
+    HB --> MEDIA{"有入站媒体?"}
+    MEDIA -->|图片| DL["downloadImage → base64（ACP image 块）"]
+    MEDIA -->|文件/视频/无转写语音| SAVE["downloadMediaBuffer → media/inbound（绝对路径进 prompt）"]
+    MEDIA -->|否| RUN
     DL --> RUN["runWithRetry → askBrain（流式）"]
-    RUN --> PROG["onProgress：tool/answer/thinking/activity<br/>→ 节流后发进度"]
+    SAVE --> RUN
+    RUN --> PROG["onProgress：tool/answer/thinking/activity<br/>→ 节流后发进度（工具优先发 item 11/12）"]
     RUN --> ANS["拿到回复文本"]
     ANS --> EXIMG["extractImages 提取图片引用"]
-    EXIMG --> SENDIMG["逐个 sendImage（失败附原链接）"]
+    EXIMG --> EXATT["extractAttachments 提取 [附件]/[文件]/[视频]"]
+    EXATT --> SENDIMG["逐个 sendImage / sendFile（失败附原路径或链接）"]
     SENDIMG --> LONG{"正文 > 1500 字?"}
     LONG -->|是| MD["sendMdOrdered → .md 文件"]
     LONG -->|否| TXT["sendOrdered → 文本（FINISH）"]
@@ -241,9 +250,10 @@ graph TD
 
 | 进度 | 触发时机 |
 |------|---------|
-| `🤖 收到，正在处理…` | 回合满 5s，且此前没有任何可见进度；有图片时用图片提示代替 |
+| `🤖 收到，正在处理…` | 回合满 5s，且此前没有任何可见进度；有附件时用附件提示代替 |
 | `🖼️ 收到 N 张图片，下载识别中…` | 有入站图片（兼作确认） |
-| `🔧 步骤 N：…` | 工具调用（首条即发，其后每 ≥15s 一条，步骤号只在实际发出时递增）；文案优先用 purpose，否则从 `rawInput` 的 command/路径/query 提取并截断 60 字 |
+| `📎 收到 N 个附件，下载中…` | 有文件/视频/无转写语音，或图片与其它附件混合 |
+| 结构化工具 item（文本回退 `🔧 步骤 N：…`） | 工具调用（start 每 15s 最多一条；end 与自己的 start 成对发，不受该间隔限制；没发过 start 的工具不发 end）；`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，失败回退文本；`WECHAT_TOOL_PROGRESS_ITEMS=0` 关闭 item。步骤号只在**真正发出**时递增（额度用尽/等待「继续」期间不发、也不占号）；文案优先用 purpose，否则从 `rawInput` 的 command/路径/query 提取并截断 60 字 |
 | `🤔 还在思考/检索中…` | 静默满 15s 第 1 次 |
 | `⏳ 仍在处理中…（已 X 秒）` | 静默第 2 次起 |
 | `⏳ 还在处理中…` | 回合满 15s、正文尚未开始，且距上一条非确认进度 ≥5s |
@@ -289,7 +299,7 @@ graph TD
 - **计数按用户、跨回合维护**（`budgetOf(to)`），只在该用户发来任何消息时重置 —— 照抄服务端「距上一条用户消息计数」的规则。重置**不是清零**，而是 `count = inflightCount(from)`：上一回合还没上线路的发送（`replyChain` 里排着的、正在补发的）仍会落在这条消息之后、占新窗口额度（`index.ts` 的 `b.count = sends.inflightCount(from)`）。这修正了「新任务从 0 计数撞上限」的 bug，也防「误以为额度还满、最终答案被限流丢掉」。
 - 进度/中间消息用 `GENERATING`，仅最终答案用 `FINISH`（见 [3. 协议内核](03-iLink-协议内核.md#关键枚举)）。
 - 最终答案占等待段预留的最后一条额度。
-- **图片也占额度**：每张图计一条，并走同一条 `replyChain`；额度不够时不再发图，改为在最终文字里附原链接（不抢最终答案的最后一条）。
+- **媒体也占额度**：每张图、每个文件/视频各计一条，并走同一条 `replyChain`；额度不够时不再发，改为在最终文字里附原链接/原路径（不抢最终答案的最后一条）。
 - **任务推送让位**：大脑回合已到「上限-2」时，`setTaskPush` 不抢最后一条额度，先延后；回合结束后还有额度就立刻发，否则转 `pending-push` 等用户下一条消息补发。
 
 ### 串行发送链
@@ -298,14 +308,39 @@ graph TD
 
 `reply` 内置错误恢复：遇 `ret=-2`（param_error）退避 1.5s 后换该用户最新缓存 token 重试一次（限流靠等待恢复，token 失效靠换 token）；遇可重试传输错误退避 1.5s 重试一次。
 
-**重启后的旧 token 与挂起补发**：`state.contextTokens` 是从磁盘恢复的，daemon 启动后里面还是上次运行留下的 `context_token`，而新 token 只有该用户发来下一条消息时才到。这段时间里「不在某个回合内」的外发——任务结果（`setTaskPush`）与 CLI 指令答复（`sendNotice`）——必然 `ret=-2 (prepare failed)`，重试仍是同一个旧 token。这类「必须送达」的发送带一个 `onError`：**只在该用户本进程还没发过消息时**把失败的外发按收件人挂进 `pending-push.ts` 的内存队列（每人上限 20 条、超出丢最旧）；一旦本进程收到过该用户的消息（`freshTokenUsers`），之后的 `-2` 就当作限流、不再挂起——否则会把过时的答复拖到用户下一条消息，反而更乱。poller 在本批消息的计数重置**全部做完之后**调用 `flushHeldPushes`（每个发件人一次，用该用户最新的 token）：补发也算这条消息之后的连发数，所以要占额度，而且不能放在逐条处理里——同一批里后一条消息的 reset 会把补发的计数抹掉。补发量受两重限制：**每轮最多 5 条**、且**不越过本回合留给答复的额度**（`CONSEC_SEND_LIMIT - 2 - 已发数`，不够就先留在队列里）；剩下的留给后续消息。补发先进 `replyChain`，排在该批消息触发的进度/答案之前。另外，重置计数不再直接清零：已经进了 `replyChain`、会在本条消息之后才上线路的发送（上一回合没发完的、正在补发的）仍占新窗口额度，重置时按 `inflightSends` 把它们算进来——否则本回合会误以为额度还满，把最终答案挤到限流上。补发仍失败（任何原因——传输错误也说明没送达）就重新挂起，同一条最多补发 `PENDING_PUSH_MAX_TRIES=3` 次，之后放弃并记日志——防一条永远被服务端拒绝的内容每次发消息都拖着 `replyChain`。回合内的普通回复（进度/答案）不挂起——它们本来就带着刚到的 token；长回复的 `.md` 文件路径（`sendMdOrdered`）与图片（`sendImageOrdered`）也走 `replyChain`，发送失败时最终文字会兜底或附原链接；图片不能像文本那样挂起补发（没有可重放的文本），但同样计入连发额度并给最终文字留最后一条。队列只在内存里，daemon 再重启一次就丢（任务结果仍保留在 `tasks.json`）。
+**重启后的旧 token 与挂起补发**：`state.contextTokens` 是从磁盘恢复的，daemon 启动后里面还是上次运行留下的 `context_token`，而新 token 只有该用户发来下一条消息时才到。这段时间里「不在某个回合内」的外发——任务结果（`setTaskPush`）与 CLI 指令答复（`sendNotice`）——必然 `ret=-2 (prepare failed)`，重试仍是同一个旧 token。这类「必须送达」的发送带一个 `onError`：**只在该用户本进程还没发过消息时**把失败的外发按收件人挂进 `pending-push.ts` 的内存队列（每人上限 20 条、超出丢最旧）；一旦本进程收到过该用户的消息（`freshTokenUsers`），之后的 `-2` 就当作限流、不再挂起——否则会把过时的答复拖到用户下一条消息，反而更乱。poller 在本批消息的计数重置**全部做完之后**调用 `flushHeldPushes`（每个发件人一次，用该用户最新的 token）：补发也算这条消息之后的连发数，所以要占额度，而且不能放在逐条处理里——同一批里后一条消息的 reset 会把补发的计数抹掉。补发量受两重限制：**每轮最多 5 条**、且**不越过本回合留给答复的额度**（`CONSEC_SEND_LIMIT - 2 - 已发数`，不够就先留在队列里）；剩下的留给后续消息。补发先进 `replyChain`，排在该批消息触发的进度/答案之前。另外，重置计数不再直接清零：已经进了 `replyChain`、会在本条消息之后才上线路的发送（上一回合没发完的、正在补发的）仍占新窗口额度，重置时按 `inflightSends` 把它们算进来——否则本回合会误以为额度还满，把最终答案挤到限流上。补发仍失败（任何原因——传输错误也说明没送达）就重新挂起，同一条最多补发 `PENDING_PUSH_MAX_TRIES=3` 次，之后放弃并记日志——防一条永远被服务端拒绝的内容每次发消息都拖着 `replyChain`。回合内的普通回复（进度/答案）不挂起——它们本来就带着刚到的 token；长回复的 `.md` 文件路径（`sendMdOrdered`）、图片（`sendImageOrdered`）与文件/视频（`sendFileOrdered`）也走 `replyChain`，发送失败时最终文字会兜底或附原路径/链接；图片与文件不能像文本那样挂起补发（没有可重放的内容），但同样计入连发额度并给最终文字留最后一条。结构化进度 item 走 `sendItemOrdered`：失败且给了回退文本时，在同一条串行位上改发文本进度（回退成功不算投递失败）；两种形式都失败才交给 `onSendError`。队列只在内存里，daemon 再重启一次就丢（任务结果仍保留在 `tasks.json`）。
 
-## 5.7 收发富媒体
+## 5.7 收发富媒体与消息类型
 
-- **收图**：poller 提取 `image_item` → `downloadImage` 下载解密 → `sniffMime` 嗅探 MIME → 作为 ACP image 块喂大脑。**两个方向**的下载都走 core 的 `readBodyWithLimit()`：收图（CDN 密文）上限 20MB，发图（大脑回复里的图片链接）上限 10MB；边读边计大小，超限立即取消（不把超大响应整个读进内存），`content-length` 只作提前拒绝的提示。**前提是预设的 `images` 字段为真**（`supportsImages()` 读 `agent-slot` 里该 agent 的 `images`，不是 `initialize` 回包——代码不解析 `agentCapabilities`；kiro/opencode 支持，DSH 官方 0.2.1-rc.2 实测不支持，预设关掉了它）。图片用不了时（全部下载失败 / 大脑不支持）由 `planImageTurn()` 决定：**有文字就只按文字回答**（答复前注明图片被忽略），**没文字才直接拒绝**——不会拿空 prompt 白问一回合，也不会连文字一起丢。
-- **发图**：`extractImages` 从大脑回复里提取 Markdown `![](src)` 或裸图片 URL → `resolveImageBytes` 下载/读取 → `sendImage` 发出，剩余文本另发。`image-reply.ts` 实现：下载带 15s 超时 + 浏览器 UA（规避图床热链 403）、10MB 上限；失败的图把原链接附文本发给用户（不静默丢图）。URL 逐跳过安全闸（`image-url.ts` 的 `assertPublicHttpUrl`）：非 http(s)、本机/私网/CGNAT/链路本地/组播（含 IPv6 与 `::ffff:` 映射）以及解析到这些地址的域名都拒绝；重定向手动跟随、每跳复查、最多 3 跳——防大脑输出被提示注入成内网 SSRF。本地文件绝对路径不受影响（那是大脑自己就能读的文件）。
-- **收语音**：直接取 `voice_item.text`（微信侧已转写）当文本喂大脑，零依赖（无需 SILK 解码）。
-- **发文件**：daemon 只用 `sendFile` 发**长回复转成的 `.md`**（`kind: "file"`）。core 的 `sendFile` 本身按扩展名自动判 image/video/file，但 daemon 侧**没有**发视频或任意文件的入口（也没有对应微信指令）。
+### 入站
+
+| item 类型 | 处理 |
+|-----------|------|
+| `TEXT` | `extractInbound()` 收集文本（多条用换行拼接）；引用的 `ref_msg` 变成 `[引用消息] …` 前缀 |
+| `IMAGE` | `downloadImage` 下载解密 → `sniffMime` → 作为 ACP image 块喂大脑（前提是预设 `images` 为真，见 §6） |
+| `VOICE` | 有微信转写：转写文本直接进 prompt，**不下载、不进 `attachments`**（否则会误报附件并挡住语音指令的快车道）；无转写：`downloadMediaBuffer` → `silk-wasm` 解码 24kHz mono → WAV（失败保留原始 SILK），存盘并把路径/格式/时长写进 prompt |
+| `FILE` | `downloadMediaBuffer` → `media/inbound/<messageId>-<安全文件名>`，prompt 写「名称/大小/本地路径」 |
+| `VIDEO` | 同上，文件名固定 `video.mp4`，prompt 写「大小/时长/本地路径」 |
+| 其它 / 工具 item 11/12 | 未知类型计入 `unsupportedTypes`；只有未知类型时明确告知用户；入站工具 item 直接忽略（它们只用于出站进度） |
+
+- **落盘位置**：`<BRAIN_HOME>/media/inbound`。brain 的 cwd 就是 `BRAIN_HOME`，所以 prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
+- **文件名安全**：`safeMediaFileName()` 去掉路径分隔符/控制字符、替换 Windows 非法字符、给保留名（`CON`/`NUL`/`COM1`…）加后缀、保留扩展名；同名用 `-1`/`-2` 后缀，绝不覆盖。
+- **清理**：daemon 启动时 `pruneInboundMedia()` 先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 7 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 256MB）从最旧开始删；best-effort，失败不影响消息处理。
+- **大小上限**：入站文件/视频/语音默认 `WECHAT_INBOUND_MEDIA_MAX_MB=100`；图片仍走图片专用链路（20MB 上限）。
+- **降级**：所有附件都下载失败时，有文字就只按文字回答（并注明哪些附件没下来）；没有任何可处理内容才拒绝。**不会**拿空 prompt 白问一回合。
+- **图片能力**：`supportsImages()` 读 agent 预设字段（不解析 `initialize` 回包）；agent 不支持或有图片失败时，`planImageTurn()` 决定「有文字就按文字答 / 没文字才拒绝」。
+
+### 出站
+
+- **发图**：`extractImages` 从大脑回复里提取 Markdown `![](src)` 或裸图片 URL → `resolveImageBytes` 下载/读取 → `sendImage` 发出，剩余文本另发。下载带 15s 超时 + 浏览器 UA（规避图床热链 403）、10MB 上限；失败的图把原链接附文本发给用户（不静默丢图）。URL 逐跳过安全闸（`image-url.ts` 的 `assertPublicHttpUrl`）：非 http(s)、本机/私网/CGNAT/链路本地/组播（含 IPv6 与 `::ffff:` 映射）以及解析到这些地址的域名都拒绝；重定向手动跟随、每跳复查、最多 3 跳——防大脑输出被提示注入成内网 SSRF。本地文件绝对路径不受影响（那是大脑自己就能读的文件）。
+- **发文件/视频**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 时写 `[附件](<路径>)`；普通形式遇到 `(` 不猜、整段保留为正文）。`extractAttachments()` 只认这三种标签（普通 Markdown 链接保留在正文，不误发）；`file://` 只接受空 host 或 `localhost`，**UNC `\\server\share` 与 `file://host/...` 一律拒绝**（避免 `realpath`/`stat` 触发 SMB 认证；软链接/junction 先看链接目标、再看 realpath 结果），Windows 还拒绝 **NTFS 数据流**（`account.json::$DATA` 可绕过按名规则）；必须是绝对路径；`realpathSync` 后过敏感文件 denylist（数据状态文件、agent 登录态与 `.auth/`、brain-home/worker-home 与 preset `realHome` 下的 `settings.json`/`models*.json`、密钥，见 §4.19 与 `attachments.test.ts`）与单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）；按标签或扩展名判 `file`/`video`，`sendFileOrdered` 逐条发出。失败/额度不足的原因会归并成附注写进最终文本（`attachmentFailureNote`），用户仍能看到原路径。
+- **发语音**：不做。微信语音回复需要 TTS + SILK，且体验通常不如文本；大脑要表达「语音」时按文件发。
+- **发工具进度**：`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，每次 `sendmessage` 只放一个 item；item 失败回退文本。**MessageState 用 `GENERATING` 是当前实现假设**（官方示例用 `FINISH`），真机若不显示见 [`docs/ai/已知坑.md`](../ai/已知坑.md) 的「工具进度 item」条。
+
+### 消息 ID 与引用
+
+- `message_id` 是 uint64，poller 用字符串比较；`seenMessageIds` 去重环防同批/服务端重放（旧 number 游标刚迁移时环是空的，历史防重放仍靠持久化 `updatesBuf`）。MCP 形态的 `get_messages` 也走同一套 core 函数。
+- 引用只做内联：`title` + `message_item` 文本 → `[引用消息] …`；只有 `svr_id` 时「引用消息内容未缓存」。不维护消息缓存、不下载被引用的原媒体。
 
 ## 5.8 长回复转 .md（md-reply.ts）
 

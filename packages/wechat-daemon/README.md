@@ -1,6 +1,6 @@
 # @wemind/cli — 命令 `wemind`
 
-> **你的 AI 大脑，挂在微信上。** 常驻微信 Bot daemon：自己长轮询 iLink 收消息 → 调常驻 **ACP 大脑**生成回复 → 自动回发。支持**运行时切换大脑**（免重启）、**多任务并行（worker 进程池）**、**完整会话管理**（列表/恢复/改名/删除）、**会话交接**、**多账号**、收发**图片**（入站只收图、语音取微信转写，文件/视频不入站；出站发图与长回复自动转 `.md`）。
+> **你的 AI 大脑，挂在微信上。** 常驻微信 Bot daemon：自己长轮询 iLink 收消息 → 调常驻 **ACP 大脑**生成回复 → 自动回发。支持**运行时切换大脑**（免重启）、**多任务并行（worker 进程池）**、**完整会话管理**（列表/恢复/改名/删除）、**会话交接**、**多账号**、收**文本/图片/语音/文件/视频**（图片给大脑看；文件/视频/无转写语音落盘给路径），出站**图片/文件/视频**与长回复自动转 `.md`。
 
 [WeMind](https://github.com/imwangpan/WeMind) monorepo 的完整应用包；只依赖内核 `@wemind/wechat-ilink-core`（构建时已内联进单文件产物），不碰 MCP 层，可独立运行。
 
@@ -84,6 +84,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 - **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：`npm i -g <适配器包>` 后 `wemind brain set <agent 名>`；各适配器的安装命令、认证、沙箱与 MCP 差异见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - ⚠️ **daemon 会让大脑免确认执行工具**：9 个内置预设默认都免审批，能给这个 bot 发消息的人即可让大脑在本机执行任意工具（shell / 写文件）。微信平台限制决定了只有扫码登录这个 bot 的**登录者**能发消息；另有一道**发件人授权（allowFrom）兜底**：登录者自动写入，**勿清空**。想收紧权限见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - `account.json`（bot token）、`state.json`（`context_token`）、`qr_login.json` 在 POSIX 上统一 chmod 600；Windows 上都是明文，请用目录权限或磁盘加密。
+- **出站附件有安全闸**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 用 `<...>`）。只允许**本地**绝对路径（`file://host/...` 与 UNC 网络路径拒绝，软链接目标同样检查；Windows 的 `文件::$DATA` 数据流也拒绝）；读取前 `realpath` 并拒绝状态/凭据文件（`account.json`、`.env`、各 agent 的 `.credentials*`、`.auth/`、`oauth_creds.json`、`settings.json`/`models*.json` 等），单文件默认上限 25MB（`WECHAT_OUTBOUND_FILE_MAX_MB`）。硬链接无法从路径区分，属已接受风险。
 - 同一个 bot token **只能有一个程序收消息**（同一份登录凭证不能同时被两个程序使用）：`wemind` daemon 与 `@wemind/wechat-mcp` 二选一，否则互相抢消息。
 
 ## 环境变量（常用）
@@ -97,6 +98,9 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `WEMIND_ACP_AUTO_ALLOW=1`                                                             | 放行 ACP agent 的一次性权限请求（默认为拒绝）                                                                            |
 | `WEMIND_ACP_SESSION_MODE`                                                             | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off`/`no` 关闭，其它值 = 该 modeId                              |
 | `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                                               | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate` |
+| `WECHAT_INBOUND_MEDIA_MAX_MB` / `WECHAT_OUTBOUND_FILE_MAX_MB`                         | 入站文件/视频/语音单文件上限（默认 100）/ 出站附件单文件上限（默认 25）                                                  |
+| `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`                                       | `brain-home/media/inbound` 保留天数 / 总量上限（默认 7 天 / 256MB；启动时清理）                                          |
+| `WECHAT_TOOL_PROGRESS_ITEMS`                                                          | 结构化工具进度 item（11/12）开关（默认开；`0` = 只发文本「步骤 N」）                                                      |
 
 ## 与 MCP 形态的区别
 
@@ -104,7 +108,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | ---- | ----------------------------------- | --------------------------------- |
 | 驱动 | 自己常驻、自己调大脑                | 随 MCP 客户端生命周期，被动调工具 |
 | 大脑 | 独立 ACP agent 进程                 | 就是 MCP 客户端背后的模型         |
-| 能力 | 收发图片（长回复转 `.md`）、远程任务、多账号、7×24 | 文本收发为主                      |
+| 能力 | 收文本/图片/语音/文件/视频；发图片/文件/视频与长回复转 `.md`；远程任务、多账号、7×24 | 文本收发为主（媒体只给占位符） |
 
 ## 文档
 
