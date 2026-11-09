@@ -205,8 +205,9 @@ export class SendPipeline {
       to,
       async () => {
         try {
-          // 进度 item 与文本进度一样用 GENERATING：FINISH 会结束当前发送窗口，最终答案可能发不出去。
-          await this.deps.sendItem(to, ctx, item, MessageState.GENERATING);
+          // 真机（2026-11-09）客户端不显示用 GENERATING 发送的工具 item；官方 2.4.10 示例与实现都用 FINISH，这里对齐。
+          // 文本进度仍用 GENERATING（FINISH 会结束当前发送窗口），只有结构化 item 用 FINISH。
+          await this.deps.sendItem(to, ctx, item, MessageState.FINISH);
         } catch (e) {
           // 回退成功就不算投递失败；真正失败由 sendMediaOrdered 统一交给 onSendError。
           if (!fallbackText) throw e;

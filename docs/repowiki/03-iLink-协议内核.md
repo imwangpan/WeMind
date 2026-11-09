@@ -85,9 +85,9 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 | `TypingStatus` | `TYPING=1` / `CANCEL=2` | 打字状态 |
 | `UploadMediaType` | `IMAGE=1` / `VIDEO=2` / `FILE=3` / `VOICE=4` | 上传媒体类型 |
 
-**`MessageState` 的关键约定**：发送进度/中间消息必须用 `GENERATING`，仅最终答案用 `FINISH`。因为 `FINISH` 会结束当前回合（关闭该 context 的发送窗口），如果进度也用 `FINISH` 会提前关掉会话。这是排查「重任务收不到结果」时纠正的关键认知（详见 [5. daemon](05-daemon.md)）。
+**`MessageState` 的关键约定**：文本进度/中间消息必须用 `GENERATING`，仅最终答案用 `FINISH`。因为 `FINISH` 会结束当前回合（关闭该 context 的发送窗口），如果文本进度也用 `FINISH` 会提前关掉会话。这是排查「重任务收不到结果」时纠正的关键认知（详见 [5. daemon](05-daemon.md)）。**结构化工具 item 是例外**：它们用 `FINISH`（官方实现如此，真机用 `GENERATING` 时客户端不显示）。
 
-**工具进度 item 的状态是假设/待实测**：官方 `@tencent-weixin/openclaw-weixin@2.4.10` 的协议里有 `TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，其示例用 `FINISH`；WeMind 受上面「进度必须 GENERATING」的既有约束，统一用 `GENERATING` 发送（`sendItem` 的 `state` 可覆盖）。若真机确认客户端不显示，改 `send-pipeline.ts` 的 `sendItemOrdered` 即可；发送失败会回退为文本进度。
+**工具进度 item 的状态**：官方 `@tencent-weixin/openclaw-weixin@2.4.10` 的协议里有 `TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，其示例与实现都用 `FINISH`，并给同一回合的所有外发消息带同一个 `run_id`。但真机实测**微信客户端不渲染**：服务端返回 200/空响应、不分配 `message_id`；`weixin-agent-sdk-rs`（2026-08-13）穷举多种 wire 变体均无效，`run_id` 只影响服务端关联。WeMind 因此**默认只发文本「步骤 N」**，`WECHAT_TOOL_PROGRESS_ITEMS=1` 才发 item（代码已对齐 `FINISH` + `run_id`，且不占连发额度；等微信端开放即可切回默认）。
 
 ### `context_token`：最易被误解的字段
 

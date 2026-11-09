@@ -10,6 +10,7 @@ import { ACP_AGENT_PRESETS } from "../../agents/brain-presets.js";
 import {
   attachmentFailureNote,
   extractAttachments,
+  isSensitiveFileError,
   isSensitiveFilePath,
   resolveAttachment,
 } from "./attachments.js";
@@ -90,6 +91,51 @@ describe("resolveAttachment（读取与安全闸）", () => {
       fs.writeFileSync(file, "secret");
       expect(() => resolveAttachment({ src: file }), name).toThrow(/敏感文件/);
     }
+  });
+
+  it("敏感名单拒绝带类型标记（便于记入待补发队列）", () => {
+    const dir = tmpDir();
+    const file = path.join(dir, "account.json");
+    fs.writeFileSync(file, "secret");
+    try {
+      resolveAttachment({ src: file });
+      expect.unreachable("应当抛出敏感文件错误");
+    } catch (e) {
+      expect(isSensitiveFileError(e)).toBe(true);
+      expect((e as { code?: string }).code).toBe("SENSITIVE_FILE");
+    }
+    // 其它错误不能被误判成敏感文件（否则会进补发队列）
+    try {
+      resolveAttachment({ src: path.join(dir, "missing.txt") });
+    } catch (e) {
+      expect(isSensitiveFileError(e)).toBe(false);
+    }
+  });
+
+  it("allowSensitive 只跳过敏感名单：网络/NTFS 数据流/大小上限仍然拒绝", () => {
+    const dir = tmpDir();
+    const sensitive = path.join(dir, "account.json");
+    fs.writeFileSync(sensitive, "secret");
+    const r = resolveAttachment({ src: sensitive }, undefined, { allowSensitive: true });
+    expect(r.data.toString()).toBe("secret");
+    expect(r.sensitiveBypassed).toBe(true);
+    expect(() =>
+      resolveAttachment({ src: `${sensitive}::$DATA` }, undefined, { allowSensitive: true }),
+    ).toThrow(/NTFS 数据流/);
+    expect(() =>
+      resolveAttachment({ src: "file://attacker/share/x.pdf" }, undefined, {
+        allowSensitive: true,
+      }),
+    ).toThrow(/网络路径/);
+    expect(() => resolveAttachment({ src: sensitive }, 3, { allowSensitive: true })).toThrow(
+      /文件过大/,
+    );
+    // 良性文件即使在窗口内也不应被标记（日志里不能误报「已临时放行」）
+    const plain = path.join(dir, "demo.txt");
+    fs.writeFileSync(plain, "ok");
+    expect(
+      resolveAttachment({ src: plain }, undefined, { allowSensitive: true }).sensitiveBypassed,
+    ).toBe(false);
   });
 
   it("agent 登录态/凭据文件拒绝（含 .auth 目录）", () => {
@@ -195,5 +241,12 @@ describe("attachmentFailureNote", () => {
     expect(note).toContain("1 个附件没能读取/校验通过");
     expect(note).toContain("1 个附件没能发出去");
     expect(note).toContain("1 个附件因接近微信连续发送上限没发");
+  });
+
+  it("敏感文件拦下时告诉用户回复「允许敏感文件」可补发", () => {
+    const note = attachmentFailureNote([{ src: "account.json", reason: "sensitive" }]);
+    expect(note).toContain("被敏感文件名单拦下");
+    expect(note).toContain("回复「允许敏感文件」可补发");
+    expect(note).toContain("account.json");
   });
 });

@@ -429,7 +429,7 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
   let instruction: string | null = firstInstruction;
   while (tasks.get(task.id) === task && instruction !== null) {
     typing(task.userId); // 立即一次「正在输入」
-    const ti = setInterval(() => typing(task.userId), 5000); // 每 5s 续命（小于客户端 typing 自动过期，防闪烁；不占连发上限）
+    const ti = setInterval(() => typing(task.userId), 3000); // 每 3s 续命（客户端 typing 约 5–8s 过期，5s 在网络抖动时会踩边界闪烁；不占连发上限）
     let wasResume = false;
     try {
       const onProgress = PROGRESS

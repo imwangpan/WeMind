@@ -233,7 +233,7 @@ describe("SendPipeline：文件/视频与结构化进度 item", () => {
     expect(h.errors).toHaveLength(1);
   });
 
-  it("进度 item 以 GENERATING 发送，返回 true", async () => {
+  it("工具 item 以 FINISH 发送（对齐官方实现），返回 true", async () => {
     const states: number[] = [];
     const h = harness({
       sendItem: async (to, _ctx, item, state) => {
@@ -250,7 +250,7 @@ describe("SendPipeline：文件/视频与结构化进度 item", () => {
       ),
     ).resolves.toBe(true);
     expect(h.items).toEqual([{ to: "u1", type: 11, ctx: "ctx" }]);
-    expect(states).toEqual([MessageState.GENERATING]);
+    expect(states).toEqual([MessageState.FINISH]);
     expect(h.sent).toHaveLength(0);
   });
 

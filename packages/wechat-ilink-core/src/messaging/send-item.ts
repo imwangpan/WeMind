@@ -12,6 +12,8 @@ export async function sendItem(params: {
   item: MessageItem;
   contextToken?: string;
   state?: number;
+  /** 本轮运行 ID（官方 2.4.10）：同一回合的所有外发消息共用，客户端据此把工具 item 归到当前回复。 */
+  runId?: string;
 }): Promise<SendMessageResp> {
   return sendMessage({
     baseUrl: params.baseUrl,
@@ -25,6 +27,7 @@ export async function sendItem(params: {
         message_state: params.state ?? MessageState.FINISH,
         item_list: [params.item],
         context_token: params.contextToken,
+        run_id: params.runId,
       },
     },
   });

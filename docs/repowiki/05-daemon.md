@@ -25,6 +25,7 @@ packages/wechat-daemon/src/
 │       ├── pending-push.ts   # 旧 token 期间失败外发的内存挂起队列（下一条消息到达后补发）
 │       ├── poller-batch.ts   # 一批消息的计数重置与「全部做完」判定
 │       ├── attachments.ts    # 出站附件：显式 [附件/文件/视频] 语法、realpath、敏感文件 denylist、拒绝网络路径、大小上限
+│       ├── sensitive-allow.ts # 「允许敏感文件」放行窗口与待补发队列（进程内，默认 2 分钟、上限 30、队列 TTL 30 分钟）
 │       ├── media-store.ts    # 入站媒体落盘：安全文件名、media/inbound 写入、TTL/总量清理
 │       ├── voice.ts          # 无转写语音：SILK → 24kHz WAV（silk-wasm 动态加载，失败返回 null）
 │       ├── md-reply.ts       # 长回复转 .md 文件
@@ -226,7 +227,7 @@ graph TD
 
 ```mermaid
 graph TD
-    S["开始：setTyping(typing)"] --> KA["keepAlive 定时器 5s 续打字"]
+    S["开始：setTyping(typing)"] --> KA["keepAlive 定时器 3s 续打字"]
     KA --> ACK["第 5s 即时确认：此前没有任何可见进度才发 🤖 收到，正在处理…"]
     ACK --> N15["第 15s 第二条：正文已开始→✍️ 正在整理回复…<br/>否则→⏳ 还在处理中…（距上一条非确认进度 ≥5s）"]
     N15 --> HB["heartbeat 定时器 15s 静默心跳"]
@@ -253,7 +254,7 @@ graph TD
 | `🤖 收到，正在处理…` | 回合满 5s，且此前没有任何可见进度；有附件时用附件提示代替 |
 | `🖼️ 收到 N 张图片，下载识别中…` | 有入站图片（兼作确认） |
 | `📎 收到 N 个附件，下载中…` | 有文件/视频/无转写语音，或图片与其它附件混合 |
-| 结构化工具 item（文本回退 `🔧 步骤 N：…`） | 工具调用（start 每 15s 最多一条；end 与自己的 start 成对发，不受该间隔限制；没发过 start 的工具不发 end）；`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，失败回退文本；`WECHAT_TOOL_PROGRESS_ITEMS=0` 关闭 item。步骤号只在**真正发出**时递增（额度用尽/等待「继续」期间不发、也不占号）；文案优先用 purpose，否则从 `rawInput` 的 command/路径/query 提取并截断 60 字 |
+| 文本工具步骤 `🔧 步骤 N 开始：…` / `✅ 步骤 N 完成：…`（默认） | 工具调用（start 每 15s 最多一条；**只有耗时 ≥10s 的工具才补发 ✅ 完成提示**；end 与自己的 start 成对发，不受该间隔限制；没发过 start 的工具不发 end）；步骤号只在**真正发出**时递增（额度用尽/等待「继续」期间不发、也不占号）；文案优先用 purpose，否则从 `rawInput` 的 command/路径/query 提取并截断 60 字。结构化 item 11/12 需 `WECHAT_TOOL_PROGRESS_ITEMS=1` 才启用——微信客户端目前不渲染，默认关闭 |
 | `🤔 还在思考/检索中…` | 静默满 15s 第 1 次 |
 | `⏳ 仍在处理中…（已 X 秒）` | 静默第 2 次起 |
 | `⏳ 还在处理中…` | 回合满 15s、正文尚未开始，且距上一条非确认进度 ≥5s |
@@ -261,7 +262,7 @@ graph TD
 
 三档按**最终答案发出时间**分（不是 Agent 首字时间）：`<5s` 只发最终答案；`5–15s` 第 5s 发确认；`≥15s` 第 5s 确认、第 15s 第二条。工具步骤/心跳/图片/重试提示都算「已有可见进度」：5s 前有进度就不发确认，第 15s 第二条要求距上一条非确认进度 ≥5s（不满足则跳过，不延后补发）。最终答案开始发送或回合失败时，两个定时器都会取消，不会在答案后再补进度。
 
-「正在输入中」（typing）每 5 秒续发，**延迟确认和等待期间一直有指示**，且**不计入**连续发送上限；每发出一条进度文本后会**立刻补发一次 typing**（文本消息会把客户端的「正在输入」顶掉，不补发的话快回合全程看不到指示）。
+「正在输入中」（typing）每 3 秒续发（客户端约 5–8s 自动过期，3s 给 `getConfig`+`sendTyping` 的网络抖动留余量），**延迟确认和等待期间一直有指示**，且**不计入**连续发送上限；每发出一条进度文本后会**立刻补发一次 typing**（文本消息会把客户端的「正在输入」顶掉，不补发的话快回合全程看不到指示）。
 
 ### 错误分类与重试
 
@@ -333,9 +334,9 @@ graph TD
 ### 出站
 
 - **发图**：`extractImages` 从大脑回复里提取 Markdown `![](src)` 或裸图片 URL → `resolveImageBytes` 下载/读取 → `sendImage` 发出，剩余文本另发。下载带 15s 超时 + 浏览器 UA（规避图床热链 403）、10MB 上限；失败的图把原链接附文本发给用户（不静默丢图）。URL 逐跳过安全闸（`image-url.ts` 的 `assertPublicHttpUrl`）：非 http(s)、本机/私网/CGNAT/链路本地/组播（含 IPv6 与 `::ffff:` 映射）以及解析到这些地址的域名都拒绝；重定向手动跟随、每跳复查、最多 3 跳——防大脑输出被提示注入成内网 SSRF。本地文件绝对路径不受影响（那是大脑自己就能读的文件）。
-- **发文件/视频**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 时写 `[附件](<路径>)`；普通形式遇到 `(` 不猜、整段保留为正文）。`extractAttachments()` 只认这三种标签（普通 Markdown 链接保留在正文，不误发）；`file://` 只接受空 host 或 `localhost`，**UNC `\\server\share` 与 `file://host/...` 一律拒绝**（避免 `realpath`/`stat` 触发 SMB 认证；软链接/junction 先看链接目标、再看 realpath 结果），Windows 还拒绝 **NTFS 数据流**（`account.json::$DATA` 可绕过按名规则）；必须是绝对路径；`realpathSync` 后过敏感文件 denylist（数据状态文件、agent 登录态与 `.auth/`、brain-home/worker-home 与 preset `realHome` 下的 `settings.json`/`models*.json`、密钥，见 §4.19 与 `attachments.test.ts`）与单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）；按标签或扩展名判 `file`/`video`，`sendFileOrdered` 逐条发出。失败/额度不足的原因会归并成附注写进最终文本（`attachmentFailureNote`），用户仍能看到原路径。
+- **发文件/视频**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 时写 `[附件](<路径>)`；普通形式遇到 `(` 不猜、整段保留为正文）。`extractAttachments()` 只认这三种标签（普通 Markdown 链接保留在正文，不误发）；`file://` 只接受空 host 或 `localhost`，**UNC `\\server\share` 与 `file://host/...` 一律拒绝**（避免 `realpath`/`stat` 触发 SMB 认证；软链接/junction 先看链接目标、再看 realpath 结果），Windows 还拒绝 **NTFS 数据流**（`account.json::$DATA` 可绕过按名规则）；必须是绝对路径；`realpathSync` 后过敏感文件 denylist（数据状态文件、agent 登录态与 `.auth/`、brain-home/worker-home 与 preset `realHome` 下的 `settings.json`/`models*.json`、密钥，见 §4.19 与 `attachments.test.ts`）与单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）；按标签或扩展名判 `file`/`video`，`sendFileOrdered` 逐条发出。失败/额度不足的原因会归并成附注写进最终文本（`attachmentFailureNote`），用户仍能看到原路径。需要临时外发敏感文件时，登录者发微信指令 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30）：`sensitive-allow.ts` 在**本进程内**记一个截止时间，窗口内 `resolveAttachment` 只跳过敏感名单，UNC/数据流/大小上限照旧；日志会写「敏感文件已临时放行」。被拦下的附件会按用户记进内存队列（30 分钟 TTL、最多 20 条），回这条指令时先开窗再补发，所以**先开后发、先拦后放两种顺序都成立**。窗口与队列都不落盘，重启即失效。
 - **发语音**：不做。微信语音回复需要 TTS + SILK，且体验通常不如文本；大脑要表达「语音」时按文件发。
-- **发工具进度**：`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，每次 `sendmessage` 只放一个 item；item 失败回退文本。**MessageState 用 `GENERATING` 是当前实现假设**（官方示例用 `FINISH`），真机若不显示见 [`docs/ai/已知坑.md`](../ai/已知坑.md) 的「工具进度 item」条。
+- **发工具进度**：默认发文本「步骤 N」。结构化 item（`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`）需 `WECHAT_TOOL_PROGRESS_ITEMS=1` 才启用；代码已对齐官方 2.4.10（`FINISH` + 本回合 `run_id`，不占连发额度），但**微信客户端目前不渲染**（服务端 200/空响应/不分配 `message_id`，多家第三方实测一致），所以默认关闭。等微信端开放后改回默认开启即可。真机异常见 [`docs/ai/已知坑.md`](../ai/已知坑.md) 的「工具进度 item」条。
 
 ### 消息 ID 与引用
 

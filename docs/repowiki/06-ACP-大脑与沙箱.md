@@ -137,7 +137,7 @@ graph TD
 
 ### 进度回调与「可发图」提示
 
-`onProgress` 把 `session/update` 帧翻译成进度事件（`tool`/`answer`/`thinking`/`activity`）给 daemon 上报。工具调用分两个阶段上报（`tool` 携带 `phase: "start" | "end"`）：`tool_call` 首帧报 start；该 `toolCallId` 的终态（`status` 为 `completed`/`failed`/`cancelled`，且不是首帧自身）报 end，同一终态只报一次；缺少 `toolCallId` 时退回用 `title` 作为去重键；没有 `toolCallId` 也没有 `title` 的帧直接忽略。人类可读描述优先取 `rawInput.__tool_use_purpose`。daemon 用这两类事件发结构化工具进度 item（`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，`WECHAT_TOOL_PROGRESS_ITEMS=0` 退回纯文本「步骤 N」；见 [5. daemon](05-daemon.md#收发富媒体与消息类型)）。
+`onProgress` 把 `session/update` 帧翻译成进度事件（`tool`/`answer`/`thinking`/`activity`）给 daemon 上报。工具调用分两个阶段上报（`tool` 携带 `phase: "start" | "end"`）：`tool_call` 首帧报 start；该 `toolCallId` 的终态（`status` 为 `completed`/`failed`/`cancelled`，且不是首帧自身）报 end，同一终态只报一次；缺少 `toolCallId` 时退回用 `title` 作为去重键；没有 `toolCallId` 也没有 `title` 的帧直接忽略。人类可读描述优先取 `rawInput.__tool_use_purpose`。daemon 用这两类事件发进度：**默认发文本「步骤 N」**；`WECHAT_TOOL_PROGRESS_ITEMS=1` 才发结构化 item（`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，微信客户端目前不渲染，见 [5. daemon](05-daemon.md#收发富媒体与消息类型)）。
 
 > **心跳注意**：`index.ts` 每 `HEARTBEAT_DEFAULT_MS`（15s）检查 `lastProgressAt`，只有 `session/update` 帧会刷新它。纯推理/committed-only 的 agent 长时间无帧时，会连续发「还在思考」，占微信约 10 条连发额度。
 >

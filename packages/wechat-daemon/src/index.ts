@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import {
   getUpdates,
   sendMessage,
@@ -60,9 +61,16 @@ import {
 import {
   attachmentFailureNote,
   extractAttachments,
+  isSensitiveFileError,
   resolveAttachment,
   type AttachmentFailure,
 } from "./daemon/messaging/attachments.js";
+import {
+  rememberPendingSensitive,
+  sensitiveAllowActive,
+  takePendingSensitive,
+  type PendingSensitiveAttachment,
+} from "./daemon/messaging/sensitive-allow.js";
 import {
   pruneInboundMedia,
   safeMediaFileName,
@@ -164,6 +172,7 @@ async function reply(
   text: string,
   state: number = MessageState.FINISH,
   fallbackToken?: string,
+  runId?: string,
 ): Promise<void> {
   const send = (token: string | undefined) => {
     const req: SendMessageReq = {
@@ -175,6 +184,8 @@ async function reply(
         message_state: state,
         item_list: [{ type: MessageItemType.TEXT, text_item: { text } }],
         context_token: token,
+        // 同一回合的所有外发消息共用 run_id，客户端据此把进度/工具 item 归到当前回复（官方 2.4.10 行为）。
+        run_id: runId,
       },
     };
     return sendMessage({ baseUrl: account.baseUrl, token: account.botToken, body: req });
@@ -220,9 +231,17 @@ function handleSendError(e: unknown, account: AccountData): void {
 
 // iLink 在用户回复前能连续发送的消息数上限（实测约 10，可调）。
 const CONSEC_SEND_LIMIT = Number(process.env.WECHAT_CONSEC_SEND_LIMIT) || 10;
-// 工具进度用结构化 item（11=start/12=result）而不是文本；发送失败自动回退文本。
-// 默认开启；设 WECHAT_TOOL_PROGRESS_ITEMS=0 可退回纯文本（兼容不认识该 item 的客户端）。
-const TOOL_PROGRESS_ITEMS = process.env.WECHAT_TOOL_PROGRESS_ITEMS !== "0";
+// 工具进度默认发文本「步骤 N」。结构化 item（11/12）**默认关闭**：官方 2.4.10 虽然定义了它，但真机微信客户端
+// 不渲染（服务端 200、空响应、不分配 message_id；2026-08 第三方 SDK 与 2026-10 galley 均复现），发了只会白占带宽/打断 typing。
+// 设 WECHAT_TOOL_PROGRESS_ITEMS=1 可提前启用（协议已对齐 FINISH + run_id，等微信端开放即可用）。
+const TOOL_PROGRESS_ITEMS = process.env.WECHAT_TOOL_PROGRESS_ITEMS === "1";
+// 工具完成提示（✅ 步骤 N）只在工具耗时达到该值时发：短工具只留开始时的一条，避免每条命令都刷出两条消息。
+const TOOL_END_NOTICE_MIN_MS = 10_000;
+
+/** 工具从开始到结束的耗时是否值得再发一条完成提示。导出仅供单测。 */
+export function shouldSendToolEnd(startedAt: number, endedAt: number): boolean {
+  return endedAt - startedAt >= TOOL_END_NOTICE_MIN_MS;
+}
 // 静默期心跳默认 15s（配置可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。
 const HEARTBEAT_DEFAULT_MS = 15_000;
 
@@ -236,7 +255,7 @@ const isParamError = (e: unknown): boolean => e instanceof ILinkError && e.kind 
 function createSendPipeline(account: AccountData): SendPipeline {
   return new SendPipeline({
     sendText: (to, ctx, text, state, fallbackToken) =>
-      reply(account, to, ctx, text, state, fallbackToken),
+      reply(account, to, ctx, text, state, fallbackToken, activeTurn?.runId),
     sendImage: (to, ctx, image) =>
       sendImage({
         baseUrl: account.baseUrl,
@@ -263,6 +282,7 @@ function createSendPipeline(account: AccountData): SendPipeline {
         item,
         contextToken: ctx,
         state,
+        runId: activeTurn?.runId,
       });
     },
     sendFileMd: async (to, ctx, text) => {
@@ -287,7 +307,7 @@ function createSendPipeline(account: AccountData): SendPipeline {
 }
 
 // 当前进行中回合（worker 串行，只有一个）：记录发往用户与所用 token（token 可被「继续」更新）。
-let activeTurn: { from: string; token: string | undefined } | null = null;
+let activeTurn: { from: string; token: string | undefined; runId: string } | null = null;
 
 /** 从解密后的字节嗅探图片 MIME。 */
 function sniffMime(b: Buffer): string {
@@ -319,14 +339,14 @@ async function handleMessage(
     .map((a) => a.item);
   const otherAttachments = attachments.filter((a) => a.kind !== "image");
   // activeTurn 只存当前回合的 from/token；连续发送计数用按用户、跨回合的 budgetOf(to)（不在回合开始清零）。
-  activeTurn = { from: to, token: ctx };
+  activeTurn = { from: to, token: ctx, runId: randomUUID() };
   const cx = () => activeTurn?.token ?? ctx;
   await setTyping(account, to, cx(), 1);
-  // 处理期间每 5s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了。
-  // 间隔需小于客户端对 typing 的自动过期（约 5–8s），否则中间会出现指示闪烁的空洞。
+  // 处理期间每 3s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了。
+  // 客户端自动过期约 5–8s；5s 的旧间隔在 getConfig+sendTyping 的网络抖动下会踩到过期边界，出现「消失一阵才回来」。
   const keepAlive = setInterval(() => {
     void setTyping(account, to, cx(), 1).catch(() => {});
-  }, 5000);
+  }, 3000);
 
   const t0 = Date.now();
   let lastProgressAt = t0; // 心跳基线：任意帧（含思考/工具活动）都会刷新
@@ -357,8 +377,15 @@ async function handleMessage(
     Number(process.env.WECHAT_BRAIN_HEARTBEAT_MS) || heartbeatMs() || HEARTBEAT_DEFAULT_MS;
   // iLink 限制 bot 在用户回复前连续发送的消息数（实测约 10，超出被 ret=-2 拒）。计数按用户跨回合维护(budgetOf)。
   // 当已发到「上限-2」(默认第8条)后，下一条进度改为「即将达上限」提示并进入等待，把最后一条额度留给最终答案；用户回复「继续」(或发任何消息)会重置计数恢复发送（见 poller）。
-  /** 发任意进度：统一处理待发确认、额度、接近上限的暂停提示与 typing 续命。 */
-  const emitProgress = (send: () => Promise<unknown>, opts?: { ackOnly?: boolean }): boolean => {
+  /**
+   * 发任意进度：统一处理待发确认、额度、接近上限的暂停提示与 typing 续命。
+   * `countBudget: false` 用于结构化工具 item：它们不占「用户可见消息」的连发额度（真机客户端不渲染时尤其不能白占，
+   * 否则会只发 3 条可见消息就提示接近上限）；仍受 `awaiting` 暂停约束。
+   */
+  const emitProgress = (
+    send: () => Promise<unknown>,
+    opts?: { ackOnly?: boolean; countBudget?: boolean },
+  ): boolean => {
     cancelAck(); // 任何进度都顶替待发的即时确认
     lastProgressAt = Date.now();
     const b = sends.budgetOf(to);
@@ -372,7 +399,8 @@ async function handleMessage(
         .then(() => setTyping(account, to, cx(), 1))
         .catch(() => {});
     };
-    if (b.count >= CONSEC_SEND_LIMIT - 2) {
+    const countsBudget = opts?.countBudget !== false;
+    if (countsBudget && b.count >= CONSEC_SEND_LIMIT - 2) {
       b.count += 1;
       b.awaiting = true;
       sendWithTyping(() =>
@@ -385,7 +413,7 @@ async function handleMessage(
       );
       return false;
     }
-    b.count += 1;
+    if (countsBudget) b.count += 1;
     sendWithTyping(send);
     return true;
   };
@@ -549,7 +577,7 @@ async function handleMessage(
     answerStarted = false; // 每次重试重新判断本轮正文是否开始，避免上一轮失败尝试的残留
     let step = 0;
     let lastToolStartAt = 0;
-    const toolSteps = new Map<string, number>();
+    const toolSteps = new Map<string, { step: number; startedAt: number }>();
     const toolName = (ev: { title?: string; kind?: string }) =>
       ev.title?.trim() || ev.kind?.trim() || "tool";
     const toolStatus = (status?: string) =>
@@ -564,28 +592,32 @@ async function handleMessage(
           const key = ev.toolCallId ?? ev.title ?? "tool";
           if (isEnd) {
             // 只给「已发过 start」的工具发结果：start 被节流时不能空降一个编号不对的 ✅。
-            const n = toolSteps.get(key);
-            if (n === undefined) return;
+            const entry = toolSteps.get(key);
+            if (entry === undefined) return;
             toolSteps.delete(key);
+            // 短工具只留开始那一条；只有 ≥10s 的工具才值得再发完成提示，避免刷屏与占用连发额度。
+            if (!shouldSendToolEnd(entry.startedAt, Date.now())) return;
             const desc = toolSummary(ev.kind, ev.title, ev.purpose, ev.detail);
-            const text = `✅ 步骤 ${n}：${desc}`;
+            const text = `✅ 步骤 ${entry.step} 完成：${desc}`;
             if (TOOL_PROGRESS_ITEMS) {
-              emitProgress(() =>
-                sends.sendItemOrdered(
-                  to,
-                  cx(),
-                  {
-                    type: MessageItemType.TOOL_CALL_RESULT,
-                    create_time_ms: Date.now(),
-                    is_completed: true,
-                    tool_call_result_item: {
-                      tool_name: toolName(ev),
-                      tool_call_id: ev.toolCallId,
-                      status: toolStatus(ev.status),
+              emitProgress(
+                () =>
+                  sends.sendItemOrdered(
+                    to,
+                    cx(),
+                    {
+                      type: MessageItemType.TOOL_CALL_RESULT,
+                      create_time_ms: Date.now(),
+                      is_completed: true,
+                      tool_call_result_item: {
+                        tool_name: toolName(ev),
+                        tool_call_id: ev.toolCallId,
+                        status: toolStatus(ev.status),
+                      },
                     },
-                  },
-                  text,
-                ),
+                    text,
+                  ),
+                { countBudget: false },
               );
             } else {
               sendProgress(text);
@@ -594,25 +626,28 @@ async function handleMessage(
           }
           // start 每 15s 最多一条防刷屏；end 不参与这个间隔（它与自己的 start 成对）。
           if (Date.now() - lastToolStartAt < 15000) return;
+          const toolStartedAt = Date.now();
           const nextStep = step + 1;
           const desc = toolSummary(ev.kind, ev.title, ev.purpose, ev.detail);
-          const text = `${toolIcon(ev.kind)} 步骤 ${nextStep}：${desc}`;
+          const text = `${toolIcon(ev.kind)} 步骤 ${nextStep} 开始：${desc}`;
           const emitted = TOOL_PROGRESS_ITEMS
-            ? emitProgress(() =>
-                sends.sendItemOrdered(
-                  to,
-                  cx(),
-                  {
-                    type: MessageItemType.TOOL_CALL_START,
-                    create_time_ms: Date.now(),
-                    is_completed: false,
-                    tool_call_start_item: {
-                      tool_name: toolName(ev),
-                      tool_call_id: ev.toolCallId,
+            ? emitProgress(
+                () =>
+                  sends.sendItemOrdered(
+                    to,
+                    cx(),
+                    {
+                      type: MessageItemType.TOOL_CALL_START,
+                      create_time_ms: Date.now(),
+                      is_completed: false,
+                      tool_call_start_item: {
+                        tool_name: toolName(ev),
+                        tool_call_id: ev.toolCallId,
+                      },
                     },
-                  },
-                  text,
-                ),
+                    text,
+                  ),
+                { countBudget: false },
               )
             : sendProgress(text);
           // 额度用尽/等待「继续」时 emitProgress 没真正发出：不占步骤号，也不记 start，
@@ -620,7 +655,7 @@ async function handleMessage(
           if (!emitted) return;
           lastToolStartAt = Date.now();
           step = nextStep; // 只在真正发出时递增，保证步骤号连续（不因节流跳号）
-          toolSteps.set(key, step);
+          toolSteps.set(key, { step: nextStep, startedAt: toolStartedAt });
         } else if (ev.type === "thinking") {
           lastProgressAt = Date.now();
         } else if (ev.type === "answer") {
@@ -703,13 +738,23 @@ async function handleMessage(
   // 发文件/视频：显式 [附件]/[文件]/[视频](绝对路径)，逐个作为独立媒体消息发出。
   const { attachments: replyAttachments, text: cleanedText } = extractAttachments(cleaned);
   const failedAttachments: AttachmentFailure[] = [];
+  const blockedSensitive: PendingSensitiveAttachment[] = [];
   for (const attachment of replyAttachments) {
     let resolved;
     try {
-      resolved = resolveAttachment(attachment);
+      // 「允许敏感文件」窗口内跳过凭证/状态名单；其余闸门（绝对路径/UNC/数据流/大小）照旧。
+      resolved = resolveAttachment(attachment, undefined, {
+        allowSensitive: sensitiveAllowActive(),
+      });
     } catch (e) {
       log("attachment rejected:", attachment.src, String(e));
-      failedAttachments.push({ src: attachment.src, reason: "read" });
+      if (isSensitiveFileError(e)) {
+        // 先拦截、后放行：记进待补发队列，用户回「允许敏感文件」时直接补发，不用让大脑重发一遍。
+        blockedSensitive.push({ src: attachment.src, kind: attachment.kind });
+        failedAttachments.push({ src: attachment.src, reason: "sensitive" });
+      } else {
+        failedAttachments.push({ src: attachment.src, reason: "read" });
+      }
       continue;
     }
     if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
@@ -720,12 +765,18 @@ async function handleMessage(
     sends.budgetOf(to).count += 1; // 文件/视频也占一条连发额度
     if (await sends.sendFileOrdered(to, cx(), resolved.data, resolved.fileName, resolved.kind)) {
       log(
-        `sent attachment (${resolved.kind}): ${resolved.fileName} ${resolved.data.length}B <- ${attachment.src.slice(0, 80)}`,
+        `sent attachment (${resolved.kind}${resolved.sensitiveBypassed ? "，敏感文件已临时放行" : ""}): ${resolved.fileName} ${resolved.data.length}B <- ${attachment.src.slice(0, 80)}`,
       );
     } else {
       log("send attachment failed:", attachment.src);
       failedAttachments.push({ src: attachment.src, reason: "send" });
     }
+  }
+  if (blockedSensitive.length > 0) {
+    const n = rememberPendingSensitive(to, blockedSensitive);
+    log(
+      `blocked sensitive attachments: ${blockedSensitive.length}（待补发 ${n} 条，回复「允许敏感文件」）`,
+    );
   }
 
   let finalText = cleanedText;
@@ -940,6 +991,48 @@ async function pollerLoop(
   }
 }
 
+/**
+ * 「允许敏感文件」的补发：把之前被敏感名单拦下的附件重新校验并逐个发出。
+ * 路径来自内存队列（30 分钟 TTL），补发时仍走 resolveAttachment 的完整校验（UNC/数据流/大小）。
+ */
+async function releasePendingSensitive(
+  sends: SendPipeline,
+  to: string,
+  ctx: string | undefined,
+): Promise<{ sent: number; failed: number }> {
+  const items = takePendingSensitive(to);
+  let sent = 0;
+  let failed = 0;
+  for (const item of items) {
+    let resolved;
+    try {
+      resolved = resolveAttachment({ src: item.src, kind: item.kind }, undefined, {
+        allowSensitive: true,
+      });
+    } catch (e) {
+      log("pending attachment rejected:", item.src, String(e));
+      failed += 1;
+      continue;
+    }
+    if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
+      log("pending attachment skipped (连发额度):", item.src);
+      failed += 1;
+      continue;
+    }
+    sends.budgetOf(to).count += 1; // 与普通附件一样占一条连发额度
+    if (await sends.sendFileOrdered(to, ctx, resolved.data, resolved.fileName, resolved.kind)) {
+      sent += 1;
+      log(
+        `sent pending attachment (${resolved.kind}${resolved.sensitiveBypassed ? "，敏感文件已临时放行" : ""}): ${resolved.fileName} ${resolved.data.length}B <- ${item.src.slice(0, 80)}`,
+      );
+    } else {
+      failed += 1;
+      log("send pending attachment failed:", item.src);
+    }
+  }
+  return { sent, failed };
+}
+
 /** 快车道的单条处理：控制指令 + 任务指令。它们不经过大脑，因此不必排在长回合后面。 */
 async function handleFastItem(
   account: AccountData,
@@ -997,7 +1090,13 @@ async function handleFastItem(
     };
     let r: string;
     try {
-      r = await handleControl(ctrl, from, { owner, notify, notifyFile });
+      r = await handleControl(ctrl, from, {
+        owner,
+        notify,
+        notifyFile,
+        // 先拦截、后放行：开窗后把队列里的附件立即补发（补发失败只计数，不阻断答复）。
+        releaseSensitive: () => releasePendingSensitive(sends, from, latestToken() ?? token),
+      });
     } catch (e) {
       r = "处理指令出错：" + String(e);
     }

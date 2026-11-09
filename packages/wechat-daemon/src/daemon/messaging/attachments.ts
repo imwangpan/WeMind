@@ -127,6 +127,23 @@ export function isSensitiveFilePath(file: string): boolean {
   return false;
 }
 
+/** 命中敏感名单时抛这个类型，调用方据此把附件记进「允许敏感文件」的待补发队列。 */
+export class SensitiveFileError extends Error {
+  readonly code = "SENSITIVE_FILE";
+  constructor(readonly fileName: string) {
+    super(`拒绝发送敏感文件：${fileName}`);
+    this.name = "SensitiveFileError";
+  }
+}
+
+/** 是否为敏感名单拒绝（兼容打包后跨副本的判定：先看 code，再看 instanceof）。 */
+export function isSensitiveFileError(e: unknown): e is SensitiveFileError {
+  return (
+    e instanceof SensitiveFileError ||
+    (typeof e === "object" && e !== null && (e as { code?: unknown }).code === "SENSITIVE_FILE")
+  );
+}
+
 export type ExtractedAttachment = {
   src: string;
   /** 由链接标签决定的类型；`附件` 交给扩展名判断。 */
@@ -174,6 +191,8 @@ export type ResolvedAttachment = {
   data: Buffer;
   fileName: string;
   kind: MediaKind;
+  /** 命中了敏感名单、但被「允许敏感文件」窗口放行（调用方据此记日志，便于事后审计）。 */
+  sensitiveBypassed?: boolean;
 };
 
 /** file:// URL 只接受本机（空 host 或 localhost）；带 host 的一律是网络路径。 */
@@ -218,6 +237,7 @@ function assertLocalPath(p: string, src: string): void {
 export function resolveAttachment(
   attachment: ExtractedAttachment,
   maxBytes: number = DEFAULT_MAX_BYTES,
+  opts: { allowSensitive?: boolean } = {},
 ): ResolvedAttachment {
   const raw = localFilePath(attachment.src);
   assertLocalPath(raw, attachment.src);
@@ -230,16 +250,23 @@ export function resolveAttachment(
   }
   const real = fs.realpathSync(raw);
   assertLocalPath(real, attachment.src);
-  if (isSensitiveFilePath(real)) throw new Error(`拒绝发送敏感文件：${path.basename(real)}`);
+  // 「允许敏感文件」窗口只跳过这张名单；网络路径/数据流/大小上限在前后照旧执行。
+  const sensitive = isSensitiveFilePath(real);
+  if (sensitive && !opts.allowSensitive) throw new SensitiveFileError(path.basename(real));
   const st = fs.statSync(real);
   if (!st.isFile()) throw new Error(`不是文件：${real}`);
   if (st.size > maxBytes) throw new Error(`文件过大 ${st.size} > ${maxBytes}`);
   const fileName = path.basename(real);
   const kind = attachment.kind ?? classifyMediaByName(fileName);
-  return { data: fs.readFileSync(real), fileName, kind };
+  return {
+    data: fs.readFileSync(real),
+    fileName,
+    kind,
+    sensitiveBypassed: sensitive && opts.allowSensitive === true,
+  };
 }
 
-export type AttachmentFailureReason = "read" | "send" | "budget";
+export type AttachmentFailureReason = "read" | "send" | "budget" | "sensitive";
 
 export type AttachmentFailure = {
   src: string;
@@ -253,8 +280,9 @@ export function attachmentFailureNote(failures: AttachmentFailure[]): string {
     read: "没能读取/校验通过",
     send: "没能发出去",
     budget: "因接近微信连续发送上限没发",
+    sensitive: "被敏感文件名单拦下（回复「允许敏感文件」可补发）",
   };
-  return (["read", "send", "budget"] as const)
+  return (["read", "send", "budget", "sensitive"] as const)
     .map((reason) => {
       const items = failures.filter((f) => f.reason === reason).map((f) => f.src);
       return items.length

@@ -55,7 +55,7 @@
 
 - [docs/设计文档/](docs/设计文档/): Plan C design, MVP, CLI-ization design (historical); the current doc-guard design is listed above.
 - [docs/审查与质量记录/](docs/审查与质量记录/): 2026-11-02 audit snapshot, 2026-11-04 archive list, 2026-11-05 source-layout refactor design (not implemented), and the 2026-11-05 audit lessons.
-- [docs/待办与后续计划/](docs/待办与后续计划/): deferred work — task numbering and record size (describes current behavior), and `wemind start` inheriting `WECHAT_DATA_DIR` (known bug, fix designed but not applied).
+- [docs/待办与后续计划/](docs/待办与后续计划/): deferred work — task numbering and record size (describes current behavior), quote-message text cache (`ref_msg` often carries only `svr_id`), and `wemind start` inheriting `WECHAT_DATA_DIR` (known bug, fix designed but not applied).
 
 ## Agent integration
 

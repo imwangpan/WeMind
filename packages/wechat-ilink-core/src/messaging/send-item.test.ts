@@ -40,6 +40,7 @@ describe("sendItem", () => {
       to: "user-1",
       contextToken: "ctx-1",
       state: MessageState.GENERATING,
+      runId: "run-1",
       item: { type: MessageItemType.TOOL_CALL_START, tool_call_start_item: { tool_name: "read" } },
     });
     expect(seen).toHaveLength(1);
@@ -52,6 +53,7 @@ describe("sendItem", () => {
         message_type: number;
         message_state: number;
         context_token: string;
+        run_id?: string;
         item_list: Array<{ type: number }>;
       };
     };
@@ -61,6 +63,7 @@ describe("sendItem", () => {
     expect(body.msg.message_type).toBe(MessageType.BOT);
     expect(body.msg.message_state).toBe(MessageState.GENERATING);
     expect(body.msg.context_token).toBe("ctx-1");
+    expect(body.msg.run_id).toBe("run-1");
     expect(body.msg.item_list).toEqual([
       { type: MessageItemType.TOOL_CALL_START, tool_call_start_item: { tool_name: "read" } },
     ]);

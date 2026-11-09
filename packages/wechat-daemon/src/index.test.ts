@@ -8,6 +8,7 @@ import {
   parseControl,
   parseTaskControl,
   shouldResumeInBrainQueue,
+  shouldSendToolEnd,
 } from "./index.js";
 
 describe("parseControl（daemon 直接处理的控制指令）", () => {
@@ -171,6 +172,8 @@ describe("isFastLane（控制/任务指令不排在大脑回合后面）", () =>
       "会话列表",
       "加载 github",
       "交接",
+      "允许敏感文件",
+      "允许敏感文件 5",
     ])
       expect(isFastLane(t, noTasks), t).toBe(true);
   });
@@ -206,5 +209,17 @@ describe("isFastLane（控制/任务指令不排在大脑回合后面）", () =>
     expect(isFastLane("任务：读一下", noTasks, 2)).toBe(false);
     expect(isFastLane("继续", { awaiting: 1, active: true, interrupted: 0 }, 1)).toBe(false);
     expect(isFastLane("帮助", noTasks, 0)).toBe(true);
+  });
+});
+
+describe("shouldSendToolEnd（工具完成提示的 10s 门槛）", () => {
+  it("短工具不发 ✅（只留开始那条）", () => {
+    expect(shouldSendToolEnd(1_000, 1_999)).toBe(false);
+    expect(shouldSendToolEnd(1_000, 10_999)).toBe(false);
+  });
+
+  it("达到 10s 才发 ✅", () => {
+    expect(shouldSendToolEnd(1_000, 11_000)).toBe(true);
+    expect(shouldSendToolEnd(1_000, 61_000)).toBe(true);
   });
 });

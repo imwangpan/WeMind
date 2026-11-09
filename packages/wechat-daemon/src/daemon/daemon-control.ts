@@ -28,6 +28,7 @@ import {
   saveHandoff,
 } from "../sessions/handoff.js";
 import { LONG_REPLY_THRESHOLD } from "./messaging/md-reply.js";
+import { armSensitiveAllow } from "./messaging/sensitive-allow.js";
 import { hasActiveTask, taskPoolSummary } from "../tasks/task-manager.js";
 import { killIdle as killIdleConns } from "../tasks/worker-pool.js";
 
@@ -122,6 +123,8 @@ type ControlCtx = {
   notify: (text: string) => Promise<void>;
   /** 补发一份长内容（交接摘要这类「要给用户留着」的文本走 .md 文件，不刷屏）。 */
   notifyFile?: (text: string) => Promise<void>;
+  /** 「允许敏感文件」开窗后补发之前被拦下的附件；快车道注入，CLI 路径没有。 */
+  releaseSensitive?: () => Promise<{ sent: number; failed: number }>;
 };
 
 /**
@@ -198,6 +201,29 @@ export async function handleControl(
       ? setTaskBrain(c.target)
       : `当前默认任务大脑：${agentLine(getAgent("worker"))}。切换用 \`切换任务大脑 <agent 名>\`。`;
   if (c.kind === "help") return renderHelp(userId === ctx.owner ? "owner" : "user", "wechat");
+  if (c.kind === "allowSensitive") {
+    const { until, minutes } = armSensitiveAllow(c.minutes);
+    const at = new Date(until).toLocaleTimeString("zh-CN", { hour12: false });
+    // 先开窗再补发：之前被拦下的附件不用让大脑重新发一遍。补发出错不改变「窗口已开」这个事实。
+    let extra = "";
+    if (ctx.releaseSensitive) {
+      try {
+        const r = await ctx.releaseSensitive();
+        if (r.sent > 0)
+          extra = `\n📎 已补发 ${r.sent} 个之前被拦下的附件${r.failed ? `（另有 ${r.failed} 个失败）` : ""}。`;
+        else if (r.failed > 0)
+          extra = `\n📎 之前拦下的 ${r.failed} 个附件补发失败（文件可能已移动、超出上限或额度不足）。`;
+      } catch (e) {
+        log("release pending sensitive failed:", String(e));
+        extra = "\n（补发之前拦下的附件时出错，可让大脑重新发一次。）";
+      }
+    }
+    return (
+      `✅ 已允许发送敏感文件，窗口 ${minutes} 分钟（到 ${at}）。${extra}\n` +
+      "这期间大脑回复里的 [附件] 链接可以发 account.json 等凭证/状态文件；" +
+      "网络路径、NTFS 数据流与大小上限仍然生效。窗口只在本 daemon 进程内，重启即失效。"
+    );
+  }
   if (c.kind === "handoff") return await runHandoff(userId, ctx);
   // 兜底：指令表新增了 kind 但这里还没接通时（正常情况下 TS 会先把这里判成不可达），别静默吞掉
   return `「${(c as { kind: string }).kind}」这条指令还没接通（当前版本请先用 CLI 对应命令）。`;

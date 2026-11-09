@@ -196,7 +196,8 @@ wemind task-stop 2                                         # 单条；task-stop 
 - **文件/视频/无转写语音（2026-11-09）**：给 bot 发一个文件、一段视频、一条语音 → prompt 里应带 `<BRAIN_HOME>/media/inbound/` 下的本地绝对路径；文件确实存在且大小正确（语音是 **WAV**，24kHz 单声道）。有微信转写的语音不发附件，直接按文本进 prompt。
 - **引用消息（2026-11-09）**：回复某条文本消息 → prompt 里应有 `[引用消息] 标题 | 正文`；只带 `svr_id` 的引用给「内容未缓存」占位，不报错。
 - **出站文件/视频（2026-11-09）**：让大脑回复一行 `[附件](file:///<绝对路径>)`（或 `[文件](...)` / `[视频](...)`；路径含 `)` 用 `[附件](<...>)`）→ 微信应收到对应文件/视频；路径不存在、是目录、超过 `WECHAT_OUTBOUND_FILE_MAX_MB`、命中敏感文件 denylist（`account.json`/`state.json`/`.env`/密钥/`brain-home/.credentials.json`/`.auth/user`/`~/.claude/settings.json` 等），或是 `file://host/...`/UNC 网络路径（含软链接目标）、Windows `account.json::$DATA` 数据流时，回复里应有失败说明而不是静默丢附件。
-- **工具进度 item（2026-11-09）**：让大脑跑一条慢命令 → 微信里应看到工具步骤；它默认是结构化 item（`TOOL_CALL_START=11`/`TOOL_CALL_RESULT=12`）。若客户端不认，设 `WECHAT_TOOL_PROGRESS_ITEMS=0` 重启 daemon，应退回文本「步骤 N」。
+- **敏感文件临时放行（2026-11-09）**：先让大脑发 `account.json` → 被拒，回复附注「被敏感文件名单拦下（回复「允许敏感文件」可补发）」；回「允许敏感文件」→ 之前那个附件直接补发（日志 `sent pending attachment (... 敏感文件已临时放行)`），无需大脑重发；也可以先发「允许敏感文件」再让大脑发（日志 `sent attachment (... 敏感文件已临时放行)`）。窗口过期或重启 daemon 后再发 → 恢复 `拒绝发送敏感文件`。窗口内 `file://attacker/...`、`::$DATA`、超 25MB 仍应被拒。
+- **工具进度（2026-11-09）**：让大脑跑一条慢命令（例如连续几次 PowerShell `Start-Sleep`）→ 微信里应看到**文本**「🔧 步骤 N 开始」；只有耗时 ≥10s 的工具才会再出现「✅ 步骤 N 完成」，短命令只有开始一条。结构化 item（`TOOL_CALL_START=11`/`TOOL_CALL_RESULT=12`）默认关闭：官方虽然定义了它，但微信客户端不渲染（服务端 200/空响应/不分配 `message_id`，第三方 SDK 与 galley 均复现）；设 `WECHAT_TOOL_PROGRESS_ITEMS=1` 可提前启用（代码已对齐 `FINISH` + `run_id`，且不占连发额度）。
 - **uint64 消息 ID（2026-11-09）**：连发两条消息，日志/`state.json` 的 `lastMessageId` 必须是字符串且两条 ID 不同；旧版会舍入成同一个数。
 
 ### MCP
@@ -239,7 +240,7 @@ MCP
 | 21 | 入站富媒体 | 文件/视频/无转写语音落盘到 `brain-home/media/inbound/`，prompt 带绝对路径；有转写语音按文本处理 |
 | 22 | 引用消息 | 引用后 prompt 带 `[引用消息] 标题 | 正文`（或占位），不中断回合 |
 | 23 | 出站附件 | `[附件]`/`[文件]`/`[视频]` 送达；非法/敏感/超限路径有失败说明 |
-| 24 | 工具进度 item | 默认发 11/12；`WECHAT_TOOL_PROGRESS_ITEMS=0` 退回文本「步骤 N」 |
+| 24 | 工具进度 | 默认发文本「步骤 N」；`WECHAT_TOOL_PROGRESS_ITEMS=1` 才发结构化 11/12（客户端目前不渲染） |
 | 25 | 消息 ID 精度 | 连发两条，`state.json` 的字符串 ID 不同、不丢消息 |
 
 ### 7.1 控制面九项（1.2.0 新增，手工）
