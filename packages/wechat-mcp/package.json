@@ -1,6 +1,6 @@
 {
   "name": "@wemind/wechat-mcp",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "MCP server for WeChat iLink Bot - lets any MCP-compatible AI agent send/receive WeChat messages.",
   "type": "module",
   "repository": {

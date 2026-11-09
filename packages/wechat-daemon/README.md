@@ -24,7 +24,7 @@
 
 ```bash
 npm i -g @wemind/cli     # 安装后得到 wemind 命令
-wemind version           # → wemind 1.5.1 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
+wemind version           # → wemind 1.6.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
 wemind list              # 查看账号与运行状态
 ```
 
