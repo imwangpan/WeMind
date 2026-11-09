@@ -109,12 +109,12 @@ describe("apiFetch（经 sendMessage 间接验证）", () => {
       res.writeHead(200);
       res.end("OK");
     };
-    await expect(sendMessage({ baseUrl, token: "t", body: { msg: {} } })).resolves.toBeUndefined();
+    await expect(sendMessage({ baseUrl, token: "t", body: { msg: {} } })).resolves.toEqual({});
   });
 
   it("HTTP 200 + 空响应体 → 视为成功", async () => {
     handler = (_req, res) => res.end("");
-    await expect(sendMessage({ baseUrl, token: "t", body: { msg: {} } })).resolves.toBeUndefined();
+    await expect(sendMessage({ baseUrl, token: "t", body: { msg: {} } })).resolves.toEqual({});
   });
 
   it("HTTP 200 但 ret≠0 → 抛 ILinkError（防「假成功」）", async () => {
@@ -128,7 +128,15 @@ describe("apiFetch（经 sendMessage 间接验证）", () => {
 
   it("HTTP 200 且 ret=0 → 成功", async () => {
     handler = (_req, res) => res.end(JSON.stringify({ ret: 0 }));
-    await expect(sendMessage({ baseUrl, token: "t", body: { msg: {} } })).resolves.toBeUndefined();
+    await expect(sendMessage({ baseUrl, token: "t", body: { msg: {} } })).resolves.toEqual({
+      ret: 0,
+    });
+  });
+
+  it("sendMessage 的 uint64 message_id 按字符串无损返回", async () => {
+    handler = (_req, res) => res.end('{"ret":0,"message_id":7525055299038555001}');
+    const resp = await sendMessage({ baseUrl, token: "t", body: { msg: {} } });
+    expect(resp.message_id).toBe("7525055299038555001");
   });
 
   it("ret=0 但 errcode=-14 → 仍抛 ILinkError（不能被 ret 掩盖）", async () => {
@@ -216,7 +224,42 @@ describe("getUpdates（长轮询超时语义）", () => {
 
     const resp = await getUpdates({ baseUrl, token: "t", updatesBuf: "c1", timeoutMs: 5000 });
     expect(resp.msgs).toHaveLength(1);
+    expect(resp.msgs?.[0].message_id).toBe("7");
     expect(resp.get_updates_buf).toBe("c2");
+  });
+
+  it("相邻 uint64 ID 不因 JSON.parse 精度丢失而折叠", async () => {
+    handler = (_req, res) =>
+      res.end(
+        '{"ret":0,"msgs":[' +
+          '{"message_id":7525055299038555000},' +
+          '{"message_id":7525055299038555001},' +
+          '{"message_id":7525055299038555002}' +
+          "]}",
+      );
+
+    const resp = await getUpdates({ baseUrl, token: "t", timeoutMs: 5000 });
+    expect(resp.msgs?.map((m) => m.message_id)).toEqual([
+      "7525055299038555000",
+      "7525055299038555001",
+      "7525055299038555002",
+    ]);
+  });
+
+  it("只改写 ID 字段，不改写字符串内容或其它数字字段", async () => {
+    handler = (_req, res) =>
+      res.end(
+        '{"ret":0,"msgs":[{"message_id": 42,"seq":42,"item_list":[{"msg_id":43,' +
+          '"ref_msg":{"svr_id":44},"text_item":{"text":"message_id: 99"}}]}]}',
+      );
+
+    const resp = await getUpdates({ baseUrl, token: "t", timeoutMs: 5000 });
+    const msg = resp.msgs?.[0];
+    expect(msg?.message_id).toBe("42");
+    expect(msg?.seq).toBe(42);
+    expect(msg?.item_list?.[0].msg_id).toBe("43");
+    expect(msg?.item_list?.[0].ref_msg?.svr_id).toBe("44");
+    expect(msg?.item_list?.[0].text_item?.text).toBe("message_id: 99");
   });
 
   it("ret≠0 且无 errcode → 抛 ILinkError（不再静默当成空轮询）", async () => {

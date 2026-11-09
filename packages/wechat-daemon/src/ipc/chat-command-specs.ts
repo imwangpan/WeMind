@@ -38,6 +38,8 @@ export type ChatCommand =
   | { kind: "workerBrain"; target?: string }
   /** 生成切换用摘要并写入磁盘。 */
   | { kind: "handoff" }
+  /** 临时放行敏感文件（凭证/状态文件）的外发窗口。 */
+  | { kind: "allowSensitive"; minutes?: number }
   | { kind: "help" };
 
 export type TaskCommand =
@@ -56,6 +58,7 @@ export const OWNER_ONLY_KINDS: ReadonlySet<ChatCommand["kind"]> = new Set([
   "brain",
   "workerBrain",
   "handoff",
+  "allowSensitive",
 ]);
 
 export function isOwnerOnly(cmd: ChatCommand): boolean {
@@ -243,6 +246,20 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     cli: "wemind brain handoff",
     brief: "生成当前会话摘要，切换后给新大脑接手",
     match: (t) => (/^(?:交接|会话交接|\/handoff)$/i.test(t) ? { kind: "handoff" } : null),
+  },
+  {
+    id: "misc.allowSensitive",
+    section: "misc",
+    ownerOnly: true,
+    zh: "允许敏感文件 [分钟]",
+    slash: "/allow-sensitive [分钟]",
+    brief: "临时放行凭证/状态文件的外发（默认 2 分钟，最多 30；只在本进程有效）",
+    match: (t) => {
+      // 整串锚定：`允许敏感文件` 才是指令，`允许敏感文件吗` 这类仍是普通消息。
+      const m = t.match(/^(?:允许(?:发送)?敏感文件|\/allow-sensitive)(?:\s*(\d+)\s*分?钟?)?$/i);
+      if (!m) return null;
+      return m[1] ? { kind: "allowSensitive", minutes: Number(m[1]) } : { kind: "allowSensitive" };
+    },
   },
   {
     id: "misc.help",

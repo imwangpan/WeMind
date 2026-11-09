@@ -57,7 +57,9 @@ function specLines(specs: HelpSpec[], mode: "wechat" | "cli"): string[] {
   const out: string[] = [];
   for (const s of specs) {
     if (mode === "cli") {
-      out.push(s.cli ? `  ${s.cli} — ${s.brief}` : `  （无 CLI）${s.zh} — ${s.brief}`);
+      // CLI 帮助只列有 CLI 等价物的条目：加载/卸载 MCP、「允许敏感文件」这类只在微信里操作。
+      if (!s.cli) continue;
+      out.push(`  ${s.cli} — ${s.brief}`);
     } else {
       const alt = s.slash ? ` ｜ ${s.slash}` : "";
       out.push(`  ${s.zh}${alt} — ${s.brief}`);

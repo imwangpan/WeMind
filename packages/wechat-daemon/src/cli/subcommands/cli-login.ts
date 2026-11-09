@@ -183,6 +183,7 @@ async function loginInto(
       staging,
     );
     await QRCode.toFile(png, qr.qrcode_img_content, { width: 480, margin: 2 });
+    // 用 small：半块字符一行装两行模块，宽高各约为默认渲染器的一半（面积约 1/4）；否则登录码会大到一屏放不下（字体比例可能让它偏长方形，PNG 始终是正方形）。
     const term = await QRCode.toString(qr.qrcode_img_content, { type: "terminal", small: true });
     console.log("\n用要登录的微信扫下面的二维码（过期会自动刷新）：\n");
     console.log(term);

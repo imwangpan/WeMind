@@ -99,6 +99,17 @@ describe("大脑指令", () => {
     expect(parseChatCommand("/help")).toEqual({ kind: "help" });
   });
 
+  it("允许敏感文件：默认 / 带分钟 / 斜杠写法；带疑问词仍是普通消息", () => {
+    expect(parseChatCommand("允许敏感文件")).toEqual({ kind: "allowSensitive" });
+    expect(parseChatCommand("允许发送敏感文件 5")).toEqual({ kind: "allowSensitive", minutes: 5 });
+    expect(parseChatCommand("允许敏感文件5分钟")).toEqual({ kind: "allowSensitive", minutes: 5 });
+    expect(parseChatCommand("/allow-sensitive 30")).toEqual({
+      kind: "allowSensitive",
+      minutes: 30,
+    });
+    expect(parseChatCommand("允许敏感文件吗")).toBeNull();
+  });
+
   it("owner-only 判定与指令表一致", () => {
     expect(isOwnerOnly({ kind: "brain" })).toBe(true);
     expect(isOwnerOnly({ kind: "handoff" })).toBe(true);
@@ -119,6 +130,7 @@ describe("大脑指令", () => {
           "切换大脑",
           "切换任务大脑",
           "交接",
+          "允许敏感文件",
           "帮助",
         ][COMMAND_SPECS.indexOf(s)],
       );

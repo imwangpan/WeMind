@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatCommand } from "../ipc/chat-commands.js";
 import type { ResolvedAgent } from "../agents/brain-agents.js";
@@ -95,6 +95,7 @@ vi.mock("../tasks/task-manager.js", () => ({
 }));
 
 import { handleControl, handleControlRequest } from "./daemon-control.js";
+import { resetSensitiveAllow, sensitiveAllowActive } from "./messaging/sensitive-allow.js";
 
 function ctx(owner: string) {
   return { owner, notify: vi.fn(async () => {}) };
@@ -115,6 +116,8 @@ beforeEach(() => {
   m.switchInFlightTarget.mockReturnValue(undefined);
   m.restartForMcpChange.mockResolvedValue(true);
 });
+
+afterEach(() => resetSensitiveAllow());
 
 describe("handleControl（微信控制指令分派）", () => {
   it("help 按「登录者 / 其他发送者」裁剪：ownerOnly 指令只出现在登录者那份", async () => {
@@ -256,6 +259,43 @@ describe("handleControl（微信控制指令分派）", () => {
       expect.objectContaining({ userId: "u1", text: "旧上下文摘要", fromAgent: "pi" }),
       "/fake-dir",
     );
+  });
+
+  it("允许敏感文件：开窗口并如实报告分钟数；默认 2 分钟，超界夹到 30", async () => {
+    const dflt = await handleControl({ kind: "allowSensitive" }, "u1", ctx("u1"));
+    expect(dflt).toContain("已允许发送敏感文件");
+    expect(dflt).toContain("窗口 2 分钟");
+    expect(sensitiveAllowActive()).toBe(true);
+
+    const five = await handleControl({ kind: "allowSensitive", minutes: 5 }, "u1", ctx("u1"));
+    expect(five).toContain("窗口 5 分钟");
+
+    const capped = await handleControl({ kind: "allowSensitive", minutes: 99 }, "u1", ctx("u1"));
+    expect(capped).toContain("窗口 30 分钟");
+  });
+
+  it("允许敏感文件：先拦截后放行时补发之前的附件，并把结果写进答复", async () => {
+    const ok = {
+      ...ctx("u1"),
+      releaseSensitive: vi.fn(async () => ({ sent: 2, failed: 0 })),
+    };
+    const out = await handleControl({ kind: "allowSensitive" }, "u1", ok);
+    expect(ok.releaseSensitive).toHaveBeenCalledTimes(1);
+    expect(out).toContain("已补发 2 个之前被拦下的附件");
+
+    const partial = {
+      ...ctx("u1"),
+      releaseSensitive: vi.fn(async () => ({ sent: 1, failed: 1 })),
+    };
+    expect(await handleControl({ kind: "allowSensitive" }, "u1", partial)).toContain(
+      "另有 1 个失败",
+    );
+
+    const none = {
+      ...ctx("u1"),
+      releaseSensitive: vi.fn(async () => ({ sent: 0, failed: 0 })),
+    };
+    expect(await handleControl({ kind: "allowSensitive" }, "u1", none)).not.toContain("📎");
   });
 
   it("指令表新增了 kind 但分派没接通时给明确提示，不静默吞掉", async () => {

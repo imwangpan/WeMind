@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import {
   getUpdates,
   sendMessage,
@@ -20,20 +21,21 @@ import {
   MessageState,
   MessageType,
   downloadImage,
+  downloadMediaBuffer,
+  MAX_INCOMING_MEDIA_BYTES,
   sendImage,
   sendFile,
+  sendItem as sendMessageItem,
   ILinkError,
   classifyTransportError,
   isAllowed,
   addAllowFrom,
   readAllowFrom,
+  compareMessageIds,
+  maxMessageId,
+  rememberMessageId,
 } from "@wemind/wechat-ilink-core";
-import type {
-  AccountData,
-  ServerState,
-  SendMessageReq,
-  ImageItem,
-} from "@wemind/wechat-ilink-core";
+import type { AccountData, ServerState, SendMessageReq } from "@wemind/wechat-ilink-core";
 import { askBrain, supportsImages, heartbeatMs } from "./acp/acp-brain.js";
 import { agentProblem, BRAIN_CONFIG_EXIT_CODE } from "./agents/brain-agents.js";
 import { switchInFlightTarget } from "./acp/brain-switch.js";
@@ -49,13 +51,32 @@ import { clearControlDirs, markBridgeReady } from "./ipc/control-bridge.js";
 import { ControlInboxRunner } from "./daemon/control-inbox-runner.js";
 import { clearHandoff, handoffPrefix, loadHandoff, takeHandoffFor } from "./sessions/handoff.js";
 import {
-  canSendImage,
+  canSendMedia,
   extractImages,
   imageFailureNote,
   planImageTurn,
   resolveImageBytes,
   type ImageFailure,
 } from "./daemon/messaging/image-reply.js";
+import {
+  attachmentFailureNote,
+  extractAttachments,
+  isSensitiveFileError,
+  resolveAttachment,
+  type AttachmentFailure,
+} from "./daemon/messaging/attachments.js";
+import {
+  rememberPendingSensitive,
+  sensitiveAllowActive,
+  takePendingSensitive,
+  type PendingSensitiveAttachment,
+} from "./daemon/messaging/sensitive-allow.js";
+import {
+  pruneInboundMedia,
+  safeMediaFileName,
+  saveInboundMedia,
+} from "./daemon/messaging/media-store.js";
+import { silkToWav } from "./daemon/messaging/voice.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./daemon/messaging/md-reply.js";
 import { isAuthorizedSender } from "./daemon/access.js";
 import { handleControl, handleControlRequest } from "./daemon/daemon-control.js";
@@ -89,7 +110,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 import {
   brainErrorMessage,
   brainFailurePlan,
-  extractText,
+  extractInbound,
+  formatQuote,
   isFastLane,
   parseBrainEscape,
   parseControl,
@@ -102,6 +124,8 @@ import {
   shouldShowSecondNotice,
   toolIcon,
   toolSummary,
+  type InboundAttachment,
+  type QuoteContext,
   type TaskFacts,
 } from "./daemon/daemon-routing.js";
 
@@ -148,6 +172,7 @@ async function reply(
   text: string,
   state: number = MessageState.FINISH,
   fallbackToken?: string,
+  runId?: string,
 ): Promise<void> {
   const send = (token: string | undefined) => {
     const req: SendMessageReq = {
@@ -159,6 +184,8 @@ async function reply(
         message_state: state,
         item_list: [{ type: MessageItemType.TEXT, text_item: { text } }],
         context_token: token,
+        // 同一回合的所有外发消息共用 run_id，客户端据此把进度/工具 item 归到当前回复（官方 2.4.10 行为）。
+        run_id: runId,
       },
     };
     return sendMessage({ baseUrl: account.baseUrl, token: account.botToken, body: req });
@@ -204,6 +231,17 @@ function handleSendError(e: unknown, account: AccountData): void {
 
 // iLink 在用户回复前能连续发送的消息数上限（实测约 10，可调）。
 const CONSEC_SEND_LIMIT = Number(process.env.WECHAT_CONSEC_SEND_LIMIT) || 10;
+// 工具进度默认发文本「步骤 N」。结构化 item（11/12）**默认关闭**：官方 2.4.10 虽然定义了它，但真机微信客户端
+// 不渲染（服务端 200、空响应、不分配 message_id；2026-08 第三方 SDK 与 2026-10 galley 均复现），发了只会白占带宽/打断 typing。
+// 设 WECHAT_TOOL_PROGRESS_ITEMS=1 可提前启用（协议已对齐 FINISH + run_id，等微信端开放即可用）。
+const TOOL_PROGRESS_ITEMS = process.env.WECHAT_TOOL_PROGRESS_ITEMS === "1";
+// 工具完成提示（✅ 步骤 N）只在工具耗时达到该值时发：短工具只留开始时的一条，避免每条命令都刷出两条消息。
+const TOOL_END_NOTICE_MIN_MS = 10_000;
+
+/** 工具从开始到结束的耗时是否值得再发一条完成提示。导出仅供单测。 */
+export function shouldSendToolEnd(startedAt: number, endedAt: number): boolean {
+  return endedAt - startedAt >= TOOL_END_NOTICE_MIN_MS;
+}
 // 静默期心跳默认 15s（配置可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。
 const HEARTBEAT_DEFAULT_MS = 15_000;
 
@@ -217,7 +255,7 @@ const isParamError = (e: unknown): boolean => e instanceof ILinkError && e.kind 
 function createSendPipeline(account: AccountData): SendPipeline {
   return new SendPipeline({
     sendText: (to, ctx, text, state, fallbackToken) =>
-      reply(account, to, ctx, text, state, fallbackToken),
+      reply(account, to, ctx, text, state, fallbackToken, activeTurn?.runId),
     sendImage: (to, ctx, image) =>
       sendImage({
         baseUrl: account.baseUrl,
@@ -226,6 +264,27 @@ function createSendPipeline(account: AccountData): SendPipeline {
         image,
         contextToken: ctx,
       }),
+    sendFile: (to, ctx, data, fileName, kind) =>
+      sendFile({
+        baseUrl: account.baseUrl,
+        token: account.botToken,
+        to,
+        data,
+        fileName,
+        kind,
+        contextToken: ctx,
+      }),
+    sendItem: async (to, ctx, item, state) => {
+      await sendMessageItem({
+        baseUrl: account.baseUrl,
+        token: account.botToken,
+        to,
+        item,
+        contextToken: ctx,
+        state,
+        runId: activeTurn?.runId,
+      });
+    },
     sendFileMd: async (to, ctx, text) => {
       const { fileName, data } = buildMdReply(text);
       await sendFile({
@@ -248,7 +307,7 @@ function createSendPipeline(account: AccountData): SendPipeline {
 }
 
 // 当前进行中回合（worker 串行，只有一个）：记录发往用户与所用 token（token 可被「继续」更新）。
-let activeTurn: { from: string; token: string | undefined } | null = null;
+let activeTurn: { from: string; token: string | undefined; runId: string } | null = null;
 
 /** 从解密后的字节嗅探图片 MIME。 */
 function sniffMime(b: Buffer): string {
@@ -269,20 +328,25 @@ async function handleMessage(
   ctx: string | undefined,
   to: string,
   text: string,
-  imageItems: ImageItem[],
+  attachments: InboundAttachment[],
+  messageId: string,
   createTimeMs?: number,
   latestToken?: () => string | undefined,
 ): Promise<boolean> {
   const msgAge = () => (createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"); // 这条消息已存在多久（诊断用）
+  const imageItems = attachments
+    .filter((a): a is Extract<InboundAttachment, { kind: "image" }> => a.kind === "image")
+    .map((a) => a.item);
+  const otherAttachments = attachments.filter((a) => a.kind !== "image");
   // activeTurn 只存当前回合的 from/token；连续发送计数用按用户、跨回合的 budgetOf(to)（不在回合开始清零）。
-  activeTurn = { from: to, token: ctx };
+  activeTurn = { from: to, token: ctx, runId: randomUUID() };
   const cx = () => activeTurn?.token ?? ctx;
   await setTyping(account, to, cx(), 1);
-  // 处理期间每 5s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了。
-  // 间隔需小于客户端对 typing 的自动过期（约 5–8s），否则中间会出现指示闪烁的空洞。
+  // 处理期间每 3s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了。
+  // 客户端自动过期约 5–8s；5s 的旧间隔在 getConfig+sendTyping 的网络抖动下会踩到过期边界，出现「消失一阵才回来」。
   const keepAlive = setInterval(() => {
     void setTyping(account, to, cx(), 1).catch(() => {});
-  }, 5000);
+  }, 3000);
 
   const t0 = Date.now();
   let lastProgressAt = t0; // 心跳基线：任意帧（含思考/工具活动）都会刷新
@@ -313,34 +377,50 @@ async function handleMessage(
     Number(process.env.WECHAT_BRAIN_HEARTBEAT_MS) || heartbeatMs() || HEARTBEAT_DEFAULT_MS;
   // iLink 限制 bot 在用户回复前连续发送的消息数（实测约 10，超出被 ret=-2 拒）。计数按用户跨回合维护(budgetOf)。
   // 当已发到「上限-2」(默认第8条)后，下一条进度改为「即将达上限」提示并进入等待，把最后一条额度留给最终答案；用户回复「继续」(或发任何消息)会重置计数恢复发送（见 poller）。
-  const sendProgress = (msg: string, opts?: { ackOnly?: boolean }) => {
+  /**
+   * 发任意进度：统一处理待发确认、额度、接近上限的暂停提示与 typing 续命。
+   * `countBudget: false` 用于结构化工具 item：它们不占「用户可见消息」的连发额度（真机客户端不渲染时尤其不能白占，
+   * 否则会只发 3 条可见消息就提示接近上限）；仍受 `awaiting` 暂停约束。
+   */
+  const emitProgress = (
+    send: () => Promise<unknown>,
+    opts?: { ackOnly?: boolean; countBudget?: boolean },
+  ): boolean => {
     cancelAck(); // 任何进度都顶替待发的即时确认
     lastProgressAt = Date.now();
     const b = sends.budgetOf(to);
-    if (b.awaiting) return; // 等待「继续」期间不发任何进度
+    if (b.awaiting) return false; // 等待「继续」期间不发任何进度
     const now = Date.now();
     visibleProgressSent = true;
     if (!opts?.ackOnly) lastNonAckProgressAt = now; // 5s 确认不能挡住 15s 的第二条
-    // 发出一条文本会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，否则接下来的等待窗口看不到指示。
-    const sendWithTyping = (text: string) => {
-      void sends
-        .sendOrdered(to, cx(), text, MessageState.GENERATING)
+    // 发出一条进度会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，否则接下来的等待窗口看不到指示。
+    const sendWithTyping = (run: () => Promise<unknown>) => {
+      void run()
         .then(() => setTyping(account, to, cx(), 1))
         .catch(() => {});
     };
-    if (b.count >= CONSEC_SEND_LIMIT - 2) {
+    const countsBudget = opts?.countBudget !== false;
+    if (countsBudget && b.count >= CONSEC_SEND_LIMIT - 2) {
       b.count += 1;
       b.awaiting = true;
-      sendWithTyping(
-        "⚠️ 接近微信连续消息上限，我先暂停进度提示、继续在后台处理；完成后会把结果直接发给你。想立刻恢复进度可回复「继续」。",
+      sendWithTyping(() =>
+        sends.sendOrdered(
+          to,
+          cx(),
+          "⚠️ 接近微信连续消息上限，我先暂停进度提示、继续在后台处理；完成后会把结果直接发给你。想立刻恢复进度可回复「继续」。",
+          MessageState.GENERATING,
+        ),
       );
-      return;
+      return false;
     }
-    b.count += 1;
-    sendWithTyping(msg);
+    if (countsBudget) b.count += 1;
+    sendWithTyping(send);
+    return true;
   };
-  // 第 5s 的即时确认：只在之前没有任何可见进度时发（工具/心跳/图片提示都会顶替它）。有图片时图片提示即确认，不再重复发。
-  if (imageItems.length === 0) {
+  const sendProgress = (msg: string, opts?: { ackOnly?: boolean }) =>
+    emitProgress(() => sends.sendOrdered(to, cx(), msg, MessageState.GENERATING), opts);
+  // 第 5s 的即时确认：只在之前没有任何可见进度时发（工具/心跳/图片/附件提示都会顶替它）。
+  if (attachments.length === 0) {
     const t = cx();
     log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
     ackTimer = setTimeout(() => {
@@ -375,23 +455,88 @@ async function handleMessage(
     }
   }, heartbeatMsValue);
 
-  // 收图：下载并解密（失败的跳过）
+  // 下载入站媒体：图片走 ACP image block；文件/视频/无转写语音落盘，把绝对路径交给大脑。
   const images: Array<{ data: string; mimeType: string }> = [];
-  if (imageItems.length > 0) {
-    sendProgress(`🖼️ 收到 ${imageItems.length} 张图片，下载识别中…`);
-    for (const im of imageItems) {
-      try {
-        const buf = await downloadImage(im);
-        images.push({ data: buf.toString("base64"), mimeType: sniffMime(buf) });
-      } catch (e) {
-        log("image download failed:", String(e));
+  const incomingNotes: string[] = [];
+  const incomingFailures: string[] = [];
+  const fmtBytes = (n: number) =>
+    n >= 1024 * 1024
+      ? `${(n / 1024 / 1024).toFixed(1)}MB`
+      : `${Math.max(1, Math.round(n / 1024))}KB`;
+  if (attachments.length > 0) {
+    if (imageItems.length && otherAttachments.length)
+      sendProgress(`📎 收到 ${attachments.length} 个附件，下载中…`);
+    else if (imageItems.length) sendProgress(`🖼️ 收到 ${imageItems.length} 张图片，下载识别中…`);
+    else sendProgress(`📎 收到 ${otherAttachments.length} 个附件，下载中…`);
+  }
+  for (const im of imageItems) {
+    try {
+      const buf = await downloadImage(im);
+      images.push({ data: buf.toString("base64"), mimeType: sniffMime(buf) });
+    } catch (e) {
+      log("image download failed:", String(e));
+      incomingFailures.push("图片");
+    }
+  }
+  for (const a of otherAttachments) {
+    try {
+      if (a.kind === "file") {
+        const buf = await downloadMediaBuffer({
+          media: a.item.media,
+          maxBytes: MAX_INCOMING_MEDIA_BYTES,
+          label: "file",
+        });
+        const name = safeMediaFileName(a.item.file_name, "file.bin");
+        const saved = saveInboundMedia(buf, { messageId, fileName: name, kind: "file" });
+        incomingNotes.push(
+          `[用户发来文件] 名称: ${name}；大小: ${fmtBytes(buf.length)}；本地路径: ${saved}`,
+        );
+        log(`inbound file saved: ${saved} (${buf.length}B)`);
+      } else if (a.kind === "video") {
+        const buf = await downloadMediaBuffer({
+          media: a.item.media,
+          maxBytes: MAX_INCOMING_MEDIA_BYTES,
+          label: "video",
+        });
+        const saved = saveInboundMedia(buf, {
+          messageId,
+          fileName: "video.mp4",
+          kind: "video",
+        });
+        const dur = a.item.play_length ? `；时长: ${a.item.play_length}s` : "";
+        incomingNotes.push(
+          `[用户发来视频] 大小: ${fmtBytes(buf.length)}${dur}；本地路径: ${saved}`,
+        );
+        log(`inbound video saved: ${saved} (${buf.length}B)`);
+      } else {
+        // 无微信转写的语音：下载后 SILK→WAV（有转写的语音在 extractInbound 里已作为文本，不会进附件）。
+        const buf = await downloadMediaBuffer({
+          media: a.item.media,
+          maxBytes: MAX_INCOMING_MEDIA_BYTES,
+          label: "voice",
+        });
+        const wav = await silkToWav(buf);
+        const saved = saveInboundMedia(wav ?? buf, {
+          messageId,
+          fileName: wav ? "voice.wav" : "voice.silk",
+          kind: "voice",
+        });
+        const dur = a.item.playtime ? `；时长: ${(a.item.playtime / 1000).toFixed(1)}s` : "";
+        incomingNotes.push(
+          `[用户发来语音] 格式: ${wav ? "audio/wav" : "audio/silk"}${dur}；本地路径: ${saved}；` +
+            "微信没有提供转写，请用可用工具尽力理解；若无法读取音频，请如实告诉用户。",
+        );
+        log(`inbound voice saved: ${saved} (${buf.length}B${wav ? ", wav" : ", raw silk"})`);
       }
+    } catch (e) {
+      const label =
+        a.kind === "file" ? a.item.file_name || "文件" : a.kind === "video" ? "视频" : "语音";
+      log(`inbound ${a.kind} download failed:`, label, String(e));
+      incomingFailures.push(label);
     }
   }
 
-  // 收图后怎么走：全部下载失败/大脑不支持时，有文字就只按文字答，没文字就直接拒绝（别拿空 prompt 浪费一回合）
-  const plan = planImageTurn(imageItems.length, images.length, supportsImages(), !!text.trim());
-  if (plan.kind === "reject") {
+  const rejectWith = async (msg: string, logMsg: string): Promise<boolean> => {
     clearInterval(keepAlive);
     clearInterval(heartbeat);
     finalStarted = true;
@@ -401,38 +546,116 @@ async function handleMessage(
     sends.budgetOf(to).count += 1;
     let sendFailed = false;
     try {
-      await sends.sendOrdered(to, cx(), plan.text, MessageState.FINISH, undefined, (e) => {
+      await sends.sendOrdered(to, cx(), msg, MessageState.FINISH, undefined, (e) => {
         sendFailed = true;
-        sends.holdUndelivered(to, plan.text, e);
+        sends.holdUndelivered(to, msg, e);
       });
-      log("image unusable and no text; rejected gracefully");
+      log(logMsg);
     } finally {
       sends.flushDeferredTaskPushes(to, latestToken ? latestToken() : cx(), sendFailed);
       activeTurn = null;
     }
     return false; // 没有答成：交接摘要不能被消费掉
-  }
+  };
+
+  // 收图后怎么走：全部下载失败/大脑不支持时，有文字（或其它附件）就只按文字答，没内容就直接拒绝。
+  const hasTextOrOther = !!text.trim() || incomingNotes.length > 0;
+  const plan = planImageTurn(imageItems.length, images.length, supportsImages(), hasTextOrOther);
+  if (plan.kind === "reject")
+    return rejectWith(plan.text, "image unusable and no text; rejected gracefully");
   const imageNote = plan.kind === "text-only" ? plan.note : "";
   if (imageNote) log(`image ignored (${images.length}/${imageItems.length} usable): ${imageNote}`);
+  if (!hasTextOrOther && images.length === 0) {
+    const reason = incomingFailures.length
+      ? `📎 附件没能下载下来（${incomingFailures.join("、")}），请重新发一次。`
+      : "这条消息里没有可处理的内容，请换一种形式再发一次。";
+    return rejectWith(reason, "attachments unusable and no text; rejected gracefully");
+  }
 
   // 一次尝试：带进度（步骤编号每次尝试重置）。进度消息节流：避免一回合刷十几条触发 iLink 发送限流（疑似 ret=-2 主因）
   const attempt = (promptText: string, imgs: typeof images): Promise<string> => {
     answerStarted = false; // 每次重试重新判断本轮正文是否开始，避免上一轮失败尝试的残留
     let step = 0;
-    let lastToolProgressAt = 0;
+    let lastToolStartAt = 0;
+    const toolSteps = new Map<string, { step: number; startedAt: number }>();
+    const toolName = (ev: { title?: string; kind?: string }) =>
+      ev.title?.trim() || ev.kind?.trim() || "tool";
+    const toolStatus = (status?: string) =>
+      status === "completed" || status === "failed" || status === "blocked" ? status : "unknown";
     return askBrain(
       to,
       promptText,
       (ev) => {
         if (ev.type === "tool") {
           lastProgressAt = Date.now(); // 工具活动刷新心跳基线
-          // 首条立即发（让你知道开始干活了），之后每 15s 最多一条，避免刷屏 + 触发限流
-          if (Date.now() - lastToolProgressAt >= 15000) {
-            lastToolProgressAt = Date.now();
-            step += 1; // 只在真正发出时递增，保证步骤号连续（不因节流跳号）
+          const isEnd = ev.phase === "end";
+          const key = ev.toolCallId ?? ev.title ?? "tool";
+          if (isEnd) {
+            // 只给「已发过 start」的工具发结果：start 被节流时不能空降一个编号不对的 ✅。
+            const entry = toolSteps.get(key);
+            if (entry === undefined) return;
+            toolSteps.delete(key);
+            // 短工具只留开始那一条；只有 ≥10s 的工具才值得再发完成提示，避免刷屏与占用连发额度。
+            if (!shouldSendToolEnd(entry.startedAt, Date.now())) return;
             const desc = toolSummary(ev.kind, ev.title, ev.purpose, ev.detail);
-            sendProgress(`${toolIcon(ev.kind)} 步骤 ${step}：${desc}`);
+            const text = `✅ 步骤 ${entry.step} 完成：${desc}`;
+            if (TOOL_PROGRESS_ITEMS) {
+              emitProgress(
+                () =>
+                  sends.sendItemOrdered(
+                    to,
+                    cx(),
+                    {
+                      type: MessageItemType.TOOL_CALL_RESULT,
+                      create_time_ms: Date.now(),
+                      is_completed: true,
+                      tool_call_result_item: {
+                        tool_name: toolName(ev),
+                        tool_call_id: ev.toolCallId,
+                        status: toolStatus(ev.status),
+                      },
+                    },
+                    text,
+                  ),
+                { countBudget: false },
+              );
+            } else {
+              sendProgress(text);
+            }
+            return;
           }
+          // start 每 15s 最多一条防刷屏；end 不参与这个间隔（它与自己的 start 成对）。
+          if (Date.now() - lastToolStartAt < 15000) return;
+          const toolStartedAt = Date.now();
+          const nextStep = step + 1;
+          const desc = toolSummary(ev.kind, ev.title, ev.purpose, ev.detail);
+          const text = `${toolIcon(ev.kind)} 步骤 ${nextStep} 开始：${desc}`;
+          const emitted = TOOL_PROGRESS_ITEMS
+            ? emitProgress(
+                () =>
+                  sends.sendItemOrdered(
+                    to,
+                    cx(),
+                    {
+                      type: MessageItemType.TOOL_CALL_START,
+                      create_time_ms: Date.now(),
+                      is_completed: false,
+                      tool_call_start_item: {
+                        tool_name: toolName(ev),
+                        tool_call_id: ev.toolCallId,
+                      },
+                    },
+                    text,
+                  ),
+                { countBudget: false },
+              )
+            : sendProgress(text);
+          // 额度用尽/等待「继续」时 emitProgress 没真正发出：不占步骤号，也不记 start，
+          // 否则用户恢复后 end 会补一个从未出现过的编号。
+          if (!emitted) return;
+          lastToolStartAt = Date.now();
+          step = nextStep; // 只在真正发出时递增，保证步骤号连续（不因节流跳号）
+          toolSteps.set(key, { step: nextStep, startedAt: toolStartedAt });
         } else if (ev.type === "thinking") {
           lastProgressAt = Date.now();
         } else if (ev.type === "answer") {
@@ -470,10 +693,11 @@ async function handleMessage(
   };
 
   const imagesForBrain = plan.kind === "text-only" ? [] : images; // 大脑不支持看图时别再塞图片（会 -32602）
+  const promptText = [text.trim(), incomingNotes.join("\n")].filter(Boolean).join("\n\n");
   let answer: string;
   let ok = true;
   try {
-    answer = await runWithRetry(text, imagesForBrain);
+    answer = await runWithRetry(promptText, imagesForBrain);
   } catch (e2) {
     ok = false; // 重试也失败 → 只是把错误提示当回复发出去，不算「答成」（交接摘要据此决定留不留）
     answer = brainErrorMessage(e2, getAgent("brain").name);
@@ -497,7 +721,7 @@ async function handleMessage(
       failedImgs.push({ src: im.src, reason: "download" });
       continue;
     }
-    if (!canSendImage(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
+    if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
       log("image skipped (连发额度留给最终文字):", im.src);
       failedImgs.push({ src: im.src, reason: "budget" });
       continue;
@@ -510,11 +734,61 @@ async function handleMessage(
       failedImgs.push({ src: im.src, reason: "send" });
     }
   }
-  let finalText = cleaned;
+
+  // 发文件/视频：显式 [附件]/[文件]/[视频](绝对路径)，逐个作为独立媒体消息发出。
+  const { attachments: replyAttachments, text: cleanedText } = extractAttachments(cleaned);
+  const failedAttachments: AttachmentFailure[] = [];
+  const blockedSensitive: PendingSensitiveAttachment[] = [];
+  for (const attachment of replyAttachments) {
+    let resolved;
+    try {
+      // 「允许敏感文件」窗口内跳过凭证/状态名单；其余闸门（绝对路径/UNC/数据流/大小）照旧。
+      resolved = resolveAttachment(attachment, undefined, {
+        allowSensitive: sensitiveAllowActive(),
+      });
+    } catch (e) {
+      log("attachment rejected:", attachment.src, String(e));
+      if (isSensitiveFileError(e)) {
+        // 先拦截、后放行：记进待补发队列，用户回「允许敏感文件」时直接补发，不用让大脑重发一遍。
+        blockedSensitive.push({ src: attachment.src, kind: attachment.kind });
+        failedAttachments.push({ src: attachment.src, reason: "sensitive" });
+      } else {
+        failedAttachments.push({ src: attachment.src, reason: "read" });
+      }
+      continue;
+    }
+    if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
+      log("attachment skipped (连发额度留给最终文字):", attachment.src);
+      failedAttachments.push({ src: attachment.src, reason: "budget" });
+      continue;
+    }
+    sends.budgetOf(to).count += 1; // 文件/视频也占一条连发额度
+    if (await sends.sendFileOrdered(to, cx(), resolved.data, resolved.fileName, resolved.kind)) {
+      log(
+        `sent attachment (${resolved.kind}${resolved.sensitiveBypassed ? "，敏感文件已临时放行" : ""}): ${resolved.fileName} ${resolved.data.length}B <- ${attachment.src.slice(0, 80)}`,
+      );
+    } else {
+      log("send attachment failed:", attachment.src);
+      failedAttachments.push({ src: attachment.src, reason: "send" });
+    }
+  }
+  if (blockedSensitive.length > 0) {
+    const n = rememberPendingSensitive(to, blockedSensitive);
+    log(
+      `blocked sensitive attachments: ${blockedSensitive.length}（待补发 ${n} 条，回复「允许敏感文件」）`,
+    );
+  }
+
+  let finalText = cleanedText;
   if (imageNote) finalText = finalText ? `${imageNote}\n${finalText}` : imageNote;
-  const note = imageFailureNote(failedImgs);
+  const inboundNote = incomingFailures.length
+    ? `（有 ${incomingFailures.length} 个入站附件没能下载：${incomingFailures.join("、")}）`
+    : "";
+  const note = [inboundNote, imageFailureNote(failedImgs), attachmentFailureNote(failedAttachments)]
+    .filter(Boolean)
+    .join("\n\n");
   if (note) finalText = finalText ? `${finalText}\n\n${note}` : note;
-  if (!finalText && !replyImages.length) finalText = "（没有内容）";
+  if (!finalText && !replyImages.length && !replyAttachments.length) finalText = "（没有内容）";
   let finalSendFailed = false;
   if (finalText) {
     sends.budgetOf(to).count += 1; // 最终答案占一条额度（等待段预留的最后一条）
@@ -542,7 +816,10 @@ async function handleMessage(
 type QueuedMsg = {
   from: string;
   text: string;
-  imageItems: ImageItem[];
+  attachments: InboundAttachment[];
+  quote?: QuoteContext;
+  unsupportedTypes: number[];
+  messageId: string;
   createTimeMs?: number;
   contextToken?: string;
 };
@@ -605,8 +882,11 @@ async function pollerLoop(
 
       const news = (resp.msgs ?? []).filter(
         (m) =>
-          m.message_type === MessageType.USER && m.message_id && m.message_id > state.lastMessageId,
+          m.message_type === MessageType.USER &&
+          m.message_id &&
+          compareMessageIds(m.message_id, state.lastMessageId) > 0,
       );
+      const seenBefore = new Set(state.seenMessageIds ?? []);
       // 先登记本批所有最新 token（worker 发送时取最新）
       for (const m of news) {
         const f = m.from_user_id ?? "";
@@ -621,13 +901,23 @@ async function pollerLoop(
       }
       let enq = false;
       for (const msg of news) {
-        state.lastMessageId = Math.max(state.lastMessageId, msg.message_id ?? 0);
+        const messageId = msg.message_id ?? "0";
+        state.lastMessageId = maxMessageId(state.lastMessageId, messageId);
+        // 本批/本进程已处理过的 ID 直接跳过。服务端游标 updatesBuf 才是防重放的主防线；
+        // 旧版 number 游标刚迁移时 seenMessageIds 可能是空的，不能依赖它补历史。
+        if (seenBefore.has(messageId)) {
+          log(`skip duplicate message id=${messageId}`);
+          continue;
+        }
+        seenBefore.add(messageId);
+        state.seenMessageIds = rememberMessageId(state.seenMessageIds ?? [], messageId);
         const from = msg.from_user_id ?? "";
         if (!isAuthorizedSender(from, owner, isAllowed)) {
           log("ignore unauthorized sender:", from);
           continue;
         }
-        const text = extractText(msg);
+        const parts = extractInbound(msg);
+        const text = parts.text;
         const voiceItem = (msg.item_list ?? []).find(
           (it) => it.type === MessageItemType.VOICE,
         )?.voice_item;
@@ -635,13 +925,12 @@ async function pollerLoop(
           log(
             `recv voice: text=${voiceItem.text ? `"${voiceItem.text.slice(0, 30)}"` : "(空,无微信转写)"} playtime=${voiceItem.playtime ?? "?"}`,
           );
-        const imageItems = (msg.item_list ?? [])
-          .filter((it) => it.type === MessageItemType.IMAGE && it.image_item)
-          .map((it) => it.image_item as ImageItem);
-        if (!text && imageItems.length === 0) {
+        if (!text && parts.attachments.length === 0 && parts.unsupportedTypes.length === 0) {
           log("skip empty/unsupported message");
           continue;
         }
+        if (parts.unsupportedTypes.length)
+          log(`recv unsupported item types: [${parts.unsupportedTypes.join(",")}]`);
         // 服务端按「距用户上一条消息」计连续发送数 → 任何来自 owner 的消息都重置该用户计数 + 退出等待段。但已经进了 replyChain、会在本条消息之后才上线路的发送（补发、上一回合没发完的）仍占新窗口的额度，所以不能直接清零，而是把它们算进来。
         const b = sends.budgetOf(from);
         const wasAwaiting = b.awaiting;
@@ -656,7 +945,10 @@ async function pollerLoop(
         const queued: QueuedMsg = {
           from,
           text,
-          imageItems,
+          attachments: parts.attachments,
+          quote: parts.quote,
+          unsupportedTypes: parts.unsupportedTypes,
+          messageId,
           createTimeMs: msg.create_time_ms,
           contextToken: msg.context_token,
         };
@@ -665,7 +957,8 @@ async function pollerLoop(
           active: hasActiveTask(from),
           interrupted: interruptedTasks(from).length,
         };
-        if (isFastLane(text, facts)) fastQueue.push(queued);
+        // 带附件的消息不走快车道：控制/任务指令不消费附件，进快车道会静默丢文件。
+        if (isFastLane(text, facts, parts.attachments.length)) fastQueue.push(queued);
         else msgQueue.push(queued);
         enq = true;
       }
@@ -696,6 +989,48 @@ async function pollerLoop(
       log("poller error:", e instanceof Error ? e.stack || e.message : String(e));
     }
   }
+}
+
+/**
+ * 「允许敏感文件」的补发：把之前被敏感名单拦下的附件重新校验并逐个发出。
+ * 路径来自内存队列（30 分钟 TTL），补发时仍走 resolveAttachment 的完整校验（UNC/数据流/大小）。
+ */
+async function releasePendingSensitive(
+  sends: SendPipeline,
+  to: string,
+  ctx: string | undefined,
+): Promise<{ sent: number; failed: number }> {
+  const items = takePendingSensitive(to);
+  let sent = 0;
+  let failed = 0;
+  for (const item of items) {
+    let resolved;
+    try {
+      resolved = resolveAttachment({ src: item.src, kind: item.kind }, undefined, {
+        allowSensitive: true,
+      });
+    } catch (e) {
+      log("pending attachment rejected:", item.src, String(e));
+      failed += 1;
+      continue;
+    }
+    if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
+      log("pending attachment skipped (连发额度):", item.src);
+      failed += 1;
+      continue;
+    }
+    sends.budgetOf(to).count += 1; // 与普通附件一样占一条连发额度
+    if (await sends.sendFileOrdered(to, ctx, resolved.data, resolved.fileName, resolved.kind)) {
+      sent += 1;
+      log(
+        `sent pending attachment (${resolved.kind}${resolved.sensitiveBypassed ? "，敏感文件已临时放行" : ""}): ${resolved.fileName} ${resolved.data.length}B <- ${item.src.slice(0, 80)}`,
+      );
+    } else {
+      failed += 1;
+      log("send pending attachment failed:", item.src);
+    }
+  }
+  return { sent, failed };
 }
 
 /** 快车道的单条处理：控制指令 + 任务指令。它们不经过大脑，因此不必排在长回合后面。 */
@@ -755,7 +1090,13 @@ async function handleFastItem(
     };
     let r: string;
     try {
-      r = await handleControl(ctrl, from, { owner, notify, notifyFile });
+      r = await handleControl(ctrl, from, {
+        owner,
+        notify,
+        notifyFile,
+        // 先拦截、后放行：开窗后把队列里的附件立即补发（补发失败只计数，不阻断答复）。
+        releaseSensitive: () => releasePendingSensitive(sends, from, latestToken() ?? token),
+      });
     } catch (e) {
       r = "处理指令出错：" + String(e);
     }
@@ -892,7 +1233,7 @@ async function workerLoop(
     //    任务侧的追问走显式寻址：`#<编号> 正文` / `> 正文` / `任务 …`（解析层已分流，不会到这里）。
     if (
       !brainEscape &&
-      shouldResumeInBrainQueue(item.text, item.imageItems.length, {
+      shouldResumeInBrainQueue(item.text, item.attachments.length, {
         awaiting: awaitingTasks(from).length,
         active: hasActiveTask(from),
         interrupted: interruptedTasks(from).length,
@@ -904,7 +1245,21 @@ async function workerLoop(
       continue;
     }
 
-    const brainText = brainEscape ?? item.text;
+    const brainText = [formatQuote(item.quote), brainEscape ?? item.text]
+      .filter(Boolean)
+      .join("\n");
+    // 没有任何可交给大脑的内容、只有不认识的 item 类型：明确告诉用户，别静默丢。
+    if (!brainText.trim() && item.attachments.length === 0 && item.unsupportedTypes.length > 0) {
+      const types = item.unsupportedTypes.join(",");
+      log(`unsupported message only (types=${types}); rejected gracefully`);
+      await sends.sendNotice(
+        from,
+        token,
+        `暂不支持这条消息的类型（item type=${types}）。可以改用文字、图片、文件、视频或语音再发一次。`,
+        latestToken(),
+      );
+      continue;
+    }
     // 交接注入：切换大脑后，发给**新**大脑的第一条消息带上前一个大脑留下的摘要（切回来源大脑、别人、
     // 过期都不带上，规则见 handoff.ts）。作为前缀带上 = 不额外占一个回合、不多一次模型调用。
     // 切换进行中时按**目标**大脑判断（这条消息会在门口等新大脑就绪，实际答话的是它）。
@@ -921,7 +1276,8 @@ async function workerLoop(
         token,
         from,
         withHandoff,
-        item.imageItems,
+        item.attachments,
+        item.messageId,
         item.createTimeMs,
         latestToken,
       );
@@ -1029,6 +1385,8 @@ export async function runDaemon(): Promise<void> {
   });
   ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
   ensureWorkerHome(); // 准备 worker 沙箱（继承全量 MCP 除 wechat + 记忆/技能/settings）
+  const pruned = pruneInboundMedia(); // 启动时清一次过期/超额入站附件
+  if (pruned.removed) log(`pruned inbound media: ${pruned.removed} files, ${pruned.bytes}B left`);
   log(`up. bot=${account.botId} owner=${owner} allowFrom=${readAllowFrom(DATA_DIR).length}`);
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
 

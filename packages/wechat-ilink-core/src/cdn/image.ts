@@ -15,7 +15,7 @@ import {
  * 机制借鉴官方 Tencent/openclaw-weixin（MIT）的 cdn/pic-decrypt + cdn-url。
  */
 
-const CDN_BASE_URL =
+export const CDN_BASE_URL =
   process.env.WECHAT_CDN_BASE_URL?.trim() || "https://novac2c.cdn.weixin.qq.com/c2c";
 
 export function decryptAesEcb(ciphertext: Buffer, key: Buffer): Buffer {

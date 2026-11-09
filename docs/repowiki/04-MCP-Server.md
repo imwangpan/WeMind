@@ -2,7 +2,7 @@
 
 > 上一页：[3. iLink 协议内核](03-iLink-协议内核.md) ｜ 下一页：[5. daemon](05-daemon.md)
 >
-> **最后核对**：2026-11-06
+> **最后核对**：2026-11-09
 
 MCP Server 把协议内核能力暴露为标准 MCP 工具，让任何兼容 MCP 的客户端（Claude Desktop、Cursor、Kiro IDE 等）都能驱动微信收发。本包是 WeMind 的两个对外发布入口之一（`@wemind/wechat-mcp`，bin: `wemind-mcp`；另一个是完整应用 CLI `@wemind/cli`（命令 `wemind`），见 [`docs/发布与变更记录/如何发布新版本.md`](../发布与变更记录/如何发布新版本.md)）。
 
@@ -117,10 +117,10 @@ sequenceDiagram
 - `wait=true` 时用 `LONG_POLL_MS=25s` 长轮询，最长等 7 天（`deadline`）；`timeout` 参数可调（1000–60000，默认 10000；`wait=true` 时忽略）；
 - `POLL_FLOOR_MS=1000`：服务端快速返回空时补足地板间隔，防零间隔请求风暴；
 - 命中 errcode `-14` → `pauseSession` 并返回 `session_expired` 提示（含剩余冷却分钟数）；
-- 过滤 `message_type === 1`（USER）且 `message_id > lastMessageId` 去重；只放行登录者（`WECHAT_OWNER_ID` 或账号 `userId`）与 `allowFrom.json` 白名单里的发件人，游标仍按**所有**收到的消息推进（被过滤的消息不会每轮重复判断），`contextTokens[botId:from_user_id]` 只记放行者的；
+- 过滤 `message_type === 1`（USER）且 `compareMessageIds(message_id, lastMessageId) > 0` 去重（ID 是 uint64，按字符串无损比较；`state.lastMessageId` 存字符串）；只放行登录者（`WECHAT_OWNER_ID` 或账号 `userId`）与 `allowFrom.json` 白名单里的发件人，游标仍按**所有**收到的消息推进（被过滤的消息不会每轮重复判断），`contextTokens[botId:from_user_id]` 只记放行者的；
 - `wait` 模式下瞬时网络错误退避 2s 重试，不让一次抖动终结长轮询；客户端取消信号会直接中止**在途**长轮询并返回 `cancelled`（核心里与超时共用一个 AbortController）；
 - 处理响应前**重新读一次** `state` 再做 load→改→save（全程同步）：长轮询可能持续很久，期间别的工具调用写入的 `context_token` 不会被旧 state 覆盖；
-- `formatMessage` 把消息格式化：text / `[Image: not downloaded…]` / `[Voice: 转写文本]` / `[File: 文件名 (not downloaded)]` / `[Video: not downloaded…]`，并处理 `ref_msg`（从 item 取，修复上游死代码）。媒体只给占位符是**明示的限制**：MCP 形态不下载任何媒体。daemon 形态也只下载**图片**（解密后给大脑看图），文件与视频同样被跳过——不要把「daemon 能处理媒体」理解成「图片/视频/文件都能处理」。
+- `formatMessage` 把消息格式化：text / `[Image: not downloaded…]` / `[Voice: 转写文本]` / `[File: 文件名 (not downloaded)]` / `[Video: not downloaded…]`，并处理 `ref_msg`（从 item 取，修复上游死代码）。媒体只给占位符是**明示的限制**：MCP 形态不下载任何媒体。**daemon 形态不同**（2026-11-09 起）：图片进 ACP image 块，文件/视频/无转写语音下载到 `brain-home/media/inbound` 并给本地路径，引用做内联前缀，工具进度可用结构化 item——两形态的媒体能力不要混为一谈。
 
 ## 4.6 发送与打字（tools/send.ts、tools/typing.ts）
 

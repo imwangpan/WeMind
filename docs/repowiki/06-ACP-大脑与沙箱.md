@@ -2,7 +2,7 @@
 
 > 上一页：[5. daemon](05-daemon.md) ｜ 下一页：[7. 远程任务 Worker](07-远程任务-Worker.md)
 >
-> **最后核对**：2026-11-06 ｜ 代码以当前分支为准。
+> **最后核对**：2026-11-09 ｜ 代码以当前分支为准。
 
 daemon 的「大脑」是一个常驻的 AI agent 子进程，通过 ACP 协议驱动。本章讲清大脑的进程生命周期、会话管理、MCP 沙箱与记忆继承，以及如何换成别的 agent。
 
@@ -19,7 +19,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 | `session/load` | 按 sessionId 恢复会话 | **不是所有 agent 都实现**（DSH 返回 `-32601`） |
 | `session/resume` | 恢复持久会话 | DSH 用这个；恢复日志但不回放旧更新 |
 | `session/prompt` | 发一轮提问 | 图片能力看预设的 `images` 字段（不是 `initialize` 回包） |
-| `session/update`（通知） | 流式回包：`agent_message_chunk`（正文）、`agent_thought_chunk`（思考）、`tool_call`/`tool_call_update`（工具进度） | committed-only agent 可能整段提交 |
+| `session/update`（通知） | 流式回包：`agent_message_chunk`（正文）、`agent_thought_chunk`（思考）、`tool_call`/`tool_call_update`（工具进度） | committed-only agent 可能整段提交；`tool_call` 首帧报 start、终态 `tool_call_update` 报 end，同一 `toolCallId` 的终态只报一次 |
 | `session/request_permission`（反向请求） | agent 请求权限 | 客户端内置应答器：默认拒绝（`cancelled`）；可信部署设 `WEMIND_ACP_AUTO_ALLOW=1` 放行 `allow_once`/`allow_always`；接入前仍建议验证 |
 
 > ⚠️ **能力来自预设字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`mcpViaAcp` 都写在 `brain-presets.ts` 的 `ACP_AGENT_PRESETS` 里，来源是接入时的**探针实测**。因此接新 agent 必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进预设——代码不会自动适配（详见 [AGENTS.md §4.2](../../AGENTS.md)）。
@@ -137,7 +137,7 @@ graph TD
 
 ### 进度回调与「可发图」提示
 
-`onProgress` 把 `session/update` 帧翻译成进度事件（`tool`/`answer`/`thinking`/`activity`）给 daemon 上报。每个工具调用只上报一次（`seenTools` 去重），优先取 `rawInput.__tool_use_purpose` 作为人类可读描述。
+`onProgress` 把 `session/update` 帧翻译成进度事件（`tool`/`answer`/`thinking`/`activity`）给 daemon 上报。工具调用分两个阶段上报（`tool` 携带 `phase: "start" | "end"`）：`tool_call` 首帧报 start；该 `toolCallId` 的终态（`status` 为 `completed`/`failed`/`cancelled`，且不是首帧自身）报 end，同一终态只报一次；缺少 `toolCallId` 时退回用 `title` 作为去重键；没有 `toolCallId` 也没有 `title` 的帧直接忽略。人类可读描述优先取 `rawInput.__tool_use_purpose`。daemon 用这两类事件发进度：**默认发文本「步骤 N」**；`WECHAT_TOOL_PROGRESS_ITEMS=1` 才发结构化 item（`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`，微信客户端目前不渲染，见 [5. daemon](05-daemon.md#收发富媒体与消息类型)）。
 
 > **心跳注意**：`index.ts` 每 `HEARTBEAT_DEFAULT_MS`（15s）检查 `lastProgressAt`，只有 `session/update` 帧会刷新它。纯推理/committed-only 的 agent 长时间无帧时，会连续发「还在思考」，占微信约 10 条连发额度。
 >

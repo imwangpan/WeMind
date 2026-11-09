@@ -56,31 +56,38 @@ wechat-ilink-core  ◄──  wechat-mcp      （tsdown 内联 core，发布单�
 ```text
 poller（长轮询，不被大脑阻塞）
   → 收到消息 / 逐条分拣入队（**不合并**：一条消息 = 一次 prompt）
+  → 消息 id 按 uint64 字符串比较 + 最近 200 条去重环（防同批/服务端重放）
+  → 解析 item_list：文本 + 图片/语音/文件/视频附件 + 内联引用；未知类型计数
   → 快车道（fastQueue，独立于大脑）：控制指令 / 任务指令 / 可续跑任务的「继续」短句
      （帮助 / 切脑 / 交接 / 会话四件套 / 任务 / MCP 等；「问大脑」前缀不在此列；
-       账号级指令（切脑/交接）由非登录者发 → 短提示拒绝，不进大脑；兜底校验，平台限制下正常不触发）
+       账号级指令（切脑/交接）由非登录者发 → 短提示拒绝，不进大脑；兜底校验，平台限制下正常不触发；
+       **带附件的消息一律不进快车道**，因为控制/任务指令不消费附件）
   → 大脑队列（msgQueue，串行）：选择 brain 或 worker（**无前缀消息默认走 brain**；出队时仍有可续跑任务才进任务表，见 `shouldResumeTask()`；回任务要显式寻址 `#编号 正文` / `> 正文` / `任务 …`。**模型/账号侧报错的任务直接转「已中断」**）
   → askBrain(userId, text, onProgress, images)
        ├─ 等切换门（切换大脑进行中时有界等待）
        ├─ ensureProcess(ag)：懒启动 ACP agent，initialize
        ├─ ensureSession(ag, userId)：内存 session → 磁盘 map → load/resume → 否则 new
        ├─ 有交接摘要且目标大脑不是来源 → 作为本条消息的**前缀**带上
-       ├─ session/prompt：文本（+ 图片）
+       ├─ session/prompt：文本（+ 图片；文件/视频/语音给本地路径）
        └─ session/update：拼 agent_message_chunk；tool/thought → 进度
   → 成功：写会话登记表（轮次+1/标题首写）、答成才消费交接摘要
-  → md-reply / image-reply 处理长文与图片
-  → send_text_message（受连续发送额度约束）
+  → md-reply / image-reply / 出站附件处理长文、图片、文件/视频
+  → send_text_message / sendItem（受连续发送额度约束）
 ```
 
 关键点：
 
+- **入站消息类型**：文本、图片、语音、文件、视频；引用消息做**内联引用**（`[引用消息] 标题 | 正文`，只有 `svr_id` 时给「内容未缓存」占位）。没有 emoji/位置/小程序/合并转发的 item 类型；纯未知类型会被明确告知，不静默丢。
+- **入站媒体**：图片下载解密成 ACP image 块；文件/视频/无转写语音下载后存 `<BRAIN_HOME>/media/inbound`，prompt 里给绝对路径（语音用 SILK→WAV，失败保留原始 SILK 并说明）。有微信转写的语音直接当文本，不再下载、也不算附件（语音里的控制/续跑指令照常生效）。媒体目录默认 7 天 / 256MB 清理。
+- **出站文件/视频**：brain 用显式 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)` 触发（路径含 `)` 用 `<...>`）；读取前 realpath + 敏感文件 denylist（含各 agent 登录态、`.auth/`、沙箱/真实 home 的 `settings.json`/`models*.json`）+ 拒绝 UNC/网络路径与 NTFS 数据流 + 单文件 25MB 上限；硬链接属已接受风险。临时要发 `account.json` 这类文件时，登录者发 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30，仅本进程内生效；只跳过名单，其余闸门照旧）：先开后发、或被拦下后再发这条指令补发（内存里留 30 分钟）都成立。**不通**用普通链接扫描方式发本地文件。
 - **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`（键 `<agent>:<userId>`，换大脑不丢各自上下文）——**这张当前会话表是「当前是哪个会话」的唯一权威**；`session-registry.json` 只是展示用的登记表（名字/标题/轮次），坏了不影响恢复；
 - **worker 是 N 个独立 ACP 进程**（进程池，一条任务一条连接），任务会话在 `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`）；任务表另存 `tasks.json` 供**重启后续跑**（未完成的标「已中断」，回「继续」才续跑）；
 - **切换大脑是进程内的**（`brain-switch.ts`）：预检 → 等回合结束 → 启动新大脑 → **成功才写 `brain.json`**；失败退回、槽位留旧大脑；
 - **控制桥与微信回合串行**：`askBrain` / `newSession` / `resumeSession` 共用 `acp-brain.ts` 的操作队列；控制桥请求带 `expiresAt`，过期请求 daemon 不执行（排队中的会话操作拿到执行权后再查一次）；
 - **自愈**：prompt 超时/失败 → `reset()` 杀进程树 → 下条消息重建并尝试恢复会话；
-- **进度**：三档（<5s 只发最终答案；5–15s 第 5s 发「收到」；≥15s 第 5s「收到」+第 15s 第二条，正文已开始→「整理回复」，否则→「还在处理中」；15s 之后不再补发第三条固定提示）。`tool_call` → 「步骤 N」（优先用 purpose，否则从 `rawInput` 取 command/路径/query，截断 60 字）；工具/心跳/图片/重试提示算已有可见进度，会顶替固定提示；第 15s 第二条距上一条非确认进度不足 5s 就跳过（不延后补发）；任意 `session/update` → 刷新心跳基线；
-- **连发上限**：iLink 约 10 条；外发管线（串行链、按用户预算、挂起补发、任务推送让位）在 `send-pipeline.ts` 的 `SendPipeline`，`index.ts` 只接真实发送函数和回合编排。预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」；图片也计一条并走同一条串行链，额度不够时改附原链接；大脑回合接近上限时任务推送先让位、回合结束后再发。**多任务与对话大脑共享同一份额度**（按用户计）。
+- **进度**：三档（<5s 只发最终答案；5–15s 第 5s 发「收到」；≥15s 第 5s「收到」+第 15s 第二条，正文已开始→「整理回复」，否则→「还在处理中」；15s 之后不再补发第三条固定提示）。`tool_call` → **默认发文本「步骤 N」**（开始即发 `🔧 步骤 N 开始`；**耗时 ≥10s 才补发 `✅ 步骤 N 完成`**；`WECHAT_TOOL_PROGRESS_ITEMS=1` 才启用结构化 item `TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`——微信客户端目前不渲染，故默认关闭；item 用 `FINISH` + 本回合 `run_id`、不占连发额度）；工具/心跳/图片/附件/重试提示算已有可见进度，会顶替固定提示；第 15s 第二条距上一条非确认进度不足 5s 就跳过（不延后补发）；任意 `session/update` → 刷新心跳基线；
+- **连发上限**：iLink 约 10 条；外发管线（串行链、按用户预算、挂起补发、任务推送让位）在 `send-pipeline.ts` 的 `SendPipeline`，`index.ts` 只接真实发送函数和回合编排。预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」；**结构化工具 item 不计入**（它们不是用户可见消息，计入会让可见消息没发几条就触发上限）；图片、文件、视频各计一条并走同一条串行链，额度不够时改附原路径/链接；大脑回合接近上限时任务推送先让位、回合结束后再发。**多任务与对话大脑共享同一份额度**（按用户计）。
+- **消息 ID 精度**：iLink 的 `message_id` 是 uint64，超过 JS 安全整数；core 在 `JSON.parse` 前给 ID 字段的裸整数加引号（按完整 JSON number token 读，小数/指数原样保留；改写失败退回原文解析），游标/去重全部用字符串比较（`compareMessageIds`/`maxMessageId`），`state.lastMessageId` 与 `seenMessageIds` 持久化为字符串/字符串数组。
 
 ---
 
@@ -142,7 +149,13 @@ poller（长轮询，不被大脑阻塞）
 | DSH 默认模型路由可直接用 | ⚪ **不成立** | 默认 `deepseek-official/deepseek-v4-flash` 需 `DEEPSEEK_API_KEY`（2026-10-29 用 `acp-probe` 在 `0.2.1-rc.3` 复测，空 home 与桌面登录态下默认值都是它）——根因是桥插件的 bundle patch 写死了 `- id: acp` 的 `provider/model`，用户 profile 只覆盖 `agent-default-model`（另一个服务的键），`- id: acp` 要用户自己写（插件 README 写明的覆盖点）。WeMind 侧**原样复制** `profiles/acp/cordis.patch.yml`、不追加条目（复制前剔除用户自己挂的微信 MCP 条目——跑 `wemind-mcp` 的或 `serverName: wechat` 的 mcp-client，防沙箱里的 agent 抢同一个 bot token）；读默认模型时优先 `- id: acp`、否则 `agent-default-model`（典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端在运行；这个值被桌面端目录淘汰时 `wemind brain` 会提示换成目录里现有的，如 `auto/dfmodel`），会话建立后按它发 `set_config_option`（agent 自己的接口）；缺 `- id: acp` 时 `wemind brain` 给可粘贴的片段、由用户补到真实 profile；读不到才回退 `deepseek-account/deepseek-flash`；显式覆盖 `wemind brain set deepseek --model …`，`--model auto` = 跟随真实 profile 的默认 |
 | DSH 首帧很慢 | ⚪ **不成立**（短任务） | 实测 1.0–2.3s；长任务仍可能静默 |
 | DSH 会发 thought/tool/usage 帧 | ✅ 实测 | `agent_thought_chunk` / `tool_call` / `usage_update` |
-| 微信连发上限约 10 条 | ✅ 实测/代码 | `CONSEC_SEND_LIMIT=10`，预留最后一条 |
+| 微信连发上限约 10 条 | ✅ 实测/代码 | `CONSEC_SEND_LIMIT=10`，预留最后一条；图片/文件/视频也各占一条 |
+| **入站支持 text/image/voice/file/video** | ✅ 代码（协议 2.4.10 核对） | `extractInbound()` 收集文本 + 附件；只有无转写语音进 voice 附件（有转写只算文本）；未知 item 类型明确告知（没有 emoji/位置/小程序/合并转发类型，群聊不支持） |
+| **无转写语音转 WAV 交给大脑** | 🟡 代码已实现，真机待实测 | `silk-wasm` 动态解码 24kHz mono s16le → WAV；未安装/解码失败保留原始 SILK 并如实说明。**出站语音不做**（微信语音回复不可靠） |
+| **出站文件/视频（显式附件语法）** | ✅ 代码 | `[附件](file:///abs/path)` / `[文件](...)` / `[视频](...)`（含 `)` 用 `<...>`）；realpath + 敏感文件 denylist（含 agent 登录态）+ 拒绝 UNC + 默认 25MB；不扫描普通链接；登录者可用 `允许敏感文件 [分钟]` 开临时放行窗口（默认 2 分钟、上限 30，进程内生效）；被拦下的附件可在这条指令后直接补发 |
+| **工具进度结构化 item 11/12** | ⛔ 协议已定义，客户端不渲染（默认关闭） | 官方 2.4.10 有 `TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`；真机实测服务端 200/空响应/不分配 `message_id`，微信客户端不显示（2026-08 第三方 SDK、2026-10 galley 均复现）。WeMind 默认发文本「步骤 N」，`WECHAT_TOOL_PROGRESS_ITEMS=1` 可提前启用（已对齐 `FINISH` + `run_id`，不占额度） |
+| **消息 ID 精度（uint64）** | ✅ 已修（2026-11-09） | `parseJsonWithLosslessIds` 解析前加引号；游标/去重用 `compareMessageIds`/`maxMessageId`；`lastMessageId` 字符串 + `seenMessageIds` 去重环 |
+| **引用消息** | 🟡 内联引用已实现 | `ref_msg` 的 `title`/`message_item` 作为 `[引用消息] …` 前缀；只有 `svr_id` 时给「内容未缓存」占位（不查缓存、不下载原消息） |
 | 15s 心跳会占连发额度 | ✅ 代码 | `index.ts` `heartbeat` + `sendProgress`；DSH 有帧时通常不触发 |
 | **切大脑要重启 daemon** | ⚪ **已不成立（1.2.0）** | `brain-switch.ts` 进程内切换：等在途回合结束 → 启动新大脑 → 成功才写入磁盘；失败退回 |
 | **agent 在进程启动时冻结** | ⚪ **已不成立（1.2.0）** | `agent-slot.ts` 槽位 + 过程内显式传 `ag`；心跳/首帧每回合现算 |
@@ -180,7 +193,8 @@ poller（长轮询，不被大脑阻塞）
 | **改多任务 / 进程池 / 任务编号** | `tasks/worker-pool.ts`（`planAcquire`/`planReap` 纯函数；`acquire` 起进程前按这条任务的 agent 调 `ensureWorkerHome(ag)`） | `tasks/worker-acp.ts`（`class WorkerConn`）、`tasks/task-manager.ts`、`tasks/task-store.ts`、`docs/repowiki/07` |
 | **改会话五条指令 / 恢复语义** | `sessions/session-manager.ts`（操作层） | `sessions/session-registry.ts`（登记表，派生元数据）、`sessions/session-map.ts`（当前会话表，唯一权威）、`acp/acp-brain.ts` 的 `resumeSession`（严格恢复） |
 | **改交接** | `sessions/handoff.ts`（写入磁盘 / 带上 / 消费） | `index.ts` 的 `workerLoop` 前缀带上、`daemon/daemon-control.ts` 的 `交接` 分支 |
-| 改微信消息/回复 | `index.ts`、`daemon/messaging/send-pipeline.ts` | `daemon/messaging/md-reply.ts`、`daemon/messaging/image-reply.ts`、`daemon/messaging/pending-push.ts` |
+| 改微信消息/回复 | `index.ts`、`daemon/messaging/send-pipeline.ts` | `daemon/messaging/attachments.ts`（出站附件与安全闸）、`media-store.ts`（入站落盘/清理）、`voice.ts`（SILK→WAV）、`md-reply.ts`、`image-reply.ts`、`pending-push.ts`；入站 item 解析在 `daemon/daemon-routing.ts` 的 `extractInbound()` |
+| 改消息 ID / 上游协议类型 | `wechat-ilink-core/src/api/message-id.ts`、`api/types.ts` | `api/client.ts`（无损 JSON 解析）、`store/account.ts`（游标迁移）、`wechat-mcp/src/tools/messages.ts` |
 | 改 CLI | `cli.ts`（分派 `cli/cli-dispatch.ts`） | `cli/manage.ts`（参数解析/分派）+ `cli/account-commands.ts` / `cli/process-lifecycle.ts` + `cli/cli-context.ts` + `cli/subcommands/cli-*.ts` |
 | **改开机自启** | `cli/subcommands/autostart.ts`（install/status/uninstall） | `cli/subcommands/windows-autostart.ts`、`cli/subcommands/posix-autostart.ts`、`shared/mixed-config.ts`（冲突探测/清理）、`shared/pm2-detector.ts`、`shared/launcher-env.ts`、`docs/部署与运维/开机自启.md` |
 | 改启动器环境（P0） | `shared/launcher-env.ts`（丢弃 `WECHAT_DATA_DIR`、强制 `WECHAT_ACCOUNT`） | 集成点：`cli/watchdog-runner.ts`、`cli/pm2-runner.ts`；`wemind daemon` 直跑不走这里 |
