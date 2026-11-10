@@ -108,7 +108,7 @@ export type InboundAttachment =
   | { kind: "file"; item: FileItem }
   | { kind: "video"; item: VideoItem };
 
-/** 引用消息的轻量上下文（首期只做内联内容，不查本地缓存）。 */
+/** 引用消息的轻量上下文（当前只取服务端下发的内联内容，不查本地缓存；引用缓存尚未实现）。 */
 export type QuoteContext = {
   /** 被引用消息的正文摘要（text/voice 转写/文件名/媒体占位）。 */
   body?: string;
@@ -216,6 +216,27 @@ export function formatQuote(quote: QuoteContext | undefined): string {
   if (quote.body) return `[引用消息] ${quote.body}`;
   if (quote.svrId) return "[引用消息内容未缓存]";
   return "";
+}
+
+/** 没有可交给大脑的正文/媒体时，返回给用户的明确提示（不进大脑）；有内容则返回 null。 */
+export function contentlessNotice(parts: {
+  text: string;
+  mediaCount: number;
+  unsupportedTypes: number[];
+  quote?: QuoteContext;
+}): string | null {
+  if (parts.text.trim() || parts.mediaCount > 0) return null;
+  const notes: string[] = [];
+  if (parts.unsupportedTypes.length)
+    notes.push(
+      `暂不支持这条消息的类型（item type=${parts.unsupportedTypes.join(",")}）。可以改用文字、图片、文件、视频或语音再发一次。`,
+    );
+  // 引用缓存尚未实现：服务端常只给 svr_id，此时不能静默丢，也不能拿空 prompt 去问大脑。
+  if (parts.quote)
+    notes.push(
+      "只收到一条引用，但微信没有提供引用内容、本地也没有缓存原消息；请把要说的话一起打出来。",
+    );
+  return notes.length ? notes.join("\n") : null;
 }
 
 /** 工具标题中文化（无 purpose 时的兜底）。 */

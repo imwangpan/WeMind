@@ -72,9 +72,13 @@ export function parseJsonWithLosslessIds<T>(rawText: string, label: string): T {
   try {
     return JSON.parse(output) as T;
   } catch {
-    // 改写失败时退回原始文本：宁可个别 ID 丢精度，也不让整条消息通道停摆。
     try {
-      return JSON.parse(rawText) as T;
+      const parsed = JSON.parse(rawText) as T;
+      // 只有「原文合法、改写后反而非法」才可能是改写逻辑坏了：留一条告警，别静默把 bug 藏起来；非 JSON 响应（如 sendMessage 的 OK、代理 HTML）是上游问题，不打这条。
+      console.warn(
+        `[wemind/wechat-ilink-core] ${label}：ID 无损改写后的 JSON 解析失败，但原始文本合法，已退回原文（请检查改写逻辑）`,
+      );
+      return parsed;
     } catch {
       throw new Error(`${label}：响应不是合法 JSON（${rawText.slice(0, 120)}）`);
     }

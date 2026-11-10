@@ -179,9 +179,11 @@ export function extractAttachments(text: string): {
       return "";
     });
   let out = collect(text ?? "", /\[(附件|文件|视频)\]\(\s*<([^>\n]+)>\s*\)/g);
-  // 普通形式排除 `<` 与 `(`：残缺的尖括号语法、以及含 `)` 的路径都保留为正文，
+  // 普通形式整段排除 `<` 与 `(`：残缺的尖括号语法、以及含 `)` 的路径都保留为正文，
   // 避免把 `report (1).pdf` 截成 `report (1` 后发错文件。这类路径必须写成 `<...>`。
-  out = collect(out, /\[(附件|文件|视频)\]\(\s*([^<()\n][^()\n]*?)\s*\)/g);
+  out = collect(out, /\[(附件|文件|视频)\]\(\s*([^<()\n][^<()\n]*?)\s*\)/g);
+  // 没有附件链接时原样返回：下面的清理只用于「移除链接后留下的空行」，不该改动正文里的 Markdown 代码块空行或首尾空白。
+  if (attachments.length === 0) return { attachments: [], text: text ?? "" };
   return {
     attachments,
     text: out
@@ -199,7 +201,7 @@ export type ResolvedAttachment = {
   sensitiveBypassed?: boolean;
 };
 
-/** file:// URL 只接受本机（空 host 或 localhost）；带 host 的一律是网络路径。 */
+/** file:// URL 只接受空 host；localhost 会被 WHATWG URL 规范化为空 host（等价 file:///），带其它 host 的写法一律按网络路径拒绝（Windows 上 fileURLToPath 会解析成 UNC）。 */
 function localFilePath(src: string): string {
   if (!/^file:/i.test(src)) return src;
   let url: URL;
@@ -209,8 +211,7 @@ function localFilePath(src: string): string {
     throw new Error(`无效的 file:// 路径：${src}`);
   }
   if (url.protocol !== "file:") throw new Error(`不是本地文件路径：${src}`);
-  if (url.host && url.host.toLowerCase() !== "localhost")
-    throw new Error(`只允许本地绝对路径（不支持网络路径）：${src}`);
+  if (url.host) throw new Error(`只允许本地绝对路径（不支持网络路径）：${src}`);
   return fileURLToPath(url);
 }
 

@@ -105,7 +105,7 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 ### 消息 ID（api/message-id.ts）
 
-iLink 的 `message_id` 会到 `7525…` 量级（超过 `Number.MAX_SAFE_INTEGER`），直接 `JSON.parse` 会把相邻 ID 舍入成同一个数。`parseJsonWithLosslessIds()` 在解析前只给 `message_id` / `msg_id` / `svr_id` 的**裸整数**加引号（不碰字符串内容、不碰 `seq` 等普通数字；按完整 JSON number token 读取，`1.5`/`7.0e2` 这类非整数原样保留，改写失败时退回原始文本解析以免通道停摆）；`compareMessageIds()` / `maxMessageId()` 用 BigInt 比较（非数字串退化为字典序），`normalizeMessageId()` 迁移旧版数字游标，`rememberMessageId()` 维护有上限的去重环。`state.json` 的 `lastMessageId` 现在是字符串、`seenMessageIds` 是字符串数组。
+iLink 的 `message_id` 会到 `7525…` 量级（超过 `Number.MAX_SAFE_INTEGER`），直接 `JSON.parse` 会把相邻 ID 舍入成同一个数。`parseJsonWithLosslessIds()` 在解析前只给 `message_id` / `msg_id` / `svr_id` 的**裸整数**加引号（不碰字符串内容、不碰 `seq` 等普通数字；按完整 JSON number token 读取，`1.5`/`7.0e2` 这类非整数原样保留；改写失败时退回原始文本解析以免通道停摆，且仅当「原文合法、改写后反而非法」时打一条 warn，避免把改写逻辑的 bug 藏起来）；`compareMessageIds()` / `maxMessageId()` 用 BigInt 比较（非数字串退化为字典序），`normalizeMessageId()` 迁移旧版数字游标，`rememberMessageId()` 维护有上限的去重环。`state.json` 的 `lastMessageId` 现在是字符串、`seenMessageIds` 是字符串数组。
 
 ### 本地（非协议）类型
 

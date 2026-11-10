@@ -55,6 +55,16 @@ describe("extractAttachments（显式附件语法）", () => {
     expect(extractAttachments(src)).toEqual({ attachments: [], text: src });
   });
 
+  it("没有附件链接时正文原样返回（不压缩代码块空行、不 trim）", () => {
+    const src = "  示例：\n```js\n\n\nconst a = 1;\n```  ";
+    expect(extractAttachments(src)).toEqual({ attachments: [], text: src });
+  });
+
+  it("普通形式中间出现 < 时整段保留为正文，不猜路径", () => {
+    const src = "[附件](C:/tmp/a<b.pdf)";
+    expect(extractAttachments(src)).toEqual({ attachments: [], text: src });
+  });
+
   it("同一路径只提取一次", () => {
     const { attachments } = extractAttachments("[附件](C:/tmp/a.pdf) [附件](C:/tmp/a.pdf)");
     expect(attachments).toHaveLength(1);
@@ -178,9 +188,14 @@ describe("resolveAttachment（读取与安全闸）", () => {
     }
   });
 
-  it("网络路径拒绝（file://host 与 UNC）", () => {
+  it("网络路径拒绝（file://host、UNC）；localhost 规范化为空 host 后按本地路径处理", () => {
     expect(() => resolveAttachment({ src: "file://attacker/share/x.pdf" })).toThrow(/网络路径/);
     expect(() => resolveAttachment({ src: "\\\\attacker\\share\\x.pdf" })).toThrow(/网络路径/);
+    const dir = tmpDir();
+    const file = path.join(dir, "a.pdf");
+    fs.writeFileSync(file, "v");
+    const url = pathToFileURL(file).href.replace("file:///", "file://localhost/");
+    expect(resolveAttachment({ src: url }).data.toString()).toBe("v");
   });
 
   it("isSensitiveFilePath 识别控制桥/任务目录与沙箱 settings", () => {

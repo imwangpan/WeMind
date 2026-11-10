@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MessageItemType, type WeixinMessage } from "@wemind/wechat-ilink-core";
 
 import {
+  contentlessNotice,
   extractInbound,
   extractText,
   formatQuote,
@@ -196,5 +197,56 @@ describe("三档进度提示（快 / 中 / 慢）", () => {
     expect(PROGRESS_NOTICE_GAP_MS).toBeLessThanOrEqual(
       PROGRESS_SECOND_NOTICE_MS - PROGRESS_ACK_DELAY_MS,
     );
+  });
+});
+
+describe("contentlessNotice（只引用 / 未知类型时给明确提示）", () => {
+  it("有正文或有媒体 → null（正常交给大脑）", () => {
+    expect(
+      contentlessNotice({ text: "你好", mediaCount: 0, unsupportedTypes: [], quote: undefined }),
+    ).toBeNull();
+    expect(
+      contentlessNotice({ text: "", mediaCount: 1, unsupportedTypes: [], quote: { svrId: "1" } }),
+    ).toBeNull();
+  });
+
+  it("只引用 → 提示用户补文字，不进大脑", () => {
+    const notice = contentlessNotice({
+      text: "",
+      mediaCount: 0,
+      unsupportedTypes: [],
+      quote: { svrId: "99" },
+    });
+    expect(notice).toContain("只收到一条引用");
+    expect(notice).toContain("请把要说的话一起打出来");
+  });
+
+  it("只有不认识的 item 类型 → 保留原提示", () => {
+    const notice = contentlessNotice({
+      text: "",
+      mediaCount: 0,
+      unsupportedTypes: [7, 8],
+      quote: undefined,
+    });
+    expect(notice).toContain("暂不支持这条消息的类型");
+    expect(notice).toContain("item type=7,8");
+  });
+
+  it("引用 + 未知类型 → 两条提示合并", () => {
+    const notice = contentlessNotice({
+      text: "",
+      mediaCount: 0,
+      unsupportedTypes: [7],
+      quote: {},
+    });
+    expect(notice).toContain("暂不支持这条消息的类型");
+    expect(notice).toContain("只收到一条引用");
+    expect(notice).toContain("\n");
+  });
+
+  it("全空且没有引用/未知类型 → null（poller 静默跳过）", () => {
+    expect(
+      contentlessNotice({ text: "", mediaCount: 0, unsupportedTypes: [], quote: undefined }),
+    ).toBeNull();
   });
 });

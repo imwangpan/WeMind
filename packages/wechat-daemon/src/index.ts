@@ -110,6 +110,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 import {
   brainErrorMessage,
   brainFailurePlan,
+  contentlessNotice,
   extractInbound,
   formatQuote,
   isFastLane,
@@ -364,11 +365,11 @@ async function handleMessage(
   activeTurn = { from: to, token: ctx, runId: randomUUID() };
   const cx = () => activeTurn?.token ?? ctx;
   await setTyping(account, to, cx(), 1);
-  // 处理期间每 3s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了。
-  // 客户端自动过期约 5–8s；5s 的旧间隔在 getConfig+sendTyping 的网络抖动下会踩到过期边界，出现「消失一阵才回来」。
+  // 处理期间每 5s 续发"正在输入"（sendtyping 不计入连续消息上限），避免长任务时指示消失、用户以为卡了。
+  // 客户端自动过期约 5–8s；发消息本身会顶掉 typing，送达后由 sendWithTyping 立刻补一次，这条瞬时闪烁靠补发缓解。
   const keepAlive = setInterval(() => {
     void setTyping(account, to, cx(), 1).catch(() => {});
-  }, 3000);
+  }, 5000);
 
   const t0 = Date.now();
   let lastProgressAt = t0; // 心跳基线：任意帧（含思考/工具活动）都会刷新
@@ -957,7 +958,13 @@ async function pollerLoop(
           log(
             `recv voice: text=${voiceItem.text ? `"${voiceItem.text.slice(0, 30)}"` : "(空,无微信转写)"} playtime=${voiceItem.playtime ?? "?"}`,
           );
-        if (!text && parts.attachments.length === 0 && parts.unsupportedTypes.length === 0) {
+        // 只引用、不输入正文的消息也要入队（由 workerLoop 明确提示），不能静默丢。
+        if (
+          !text &&
+          parts.attachments.length === 0 &&
+          parts.unsupportedTypes.length === 0 &&
+          !parts.quote
+        ) {
           log("skip empty/unsupported message");
           continue;
         }
@@ -1280,16 +1287,18 @@ async function workerLoop(
     const brainText = [formatQuote(item.quote), brainEscape ?? item.text]
       .filter(Boolean)
       .join("\n");
-    // 没有任何可交给大脑的内容、只有不认识的 item 类型：明确告诉用户，别静默丢。
-    if (!brainText.trim() && item.attachments.length === 0 && item.unsupportedTypes.length > 0) {
-      const types = item.unsupportedTypes.join(",");
-      log(`unsupported message only (types=${types}); rejected gracefully`);
-      await sends.sendNotice(
-        from,
-        token,
-        `暂不支持这条消息的类型（item type=${types}）。可以改用文字、图片、文件、视频或语音再发一次。`,
-        latestToken(),
+    // 没有正文、没有媒体时（只引用，或只有不认识的 item 类型）：直接回一条明确提示，别静默丢，也别拿空 prompt /「用户发来一张图片」的兜底去问大脑。
+    const emptyNotice = contentlessNotice({
+      text: brainEscape ?? item.text,
+      mediaCount: item.attachments.length,
+      unsupportedTypes: item.unsupportedTypes,
+      quote: item.quote,
+    });
+    if (emptyNotice) {
+      log(
+        `message without usable content (quote=${!!item.quote}, types=${item.unsupportedTypes.join(",")}); rejected gracefully`,
       );
+      await sends.sendNotice(from, token, emptyNotice, latestToken());
       continue;
     }
     // 交接注入：切换大脑后，发给**新**大脑的第一条消息带上前一个大脑留下的摘要（切回来源大脑、别人、

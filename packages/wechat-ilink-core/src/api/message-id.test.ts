@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   compareMessageIds,
@@ -9,6 +9,26 @@ import {
 } from "./message-id.js";
 
 describe("parseJsonWithLosslessIds", () => {
+  it("改写结果解析失败时告警并退回原文（不静默掩盖改写 bug）", () => {
+    const originalParse = JSON.parse;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(JSON, "parse").mockImplementation(((text: string) => {
+      if (text === '{"message_id":"123"}') throw new SyntaxError("rewritten broken");
+      return originalParse(text);
+    }) as typeof JSON.parse);
+    try {
+      expect(
+        parseJsonWithLosslessIds<{ message_id: number }>('{"message_id":123}', "test"),
+      ).toEqual({
+        message_id: 123,
+      });
+      expect(warn).toHaveBeenCalledOnce();
+      expect(String(warn.mock.calls[0]?.[0])).toContain("test");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("把 message_id/msg_id/svr_id 的数字转成字符串", () => {
     const parsed = parseJsonWithLosslessIds<{
       message_id: string;

@@ -227,7 +227,7 @@ graph TD
 
 ```mermaid
 graph TD
-    S["开始：setTyping(typing)"] --> KA["keepAlive 定时器 3s 续打字"]
+    S["开始：setTyping(typing)"] --> KA["keepAlive 定时器 5s 续打字"]
     KA --> ACK["第 5s 即时确认：此前没有任何可见进度才发 🤖 收到，正在处理…"]
     ACK --> N15["第 15s 第二条：正文已开始→✍️ 正在整理回复…<br/>否则→⏳ 还在处理中…（距上一条非确认进度 ≥5s）"]
     N15 --> HB["heartbeat 定时器 15s 静默心跳"]
@@ -334,7 +334,7 @@ graph TD
 ### 出站
 
 - **发图**：`extractImages` 从大脑回复里提取 Markdown `![](src)` 或裸图片 URL → `resolveImageBytes` 下载/读取 → `sendImage` 发出，剩余文本另发。下载带 15s 超时 + 浏览器 UA（规避图床热链 403）、10MB 上限；失败的图把原链接附文本发给用户（不静默丢图）。URL 逐跳过安全闸（`image-url.ts` 的 `assertPublicHttpUrl`）：非 http(s)、本机/私网/CGNAT/链路本地/组播（含 IPv6 与 `::ffff:` 映射）以及解析到这些地址的域名都拒绝；重定向手动跟随、每跳复查、最多 3 跳——防大脑输出被提示注入成内网 SSRF。本地文件绝对路径不受影响（那是大脑自己就能读的文件）。
-- **发文件/视频**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 时写 `[附件](<路径>)`；普通形式遇到 `(` 不猜、整段保留为正文）。`extractAttachments()` 只认这三种标签（普通 Markdown 链接保留在正文，不误发）；`file://` 只接受空 host 或 `localhost`，**UNC `\\server\share` 与 `file://host/...` 一律拒绝**（避免 `realpath`/`stat` 触发 SMB 认证；软链接/junction 先看链接目标、再看 realpath 结果），Windows 还拒绝 **NTFS 数据流**（`account.json::$DATA` 可绕过按名规则）；必须是绝对路径；`realpathSync` 后过敏感文件 denylist（数据状态文件、agent 登录态与 `.auth/`、brain-home/worker-home 与 preset `realHome` 下的 `settings.json`/`models*.json`、密钥，见 §4.19 与 `attachments.test.ts`）与单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）；按标签或扩展名判 `file`/`video`，`sendFileOrdered` 逐条发出。失败/额度不足的原因会归并成附注写进最终文本（`attachmentFailureNote`），用户仍能看到原路径。需要临时外发敏感文件时，登录者发微信指令 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30）：`sensitive-allow.ts` 在**本进程内**记一个截止时间，窗口内 `resolveAttachment` 只跳过敏感名单，UNC/数据流/大小上限照旧；日志会写「敏感文件已临时放行」。被拦下的附件会按用户记进内存队列（30 分钟 TTL、最多 20 条），回这条指令时先开窗再补发，所以**先开后发、先拦后放两种顺序都成立**。窗口与队列都不落盘，重启即失效。
+- **发文件/视频**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 时写 `[附件](<路径>)`；普通形式遇到 `(` 或 `<` 不猜、整段保留为正文；没有附件链接时正文原样返回，不 trim、不压缩空行）。`extractAttachments()` 只认这三种标签（普通 Markdown 链接保留在正文，不误发）；`file://` 只接受空 host（`localhost` 会被 WHATWG URL 规范化为空 host，等价 `file:///`），**UNC `\\server\share` 与 `file://host/...` 一律拒绝**（避免 `realpath`/`stat` 触发 SMB 认证；软链接/junction 先看链接目标、再看 realpath 结果），Windows 还拒绝 **NTFS 数据流**（`account.json::$DATA` 可绕过按名规则）；必须是绝对路径；`realpathSync` 后过敏感文件 denylist（数据状态文件、agent 登录态与 `.auth/`、brain-home/worker-home 与 preset `realHome` 下的 `settings.json`/`models*.json`、密钥，见 §4.19 与 `attachments.test.ts`）与单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）；按标签或扩展名判 `file`/`video`，`sendFileOrdered` 逐条发出。失败/额度不足的原因会归并成附注写进最终文本（`attachmentFailureNote`），用户仍能看到原路径。需要临时外发敏感文件时，登录者发微信指令 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30）：`sensitive-allow.ts` 在**本进程内**记一个截止时间，窗口内 `resolveAttachment` 只跳过敏感名单，UNC/数据流/大小上限照旧；日志会写「敏感文件已临时放行」。被拦下的附件会按用户记进内存队列（30 分钟 TTL、最多 20 条），回这条指令时先开窗再补发，所以**先开后发、先拦后放两种顺序都成立**。窗口与队列都不落盘，重启即失效。
 - **发语音**：不做。微信语音回复需要 TTS + SILK，且体验通常不如文本；大脑要表达「语音」时按文件发。
 - **发工具进度**：默认发文本「步骤 N」。结构化 item（`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`）需 `WECHAT_TOOL_PROGRESS_ITEMS=1` 才启用；代码已对齐官方 2.4.10（`FINISH` + 本回合 `run_id`，不占连发额度、不顶替固定提示；回退文本计额度），但**微信客户端目前不渲染**（服务端 200/空响应/不分配 `message_id`，多家第三方实测一致），所以默认关闭。等微信端开放后改回默认开启即可。真机异常见 [`docs/ai/已知坑.md`](../ai/已知坑.md) 的「工具进度 item」条。
 

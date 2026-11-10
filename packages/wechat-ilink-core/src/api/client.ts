@@ -108,13 +108,9 @@ async function apiFetch(params: {
   }
 }
 
-/** 防御性解析 API JSON 响应：失败抛带 label 与响应片段的清晰错误，而非裸 SyntaxError（畸形/代理 HTML/截断响应不致以晦涩错误打断调用方）。 */
+/** 防御性解析 API JSON 响应：parseJsonWithLosslessIds 自己抛带 label 与响应片段的清晰错误（畸形/代理 HTML/截断响应不致以晦涩错误打断调用方），这里不再重复包一层。 */
 function parseJsonResp<T>(raw: string, label: string): T {
-  try {
-    return parseJsonWithLosslessIds<T>(raw, label);
-  } catch {
-    throw new Error(`${label}：响应不是合法 JSON（${raw.slice(0, 120)}）`);
-  }
+  return parseJsonWithLosslessIds<T>(raw, label);
 }
 
 /** sendMessage 的成功响应可能为空/非 JSON（历史上 iLink 如此）；只有明确错误码才失败。 */

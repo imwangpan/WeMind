@@ -14,9 +14,16 @@
 
 ### Changed
 
+- **「正在输入」续命间隔改回 5s（2026-11-10）**：1.6.0 曾为规避 `getConfig`+`sendTyping` 在网络抖动下踩到 typing 过期边界，把 `index.ts` 的 keepAlive 与 `task-manager.ts` 的每轮续命从 5s 压到 3s；但请求量 +67% 且没有配置化，收益不足以抵消。现两处都改回 5s，发消息后仍由 `sendWithTyping` 立刻补一次。文档同步：`README.md`、`已知坑.md`、`repowiki/05`、`repowiki/07`。
+
 - **入站媒体默认保留 30 天 / 1GB，且常驻 daemon 运行中也会清理（2026-11-10）**：原先 `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB` 默认 7 天 / 256MB，且只有 daemon 启动时调一次 `pruneInboundMedia()`——长期不重启时两个上限形同虚设，放宽阈值后磁盘会攒得更多。现在默认值改为 30 天 / 1GB，新增 `pruneInboundMediaIfDue()`（进程内节流 1 小时、首次必执行）：`runDaemon` 启动时清一次，之后**只在 `saveInboundMedia()` 写入入站媒体时**检查（目录只在写入时增长，挂在 poller 主循环上没有必要），到点才真的 readdir+stat。测试：`media-store.test.ts`（写入时按 TTL 清过期文件、同批连续写入只扫一次）。
 
 ### Fixed
+
+- **只引用、不输入正文不再零反馈（2026-11-10 修）**：poller 的 skip 判断原先只算 `text` / `attachments` / `unsupportedTypes`，不算 `parts.quote`，纯引用消息被静默丢弃；直接放行又会因 `formatQuote` 返回空串而让 `askBrain` 用「（用户发来一张图片，请查看并回应）」兜底误导大脑。现在纯引用消息入队，由新增的 `contentlessNotice()` 回一条明确提示（不进大脑、不烧模型回合）；只有未知 item 类型时仍给原提示，两者同时出现时合并。**引用正文缓存仍不做**（方案见 `待办与后续计划/待办-引用消息缓存.md`），`[引用消息内容未缓存]` 占位保留。测试：`daemon-routing.test.ts`。
+- **无损 ID 改写失败不再静默退回（2026-11-10 修）**：`parseJsonWithLosslessIds()` 原先在改写后 JSON 解析失败时无声按原文解析，会把改写逻辑的 bug 藏起来。现在仅当「原文合法、改写后反而非法」时打一条 `warn` 再退回原文（正常的非 JSON 响应如 sendMessage 的 `OK`、代理 HTML 不打这条）；`client.ts` 的 `parseJsonResp` 去掉重复包一层的 try/catch，错误文案只在一处生成。测试：`message-id.test.ts`、`client.test.ts`。
+- **出站附件语法与 `file://` 判定边界（2026-11-10 修）**：`extractAttachments()` 普通形式原先只排除首字符 `<`，中间仍会吃到残缺尖括号语法；且无论有没有附件都会 `trim()` + 压缩 `\n{3,}`，会改动 Markdown 代码块空行。现在整段排除 `<`、无附件链接时正文原样返回。另核对发现 `file://localhost/...` 的 host 会被 WHATWG URL 规范化为空（等价 `file:///`），原注释本来正确、不是不一致；已去掉冗余的 `!== "localhost"` 判断并补测试锁定该行为。测试：`attachments.test.ts`。
+- **注释如实化（2026-11-10）**：`SendMessageResp.message_id` 的「出站引用缓存要用」与 `run_id` 的「引用缓存可用」改为「预留字段 / 缓存尚未实现」，避免文档承诺未实现的能力（缓存方案见待办文档）。
 
 - **MCP `get_messages` 补上去重环（2026-11-10 修）**：此前 MCP 侧只用 `compareMessageIds(message_id, lastMessageId) > 0` 一层过滤，服务端若在同一批 `resp.msgs` 里重复投递同一个 ID（或重放），会把同一条消息返回给 MCP 客户端两次；daemon 侧本来就有 `seenMessageIds`（最近 200 条环形）兜住。现在 MCP 侧按**所有** incoming 复用 `rememberMessageId`，环随 `saveState` 落盘，两种形态行为一致。测试：`messages.test.ts`（同批重复、已缓存 ID 重放）。
 

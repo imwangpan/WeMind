@@ -220,7 +220,7 @@ export interface WeixinMessage {
   /** 见 MessageState（发送时：进度用 GENERATING、最终用 FINISH）。 */
   message_state?: number;
   item_list?: MessageItem[];
-  /** 本轮运行 ID（官方 2.4.10 新增；工具进度/引用缓存可用）。 */
+  /** 本轮运行 ID（官方 2.4.10 新增；当前只用于同一回合外发消息的服务端关联）。 */
   run_id?: string;
   /**
    * 会话上下文令牌。发消息（回复）必须带它，否则发送被拒。
@@ -263,7 +263,7 @@ export interface SendMessageReq {
 
 /** SendMessage 响应（proto 为空体；实际响应体可能带 ret/errcode 表示失败，见 sendMessage 实现）。 */
 export interface SendMessageResp {
-  /** 服务端分配的消息 ID（uint64，按字符串无损解析；出站引用缓存要用）。 */
+  /** 服务端分配的消息 ID（uint64，按字符串无损解析；目前只是预留字段，出站引用缓存尚未实现）。 */
   message_id?: string;
   ret?: number;
   errcode?: number;
