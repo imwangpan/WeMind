@@ -8,8 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @wemind/wechat-ilink-core && npm run build -w @wemind/cli -w @wemind/wechat-mcp",
-    "typecheck": "npm run build -w @wemind/wechat-ilink-core && npm run typecheck -w @wemind/cli -w @wemind/wechat-mcp",
+    "build": "npm run typecheck -w @wemind/wechat-ilink-core && npm run build -w @wemind/cli -w @wemind/wechat-mcp",
+    "typecheck": "npm run typecheck -w @wemind/wechat-ilink-core && npm run typecheck -w @wemind/cli -w @wemind/wechat-mcp",
     "test": "vitest run",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",

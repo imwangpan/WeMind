@@ -4,15 +4,19 @@
 
 > **版本边界**：下面每个 `## [x.y.z]` 段只记**该版本发布时**的行为。发布之后才改的行为进 `## [Unreleased]`，不要回改已发布版本的条目——用户装的 1.4.0 与条目描述必须对得上。各版本条目里的源码路径是**发布当时**的路径；2026-11-06 起 `src/` 已分层，旧路径不再存在，现行位置见 [`docs/ai/代码地图.md`](../ai/代码地图.md)。
 
-## [Unreleased] — 发布后的改动（2026-11-09 起）
+## [Unreleased] — 发布后的改动（2026-11-10 起）
 
 <!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
+
+## [1.7.0] GitHub Copilot 预设 · 构建拓扑改为 JIT（2026-11-10）
 
 ### Added
 
 - **GitHub Copilot CLI 原生 ACP agent**：新增显式选择的 `copilot` 预设，Windows 使用 `copilot.cmd`；在隔离的 `COPILOT_HOME` 中同步登录配置、skills 与指令，通过 ACP 激活 MCP 并排除 `wechat`；Copilot `config.json` 也纳入敏感附件拦截。Copilot CLI 1.0.107 的本机 ACP 探针已验证会话、工具和 MCP 调用；真实微信 brain/worker E2E 尚待验证。
 
 ### Changed
+
+- **协议内核改为 JIT 源码包（2026-11-10）**：`packages/wechat-ilink-core` 的 `main`/`types`/`exports` 改为指向 `src/index.ts`，删除 `build` 脚本与 `dist/`。此前 workspace 内引用 core 会经 npm 软链落到包入口（`dist/index.js`），因此 clone 后必须先构建 core 才能 `npm test` / `npm run typecheck`；现在 tsc / Vitest / tsdown / tsx 直接消费源码，构建只发生在发布打包时。两个发布包仍由 tsdown `deps.alwaysBundle` 内联 core，并新增 `failOnWarn: true` 把「core 未被内联」从 warning 升级为失败；`scripts/prepack-guard.mjs` 增加产物扫描，发现 `@wemind/*` 裸 import 即拒绝发布。消费方 `tsconfig.json` 加 `noEmit: true`，根 `build`/`typecheck` 先跑 core 的 `typecheck`。CI `min-node` 改为直接 `npm test` 并断言无 core dist。注意纯 `node` 不能直接跑 `src/*.ts`（不做 `.js` → `.ts` 映射），源码运行用 `tsx`。守卫：`scripts/core-entry.test.mjs`、`scripts/prepack-guard.test.mjs`。文档同步：`AGENTS.md`、`README.md`、`docs/ai/README.md`、`已知坑.md`、`验收清单.md`、`repowiki/01`、`03`、`11`、`packages/wechat-ilink-core/README.md`、`如何发布新版本.md`、`llms.txt`。
 
 - **「正在输入」续命间隔改回 5s（2026-11-10）**：1.6.0 曾为规避 `getConfig`+`sendTyping` 在网络抖动下踩到 typing 过期边界，把 `index.ts` 的 keepAlive 与 `task-manager.ts` 的每轮续命从 5s 压到 3s；但请求量 +67% 且没有配置化，收益不足以抵消。现两处都改回 5s，发消息后仍由 `sendWithTyping` 立刻补一次。文档同步：`README.md`、`已知坑.md`、`repowiki/05`、`repowiki/07`。
 
@@ -24,8 +28,6 @@
 - **无损 ID 改写失败不再静默退回（2026-11-10 修）**：`parseJsonWithLosslessIds()` 原先在改写后 JSON 解析失败时无声按原文解析，会把改写逻辑的 bug 藏起来。现在仅当「原文合法、改写后反而非法」时打一条 `warn` 再退回原文（正常的非 JSON 响应如 sendMessage 的 `OK`、代理 HTML 不打这条）；`client.ts` 的 `parseJsonResp` 去掉重复包一层的 try/catch，错误文案只在一处生成。测试：`message-id.test.ts`、`client.test.ts`。
 - **出站附件语法与 `file://` 判定边界（2026-11-10 修）**：`extractAttachments()` 普通形式原先只排除首字符 `<`，中间仍会吃到残缺尖括号语法；且无论有没有附件都会 `trim()` + 压缩 `\n{3,}`，会改动 Markdown 代码块空行。现在整段排除 `<`、无附件链接时正文原样返回。另核对发现 `file://localhost/...` 的 host 会被 WHATWG URL 规范化为空（等价 `file:///`），原注释本来正确、不是不一致；已去掉冗余的 `!== "localhost"` 判断并补测试锁定该行为。测试：`attachments.test.ts`。
 - **注释如实化（2026-11-10）**：`SendMessageResp.message_id` 的「出站引用缓存要用」与 `run_id` 的「引用缓存可用」改为「预留字段 / 缓存尚未实现」，避免文档承诺未实现的能力（缓存方案见待办文档）。
-
-- **MCP `get_messages` 补上去重环（2026-11-10 修）**：此前 MCP 侧只用 `compareMessageIds(message_id, lastMessageId) > 0` 一层过滤，服务端若在同一批 `resp.msgs` 里重复投递同一个 ID（或重放），会把同一条消息返回给 MCP 客户端两次；daemon 侧本来就有 `seenMessageIds`（最近 200 条环形）兜住。现在 MCP 侧按**所有** incoming 复用 `rememberMessageId`，环随 `saveState` 落盘，两种形态行为一致。测试：`messages.test.ts`（同批重复、已缓存 ID 重放）。
 
 - **结构化工具进度 item 的连发额度与固定提示（2026-11-09 修）**：`WECHAT_TOOL_PROGRESS_ITEMS=1` 时，item 本身不占额度是对的，但它发送失败回退的**文本**是用户可见消息，此前同样不计数（额度偏低可能触发 `ret=-2`、「接近上限」暂停提示滞后）；且 `emitProgress` 无条件把不可见 item 当作「已有可见进度」，客户端不渲染时连 5s「收到」和 15s 第二条都被抑制。现在把额度/可见性决策抽成纯函数 `planProgressEmission`：不可见 item 不顶替固定提示、不刷新 15s 第二条基线，额度到 `limit-2` 时直接跳过（免得回退文本挤占留给最终答案的最后一条）；回退文本确实发出后由 `sendItemOrdered` 的 `onFallback` 回调补计一条额度并顶替固定提示。默认文本进度路径行为不变。测试：`index.test.ts`（`planProgressEmission`）、`send-pipeline.test.ts`（`onFallback` 触发时机）。
 
@@ -59,6 +61,16 @@
 
 - **uint64 消息 ID 精度**：iLink 的大消息 ID 保持精确字符串，不再因 JS 数字舍入导致 MCP `get_messages` 漏消息或重复处理。
 - **轮询与发送错误处理**：长轮询可取消；状态写回前重新读取账号状态；传输错误分类统一并对 MCP 发送重试，登出失败不再误报凭证已清除。
+
+## [1.1.2] `@wemind/wechat-mcp` 消息去重与构建同步（2026-11-10）
+
+### Fixed
+
+- **`get_messages` 补上去重环（2026-11-10 修）**：此前 MCP 侧只用 `compareMessageIds(message_id, lastMessageId) > 0` 一层过滤，服务端若在同一批 `resp.msgs` 里重复投递同一个 ID（或重放），会把同一条消息返回给 MCP 客户端两次；daemon 侧本来就有 `seenMessageIds`（最近 200 条环形）兜住。现在 MCP 侧按**所有** incoming 复用 `rememberMessageId`，环随 `saveState` 落盘，两种形态行为一致。测试：`messages.test.ts`（同批重复、已缓存 ID 重放）。
+
+### Changed
+
+- **构建拓扑同步（2026-11-10）**：core 改为 JIT 源码包（入口 `src/index.ts`，无 `dist/`），发布产物仍由 tsdown 内联；MCP 运行时行为不变。
 
 ## [1.5.1] 源码目录分层（2026-11-06）
 

@@ -17,8 +17,9 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-      - run: npm run build -w @wemind/wechat-ilink-core
+      # core 是 JIT 源码包，不再需要预构建；本 job 直接跑测试，锁住「无 core dist 也能跑」这个不变量。
       - run: npm test
+      - run: test ! -e packages/wechat-ilink-core/dist
 
   build-test:
     strategy:

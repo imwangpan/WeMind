@@ -136,6 +136,22 @@ describe("doc-impact 规则匹配", () => {
     expect(hit.find((h) => h.rule.id === "preset").dynamicNames).toEqual(["acme"]);
   });
 
+  it("构建拓扑配置变化触发 build-config", () => {
+    const hit = match([
+      '+packages/wechat-ilink-core/package.json\t  "exports": {',
+      '+packages/wechat-daemon/tsconfig.json\t  "noEmit": true,',
+      '+packages/wechat-daemon/tsdown.config.ts\t  failOnWarn: true,',
+    ]);
+    expect(hit.map((h) => h.rule.id)).toContain("build-config");
+  });
+
+  it("build-config 不看普通源码与依赖版本", () => {
+    const fromSrc = match(["+packages/wechat-daemon/src/a.ts\tconst files = 1;"]);
+    expect(fromSrc.map((h) => h.rule.id)).not.toContain("build-config");
+    const fromVersion = match(['+packages/wechat-daemon/package.json\t  "version": "1.6.1",']);
+    expect(fromVersion.map((h) => h.rule.id)).not.toContain("build-config");
+  });
+
   it("接入文档名归一化：大小写与连字符不参与比较", () => {
     expect(normalizeDocName("docs/接入方案/接入-ClaudeCode.md")).toBe(
       normalizeDocName("接入-claude-code.md"),

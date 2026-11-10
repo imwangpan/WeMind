@@ -211,6 +211,42 @@ export const RULES = [
     // docs/设计文档/源码目录分层设计.md §9
     note: '至少同步一个目录结构文档；并对照源码目录分层设计 §9 的完整清单逐项核对（历史快照文档只加「当时路径」说明，不改正文）。',
   },
+  {
+    id: 'build-config',
+    why: '构建拓扑（JIT 源码包/内联/emit 开关）变了，README、开发指南与发布手册里的构建步骤和产物说明会一起失效。',
+    // 只看构建配置本身：普通源码、依赖版本、测试 fixture 不触发。
+    files: [
+      'package.json',
+      'packages/wechat-ilink-core/package.json',
+      'packages/wechat-daemon/package.json',
+      'packages/wechat-mcp/package.json',
+      'packages/wechat-ilink-core/tsconfig.json',
+      'packages/wechat-daemon/tsconfig.json',
+      'packages/wechat-mcp/tsconfig.json',
+      'packages/wechat-daemon/tsdown.config.ts',
+      'packages/wechat-mcp/tsdown.config.ts',
+    ],
+    trigger: (diffLines) =>
+      diffLines.some(
+        (line) =>
+          line.startsWith('+') &&
+          /(?:"(?:main|types|exports|build|files|noEmit)"\s*:|(?:alwaysBundle|failOnWarn)\s*:)/.test(
+            line,
+          ),
+      ),
+    anyOf: true,
+    docs: [
+      'AGENTS.md §0 / §2 / §3 / §4.20（构建拓扑）',
+      'docs/ai/README.md 包表',
+      'docs/repowiki/11-开发指南.md §11.2–11.3',
+      'README.md 项目结构与本地开发',
+      'packages/wechat-ilink-core/README.md 安装',
+      'docs/发布与变更记录/如何发布新版本.md',
+      'docs/ai/已知坑.md',
+      'docs/ai/验收清单.md 构建拓扑行',
+    ],
+    note: '至少同步一处；完整核对清单见 AGENTS.md §4.20。',
+  },
 ];
 
 /**

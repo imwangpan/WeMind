@@ -2,9 +2,11 @@
 
 > 上一页：[2. 系统架构](02-系统架构.md) ｜ 下一页：[4. MCP Server](04-MCP-Server.md)
 >
-> **最后核对**：2026-11-09
+> **最后核对**：2026-11-10
 
 协议内核是整个项目的地基：它封装了与腾讯 iLink 服务器通信的全部细节，对上提供纯粹、无状态依赖的 API。MCP server 和 daemon 都只依赖它。
+
+它是 **JIT 源码包（source-first）**：`package.json` 的 `main`/`types`/`exports` 指向 `src/index.ts`，没有构建步骤与 `dist/`；workspace 内 tsc / Vitest / tsdown / tsx 直接消费源码，发布时由 tsdown 内联进两个发布包（见 [11.3 构建拓扑与产物](11-开发指南.md#113-构建拓扑与产物)）。
 
 ## 3.1 模块结构
 

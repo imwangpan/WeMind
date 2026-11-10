@@ -38,12 +38,12 @@ WeMind 只做一件事：**把个人微信的消息，变成某个 AI agent 的�
 ```text
 wechat-ilink-core  ◄──  wechat-mcp      （tsdown 内联 core，发布单包）
         ▲
-        └──────────────  wechat-daemon（发布为 @wemind/cli，命令 wemind；core 构建时内联）
+        └──────────────  wechat-daemon（发布为 @wemind/cli，命令 wemind；core 是 JIT 源码包，发布时内联）
 ```
 
 | 包 | 路径 | 职责 | 发布 |
 |---|---|---|---|
-| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink HTTP、类型、错误码、会话守卫、账号/状态、收发图加解密 | 私有（构建时内联进 `@wemind/wechat-mcp` 与 `@wemind/cli`） |
+| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink HTTP、类型、错误码、会话守卫、账号/状态、收发图加解密 | 私有（JIT 源码包，入口 `src/index.ts`、无 dist；发布时 tsdown 内联进 `@wemind/wechat-mcp` 与 `@wemind/cli`） |
 | `@wemind/wechat-mcp` | `packages/wechat-mcp` | 6 个 MCP 工具 | 已发布（bin `wemind-mcp`） |
 | `@wemind/cli` | `packages/wechat-daemon` | daemon + ACP 大脑 + worker + CLI | 已发布（命令 `wemind`） |
 

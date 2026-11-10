@@ -4,7 +4,8 @@
  *
  * 因此每个要发布的工作区包在 `scripts.prepack` 里调本脚本，检查目标目录：
  *   1. package.json 的 `files` 里列出的每个目录/文件都存在且非空；
- *   2. `bin` 指向的文件存在（可执行入口必须有）。
+ *   2. `bin` 指向的文件存在（可执行入口必须有）；
+ *   3. 产物里不得残留 `@wemind/*` 裸包名 import（core 是 JIT 源码包，必须被 tsdown 内联）。
  * 任何一项不满足就 exit 1，让 `npm publish` 失败而不是发出坏包。
  *
  * 用法：node scripts/prepack-guard.mjs <包目录>
@@ -51,9 +52,44 @@ function existsNonEmpty(p) {
   return st.size > 0;
 }
 
+/** 递归收集 files 覆盖的脚本产物；只扫 .js/.mjs/.cjs——.map 的 sourcesContent 会包含源码里的 import，扫它会误报。 */
+const SCRIPT_EXT = new Set([".js", ".mjs", ".cjs"]);
+function collectScripts(p) {
+  const out = [];
+  const st = fs.statSync(p);
+  if (st.isDirectory()) {
+    for (const ent of fs.readdirSync(p, { withFileTypes: true })) {
+      if (ent.name === "node_modules") continue;
+      out.push(...collectScripts(path.join(p, ent.name)));
+    }
+  } else if (SCRIPT_EXT.has(path.extname(p))) {
+    out.push(p);
+  }
+  return out;
+}
+
+const packagedScripts = [];
 for (const entry of pkg.files ?? []) {
-  if (!existsNonEmpty(path.join(pkgDir, entry))) {
+  const p = path.join(pkgDir, entry);
+  if (!existsNonEmpty(p)) {
     problems.push(`files 条目不存在或为空：${entry}（先跑 npm run build）`);
+    continue;
+  }
+  packagedScripts.push(...collectScripts(p));
+}
+
+// 发布产物必须自包含：core 是 private 的 JIT 源码包，由 tsdown alwaysBundle 内联。
+// 产物里若仍出现 @wemind/* 裸包名 import，说明它被当成 external，装到用户机器上会 ERR_MODULE_NOT_FOUND。
+const WORKSPACE_SPECIFIER =
+  /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'](@wemind\/[^"']+)["']/g;
+for (const file of packagedScripts) {
+  const text = fs.readFileSync(file, "utf-8");
+  WORKSPACE_SPECIFIER.lastIndex = 0;
+  const hit = WORKSPACE_SPECIFIER.exec(text);
+  if (hit) {
+    problems.push(
+      `产物仍引用工作区包 ${hit[1]}：${path.relative(pkgDir, file)}（core 没有被内联，检查 tsdown deps.alwaysBundle）`,
+    );
   }
 }
 

@@ -2,7 +2,7 @@
 
 > **你的 AI 大脑，挂在微信上。** 常驻微信 Bot daemon：自己长轮询 iLink 收消息 → 调常驻 **ACP 大脑**生成回复 → 自动回发。支持**运行时切换大脑**（免重启）、**多任务并行（worker 进程池）**、**完整会话管理**（列表/恢复/改名/删除）、**会话交接**、**多账号**、收**文本/图片/语音/文件/视频**（图片给大脑看；文件/视频/无转写语音落盘给路径），出站**图片/文件/视频**与长回复自动转 `.md`。
 
-[WeMind](https://github.com/imwangpan/WeMind) monorepo 的完整应用包；只依赖内核 `@wemind/wechat-ilink-core`（构建时已内联进单文件产物），不碰 MCP 层，可独立运行。
+[WeMind](https://github.com/imwangpan/WeMind) monorepo 的完整应用包；只依赖内核 `@wemind/wechat-ilink-core`（发布时已内联进单文件产物），不碰 MCP 层，可独立运行。
 
 > **包名 `@wemind/cli`，命令名 `wemind`。** 包收在 scope 下，命令保持短名。**`npx` 必须写全包名**。
 
@@ -25,7 +25,7 @@
 
 ```bash
 npm i -g @wemind/cli     # 安装后得到 wemind 命令
-wemind version           # → wemind 1.6.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
+wemind version           # → wemind 1.7.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
 wemind list              # 查看账号与运行状态
 ```
 

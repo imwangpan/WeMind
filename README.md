@@ -84,13 +84,13 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 
 | 包                          | 路径                         | 说明                                                                                         | 发布                            |
 | --------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
-| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（构建时内联进 `@wemind/cli` 与 `@wemind/wechat-mcp`） |
+| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（JIT 源码包；发布时内联进 `@wemind/cli` 与 `@wemind/wechat-mcp`） |
 | `@wemind/wechat-mcp`        | `packages/wechat-mcp`        | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入                                 | **已发布**（bin: `wemind-mcp`） |
 | `@wemind/cli`               | `packages/wechat-daemon`     | 独立常驻 daemon：长轮询 + 常驻 ACP 大脑自动收发                                             | **已发布**（命令 `wemind`）     |
 
 > 📌 上表「发布」列指的是**该子包**是否发布到 npm：对外发布的是 `@wemind/wechat-mcp`（MCP 形态）与 `@wemind/cli`（完整应用 CLI，命令 `wemind`）两个入口。两者共用同一个 bot token 时**只能二选一**。
 
-`@wemind/wechat-mcp` 与 `@wemind/cli` 发布时都用 [tsdown](https://tsdown.dev/)（rolldown + oxc）把 `core` **内联**进单一产物，**两个包各自自包含**；`core` 本身 `private: true`，永不单独发布。发布流程见 [`.github/workflows/wemind-publish.yml`](.github/workflows/wemind-publish.yml) 与 [`docs/发布与变更记录/如何发布新版本.md`](docs/发布与变更记录/如何发布新版本.md)。
+`@wemind/wechat-mcp` 与 `@wemind/cli` 发布时都用 [tsdown](https://tsdown.dev/)（rolldown + oxc）把 `core` **内联**进单一产物，**两个包各自自包含**；`core` 本身 `private: true`，永不单独发布。开发时 `core` 是 **JIT 源码包**（入口直接指向 `src/index.ts`，没有构建步骤与 `dist/`），`npm test` / `npm run typecheck` 不需要先构建它。发布流程见 [`.github/workflows/wemind-publish.yml`](.github/workflows/wemind-publish.yml) 与 [`docs/发布与变更记录/如何发布新版本.md`](docs/发布与变更记录/如何发布新版本.md)。
 
 ## 安装（两种形态，二选一）
 
@@ -249,7 +249,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 git clone https://github.com/imwangpan/WeMind.git
 cd WeMind
 npm install
-npm run build      # 按 core → @wemind/cli / @wemind/wechat-mcp 顺序构建各包
+npm run build      # 只打两个发布包；core 是 JIT 源码包，无需预构建
 npm start          # 运行 node packages/wechat-mcp/dist/index.js
 npm test           # 运行单元测试
 npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（可选）
@@ -341,7 +341,7 @@ wemind list                          # 账号与运行状态
 wemind brain check                   # 验证大脑能实现 ACP（真起一次握手）
 
 # 方式二：从源码跑（开发者）
-npm run build
+npm run build       # 只打两个发布包（core 是 JIT 源码包，内联进产物）
 npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 ```
 
@@ -685,4 +685,4 @@ daemon 的**内置预设默认免审批**（每个 agent 用自己官方的开�
 
 ---
 
-> **最后核对**：2026-11-05 ｜ 本文档描述当前分支的最新代码，已发布版本见 [CHANGELOG](docs/发布与变更记录/CHANGELOG.md) 与 npm；接入类结论请看对应文档的「实测/假设」标注。
+> **最后核对**：2026-11-10 ｜ 本文档描述当前分支的最新代码，已发布版本见 [CHANGELOG](docs/发布与变更记录/CHANGELOG.md) 与 npm；接入类结论请看对应文档的「实测/假设」标注。

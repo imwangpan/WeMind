@@ -26,10 +26,12 @@
 > ⚠️ **本包不发布到 npm**（`private: true`，`npm view` 会 404）。它只有两个消费方，且都在本仓库里：
 > [`@wemind/wechat-mcp`](../wechat-mcp) 与 [`@wemind/cli`](../wechat-daemon) 用 tsdown 把它**内联**进各自单文件产物。
 > 想用这套 iLink 内核请 clone 仓库：`npm install` 后 workspace 会自动链接本包（`@wemind/wechat-ilink-core: "*"`）。
+>
+> 本包是 **JIT 源码包（source-first）**：`main` / `types` / `exports` 指向 `src/index.ts`，没有构建脚本与 `dist/`。workspace 内 tsc / Vitest / tsdown / tsx 直接消费源码；发布时由两个消费方的 tsdown 内联，`scripts/prepack-guard.mjs` 会拒绝仍带 `@wemind/*` 裸 import 的产物。
 
 ```bash
 git clone https://github.com/imwangpan/WeMind.git
-cd WeMind && npm install && npm run build   # core → daemon/mcp
+cd WeMind && npm install && npm run build   # 只打 daemon/mcp 两个发布包（core 是 JIT 源码包，无需构建）
 ```
 
 ## 用法
