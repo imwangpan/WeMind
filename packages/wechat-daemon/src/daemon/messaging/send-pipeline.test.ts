@@ -273,6 +273,58 @@ describe("SendPipeline：文件/视频与结构化进度 item", () => {
     expect(h.sent).toHaveLength(1);
     expect(h.errors).toHaveLength(1);
   });
+
+  it("onFallback 只在 item 失败且回退文本确实发出时触发", async () => {
+    const calls: string[] = [];
+    const ok = harness();
+    await expect(
+      ok.pipeline.sendItemOrdered("u1", "ctx", { type: 11 }, "读取文件", () => calls.push("ok")),
+    ).resolves.toBe(true);
+    expect(calls).toEqual([]); // item 成功：没有可见文本，不补记账
+    expect(ok.items).toHaveLength(1);
+
+    const fallback = harness({
+      sendItem: async () => {
+        throw new Error("item unsupported");
+      },
+    });
+    await expect(
+      fallback.pipeline.sendItemOrdered("u1", "ctx", { type: 11 }, "读取文件", () =>
+        calls.push("fallback"),
+      ),
+    ).resolves.toBe(true);
+    expect(calls).toEqual(["fallback"]);
+    expect(fallback.sent).toHaveLength(1);
+
+    const textFail = harness({
+      sendItem: async () => {
+        throw new Error("item unsupported");
+      },
+      sendText: async () => {
+        throw new Error("text failed");
+      },
+    });
+    await expect(
+      textFail.pipeline.sendItemOrdered("u1", "ctx", { type: 11 }, "读取文件", () =>
+        calls.push("textFail"),
+      ),
+    ).resolves.toBe(false);
+    expect(calls).toEqual(["fallback"]); // 文本没发出去，不能记账
+    expect(textFail.errors).toHaveLength(1);
+
+    const noText = harness({
+      sendItem: async () => {
+        throw new Error("item unsupported");
+      },
+    });
+    await expect(
+      noText.pipeline.sendItemOrdered("u1", "ctx", { type: 12 }, undefined, () =>
+        calls.push("noText"),
+      ),
+    ).resolves.toBe(false);
+    expect(calls).toEqual(["fallback"]);
+    expect(noText.sent).toHaveLength(0);
+  });
 });
 
 describe("SendPipeline：图片与 .md", () => {

@@ -7,6 +7,7 @@ import {
   parseBrainEscape,
   parseControl,
   parseTaskControl,
+  planProgressEmission,
   shouldResumeInBrainQueue,
   shouldSendToolEnd,
 } from "./index.js";
@@ -221,5 +222,54 @@ describe("shouldSendToolEnd（工具完成提示的 10s 门槛）", () => {
   it("达到 10s 才发 ✅", () => {
     expect(shouldSendToolEnd(1_000, 11_000)).toBe(true);
     expect(shouldSendToolEnd(1_000, 61_000)).toBe(true);
+  });
+});
+
+describe("planProgressEmission（进度额度与可见性）", () => {
+  const limit = 10;
+
+  it("可见进度正常计数；到 limit-2 改发暂停提示", () => {
+    expect(planProgressEmission({ count: 0, awaiting: false }, limit)).toEqual({
+      kind: "send",
+      countsBudget: true,
+    });
+    expect(planProgressEmission({ count: 7, awaiting: false }, limit)).toEqual({
+      kind: "send",
+      countsBudget: true,
+    });
+    expect(planProgressEmission({ count: 8, awaiting: false }, limit)).toEqual({ kind: "pause" });
+  });
+
+  it("等待「继续」期间任何进度都跳过（含结构化 item）", () => {
+    expect(planProgressEmission({ count: 0, awaiting: true }, limit)).toEqual({ kind: "skip" });
+    expect(
+      planProgressEmission({ count: 0, awaiting: true }, limit, {
+        countBudget: false,
+        visible: false,
+      }),
+    ).toEqual({ kind: "skip" });
+  });
+
+  it("结构化 item 不计数：额度宽松时可发，到线时跳过（不发可见暂停提示、也不给回退文本留隐患）", () => {
+    const item = { countBudget: false, visible: false } as const;
+    expect(planProgressEmission({ count: 3, awaiting: false }, limit, item)).toEqual({
+      kind: "send",
+      countsBudget: false,
+    });
+    expect(planProgressEmission({ count: 7, awaiting: false }, limit, item)).toEqual({
+      kind: "send",
+      countsBudget: false,
+    });
+    expect(planProgressEmission({ count: 8, awaiting: false }, limit, item)).toEqual({
+      kind: "skip",
+    });
+  });
+
+  it("limit 可调：limit-2 边界跟着变", () => {
+    expect(planProgressEmission({ count: 3, awaiting: false }, 6)).toEqual({
+      kind: "send",
+      countsBudget: true,
+    });
+    expect(planProgressEmission({ count: 4, awaiting: false }, 6)).toEqual({ kind: "pause" });
   });
 });

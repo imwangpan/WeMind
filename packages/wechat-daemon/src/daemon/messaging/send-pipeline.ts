@@ -192,7 +192,8 @@ export class SendPipeline {
   }
 
   /**
-   * 发一个结构化进度 item；失败时回退成一条文本进度（同一串行位，不额外占额度）。
+   * 发一个结构化进度 item；失败时回退成一条文本进度（同一串行位，不额外等间隔）。
+   * item 本身不占连发额度，但回退文本是用户可见消息：`onFallback` 在文本确实发出后由调用方补记账。
    * 返回是否至少有一种形式发出。
    */
   async sendItemOrdered(
@@ -200,6 +201,7 @@ export class SendPipeline {
     ctx: string | undefined,
     item: MessageItem,
     fallbackText?: string,
+    onFallback?: () => void,
   ): Promise<boolean> {
     return this.sendMediaOrdered(
       to,
@@ -213,6 +215,8 @@ export class SendPipeline {
           if (!fallbackText) throw e;
           this.deps.log("send item failed, fallback to text:", String(e));
           await this.deps.sendText(to, ctx, fallbackText, MessageState.GENERATING);
+          // 只有文本真的发出去才记账：item 不占额度、不抑制固定提示，回退文本要按可见进度补上。
+          onFallback?.();
         }
       },
       "send item",

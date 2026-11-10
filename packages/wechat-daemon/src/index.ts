@@ -242,6 +242,28 @@ const TOOL_END_NOTICE_MIN_MS = 10_000;
 export function shouldSendToolEnd(startedAt: number, endedAt: number): boolean {
   return endedAt - startedAt >= TOOL_END_NOTICE_MIN_MS;
 }
+
+/** 进度发送的额度/可见性决策（纯函数，导出仅供单测）；副作用留给 emitProgress 执行。 */
+export type ProgressEmissionPlan =
+  | { kind: "send"; countsBudget: boolean }
+  | { kind: "pause" }
+  | { kind: "skip" };
+
+export function planProgressEmission(
+  budget: { count: number; awaiting: boolean },
+  limit: number,
+  opts: { countBudget?: boolean; visible?: boolean } = {},
+): ProgressEmissionPlan {
+  if (budget.awaiting) return { kind: "skip" };
+  const countsBudget = opts.countBudget !== false;
+  const visible = opts.visible !== false;
+  if (budget.count >= limit - 2) {
+    // 可见进度到线：发「接近上限」提示并进入等待；不可见的结构化 item 到线直接跳过——它失败时会回退成一条可见文本，不能挤掉留给最终答案的额度，也不该触发可见的暂停提示。
+    return visible && countsBudget ? { kind: "pause" } : { kind: "skip" };
+  }
+  return { kind: "send", countsBudget };
+}
+
 // 静默期心跳默认 15s（配置可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。
 const HEARTBEAT_DEFAULT_MS = 15_000;
 
@@ -379,28 +401,29 @@ async function handleMessage(
   // 当已发到「上限-2」(默认第8条)后，下一条进度改为「即将达上限」提示并进入等待，把最后一条额度留给最终答案；用户回复「继续」(或发任何消息)会重置计数恢复发送（见 poller）。
   /**
    * 发任意进度：统一处理待发确认、额度、接近上限的暂停提示与 typing 续命。
-   * `countBudget: false` 用于结构化工具 item：它们不占「用户可见消息」的连发额度（真机客户端不渲染时尤其不能白占，
-   * 否则会只发 3 条可见消息就提示接近上限）；仍受 `awaiting` 暂停约束。
+   * `countBudget: false` + `visible: false` 用于结构化工具 item：它们不占「用户可见消息」的连发额度（真机客户端不渲染时尤其不能白占），也不该顶替 5s 确认/15s 第二条；item 发送失败回退成文本时，由 `accountForFallback` 在文本确实发出后按可见进度补记账。
    */
   const emitProgress = (
     send: () => Promise<unknown>,
-    opts?: { ackOnly?: boolean; countBudget?: boolean },
+    opts?: { ackOnly?: boolean; countBudget?: boolean; visible?: boolean },
   ): boolean => {
-    cancelAck(); // 任何进度都顶替待发的即时确认
-    lastProgressAt = Date.now();
+    const visible = opts?.visible !== false;
+    if (visible) cancelAck(); // 可见进度顶替待发的即时确认；不可见 item 不能取消它
+    lastProgressAt = Date.now(); // 任意帧（含不渲染的 item）都刷新心跳基线
     const b = sends.budgetOf(to);
-    if (b.awaiting) return false; // 等待「继续」期间不发任何进度
-    const now = Date.now();
-    visibleProgressSent = true;
-    if (!opts?.ackOnly) lastNonAckProgressAt = now; // 5s 确认不能挡住 15s 的第二条
+    const plan = planProgressEmission(b, CONSEC_SEND_LIMIT, opts);
+    if (plan.kind === "skip") return false; // 等待「继续」期间、或 item 额度吃紧：不发任何进度
+    if (visible) {
+      visibleProgressSent = true;
+      if (!opts?.ackOnly) lastNonAckProgressAt = Date.now(); // 5s 确认不能挡住 15s 的第二条
+    }
     // 发出一条进度会把客户端刚显示的「正在输入」顶掉 → 消息送达后立刻补发一次 typing，否则接下来的等待窗口看不到指示。
     const sendWithTyping = (run: () => Promise<unknown>) => {
       void run()
         .then(() => setTyping(account, to, cx(), 1))
         .catch(() => {});
     };
-    const countsBudget = opts?.countBudget !== false;
-    if (countsBudget && b.count >= CONSEC_SEND_LIMIT - 2) {
+    if (plan.kind === "pause") {
       b.count += 1;
       b.awaiting = true;
       sendWithTyping(() =>
@@ -413,9 +436,16 @@ async function handleMessage(
       );
       return false;
     }
-    if (countsBudget) b.count += 1;
+    if (plan.countsBudget) b.count += 1;
     sendWithTyping(send);
     return true;
+  };
+  /** 结构化 item 失败回退成可见文本后补记账：占一条额度，并顶替 5s 确认/15s 第二条。 */
+  const accountForFallback = () => {
+    cancelAck();
+    visibleProgressSent = true;
+    lastNonAckProgressAt = Date.now();
+    sends.budgetOf(to).count += 1;
   };
   const sendProgress = (msg: string, opts?: { ackOnly?: boolean }) =>
     emitProgress(() => sends.sendOrdered(to, cx(), msg, MessageState.GENERATING), opts);
@@ -616,8 +646,9 @@ async function handleMessage(
                       },
                     },
                     text,
+                    accountForFallback,
                   ),
-                { countBudget: false },
+                { countBudget: false, visible: false },
               );
             } else {
               sendProgress(text);
@@ -646,8 +677,9 @@ async function handleMessage(
                       },
                     },
                     text,
+                    accountForFallback,
                   ),
-                { countBudget: false },
+                { countBudget: false, visible: false },
               )
             : sendProgress(text);
           // 额度用尽/等待「继续」时 emitProgress 没真正发出：不占步骤号，也不记 start，

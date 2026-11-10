@@ -12,6 +12,10 @@
 
 - **GitHub Copilot CLI 原生 ACP agent**：新增显式选择的 `copilot` 预设，Windows 使用 `copilot.cmd`；在隔离的 `COPILOT_HOME` 中同步登录配置、skills 与指令，通过 ACP 激活 MCP 并排除 `wechat`；Copilot `config.json` 也纳入敏感附件拦截。Copilot CLI 1.0.107 的本机 ACP 探针已验证会话、工具和 MCP 调用；真实微信 brain/worker E2E 尚待验证。
 
+### Fixed
+
+- **结构化工具进度 item 的连发额度与固定提示（2026-11-09 修）**：`WECHAT_TOOL_PROGRESS_ITEMS=1` 时，item 本身不占额度是对的，但它发送失败回退的**文本**是用户可见消息，此前同样不计数（额度偏低可能触发 `ret=-2`、「接近上限」暂停提示滞后）；且 `emitProgress` 无条件把不可见 item 当作「已有可见进度」，客户端不渲染时连 5s「收到」和 15s 第二条都被抑制。现在把额度/可见性决策抽成纯函数 `planProgressEmission`：不可见 item 不顶替固定提示、不刷新 15s 第二条基线，额度到 `limit-2` 时直接跳过（免得回退文本挤占留给最终答案的最后一条）；回退文本确实发出后由 `sendItemOrdered` 的 `onFallback` 回调补计一条额度并顶替固定提示。默认文本进度路径行为不变。测试：`index.test.ts`（`planProgressEmission`）、`send-pipeline.test.ts`（`onFallback` 触发时机）。
+
 ## [1.6.0] 多媒体收发与账号运维增强（2026-11-09）
 
 ### Added
