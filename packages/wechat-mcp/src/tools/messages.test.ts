@@ -25,6 +25,11 @@ vi.mock("@wemind/wechat-ilink-core", () => ({
   },
   maxMessageId: (a: string | number, b: string | number) =>
     BigInt(String(a)) >= BigInt(String(b)) ? String(a) : String(b),
+  rememberMessageId: (seen: string[], id: string, max = 200) => {
+    if (!id || seen.includes(id)) return seen;
+    const next = [...seen, id];
+    return next.length > max ? next.slice(next.length - max) : next;
+  },
 }));
 
 import { getMessages } from "./messages.js";
@@ -156,6 +161,52 @@ describe("getMessages", () => {
       contextTokens: Record<string, string>;
     };
     expect(saved.contextTokens).toMatchObject({ "bot1:other": "ct-other", "bot1:u": "ct-new" });
+  });
+
+  it("同一批里重复的 message_id 只交付一次，并写进去重环", async () => {
+    const msg = (id: number, text: string) => ({
+      message_type: 1,
+      message_id: id,
+      from_user_id: "u",
+      context_token: "ct",
+      item_list: [{ type: 1, text_item: { text } }],
+    });
+    m.getUpdates.mockResolvedValue({
+      ret: 0,
+      msgs: [msg(21, "first"), msg(21, "dup"), msg(22, "second")],
+      get_updates_buf: "buf-dup",
+    });
+    const r = await getMessages({});
+    const j = parse(r);
+    expect(j.message_count).toBe(2);
+    expect(j.messages.map((x: { message_id: unknown }) => x.message_id)).toEqual([21, 22]);
+    const saved = m.saveState.mock.calls.at(-1)![0] as { seenMessageIds?: string[] };
+    expect(saved.seenMessageIds).toEqual(["21", "22"]);
+  });
+
+  it("seenMessageIds 里已有的消息（服务端重放）跳过，游标仍推进", async () => {
+    m.loadState.mockReturnValue({
+      updatesBuf: "",
+      contextTokens: {},
+      lastMessageId: "20",
+      seenMessageIds: ["21"],
+    });
+    m.getUpdates.mockResolvedValue({
+      ret: 0,
+      msgs: [
+        {
+          message_type: 1,
+          message_id: 21,
+          from_user_id: "u",
+          item_list: [{ type: 1, text_item: { text: "replay" } }],
+        },
+      ],
+      get_updates_buf: "buf-replay",
+    });
+    const r = await getMessages({});
+    expect(parse(r).message_count).toBe(0);
+    const saved = m.saveState.mock.calls.at(-1)![0] as { lastMessageId: string };
+    expect(saved.lastMessageId).toBe("21");
   });
 
   it("非登录者消息被忽略，但游标照常推进（不会每轮重复判断）", async () => {

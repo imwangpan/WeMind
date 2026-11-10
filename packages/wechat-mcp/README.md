@@ -52,7 +52,7 @@
 >
 > **`get_messages` 的两个入参**：`wait`（默认 `false`；`true` 时阻塞到有新消息，最长 7 天，**要求 MCP 客户端不设工具超时**）与 `timeout`（长轮询超时毫秒，默认 `10000`，范围 `1000–60000`；**`wait=true` 时忽略**）。Agent 通常只用 `wait=true`，这两个参数在 description 里会看到。
 >
-> **消息 ID**：`get_messages` 返回的 `message_id` 保留 iLink 的完整十进制精度；把它当字符串/不透明 ID 使用，不要转成 JavaScript `Number`。
+> **消息 ID**：`get_messages` 返回的 `message_id` 保留 iLink 的完整十进制精度；把它当字符串/不透明 ID 使用，不要转成 JavaScript `Number`。同一条消息不会被重复返回：服务端同批重复投递或重放的 `message_id` 由 `state.json` 里最近 200 条的 `seenMessageIds` 去重环跳过（与 daemon 形态同一套判据）。
 >
 > 表中 `check_qrcode_status` 的 description 里 `npx -y @wemind/cli login` 是源码 description 的原文——不安装、临时运行 CLI 时这样写；全局安装后等价的命令是 `wemind login`。
 >

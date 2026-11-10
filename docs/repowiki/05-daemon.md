@@ -326,7 +326,7 @@ graph TD
 
 - **落盘位置**：`<BRAIN_HOME>/media/inbound`。brain 的 cwd 就是 `BRAIN_HOME`，所以 prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
 - **文件名安全**：`safeMediaFileName()` 去掉路径分隔符/控制字符、替换 Windows 非法字符、给保留名（`CON`/`NUL`/`COM1`…）加后缀、保留扩展名；同名用 `-1`/`-2` 后缀，绝不覆盖。
-- **清理**：daemon 启动时 `pruneInboundMedia()` 先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 7 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 256MB）从最旧开始删；best-effort，失败不影响消息处理。
+- **清理**：`saveInboundMedia()` 每次写入后问一次 `pruneInboundMediaIfDue()`，daemon 启动时也调一次（时钟为「从未清理」→ 必执行）；真正清理至少间隔 1 小时，避免同一批附件重复扫目录（挂在 poller 主循环上没有必要，目录只在写入时才增长）。每次先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 30 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 1GB）从最旧开始删；best-effort，失败不影响消息处理。
 - **大小上限**：入站文件/视频/语音默认 `WECHAT_INBOUND_MEDIA_MAX_MB=100`；图片仍走图片专用链路（20MB 上限）。
 - **降级**：所有附件都下载失败时，有文字就只按文字回答（并注明哪些附件没下来）；没有任何可处理内容才拒绝。**不会**拿空 prompt 白问一回合。
 - **图片能力**：`supportsImages()` 读 agent 预设字段（不解析 `initialize` 回包）；agent 不支持或有图片失败时，`planImageTurn()` 决定「有文字就按文字答 / 没文字才拒绝」。

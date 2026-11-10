@@ -12,7 +12,13 @@
 
 - **GitHub Copilot CLI 原生 ACP agent**：新增显式选择的 `copilot` 预设，Windows 使用 `copilot.cmd`；在隔离的 `COPILOT_HOME` 中同步登录配置、skills 与指令，通过 ACP 激活 MCP 并排除 `wechat`；Copilot `config.json` 也纳入敏感附件拦截。Copilot CLI 1.0.107 的本机 ACP 探针已验证会话、工具和 MCP 调用；真实微信 brain/worker E2E 尚待验证。
 
+### Changed
+
+- **入站媒体默认保留 30 天 / 1GB，且常驻 daemon 运行中也会清理（2026-11-10）**：原先 `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB` 默认 7 天 / 256MB，且只有 daemon 启动时调一次 `pruneInboundMedia()`——长期不重启时两个上限形同虚设，放宽阈值后磁盘会攒得更多。现在默认值改为 30 天 / 1GB，新增 `pruneInboundMediaIfDue()`（进程内节流 1 小时、首次必执行）：`runDaemon` 启动时清一次，之后**只在 `saveInboundMedia()` 写入入站媒体时**检查（目录只在写入时增长，挂在 poller 主循环上没有必要），到点才真的 readdir+stat。测试：`media-store.test.ts`（写入时按 TTL 清过期文件、同批连续写入只扫一次）。
+
 ### Fixed
+
+- **MCP `get_messages` 补上去重环（2026-11-10 修）**：此前 MCP 侧只用 `compareMessageIds(message_id, lastMessageId) > 0` 一层过滤，服务端若在同一批 `resp.msgs` 里重复投递同一个 ID（或重放），会把同一条消息返回给 MCP 客户端两次；daemon 侧本来就有 `seenMessageIds`（最近 200 条环形）兜住。现在 MCP 侧按**所有** incoming 复用 `rememberMessageId`，环随 `saveState` 落盘，两种形态行为一致。测试：`messages.test.ts`（同批重复、已缓存 ID 重放）。
 
 - **结构化工具进度 item 的连发额度与固定提示（2026-11-09 修）**：`WECHAT_TOOL_PROGRESS_ITEMS=1` 时，item 本身不占额度是对的，但它发送失败回退的**文本**是用户可见消息，此前同样不计数（额度偏低可能触发 `ret=-2`、「接近上限」暂停提示滞后）；且 `emitProgress` 无条件把不可见 item 当作「已有可见进度」，客户端不渲染时连 5s「收到」和 15s 第二条都被抑制。现在把额度/可见性决策抽成纯函数 `planProgressEmission`：不可见 item 不顶替固定提示、不刷新 15s 第二条基线，额度到 `limit-2` 时直接跳过（免得回退文本挤占留给最终答案的最后一条）；回退文本确实发出后由 `sendItemOrdered` 的 `onFallback` 回调补计一条额度并顶替固定提示。默认文本进度路径行为不变。测试：`index.test.ts`（`planProgressEmission`）、`send-pipeline.test.ts`（`onFallback` 触发时机）。
 

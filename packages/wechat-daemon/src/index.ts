@@ -72,7 +72,7 @@ import {
   type PendingSensitiveAttachment,
 } from "./daemon/messaging/sensitive-allow.js";
 import {
-  pruneInboundMedia,
+  pruneInboundMediaIfDue,
   safeMediaFileName,
   saveInboundMedia,
 } from "./daemon/messaging/media-store.js";
@@ -1417,8 +1417,8 @@ export async function runDaemon(): Promise<void> {
   });
   ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
   ensureWorkerHome(); // 准备 worker 沙箱（继承全量 MCP 除 wechat + 记忆/技能/settings）
-  const pruned = pruneInboundMedia(); // 启动时清一次过期/超额入站附件
-  if (pruned.removed) log(`pruned inbound media: ${pruned.removed} files, ${pruned.bytes}B left`);
+  const pruned = pruneInboundMediaIfDue(); // 启动时清一次过期/超额入站附件（并把节流时钟起好）
+  if (pruned?.removed) log(`pruned inbound media: ${pruned.removed} files, ${pruned.bytes}B left`);
   log(`up. bot=${account.botId} owner=${owner} allowFrom=${readAllowFrom(DATA_DIR).length}`);
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
 

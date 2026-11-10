@@ -14,6 +14,7 @@ import {
   isAllowed,
   compareMessageIds,
   maxMessageId,
+  rememberMessageId,
 } from "@wemind/wechat-ilink-core";
 import type { WeixinMessage } from "@wemind/wechat-ilink-core";
 
@@ -124,10 +125,21 @@ export async function getMessages(
           compareMessageIds(m.message_id, state.lastMessageId) > 0,
       ) ?? [];
 
+    // 与 daemon 同一套去重：服务端可能在同一批里重复投递同一个 ID（或重放），只交付一次。
+    // 按**所有** incoming 去重（含未授权消息），与游标推进口径一致；环写回 state 持久化。
+    const seenBefore = new Set(state.seenMessageIds ?? []);
+    const fresh = incoming.filter((m) => {
+      const id = String(m.message_id ?? "0");
+      if (seenBefore.has(id)) return false;
+      seenBefore.add(id);
+      state.seenMessageIds = rememberMessageId(state.seenMessageIds ?? [], id);
+      return true;
+    });
+
     // 与 daemon 同一套发件人校验：只收登录者（或 allowFrom 白名单里的）消息。平台正常只投登录者，
     // 这道闸防的是发送范围变化 / 同一数据目录被别的入口接到——MCP 客户端拿到非登录者的消息会照做。
     const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId;
-    const newMessages = incoming.filter(
+    const newMessages = fresh.filter(
       (m) => !!m.from_user_id && (m.from_user_id === owner || isAllowed(m.from_user_id)),
     );
 

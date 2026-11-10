@@ -11,12 +11,12 @@ import { BRAIN_HOME } from "../../agents/sandbox/mcp-sandbox.js";
  * 目录/文件权限：POSIX 下 0700/0600；Windows 的 chmod 是 no-op，依赖数据目录本身的权限。
  */
 
-/** 默认保留 7 天；超过就清（微信媒体本身也只保留有限时间）。 */
+/** 默认保留 30 天；超过就清（微信媒体本身也只保留有限时间）。 */
 export const INBOUND_MEDIA_TTL_MS =
-  (Number(process.env.WECHAT_MEDIA_TTL_DAYS) || 7) * 24 * 3600_000;
-/** 默认总量 256MB，超过按最旧优先清。 */
+  (Number(process.env.WECHAT_MEDIA_TTL_DAYS) || 30) * 24 * 3600_000;
+/** 默认总量 1GB，超过按最旧优先清。 */
 export const INBOUND_MEDIA_MAX_BYTES =
-  (Number(process.env.WECHAT_MEDIA_MAX_MB) || 256) * 1024 * 1024;
+  (Number(process.env.WECHAT_MEDIA_MAX_MB) || 1024) * 1024 * 1024;
 
 const WINDOWS_RESERVED = new Set([
   "con",
@@ -65,10 +65,13 @@ export function saveInboundMedia(
     const file = path.join(dir, i === 0 ? stem : `${id}-${i}-${name}`);
     try {
       fs.writeFileSync(file, data, { flag: "wx", mode: 0o600 });
-      return file;
     } catch (e) {
       if ((e as NodeJS.ErrnoException)?.code !== "EEXIST") throw e;
+      continue;
     }
+    // 目录增长只发生在写入时，清理就挂在这里（放在写文件的 try 外，免得清理异常被误判成写入失败）：内部节流至少间隔 1 小时，同一批附件不会重复扫目录；清理本身 best-effort，不影响本次写入结果。
+    pruneInboundMediaIfDue(undefined, dir);
+    return file;
   }
   throw new Error(`无法为附件生成唯一文件名：${name}`);
 }
@@ -131,4 +134,23 @@ export function pruneInboundMedia(
     bytes -= e.size;
   }
   return { removed, bytes: Math.max(0, bytes) };
+}
+
+/** 清理只在「写入入站媒体」与 daemon 启动时被问到；真正清理至少间隔 1 小时，避免同一批附件重复 readdir+stat 整个目录。 */
+export const INBOUND_MEDIA_PRUNE_INTERVAL_MS = 60 * 60_000;
+let lastPruneAt: number | null = null;
+
+/** 单测用：重置节流时钟（回到「从未清理」）。 */
+export function resetInboundMediaPruneClock(): void {
+  lastPruneAt = null;
+}
+
+/** 启动时的第一次调用必定执行（不依赖时钟纪元）；之后按间隔节流。返回 null 表示这次跳过。 */
+export function pruneInboundMediaIfDue(
+  now: number = Date.now(),
+  dir: string = mediaInboxDir(),
+): { removed: number; bytes: number } | null {
+  if (lastPruneAt !== null && now - lastPruneAt < INBOUND_MEDIA_PRUNE_INTERVAL_MS) return null;
+  lastPruneAt = now;
+  return pruneInboundMedia(dir);
 }

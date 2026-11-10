@@ -1,11 +1,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  INBOUND_MEDIA_MAX_BYTES,
+  INBOUND_MEDIA_PRUNE_INTERVAL_MS,
+  INBOUND_MEDIA_TTL_MS,
   mediaInboxDir,
   pruneInboundMedia,
+  pruneInboundMediaIfDue,
+  resetInboundMediaPruneClock,
   safeMediaFileName,
   saveInboundMedia,
 } from "./media-store.js";
@@ -118,5 +123,58 @@ describe("pruneInboundMedia", () => {
 describe("mediaInboxDir", () => {
   it("位于 BRAIN_HOME/media/inbound", () => {
     expect(mediaInboxDir()).toMatch(/[\\/]media[\\/]inbound$/);
+  });
+});
+
+describe("saveInboundMedia 写入时清理", () => {
+  beforeEach(() => resetInboundMediaPruneClock());
+
+  it("写入时按 TTL 清掉过期文件，保留本次写入的文件", () => {
+    const dir = tmpDir();
+    const old = path.join(dir, "old.bin");
+    fs.writeFileSync(old, "old");
+    const t = Date.now() - 31 * 24 * 3600_000;
+    fs.utimesSync(old, new Date(t), new Date(t));
+    const fresh = saveInboundMedia(
+      Buffer.from("new"),
+      { messageId: "m1", fileName: "new.bin", kind: "file" },
+      dir,
+    );
+    expect(fs.existsSync(old)).toBe(false);
+    expect(fs.existsSync(fresh)).toBe(true);
+  });
+
+  it("同一批连续写入只扫一次（写入后时钟已起好）", () => {
+    const dir = tmpDir();
+    saveInboundMedia(Buffer.from("a"), { messageId: "m2", fileName: "a.bin", kind: "file" }, dir);
+    saveInboundMedia(Buffer.from("b"), { messageId: "m2", fileName: "b.bin", kind: "file" }, dir);
+    expect(pruneInboundMediaIfDue(Date.now(), dir)).toBeNull();
+  });
+});
+
+describe("pruneInboundMediaIfDue（写入/启动时的节流）", () => {
+  beforeEach(() => resetInboundMediaPruneClock());
+
+  it("默认阈值是 30 天 / 1GB", () => {
+    expect(INBOUND_MEDIA_TTL_MS).toBe(30 * 24 * 3600_000);
+    expect(INBOUND_MEDIA_MAX_BYTES).toBe(1024 * 1024 * 1024);
+  });
+
+  it("首次必清；间隔内跳过；到点再清", () => {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, "a.bin"), "x");
+    const t = 1_000_000;
+    expect(pruneInboundMediaIfDue(t, dir)).not.toBeNull();
+    expect(pruneInboundMediaIfDue(t + 1, dir)).toBeNull();
+    expect(pruneInboundMediaIfDue(t + INBOUND_MEDIA_PRUNE_INTERVAL_MS - 1, dir)).toBeNull();
+    expect(pruneInboundMediaIfDue(t + INBOUND_MEDIA_PRUNE_INTERVAL_MS, dir)).not.toBeNull();
+  });
+
+  it("重置时钟后下一次又会清（模拟重启）", () => {
+    const dir = tmpDir();
+    const t = 2_000_000;
+    expect(pruneInboundMediaIfDue(t, dir)).not.toBeNull();
+    resetInboundMediaPruneClock();
+    expect(pruneInboundMediaIfDue(t, dir)).not.toBeNull();
   });
 });

@@ -101,7 +101,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `WEMIND_ACP_SESSION_MODE`                                                             | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off`/`no` 关闭，其它值 = 该 modeId                              |
 | `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                                               | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate` |
 | `WECHAT_INBOUND_MEDIA_MAX_MB` / `WECHAT_OUTBOUND_FILE_MAX_MB`                         | 入站文件/视频/语音单文件上限（默认 100）/ 出站附件单文件上限（默认 25）                                                  |
-| `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`                                       | `brain-home/media/inbound` 保留天数 / 总量上限（默认 7 天 / 256MB；启动时清理）                                          |
+| `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`                                       | `brain-home/media/inbound` 保留天数 / 总量上限（默认 30 天 / 1GB；启动时 + 写入媒体时清理）                                          |
 | `WECHAT_TOOL_PROGRESS_ITEMS`                                                          | 结构化工具进度 item（11/12）开关（**默认关**：微信客户端目前不渲染，只发文本「步骤 N」；`1` = 启用）                      |
 
 ## 与 MCP 形态的区别
