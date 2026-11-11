@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -12,6 +13,19 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const script = path.join(repoRoot, "scripts", "run-daemon.ps1");
+
+describe("scripts/run-daemon.ps1 日志格式", () => {
+  it("自己写进 daemon.log 的每行都带 [LEVEL]（--errors 才能精确识别）", () => {
+    const lines = fs
+      .readFileSync(script, "utf8")
+      .split(/\r?\n/)
+      .filter((line) => line.includes("[wemind/wechat-daemon/wrapper]"));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).toMatch(/\[wemind\/wechat-daemon\/wrapper\]\[(INFO|WARN|ERROR)\]/);
+    }
+  });
+});
 
 function runScript(args: string[]) {
   const env = { ...process.env };

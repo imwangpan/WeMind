@@ -2,7 +2,13 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
-import { loadAccount, notifyStart, notifyStop } from "@wemind/wechat-ilink-core";
+import {
+  createLogger,
+  describeError,
+  loadAccount,
+  notifyStart,
+  notifyStop,
+} from "@wemind/wechat-ilink-core";
 import { VERSION } from "./version.js";
 import {
   loginQrcode,
@@ -15,6 +21,7 @@ import {
 import { getMessages, getMessagesSchema } from "./tools/messages.js";
 import { sendTextMessage, sendTextMessageSchema } from "./tools/send.js";
 import { sendTypingIndicator, sendTypingSchema } from "./tools/typing.js";
+const log = createLogger("wechat-mcp");
 
 /**
  * 关于工具 description 为什么保持英文（不要改成中文）：
@@ -132,20 +139,27 @@ Status 'typing' shows the indicator, status 'cancel' stops it. The 'to' field is
 );
 
 async function main() {
+  // 与 daemon 一致：MCP server 常驻 stdio，未捕获的拒绝/异常只记日志不退出（客户端还连着），并用 describeError 把单文件产物的行号映射回 .ts。
+  // console.error 走 stderr，不会污染 stdout 上的 JSON-RPC 帧。
+  process.on("unhandledRejection", (reason) => {
+    log.error("unhandledRejection:", describeError(reason, import.meta.url));
+  });
+  process.on("uncaughtException", (err) => {
+    log.error("uncaughtException:", describeError(err, import.meta.url));
+  });
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
   const account = loadAccount();
   if (account?.botToken) {
-    console.error(
-      `[wemind/wechat-mcp] Connected. Logged in as bot ${account.botId}, user ${account.userId}`,
-    );
+    log.info(`Connected. Logged in as bot ${account.botId}, user ${account.userId}`);
     void notifyStart({
       baseUrl: account.baseUrl,
       token: account.botToken,
     }).catch(() => {});
   } else {
-    console.error("[wemind/wechat-mcp] Connected. Not logged in. Call login_qrcode to start.");
+    log.info("Connected. Not logged in. Call login_qrcode to start.");
   }
 
   // 优雅关停：通知服务端下线（best-effort，notifyStop 内部已吞异常）再退出
@@ -160,6 +174,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[wemind/wechat-mcp] Fatal error:", err);
+  log.error("Fatal error:", describeError(err, import.meta.url));
   process.exit(1);
 });

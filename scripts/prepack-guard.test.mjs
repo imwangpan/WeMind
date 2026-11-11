@@ -93,6 +93,25 @@ describe("prepack-guard：产物自包含", () => {
     expect(r.status).toBe(0);
   });
 
+  it("bin 声明了 sourcemap 且 .map 随包时通过（两个发布包都走这条）", () => {
+    const r = runGuard(
+      makePkg({
+        js: '#!/usr/bin/env node\nconsole.log("ok");\n//# sourceMappingURL=cli.js.map',
+        extraFiles: { "cli.js.map": JSON.stringify({ version: 3, sources: [], mappings: "" }) },
+      }),
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("产物齐全");
+  });
+
+  it("bin 声明了 sourcemap 但 .map 缺失时拒绝", () => {
+    const r = runGuard(
+      makePkg({ js: '#!/usr/bin/env node\nconsole.log("ok");\n//# sourceMappingURL=cli.js.map' }),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("sourcemap");
+  });
+
   it("空 dist 仍然失败", () => {
     const dir = makePkg();
     fs.rmSync(path.join(dir, "dist"), { recursive: true, force: true });

@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 
 import {
+  createLogger,
   fetchQRCode,
   pollQRStatus,
   notifyStart,
@@ -27,6 +28,7 @@ import {
 import type { QRStatusResponse } from "@wemind/wechat-ilink-core";
 
 import { jsonResult, textResult, type ToolResult } from "./tool-result.js";
+const log = createLogger("wechat-mcp");
 
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 
@@ -62,7 +64,7 @@ function registerCliAccount(acc: { botId: string; userId: string; baseUrl: strin
     });
   } catch (e) {
     // 登记失败不影响登录本身（凭证已写好）；只记日志，用户仍可 wemind adopt 手动接管。
-    console.error("[wemind/wechat-mcp] account registry update failed:", String(e));
+    log.warn("account registry update failed:", String(e));
   }
 }
 
@@ -71,7 +73,7 @@ function unregisterCliAccount(botId: string | undefined): void {
   try {
     if (loadRegistry().accounts[ACCOUNT_KEY]?.botId === botId) unregisterAccount(ACCOUNT_KEY);
   } catch (e) {
-    console.error("[wemind/wechat-mcp] account registry cleanup failed:", String(e));
+    log.warn("account registry cleanup failed:", String(e));
   }
 }
 

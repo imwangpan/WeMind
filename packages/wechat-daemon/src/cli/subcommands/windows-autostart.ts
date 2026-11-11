@@ -1,3 +1,4 @@
+import { print } from "@wemind/wechat-ilink-core";
 import { execFileSync } from "node:child_process";
 import * as path from "node:path";
 import { AUTOSTART_TASK_NAME, AUTOSTART_TASK_NAME_PM2 } from "../../shared/mixed-config.js";
@@ -59,7 +60,7 @@ export function installWindowsAutostart(
   try {
     registerScheduledTask(nodePath, cliPath, name, keys, runner);
     if (taskExists(name)) {
-      console.log(`已创建 Windows 计划任务 ${name}（登录时自动启动）`);
+      print(`已创建 Windows 计划任务 ${name}（登录时自动启动）`);
       return "scheduled-task";
     }
     throw new Error("任务注册后未查询到");
@@ -68,7 +69,7 @@ export function installWindowsAutostart(
     // 注册可能已经部分成功（只是查询失败）；再清一次，确保最终只剩 Run 键这一种触发器。
     uninstallWindowsAutostart();
     installRunKey(name, command);
-    console.log(`已写入注册表 Run 键 ${name}（登录时自动启动）`);
+    print(`已写入注册表 Run 键 ${name}（登录时自动启动）`);
     return "run-key";
   }
 }

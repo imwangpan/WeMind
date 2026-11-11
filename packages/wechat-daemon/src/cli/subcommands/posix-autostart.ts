@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { accountDir } from "@wemind/wechat-ilink-core";
+import { print, accountDir } from "@wemind/wechat-ilink-core";
 import { LAUNCHD_LABEL_PREFIX, SYSTEMD_UNIT_PREFIX } from "../../shared/mixed-config.js";
 
 /**
@@ -65,7 +65,7 @@ export function installSystemdUnit(key: string, nodePath: string, cliPath: strin
   runSystemctl(["daemon-reload"]);
   runSystemctl(["enable", unitName]);
   runSystemctl(["restart", unitName]);
-  console.log(`已安装并启动 systemd 用户单元：${unitName}`);
+  print(`已安装并启动 systemd 用户单元：${unitName}`);
 
   // 非图形会话下用户级服务会在登出后停止；提示一次 enable-linger
   const linger = runCapture("loginctl", ["show-user", os.userInfo().username, "--property=Linger"]);
@@ -149,7 +149,7 @@ export function installLaunchAgent(key: string, nodePath: string, cliPath: strin
   }
   fs.writeFileSync(plistPath, buildLaunchAgentPlist(key, nodePath, cliPath, logPath), "utf-8");
   execFileSync("launchctl", ["load", plistPath], { stdio: "pipe", timeout: 15_000 });
-  console.log(`已安装并加载 LaunchAgent：${label}`);
+  print(`已安装并加载 LaunchAgent：${label}`);
 }
 
 /** systemd 单元值转义：含空白、引号或反斜杠的值要用双引号包起来。 */

@@ -4,6 +4,8 @@
 
 [WeMind](https://github.com/imwangpan/WeMind) monorepo 中已发布到 npm 的包（`@wemind/wechat-mcp`）；内核已内联进产物，对外只需这一个自包含的包。
 
+产物 `dist/index.js` 同时带 `dist/index.js.map`。Node 默认不应用 sourcemap，所以 server 在打印 fatal 错误时自己读同目录的这张 map，日志里的堆栈直接写成 `src/xxx.ts:12` 这样的源码位置，不需要在 MCP 客户端配置里设任何环境变量；map 与产物同一次构建、同一目录，版本天然配对。
+
 ## 接入
 
 在 MCP 客户端配置里，让客户端通过 `npx -y @wemind/wechat-mcp` 按需拉起即可（MCP 生态惯例，下方两份配置即此写法）：无需预先安装，`npx` 由客户端在自己的环境里解析包；不带版本号时会解析 `latest`，要固定版本可在包名后写 `@版本号`。
@@ -82,3 +84,5 @@
 ## License
 
 MIT
+
+> **日志格式（2026-11-11 起）**：运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出，格式为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部写 stderr（MCP 的 stdout 仍是 JSON-RPC 通道）；CLI 用户输出走 stdout 的 `print()`，不加前缀、不加级别。本文下面的日志样例可能省略了级别标记，实际每行都有。`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。`WEMIND_LOG_LEVEL=debug` 才输出 DEBUG（目前没有 debug 调用点，属预留级别）。

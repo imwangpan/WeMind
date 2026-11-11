@@ -400,3 +400,5 @@ wemind brain set kiro --restart <key>   # 老写法：写入磁盘 + 重启 daem
 - [`docs/机制与协议说明/本地双入口-命令派发与查看回复.md`](../../机制与协议说明/本地双入口-命令派发与查看回复.md)（控制桥）
 - [`docs/ai/recipes/debug-daemon.md`](debug-daemon.md)
 - [`scripts/acp-probe.mjs`](../../../scripts/acp-probe.mjs)
+
+> **日志格式（2026-11-11 起）**：运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出，格式为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部写 stderr（MCP 的 stdout 仍是 JSON-RPC 通道）；CLI 用户输出走 stdout 的 `print()`，不加前缀、不加级别。本文正文中的日志样例可能省略了级别标记，实际每行都有。`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。`WEMIND_LOG_LEVEL=debug` 才输出 DEBUG（目前没有 debug 调用点，属预留级别）。

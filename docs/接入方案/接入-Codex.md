@@ -133,3 +133,4 @@ $env:ACP_BIN = "codex-acp.cmd"; $env:ACP_SHELL = "1"; node scripts/acp-probe.mjs
 - **`taskkill /T /F` 强杀恢复**：探针只验证了正常 `session/load`，强杀后的恢复 E2E **未做**（§2 C9；对应 [`docs/ai/已知坑.md`](../ai/已知坑.md)「仍未单独测」条）。
 - **适配器升级后重跑探针**：`codex-acp` 的 capabilities 与 mode id 随版本变化（本文实测基线 2.5.0、Codex CLI 0.165–0.166），升级后需按 §2 重新验证 `loadSession`、`image`、`availableModes` 含 `agent-full-access` 等结论是否仍成立（状态行与 §4 第 6 条）。
 
+> **日志格式说明（2026-11-11，历史实测记录不改正文）**：本文记录的日志线索沿用当时的写法；现行运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部 stderr。ACP 帧级关键线索（`spawn` / `initialized` / `session/new` / `prompt ok`）归 **INFO**（排障必须可见），`prompt FAIL` 与自愈归 **WARN**。CLI 用户输出走 stdout 的 `print()`，无前缀无级别；`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。详见 [`AGENTS.md`](../../AGENTS.md) 与 [`repowiki/11`](../repowiki/11-开发指南.md)。

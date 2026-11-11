@@ -6,7 +6,9 @@
  * 官方 openclaw-weixin 2.4.10 的做法是在 JSON.parse 之前给这些字段的数字加引号；
  * 这里复刻同一思路，并统一用 BigInt 做比较。
  */
+import { createLogger } from "../logging.js";
 
+const log = createLogger("wechat-ilink-core");
 const LOSSLESS_ID_FIELDS = new Set(["message_id", "msg_id", "svr_id"]);
 
 /**
@@ -75,8 +77,8 @@ export function parseJsonWithLosslessIds<T>(rawText: string, label: string): T {
     try {
       const parsed = JSON.parse(rawText) as T;
       // 只有「原文合法、改写后反而非法」才可能是改写逻辑坏了：留一条告警，别静默把 bug 藏起来；非 JSON 响应（如 sendMessage 的 OK、代理 HTML）是上游问题，不打这条。
-      console.warn(
-        `[wemind/wechat-ilink-core] ${label}：ID 无损改写后的 JSON 解析失败，但原始文本合法，已退回原文（请检查改写逻辑）`,
+      log.warn(
+        `${label}：ID 无损改写后的 JSON 解析失败，但原始文本合法，已退回原文（请检查改写逻辑）`,
       );
       return parsed;
     } catch {

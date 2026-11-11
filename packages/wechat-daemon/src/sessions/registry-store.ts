@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import { writeJsonAtomic } from "../shared/io/atomic-json.js";
 import { brainSessionMapPath, readSessionMap, sessionKey } from "./session-map.js";
+const log = createLogger("wechat-daemon");
 
 /**
  * 会话登记表的**存储层**：类型、读写、条数裁剪、登记/刷新（无渲染）。
@@ -87,7 +88,7 @@ export function saveRegistry(reg: SessionRegistry, dir: string = DATA_DIR): void
   try {
     writeJsonAtomic(registryPath(dir), reg);
   } catch (e) {
-    console.error("[wemind/wechat-daemon] session-registry save failed:", String(e));
+    log.warn("session-registry save failed:", String(e));
   }
 }
 

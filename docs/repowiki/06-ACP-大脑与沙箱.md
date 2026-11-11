@@ -224,7 +224,7 @@ agent 带 `settingsBase` 时（qoder / gemini）走另一条分支：读真实�
 - **`presets` 段（1.2.0 新增）**：按**agent 名**保存启动覆盖（`--bin`/`--args`/`--extra-args`/`--shell`/`homeEnvVar`/`model`）。因为顶层那几个字段是「当前 agent 的覆盖」，切走再切回就会丢（典型：DSH 的 `--bin <绝对路径>`）——换 agent 时旧覆盖自动迁进 `presets[旧 agent]`，同一 agent 再次 `set` 时沿用未给出的字段。
 - **`worker` 段**：默认任务大脑（`{agent, bin?, args?, extraArgs?, shell?, homeEnvVar?, model?}`，与顶层同字段；`model` 同样在会话建立/恢复后经 `session/set_config_option` 下发）。它也带 `presets` 查找上下文——`agentConfigFor("worker")` 会把顶层的 `presets` 带进 worker 段，否则「有 `worker.agent` 时 `presets[agent]` 查不到」、`--bin` 之类覆盖会静默失效。
 - 切换用 CLI：`wemind brain set <agent 名|auto> [--bin X] [--args "…"] [--extra-args "…"] [--model X|auto] [--restart]`、`wemind brain unset`、`wemind brain`（查看，「生效」行含 `model=`）、`wemind brain check`（真起进程跑 ACP 握手）、**`wemind brain switch <agent 名|auto> [--worker]`（运行时换大脑，见 §6.2）**。`brain set` 现在是**读-改-写**（早期版本是整体覆盖，会把 `worker`/`presets` 段抹掉），并且**在 daemon 在跑且认控制桥时，纯 agent 名会立刻当场应用（不用重启）**（等价 `brain switch`：先启动新大脑、成功才写入磁盘）；带 `--bin`/`--args`/`--extra-args`/`--shell`/`--model` 时只写入磁盘——控制桥刻意不接受这些字段（安全边界，见 §7.5），但其中 `--bin`/`--args`/`--extra-args`/`--model` 的改动可由随后的 `wemind brain switch <同名 agent>` 当场应用（判据见上一条），否则重启 daemon。`--args` 是**整段替换**（漏掉 `acp` 这类模式参数会导致「进程起得来、不实现 ACP」）；`--extra-args` 追加在末尾，适合只加开关（解析出的 args 里没有该 agent 的 ACP 模式标记时，`wemind brain` / `brain set` 只**警告**不阻止，自定义 `--bin` 时跳过）。`--model` 指定默认模型（格式 `["provider 路由","模型名"]`，如 `'["deepseek-account","deepseek-flash"]'`），会话建立后经 `session/set_config_option` 下发一次（显式覆盖以它为准）；解析优先级「本段 > `presets[agent 名]` > 真实 profile 的默认 > 预设兜底」，其中「真实 profile 的默认」由 `profile-model.ts` 读（**优先用户自己写的 `- id: acp`，否则 `agent-default-model`**）。`--model auto`（或 `default`）= **跟随真实 profile 的默认**——DSH 读 `~/.dsh/profiles/acp/cordis.patch.yml`（典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端在运行），读不到就**不下发**（`auto` **不**回退预设值：DSH 会用它自己的默认 `deepseek-official/deepseek-v4-flash`，仍需 `DEEPSEEK_API_KEY`）；只有**没写** `model` 的默认情形、读不到时才落到预设的 `deepseek-account/deepseek-flash` 兜底。**WeMind 不替 agent 合成配置**：profile 里缺 `- id: acp` 时只由 `wemind brain` 给出可粘贴的片段、让用户补到真实文件（§4.14 的纪律）。daemon 没跑（或跑的是不认桥的旧版）时同样是「写入磁盘 + 下次启动生效」，答复会写明。
-- **启动即校验**：daemon 起来时先解析并校验二进制；不可用则 `[wemind/wechat-daemon] FATAL 大脑不可用：…` 并以退出码 78 退出（后台守护进程据此停止自动重启，不再每 5s 刷屏）；未知 agent 名也不再静默回退 kiro。
+- **启动即校验**：daemon 起来时先解析并校验二进制；不可用则 `[wemind/wechat-daemon][ERROR] FATAL 大脑不可用：…` 并以退出码 78 退出（后台守护进程据此停止自动重启，不再每 5s 刷屏）；未知 agent 名也不再静默回退 kiro。
 
 | 环境变量 | 作用 |
 |----------|------|
@@ -294,3 +294,5 @@ worker 沙箱详见 [7. 远程任务 Worker](07-远程任务-Worker.md#worker-�
 ---
 
 接下来：[7. 远程任务 Worker](07-远程任务-Worker.md) 看如何把漫长任务交给微信遥控。
+
+> **日志格式（2026-11-11 起）**：运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出，格式为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部写 stderr（MCP 的 stdout 仍是 JSON-RPC 通道）；CLI 用户输出走 stdout 的 `print()`，不加前缀、不加级别。本文正文中的日志样例可能省略了级别标记，实际每行都有。`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。`WEMIND_LOG_LEVEL=debug` 才输出 DEBUG（目前没有 debug 调用点，属预留级别）。

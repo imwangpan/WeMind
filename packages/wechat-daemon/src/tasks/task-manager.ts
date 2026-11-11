@@ -1,4 +1,4 @@
-import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import { getAgent } from "../agents/agent-slot.js";
 import { agentConfigFor, loadBrainConfig } from "../agents/brain-config.js";
@@ -16,6 +16,7 @@ import {
   type TaskStore,
   type StoredTaskStatus,
 } from "./task-store.js";
+const log = createLogger("wechat-daemon/task");
 
 /**
  * 任务表：**一条任务一条 worker 连接**，多条任务并行；编号按用户单调递增、永不复用（避免「任务2」在对话里指代变化）。
@@ -29,8 +30,6 @@ import {
  *
  * 依赖注入（push/typing/stateSink）保持不变：task-manager 不直接依赖发送层与 account，保持可测。
  */
-
-const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon/task]", ...a);
 
 export type TaskStatus = StoredTaskStatus;
 
@@ -191,7 +190,7 @@ export function initTasks(dir: string = DATA_DIR): { interrupted: number[] } {
   tasks.clear();
   for (const t of store.tasks) tasks.set(t.id, { ...t });
   if (hit.length)
-    log(
+    log.info(
       `重启：${hit.length} 条未完成任务标记为「已中断」（编号 ${hit.map((t) => t.id).join("、")}；回「继续」可续跑）`,
     );
   emitState();
@@ -386,7 +385,7 @@ function waitForInject(task: Task): Promise<string | null> {
 async function runTask(task: Task, firstInstruction: string): Promise<void> {
   const ag = task.ag;
   if (!ag) {
-    log(`task ${task.id} 没有 agent（内部错误）`);
+    log.error(`task ${task.id} 没有 agent（内部错误）`);
     return;
   }
   task.status = "running";
@@ -424,7 +423,7 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
   emitState();
   ackIf(task.ackId, ackFor(task, task.numbered === true)); // 起进程成功：这时才敢说「已派发」
   task.ackId = undefined;
-  log(`task ${task.id} start agent=${ag.name} conn=${conn.id} cwd=${conn.effectiveCwd()}`);
+  log.info(`task ${task.id} start agent=${ag.name} conn=${conn.id} cwd=${conn.effectiveCwd()}`);
 
   let instruction: string | null = firstInstruction;
   while (tasks.get(task.id) === task && instruction !== null) {
@@ -457,12 +456,12 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
         task.lastOutput = `⚠️ #${task.id} 号任务这次接不上：${why}（这条任务的记录还在；要重来就「结束任务 ${task.id}」后重新派一条。）`;
         persist();
         emitState();
-        log(`task ${task.id} resume failed（接不上，已转「已中断」）:`, why);
+        log.warn(`task ${task.id} resume failed（接不上，已转「已中断」）:`, why);
         push(task.userId, task.lastOutput + replyFooter(task, "interrupted"));
         break;
       }
       const label = labelOf(task);
-      log(`task ${task.id} turn failed:`, why);
+      log.error(`task ${task.id} turn failed:`, why);
       const prov = providerIssue(e);
       if (prov) {
         // 模型/账号侧的问题（余额、密钥、计费、模型不存在）：重试也不会好，停在「等你回复」只会让用户以为还能接着干。转「已中断」——状态如实反映这轮没跑完，续跑要用户显式回「继续」/`#n 继续`。
@@ -470,7 +469,7 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
         task.lastOutput = `⚠️【${label}】中断了（${prov}）。这类错误重试也不会好——把账号/模型处理好后再续跑。`;
         persist();
         emitState();
-        log(`task ${task.id} provider issue（${prov}）→ 已转「已中断」`);
+        log.warn(`task ${task.id} provider issue（${prov}）→ 已转「已中断」`);
         push(task.userId, task.lastOutput + replyFooter(task, "interrupted"));
         break;
       }
@@ -498,7 +497,7 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
     task.conn = undefined;
   }
   emitState();
-  log(`task ${task.id} loop ended`);
+  log.info(`task ${task.id} loop ended`);
 }
 
 function reason(e: unknown): string {

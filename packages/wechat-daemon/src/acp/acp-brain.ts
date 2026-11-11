@@ -1,7 +1,7 @@
 import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 
-import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 import { BRAIN_HOME, activeMcpServers } from "../agents/sandbox/mcp-sandbox.js";
 import { getAgent } from "../agents/agent-slot.js";
 import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
@@ -37,13 +37,14 @@ import {
   type AcpProgressEvent,
 } from "./protocol/acp-connection.js";
 import { LineDecoder } from "../shared/io/line-decoder.js";
+const log = createLogger("wechat-daemon/acp");
 
 /**
  * ACP 大脑：维护一个常驻的 ACP agent 进程（JSON-RPC over stdio，换行分隔）。
  * 通过标准 ACP 协议驱动，agent 可配置（默认 kiro-cli，见 brain-agents.ts），任意兼容 ACP 的 CLI 均可接入。
  * - 每用户一个 ACP session（原生多轮记忆）；session 映射持久化到磁盘。
  * - 自愈：session/prompt 超时/失败 → 杀进程重建；重建后用 session/load 恢复上下文。
- * - 诊断日志（[wemind/wechat-daemon/acp] 前缀，进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差。
+ * - 诊断日志（统一走 `createLogger("wechat-daemon/acp")`，格式 `[wemind/wechat-daemon/acp][INFO|WARN|ERROR] …`，全部 stderr、进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差；`spawn`/`initialized`/`session/new`/`prompt ok` 等帧级关键线索归 INFO（排障必须可见），失败与自愈归 WARN/ERROR。
  * 跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
  * 协议细节（帧处理、请求/回合超时、模型与模式、回放静默）与 worker 共用 `acp-connection.ts`；本模块只保留常驻单例与会话持久化。
  *
@@ -52,10 +53,6 @@ import { LineDecoder } from "../shared/io/line-decoder.js";
  * 之后 `ensureProcess(ag)` / `ensureSession(ag,…)` / `applyAcpModel(host, ag, …)` / `promptAcp(host, …)` 一路显式传下去——
  * 过程内不再读槽位，「握手到一半被换掉 agent」在结构上不可能发生（不需要锁）。
  */
-
-function dlog(...a: unknown[]): void {
-  console.error("[wemind/wechat-daemon/acp]", ...a);
-}
 
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 120_000; // 多久没收到任何帧才算"卡死"。重任务单次慢抓取可静默较久（直连 kiro-cli 无此限制），放宽到 2min 兜底真死
@@ -89,7 +86,12 @@ const host: AcpHost = {
   write: (payload) => {
     child?.stdin.write(JSON.stringify(payload) + "\n");
   },
-  log: (message) => dlog(message),
+  log: (message, level) =>
+    level === "error"
+      ? log.error(message)
+      : level === "warn"
+        ? log.warn(message)
+        : log.info(message),
 };
 
 // ---- 并发门（切脑用）----
@@ -150,7 +152,7 @@ export async function drainTurn(timeoutMs: number): Promise<boolean> {
 /** 回合入口用：切换进行中就先等它完成（有界），再继续——避免与启动新大脑抢同一个 ACP 进程。 */
 async function waitWhileSwitching(): Promise<void> {
   if (!switching) return;
-  dlog("turn waits for in-flight brain switch…");
+  log.info("turn waits for in-flight brain switch…");
   await drainSwitch(SWITCH_WAIT_MS);
 }
 
@@ -205,7 +207,7 @@ function loadSessionMap(ag: ResolvedAgent): Record<string, string> {
     raw = readSessionMapStrict(file);
   } catch (e) {
     const backup = backupCorruptSessionMap(file);
-    dlog(
+    log.warn(
       `session map unreadable (${String(e)}) → ${backup ? `backed up to ${backup}` : "backup failed"}；按空表继续`,
     );
     return {};
@@ -223,11 +225,11 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   reset();
   const kept: string[] = [];
   const env = agentEnv(ag, BRAIN_HOME, kept); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
-  if (kept.length) dlog(`env defaults kept from parent: ${kept.join(",")}`); // 部署方显式设置的审批类开关
+  if (kept.length) log.info(`env defaults kept from parent: ${kept.join(",")}`); // 部署方显式设置的审批类开关
   prepareAgent(ag); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
   const proc = spawnAgent(ag, { cwd: BRAIN_HOME, env });
   child = proc;
-  dlog(`spawn ${ag.name} acp pid=${proc.pid} bin=${ag.bin} args=[${ag.args.join(" ")}]`);
+  log.info(`spawn ${ag.name} acp pid=${proc.pid} bin=${ag.bin} args=[${ag.args.join(" ")}]`);
   // 身份记录（JSON）：manage.ts 据此算进程特征串与展示 live 状态，不必猜「配置里的 agent 是不是正在跑的那个」
   writePidRecords(BRAIN_PID_FILE, [pidRecordOf(proc.pid!, ag)]);
   proc.stdout.on("data", (d) => feedAcpStdout(stdoutLines, d, (f) => handleAcpFrame(f, host)));
@@ -238,11 +240,11 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   proc.on("exit", (code) => {
     // A：握手前就退出时，把「args 可能漏了 ACP 模式参数」直接写进日志（比只报一行 exited 好查）
     const hint = child === proc && !initialized ? acpArgsHint(ag) : "";
-    dlog(`acp exited code=${code}${hint}`);
+    (code === 0 ? log.info : log.warn)(`acp exited code=${code}${hint}`);
     if (child === proc) reset();
   });
   proc.on("error", (e) => {
-    dlog(`acp error ${String(e)}`);
+    log.error(`acp error ${String(e)}`);
     if (child === proc) reset();
   });
   try {
@@ -254,11 +256,11 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
     );
   } catch (e) {
     // A：initialize 超时/失败最常见的原因是 args 覆盖漏了 ACP 子命令——把诊断提示附在同一行日志里
-    dlog(`initialize failed: ${String(e)}${acpArgsHint(ag)}`);
+    log.error(`initialize failed: ${String(e)}${acpArgsHint(ag)}`);
     throw e;
   }
   initialized = true;
-  dlog("initialized");
+  log.info("initialized");
 }
 
 async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string> {
@@ -283,7 +285,7 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
         );
         await drainAcpReplay(host, ag);
       } catch (e) {
-        dlog(`session/${method} failed (${String(e)})`);
+        log.warn(`session/${method} failed (${String(e)})`);
         continue;
       }
       // 恢复已经成功：模型设置失败只记日志，不能退回 session/new——那会丢掉刚恢复的上下文。
@@ -296,7 +298,9 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
       await applyAcpSessionMode(host, ag, saved, availableAcpModes(restored), REQ_TIMEOUT);
       userSessions.set(userId, saved);
       markUsed(ag.name, userId, saved); // 会话登记表：把它顶到「最近使用」（列表按此排序）
-      dlog(`session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
+      log.info(
+        `session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`,
+      );
       return saved;
     }
   }
@@ -315,7 +319,7 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
   map[keyOf(ag, userId)] = res.sessionId;
   saveSessionMap(map);
   ensureEntry(ag.name, userId, res.sessionId); // 会话登记表：新会话进列表（turns 从 0 起）
-  dlog(`session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
+  log.info(`session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
   return res.sessionId;
 }
 
@@ -394,14 +398,14 @@ async function runTurn(
     // 成功回合才登记：轮次 +1、刷新最近使用、首次写入标题（用户消息前 30 字；纯图片消息没有文字 → 留给下一次）
     // 标题取**剥掉交接前缀**后的正文：不然列表里全是「【交接摘要 · 来自 …】」，用户认不出哪条是哪条。
     touchEntry(ag.name, userId, sid, { title: titleOf(stripHandoffPrefix(message)) });
-    dlog(
+    log.info(
       `prompt ok ${Date.now() - t0}ms chunks=${acpTurnChunks(turn, sid)} updateTypes=[${[...turn.seenUpdateTypes].join(",")}]`,
     );
     return txt;
   } catch (e) {
     const chunks = acpTurnChunks(turn, sid);
     const sinceFrame = rpcState.lastFrameAt ? Date.now() - rpcState.lastFrameAt : -1;
-    dlog(
+    log.warn(
       `prompt FAIL ${Date.now() - t0}ms chunks=${chunks} lastFrameAgo=${sinceFrame}ms err=${String(e)} -> rebuild`,
     );
     reset(); // 自愈：杀掉可能假死的进程，下条消息重建并 session/load 恢复
@@ -462,11 +466,11 @@ export async function resumeSession(
         const map = loadSessionMap(ag);
         map[keyOf(ag, userId)] = sessionId;
         saveSessionMap(map);
-        dlog(`resume ok ${sessionId}`);
+        log.info(`resume ok ${sessionId}`);
         return { ok: true };
       } catch (e) {
         lastErr = String(e);
-        dlog(`resume session/${method} failed (${lastErr})`);
+        log.error(`resume session/${method} failed (${lastErr})`);
       }
     }
     return {

@@ -1,8 +1,10 @@
+import { createLogger } from "../logging.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 import { withFileLock } from "./file-lock.js";
+const log = createLogger("wechat-ilink-core/accounts");
 
 /**
  * 账号注册表：管理 ~/.wemind 下的多账号清单。
@@ -60,9 +62,7 @@ export function loadRegistry(): AccountsRegistry {
     throw new Error("registry shape invalid");
   } catch (e) {
     // 存在但损坏：不要当空注册表直接覆盖（紧接的 save 会抹掉所有已登记账号）；备份坏文件 + 记日志
-    console.error(
-      `[wemind/wechat-ilink-core/accounts] ${REGISTRY_FILE} parse failed, backing up: ${String(e)}`,
-    );
+    log.warn(`${REGISTRY_FILE} parse failed, backing up: ${String(e)}`);
     try {
       fs.renameSync(REGISTRY_FILE, `${REGISTRY_FILE}.corrupt-${Date.now()}`);
     } catch {

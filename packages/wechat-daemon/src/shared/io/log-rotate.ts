@@ -9,7 +9,9 @@
  * 仍被写入进程持有的文件。内置 watchdog 因此把子进程 stdout/stderr 接成管道，由它逐块追加，
  * 轮转时文件没有打开句柄；`scripts/run-daemon.ps1 -Mode shell` 则在每次重拉前（子进程已退出）轮转。
  */
+import { createLogger } from "@wemind/wechat-ilink-core";
 import fs from "node:fs";
+const log = createLogger("wechat-daemon/wrapper");
 
 export type LogLimits = { maxBytes: number; keep: number };
 
@@ -83,7 +85,7 @@ export class RotatingLog {
       fs.appendFileSync(this.file, buf);
       this.bytes += buf.length;
     } catch (e) {
-      console.error("[wemind/wechat-daemon/wrapper] 写 daemon.log 失败：", String(e));
+      log.warn("写 daemon.log 失败：", String(e));
       return;
     }
     this.rotateIfNeeded();
@@ -99,13 +101,14 @@ export class RotatingLog {
       if (!rotateLogFile(this.file, this.limits)) return;
     } catch (e) {
       // 轮转失败不致命：继续往当前文件追加，下次写满再试。
-      console.error("[wemind/wechat-daemon/wrapper] daemon.log 轮转失败：", String(e));
+      log.warn("daemon.log 轮转失败：", String(e));
       return;
     }
     this.bytes = 0;
     // 轮转标记直接追加，不经过 write()：否则 maxBytes 极小时会「写完标记立刻再轮转」无限递归。
     try {
-      const marker = `[wemind/wechat-daemon/wrapper] daemon.log 达到 ${Math.round(this.limits.maxBytes / 1024 / 1024)}MB，已轮转（保留 ${this.limits.keep} 份）\n`;
+      // 轮转标记由 RotatingLog 自己直接 append（不经过 logger），格式与 wrapperLine/createLogger 对齐，保证 daemon.log 每行都有级别标记。
+      const marker = `[wemind/wechat-daemon/wrapper][INFO] daemon.log 达到 ${Math.round(this.limits.maxBytes / 1024 / 1024)}MB，已轮转（保留 ${this.limits.keep} 份）\n`;
       fs.appendFileSync(this.file, marker);
       this.bytes += Buffer.byteLength(marker);
     } catch {

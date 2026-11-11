@@ -72,6 +72,8 @@ wemind session list <key|label>
 
 默认数据目录：`~/.wemind/<key>/`
 
+优先用 `wemind log [key|label]` 看尾部（默认最后 50 行；`--errors` 只筛 `[ERROR]/[WARN]` 并带前后各 2 行上下文；`--file 1` 看轮转文件）。它是全量运行日志的一次性快照，没有 `--follow`；要实时跟随时再用系统工具或 `pm2 logs`。
+
 | 文件 | 用途 |
 |---|---|
 | `daemon.log` | daemon / acp / worker / task / watchdog / switch 日志 |
@@ -133,7 +135,7 @@ wemind brain check
 
 1. `wemind list` 确认账号 `运行中`；
 2. 确认你（登录者）在 `allowFrom` 白名单里（正常会自动写入）：`wemind allowlist <key>` 看清单、异常时 `wemind allow <key> <userId>` 加人；
-3. 看 `daemon.log` 有没有 `turn start`：
+3. 看 `daemon.log`（或 `wemind log --errors <key>`）有没有 `turn start`：
    - 没有 → 消息没被拉取（登录/token/别处也在收消息）；
    - 有但没有 `prompt ok` → ACP 层问题，转 3.3；
 4. 确认没有第二个 MCP/daemon 用同一 token（回环/抢消息）。
@@ -302,3 +304,5 @@ wemind start <key>
 - [`docs/机制与协议说明/本地双入口-命令派发与查看回复.md`](../../机制与协议说明/本地双入口-命令派发与查看回复.md)（控制桥协议）
 - [`docs/ai/recipes/run-e2e.md`](run-e2e.md)（验收与待实测清单）
 - [`docs/部署与运维/daemon-常驻原理.md`](../../部署与运维/daemon-常驻原理.md)
+
+> **日志格式（2026-11-11 起）**：运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出，格式为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部写 stderr（MCP 的 stdout 仍是 JSON-RPC 通道）；CLI 用户输出走 stdout 的 `print()`，不加前缀、不加级别。本文正文中的日志样例可能省略了级别标记，实际每行都有。`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。`WEMIND_LOG_LEVEL=debug` 才输出 DEBUG（目前没有 debug 调用点，属预留级别）。

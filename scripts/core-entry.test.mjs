@@ -51,6 +51,45 @@ describe("core 是 JIT 源码包（source-first）", () => {
     }
   });
 
+  it("两个发布包都开 sourcemap（.map 随包由 prepack 守卫检查）", () => {
+    for (const rel of [
+      "packages/wechat-daemon/tsdown.config.ts",
+      "packages/wechat-mcp/tsdown.config.ts",
+    ]) {
+      expect(readText(rel)).toMatch(/sourcemap:\s*true/);
+    }
+  });
+
+  it("CLI / daemon / MCP 的错误出口都走 describeError（日志自动带 .ts 行号）", () => {
+    const cli = readText("packages/wechat-daemon/src/cli.ts");
+    expect(cli.match(/describeError\(/g)?.length).toBeGreaterThanOrEqual(3);
+    // 管理命令的 fatal 出口用 log.child("cli")：前缀与级别由 logger 生成，调用点不再自带前缀，也不能退回裸 console.error。
+    expect(cli).toContain('const cliLog = log.child("cli")');
+    expect(cli).toContain("cliLog.error(describeError(e, import.meta.url))");
+    expect(cli).not.toContain('console.error("error:"');
+    expect(readText("packages/wechat-daemon/src/index.ts")).toContain(
+      'process.on("unhandledRejection"',
+    );
+    expect(readText("packages/wechat-daemon/src/index.ts")).toContain("describeError(");
+    expect(readText("packages/wechat-mcp/src/index.ts")).toContain("describeError(");
+  });
+
+  it("daemon 业务循环与 MCP 全局兜底也用 describeError（日志行号可读）", () => {
+    const daemon = readText("packages/wechat-daemon/src/index.ts");
+    const mcp = readText("packages/wechat-mcp/src/index.ts");
+    for (const label of [
+      "save state failed:",
+      "poller error:",
+      "fast command error:",
+      "handleMessage error:",
+    ]) {
+      expect(daemon).toContain(`log.error("${label}", describeError(`);
+    }
+    expect(mcp).toContain('process.on("unhandledRejection"');
+    expect(mcp).toContain('process.on("uncaughtException"');
+    expect(mcp).toContain("describeError(reason, import.meta.url)");
+  });
+
   it("根脚本不再预构建 core", () => {
     const root = readJson("package.json");
     expect(root.scripts.build).not.toContain("build -w @wemind/wechat-ilink-core");

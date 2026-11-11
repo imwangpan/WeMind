@@ -144,6 +144,7 @@ MCP server 用 [tsdown](https://tsdown.dev/)（rolldown + oxc，tsup 的继任�
 - **`deps.alwaysBundle: ["@wemind/wechat-ilink-core"]`** —— 把内核内联进单一产物，发布时无需单独发布 core；
 - 其余运行时依赖（MCP SDK / zod / qrcode）保持 external，但**已声明在 `dependencies`**，安装包时由 npm / npx 一并装好；只有离线手工部署或自行重新打包时才需要单独准备；
 - **`dts: false`** —— 该包不对外暴露类型；关掉也避免 tsdown 加载 `typescript` 包（TypeScript 7.0 原生已不再暴露旧 JS API，否则启动即报错）；
+- **`sourcemap: true`**（2026-11-11 起）—— `dist/index.js.map` 随包，与 `@wemind/cli` 对齐；`prepack` 守卫会检查 `.map` 存在且被 `files` 覆盖。Node 默认不应用 sourcemap，所以 `main().catch` 走 `describeError()` 自己读同目录的 map，fatal 日志直接显示 `src/xxx.ts:NN`，MCP 客户端无需任何配置（见 [已知坑](../ai/已知坑.md)）；
 - 入口 shebang（`#!/usr/bin/env node`）由 rolldown 自动保留。
 
 `package.json` 标记 `publishConfig.access: public`，与 `@wemind/cli`（命令 `wemind`）一起属于两个**已发布**的子包；`@wemind/wechat-ilink-core` 保持 `private`，只做内联。
@@ -161,3 +162,5 @@ MCP 形态是**不主动轮询的请求驱动**：没有后台进程，靠 MCP �
 ---
 
 接下来：[5. daemon](05-daemon.md) 进入项目最复杂的部分。
+
+> **日志格式（2026-11-11 起）**：运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出，格式为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部写 stderr（MCP 的 stdout 仍是 JSON-RPC 通道）；CLI 用户输出走 stdout 的 `print()`，不加前缀、不加级别。本文正文中的日志样例可能省略了级别标记，实际每行都有。`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。`WEMIND_LOG_LEVEL=debug` 才输出 DEBUG（目前没有 debug 调用点，属预留级别）。

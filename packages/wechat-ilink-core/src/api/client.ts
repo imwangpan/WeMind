@@ -1,3 +1,4 @@
+import { createLogger } from "../logging.js";
 import crypto from "node:crypto";
 
 import { ILINK_APP_ID } from "../config.js";
@@ -16,6 +17,7 @@ import type {
   GetUploadUrlReq,
   GetUploadUrlResp,
 } from "./types.js";
+const log = createLogger("wechat-ilink-core/ilink");
 
 /** 普通 RPC 的超时（send/typing/config/upload/notify）。 */
 const DEFAULT_API_TIMEOUT_MS = 15_000;
@@ -334,9 +336,7 @@ async function notifyLifecycle(
       label: op,
     });
   } catch (err) {
-    console.error(
-      `[wemind/wechat-ilink-core/ilink] ${op} failed (ignored, best-effort): ${String(err)}`,
-    );
+    log.warn(`${op} failed (ignored, best-effort): ${String(err)}`);
   }
 }
 

@@ -9,11 +9,12 @@ import {
   writeControlResponse,
   type ControlRequest,
 } from "../ipc/control-bridge.js";
+import type { LeveledLog } from "../shared/io/leveled-log.js";
 
 export type ControlInboxDeps = {
   /** 执行一条已校验且未过期的请求；返回给 CLI 的文本（`❌` 开头表示失败）。 */
   handle: (req: ControlRequest, owner: string) => Promise<string>;
-  log: (...args: unknown[]) => void;
+  log: LeveledLog;
   now?: () => number;
 };
 
@@ -47,12 +48,12 @@ export class ControlInboxRunner {
           /* ignore */
         } // 先删，避免重复处理
         if (!req) {
-          this.deps.log("control: 非法请求（未知 kind / 坏 JSON），已丢弃:", file);
+          this.deps.log("warn", "control: 非法请求（未知 kind / 坏 JSON），已丢弃:", file);
           continue;
         }
         // CLI 已经等到超时并放弃：不要再执行（否则「CLI 说没等到、daemon 却照做」）。
         if (isControlRequestExpired(req, this.deps.now())) {
-          this.deps.log("control: 请求已超时，跳过执行:", req.kind, file);
+          this.deps.log("warn", "control: 请求已超时，跳过执行:", req.kind, file);
           writeControlResponse(
             {
               id: req.id,
@@ -65,6 +66,7 @@ export class ControlInboxRunner {
           continue;
         }
         this.deps.log(
+          "info",
           "control(cli):",
           req.kind,
           JSON.stringify({ target: req.target, ref: req.ref }),
@@ -73,6 +75,7 @@ export class ControlInboxRunner {
         try {
           text = await this.deps.handle(req, owner);
         } catch (e) {
+          this.deps.log("error", "control: 处理出错:", req.kind, String(e));
           text = `❌ 处理出错：${String(e)}`;
         }
         // 约定：❌ 开头即失败（CLI 据此定退出码）。应答一定写——不写的话 CLI 会白等到超时。

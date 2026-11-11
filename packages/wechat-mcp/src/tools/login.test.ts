@@ -33,6 +33,12 @@ fs.mkdirSync(m.dataDir, { recursive: true });
 vi.mock("@wemind/wechat-ilink-core", () => ({
   ...m,
   ACCOUNT_KEY: "default",
+  // login.ts 现在用统一 logger；测试不需要真的输出，给一个全 noop 的实现。
+  createLogger: () => {
+    const noop = () => {};
+    const logger = { info: noop, warn: noop, error: noop, debug: noop, child: () => logger };
+    return logger;
+  },
   // 函数在调用时读 m.root（工厂执行时它还没赋值，不能像常量一样提前捕获）
   accountDir: (key: string) => path.join(m.root, key),
   get DATA_DIR() {

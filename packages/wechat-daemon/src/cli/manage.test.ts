@@ -47,6 +47,7 @@ describe("helpText（CLI 帮助面）", () => {
       "wemind session delete",
       "wemind task-list",
       "wemind task-reply",
+      "log [key|label]", // 日志尾部（--errors / --file）
       "--model", // brain set 可以覆盖模型（DSH 的模型路由不再是改源码才能换）
       "控制桥", // 说明「CLI 与微信走同一段代码」的那句
     ])
@@ -118,6 +119,16 @@ describe("CLI 参数校验（缺值 / 非法编号 / 未知 runner）", () => {
     await expect(runManage(["session", "list", "--page", "0"])).rejects.toThrow(/正整数/);
     await expect(runManage(["task-reply", "#0 hi"])).rejects.toThrow(/正整数/);
     await expect(runManage(["task-stop", "0"])).rejects.toThrow(/正整数/);
+  });
+
+  it("wemind log --help 打印用法，不再当成未知参数", async () => {
+    const out = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await runManage(["log", "--help"]);
+      expect(out.mock.calls.map((c) => String(c[0])).join("\n")).toContain("wemind log");
+    } finally {
+      out.mockRestore();
+    }
   });
 });
 

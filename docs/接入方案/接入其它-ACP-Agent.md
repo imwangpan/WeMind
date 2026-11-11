@@ -432,3 +432,5 @@ WeMind 让大脑跑在一个独立沙箱目录（`BRAIN_HOME`，由 `WECHAT_BRAI
 > 接入任一 agent 的通用步骤见本文 §2–§5；带「适配器」的先 `npm i -g <适配器包>`（npx 只作兜底），再把 `WEMIND_BRAIN_BIN/ARGS` 指向适配器启动命令。除 §5 里已实测的内置预设（kiro / opencode / deepseek / qoder / cline，加上 gemini：探针级 + 真机 E2E（0.66.0，2026-11-01）、claude-code：探针级 + 真机微信单轮 E2E、codex：探针级 + 真机 E2E、pi：探针级 + 真机 E2E）外，均建议先实测。
 >
 > 远程 ACP（HTTP/WebSocket）官方仍在完善——成熟后可把工作机部署到独立/更强机器（见《方案C-受控ACP工作机设计》）。
+
+> **日志格式说明（2026-11-11，历史实测记录不改正文）**：本文记录的日志线索沿用当时的写法；现行运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部 stderr。ACP 帧级关键线索（`spawn` / `initialized` / `session/new` / `prompt ok`）归 **INFO**（排障必须可见），`prompt FAIL` 与自愈归 **WARN**。CLI 用户输出走 stdout 的 `print()`，无前缀无级别；`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。详见 [`AGENTS.md`](../../AGENTS.md) 与 [`repowiki/11`](../repowiki/11-开发指南.md)。

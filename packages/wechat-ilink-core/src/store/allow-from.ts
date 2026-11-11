@@ -1,8 +1,10 @@
+import { createLogger } from "../logging.js";
 import fs from "node:fs";
 import path from "node:path";
 
 import { DATA_DIR } from "./account.js";
 import { withFileLock } from "./file-lock.js";
+const log = createLogger("wechat-ilink-core/allow-from");
 
 /**
  * 登录者白名单（allowFrom）：每账号一份持久化的「允许发消息的 userId 清单」，取代单一 `WECHAT_OWNER_ID` 环境变量白名单。
@@ -34,9 +36,7 @@ export function readAllowFrom(dir: string = DATA_DIR): string[] {
       : [];
   } catch (e) {
     // 存在但损坏：本清单是安全闸，损坏返回 [] 是 fail-closed（全员锁死），必须可见 → 记日志 + 备份坏文件
-    console.error(
-      `[wemind/wechat-ilink-core/allow-from] ${filePath(dir)} parse failed, backing up: ${String(e)}`,
-    );
+    log.warn(`${filePath(dir)} parse failed, backing up: ${String(e)}`);
     try {
       fs.renameSync(filePath(dir), `${filePath(dir)}.corrupt-${Date.now()}`);
     } catch {

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { accountDir } from "@wemind/wechat-ilink-core";
+import { print, accountDir } from "@wemind/wechat-ilink-core";
 import { pm2Start, pm2Stop } from "./pm2-runner.js";
 import { watchdogStart } from "./watchdog-runner.js";
 import {
@@ -142,7 +142,7 @@ export function startDaemon(key: string, runner?: string): { ok: boolean; msg: s
   const useRunner = (runner || process.env.WEMIND_RUNNER || "builtin").toLowerCase();
   const r = useRunner === "pm2" ? pm2Start(key, cliPath) : watchdogStart(key, cliPath);
   if (!r.ok) process.exitCode = 1; // runner 起不来时别让「已启动」的文案配一个成功退出码
-  console.log(r.msg);
+  print(r.msg);
   return r;
 }
 

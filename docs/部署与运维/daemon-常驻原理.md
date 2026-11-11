@@ -296,3 +296,5 @@ foreach ($key in $accounts) {
 ## 10. 一句话总结
 
 > **开机触发器负责「开机拉起一次」并脱离 shell**——Windows 用计划任务（首选）或 `HKCU\...\Run`（禁建任务时的退路）、Linux 用 systemd、macOS 用 launchd；**同一台机器只选一个**。后台守护进程（builtin `_watchdog`，`run-daemon.ps1` 默认薄壳最终也走它 / pm2 / `run-daemon.ps1 -Mode shell`）的循环负责「崩了再拉」；node 的三个 `while(true)`（poller + fastWorker + worker）负责「自己不退」；单实例守卫（wrapper.pid 身份校验 / Mutex / pm2 app 名）负责「不重复」；pid 文件链负责「能精确停」。五者叠起来 = 稳定的后台常驻。**
+
+> **日志格式（2026-11-11 起）**：运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出，格式为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部写 stderr（MCP 的 stdout 仍是 JSON-RPC 通道）；CLI 用户输出走 stdout 的 `print()`，不加前缀、不加级别。本文正文中的日志样例可能省略了级别标记，实际每行都有。`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。`WEMIND_LOG_LEVEL=debug` 才输出 DEBUG（目前没有 debug 调用点，属预留级别）。

@@ -90,7 +90,8 @@ export type AcpHost = {
   noProcessMessage: string;
   nextId(): number;
   write(payload: Record<string, unknown>): void;
-  log(message: string): void;
+  /** 帧级诊断默认 INFO；协议错误/降级（ERROR 帧、模型或模式设置失败）显式传 WARN。 */
+  log(message: string, level?: "info" | "warn" | "error"): void;
 };
 
 export function newTurnState(): AcpTurnState {
@@ -168,7 +169,7 @@ export function handleAcpFrame(f: Record<string, any>, host: AcpHost): void {
     p.clear();
     host.pending.delete(f.id);
     if (f.error) {
-      host.log(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`);
+      host.log(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`, "warn");
       p.reject(new Error(JSON.stringify(f.error)));
     } else p.resolve(f.result);
     return;
@@ -346,7 +347,7 @@ export async function applyAcpModel(
     );
     host.log(`model set ${ag.model}`);
   } catch (e) {
-    host.log(`model set failed (${String(e)})`);
+    host.log(`model set failed (${String(e)})`, "warn");
     throw e;
   }
 }
@@ -380,7 +381,7 @@ export async function applyAcpSessionMode(
     await requestAcp(host, "session/set_mode", { sessionId, modeId: ag.sessionMode }, timeoutMs);
     host.log(`session mode set ${ag.sessionMode}`);
   } catch (e) {
-    host.log(`session mode set failed (${String(e)})——继续；审批请求仍由应答器处理`);
+    host.log(`session mode set failed (${String(e)})——继续；审批请求仍由应答器处理`, "warn");
   }
 }
 

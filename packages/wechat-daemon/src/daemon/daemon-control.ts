@@ -1,4 +1,4 @@
-import { DATA_DIR, clearSessionPause, loadAccount } from "@wemind/wechat-ilink-core";
+import { createLogger, DATA_DIR, clearSessionPause, loadAccount } from "@wemind/wechat-ilink-core";
 import { askBrainTurn, newSession, restartForMcpChange, resumeSession } from "../acp/acp-brain.js";
 import { agentConfigFor, loadBrainConfig } from "../agents/brain-config.js";
 import {
@@ -31,8 +31,7 @@ import { LONG_REPLY_THRESHOLD } from "./messaging/md-reply.js";
 import { armSensitiveAllow } from "./messaging/sensitive-allow.js";
 import { hasActiveTask, taskPoolSummary } from "../tasks/task-manager.js";
 import { killIdle as killIdleConns } from "../tasks/worker-pool.js";
-
-const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon]", ...a);
+const log = createLogger("wechat-daemon");
 
 /** 切脑结果/来源的中文说法（`AI` 总览与答复共用一套词，避免两处说法不一致）。 */
 const SOURCE_LABEL: Record<ResolvedAgent["source"], string> = {
@@ -85,8 +84,8 @@ async function switchBrainAck(target: string, userId: string, ctx: ControlCtx): 
     .then((out) => (out.ok ? out.notice : `❌ ${out.problem}`))
     .catch((e) => `❌ 切换出错：${String(e)}`)
     .then(async (r) => {
-      log("brain switch:", r.replace(/\n/g, " | "));
-      await ctx.notify(r).catch((e) => log("switch notice failed:", String(e)));
+      (r.startsWith("❌") ? log.warn : log.info)("brain switch:", r.replace(/\n/g, " | "));
+      await ctx.notify(r).catch((e) => log.warn("switch notice failed:", String(e)));
     });
   return `⏳ 正在切到「${pre.agent.name}」…（正在启动新大脑，成功或失败稍后补发消息；这期间发来的消息会等新大脑就绪）`;
 }
@@ -164,7 +163,7 @@ async function runHandoff(userId: string, ctx: ControlCtx, deadline?: number): P
     `✅ 交接摘要已保存（${text.length} 字，来自「${from}」）。\n` +
     `切到别的大脑后，你发的第一条消息会自动带上它（答完即用掉，只带一次；切回「${from}」不带上）。`;
   if (text.length > LONG_REPLY_THRESHOLD && ctx.notifyFile) {
-    await ctx.notifyFile(text).catch((e) => log("handoff md send failed:", String(e)));
+    await ctx.notifyFile(text).catch((e) => log.warn("handoff md send failed:", String(e)));
     return `${head}\n（摘要较长，已另发 .md 文件。）`;
   }
   return `${head}\n\n${text}`;
@@ -214,7 +213,7 @@ export async function handleControl(
         else if (r.failed > 0)
           extra = `\n📎 之前拦下的 ${r.failed} 个附件补发失败（文件可能已移动、超出上限或额度不足）。`;
       } catch (e) {
-        log("release pending sensitive failed:", String(e));
+        log.error("release pending sensitive failed:", String(e));
         extra = "\n（补发之前拦下的附件时出错，可让大脑重新发一次。）";
       }
     }
@@ -280,7 +279,7 @@ export async function handleControlRequest(req: ControlRequest, owner: string): 
       const botId = loadAccount()?.botId;
       if (!botId) return "❌ 没有登录凭证；先登录再解除冷却。";
       clearSessionPause(botId);
-      log("control(cli): 已解除 -14 冷却，继续轮询");
+      log.info("control(cli): 已解除 -14 冷却，继续轮询");
       return "✅ 已解除会话过期冷却，继续轮询。";
     }
   }

@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 import { createConn, effectiveWorkerCwd, type WorkerConn } from "./worker-acp.js";
 import {
   pidRecordOf,
@@ -10,6 +10,7 @@ import {
 } from "../shared/process/pid-record.js";
 import type { ResolvedAgent } from "../agents/brain-agents.js";
 import { ensureWorkerHome } from "../agents/sandbox/worker-sandbox.js";
+const log = createLogger("wechat-daemon/worker");
 
 /**
  * worker 进程池：**一条任务一条 ACP 连接**，按 agent 复用常驻进程。
@@ -204,9 +205,7 @@ export async function acquire(
   try {
     ensureWorkerHome(ag);
   } catch (e) {
-    console.error(
-      `[wemind/wechat-daemon/worker] 准备沙箱失败（${ag.name}）：${e instanceof Error ? e.message : String(e)}`,
-    );
+    log.error(`准备沙箱失败（${ag.name}）：${e instanceof Error ? e.message : String(e)}`);
   }
   reapByIds(plan.reap);
 

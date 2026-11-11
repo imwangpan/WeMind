@@ -90,7 +90,7 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 
 > 📌 上表「发布」列指的是**该子包**是否发布到 npm：对外发布的是 `@wemind/wechat-mcp`（MCP 形态）与 `@wemind/cli`（完整应用 CLI，命令 `wemind`）两个入口。两者共用同一个 bot token 时**只能二选一**。
 
-`@wemind/wechat-mcp` 与 `@wemind/cli` 发布时都用 [tsdown](https://tsdown.dev/)（rolldown + oxc）把 `core` **内联**进单一产物，**两个包各自自包含**；`core` 本身 `private: true`，永不单独发布。开发时 `core` 是 **JIT 源码包**（入口直接指向 `src/index.ts`，没有构建步骤与 `dist/`），`npm test` / `npm run typecheck` 不需要先构建它。发布流程见 [`.github/workflows/wemind-publish.yml`](.github/workflows/wemind-publish.yml) 与 [`docs/发布与变更记录/如何发布新版本.md`](docs/发布与变更记录/如何发布新版本.md)。
+`@wemind/wechat-mcp` 与 `@wemind/cli` 发布时都用 [tsdown](https://tsdown.dev/)（rolldown + oxc）把 `core` **内联**进单一产物，**两个包各自自包含**；`core` 本身 `private: true`，永不单独发布。开发时 `core` 是 **JIT 源码包**（入口直接指向 `src/index.ts`，没有构建步骤与 `dist/`），`npm test` / `npm run typecheck` 不需要先构建它。两个包都带 `dist/*.js.map`：Node 默认不应用 sourcemap，所以 WeMind 在打印错误时**自己读同目录的 map** 改写堆栈（`core/stack-map.ts` 的 `describeError()`），`daemon.log` 与 CLI/MCP 的报错直接显示 `src/xxx.ts:12` 这样的源码位置。map 与产物同一次构建、同一目录，版本天然配对；用户零配置，所有启动方式（watchdog / pm2 / 开机自启 / 前台直跑）通用。想让 Node 连我们没打印的栈也映射，可另加 `NODE_OPTIONS=--enable-source-maps`（可选）。发布流程见 [`.github/workflows/wemind-publish.yml`](.github/workflows/wemind-publish.yml) 与 [`docs/发布与变更记录/如何发布新版本.md`](docs/发布与变更记录/如何发布新版本.md)。
 
 ## 安装（两种形态，二选一）
 
@@ -274,6 +274,8 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 
 > 本表由 `node scripts/gen-docs-tables.mjs` 从 `cli/manage.ts` 与 `ipc/chat-command-specs.ts` 生成，保证命令清单与代码一致。
 
+**看日志**：`wemind log [key|label]` 打印该账号 `daemon.log` 的最后 50 行（**全量运行日志**，正常轨迹与错误混在一起，不是只记错误）；`--lines N` 调条数，`--errors` **精确认 `[ERROR]` / `[WARN]` 级别标记**（升级前的旧日志仍按关键词兼容），并**带上前后各 2 行上下文**保留因果，`--file 1` 看轮转出去的旧日志。日志由 `core/logging.ts` 的 `createLogger(scope)` 统一输出，格式 `[wemind/<scope>][INFO\|WARN\|ERROR\|DEBUG] …`，全部写 stderr；CLI 用户输出走 stdout 的 `print()`，无前缀无级别。它是一次性快照，**没有 `--follow`**：日志靠改名轮转，跟随句柄会指向旧文件，需要实时看请用系统工具（`tail -f <路径>` / `Get-Content -Wait`）或 pm2 路线的 `pm2 logs wemind-<key>`。
+
 <!-- BEGIN:auto cli-commands -->
 **CLI 子命令**（`wemind <命令>`）
 
@@ -289,6 +291,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 | `help` |
 | `label` |
 | `list` |
+| `log` |
 | `login` |
 | `logout` |
 | `revoke` |
@@ -390,6 +393,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WEMIND_SESSION_LOG_MAX` / `WEMIND_SESSION_PAGE_SIZE`   | 会话登记表每个「登录者 · 大脑」保留的条数上限（默认 50）/ 会话列表每页条数（默认 10）                                              |
 | `WEMIND_MAX_RESTARTS`                                   | 后台守护进程的**连续崩溃**重拉上限（默认 50；跑满 10 分钟视为稳定、计数清零），超限停止自动重启（pm2 由 `max_restarts` 管）        |
 | `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                 | `daemon.log` 单文件上限（默认 10MB）/ 轮转保留份数（默认 3；`0` = 不留历史）。内置 watchdog 运行中轮转；`run-daemon.ps1 -Mode shell` 每次重拉前轮转；pm2 runner 交给 `pm2-logrotate` |
+| `WEMIND_LOG_LEVEL`                                       | 设为 `debug` 才输出 DEBUG 级别日志（预留级别，当前没有 debug 调用点）；INFO/WARN/ERROR 始终输出 |
 | 大脑 agent 选择 / 记忆继承                              | 见下方「切换大脑 Agent」与 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md)（`WEMIND_BRAIN*`、`WEMIND_BRAIN_REAL_HOME` 等） |
 
 限制：
@@ -685,4 +689,4 @@ daemon 的**内置预设默认免审批**（每个 agent 用自己官方的开�
 
 ---
 
-> **最后核对**：2026-11-10 ｜ 本文档描述当前分支的最新代码，已发布版本见 [CHANGELOG](docs/发布与变更记录/CHANGELOG.md) 与 npm；接入类结论请看对应文档的「实测/假设」标注。
+> **最后核对**：2026-11-11 ｜ 本文档描述当前分支的最新代码，已发布版本见 [CHANGELOG](docs/发布与变更记录/CHANGELOG.md) 与 npm；接入类结论请看对应文档的「实测/假设」标注。

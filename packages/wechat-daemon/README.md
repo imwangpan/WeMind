@@ -4,6 +4,8 @@
 
 [WeMind](https://github.com/imwangpan/WeMind) monorepo 的完整应用包；只依赖内核 `@wemind/wechat-ilink-core`（发布时已内联进单文件产物），不碰 MCP 层，可独立运行。
 
+产物 `dist/cli.js` 同时带 `dist/cli.js.map`。Node 默认不应用 sourcemap，所以 WeMind 在打印错误时自己读同目录的这张 map：`daemon.log` 里的堆栈会直接写成 `src/xxx.ts:12` 这样的源码位置，不需要设任何环境变量；map 与产物同一次构建、同一目录，版本天然配对。
+
 > **包名 `@wemind/cli`，命令名 `wemind`。** 包收在 scope 下，命令保持短名。**`npx` 必须写全包名**。
 
 ## 环境要求
@@ -25,7 +27,7 @@
 
 ```bash
 npm i -g @wemind/cli     # 安装后得到 wemind 命令
-wemind version           # → wemind 1.7.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
+wemind version           # → wemind 1.8.0 (@wemind/cli, node …, win32-x64)   # 版本以实际安装为准
 wemind list              # 查看账号与运行状态
 ```
 
@@ -54,6 +56,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `wemind login [--label 名] [--start] [--runner builtin\|pm2]`                                       | 扫码登录；`--start` 顺带拉起常驻                                                                                                                                                                                                                             |
 | `wemind list`                                                                                       | 账号、别名、运行状态、当前大脑、worker 池                                                                                                                                                                                                                    |
+| `wemind log [key\|label] [--lines N] [--errors] [--file N]`                                         | 看该账号 `daemon.log` 尾部（默认 50 行、全量日志；`--errors` 精确认 `[ERROR]`/`[WARN]` 标记（旧日志按关键词兼容）并带前后各 2 行上下文，`--file 1` 看轮转文件）。一次性快照，不带 `--follow`                                                                                                                                          |
 | `wemind start / stop <key\|label>`                                                                  | 启停某账号的常驻                                                                                                                                                                                                                                             |
 | `wemind start --all \| <key1> <key2>…`                                                              | 启动所有 / 指定的多个账号（单账号失败不影响其余）                                                                                                                                                                                                            |
 | `wemind autostart install\|status\|uninstall [--key <key>\|--label 名]`                             | 开机自启：默认所有已登记账号；检测到 PM2 优先用 PM2，否则用计划任务 / systemd / LaunchAgent                                                                                                                                                                  |
@@ -100,6 +103,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `WEMIND_ACP_AUTO_ALLOW=1`                                                             | 放行 ACP agent 的一次性权限请求（默认为拒绝）                                                                            |
 | `WEMIND_ACP_SESSION_MODE`                                                             | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off`/`no` 关闭，其它值 = 该 modeId                              |
 | `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                                               | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate` |
+| `WEMIND_LOG_LEVEL`                                                                     | 设为 `debug` 才输出 DEBUG 级别（预留级别，当前没有 debug 调用点）；INFO/WARN/ERROR 始终输出 |
 | `WECHAT_INBOUND_MEDIA_MAX_MB` / `WECHAT_OUTBOUND_FILE_MAX_MB`                         | 入站文件/视频/语音单文件上限（默认 100）/ 出站附件单文件上限（默认 25）                                                  |
 | `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`                                       | `brain-home/media/inbound` 保留天数 / 总量上限（默认 30 天 / 1GB；启动时 + 写入媒体时清理）                                          |
 | `WECHAT_TOOL_PROGRESS_ITEMS`                                                          | 结构化工具进度 item（11/12）开关（**默认关**：微信客户端目前不渲染，只发文本「步骤 N」；`1` = 启用）                      |

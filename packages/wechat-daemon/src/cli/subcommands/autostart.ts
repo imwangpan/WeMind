@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { listAccounts, type AccountMeta } from "@wemind/wechat-ilink-core";
+import { print, listAccounts, type AccountMeta } from "@wemind/wechat-ilink-core";
 import { stableExecPath } from "../../shared/launcher-env.js";
 import { pm2Start } from "../pm2-runner.js";
 import { stopDaemon } from "../process-lifecycle.js";
@@ -107,12 +107,12 @@ export async function cmdAutostart(argv: string[]): Promise<void> {
   const sub = (argv[0] ?? "").toLowerCase();
 
   if (sub === "" || sub === "help" || sub === "--help" || sub === "-h") {
-    console.log(USAGE);
+    print(USAGE);
     return;
   }
   // `install --help` / `uninstall --help`：只打印用法，不能真的装/卸
   if (autostartHelpRequested(argv)) {
-    console.log(USAGE);
+    print(USAGE);
     return;
   }
   if (sub === "install") return install(argv.slice(1));
@@ -141,7 +141,7 @@ async function install(argv: string[]): Promise<void> {
       cleanupPM2Instances();
       cleanupSystemTriggers();
     }
-    console.log("旧配置已按选择清理。\n");
+    print("旧配置已按选择清理。\n");
   }
 
   // 2) 有 PM2 就让 PM2 托管（复用 pm2-runner 的声明：daemon 前台常驻、5s 重拉、退出码 75/78 不重拉）
@@ -149,7 +149,7 @@ async function install(argv: string[]): Promise<void> {
   const nodePath = stableExecPath(process.execPath);
   const cliPath = stableExecPath(currentCliPath());
   if (pm2.available && !forceNative) {
-    console.log(`检测到 PM2 ${pm2.version}，使用 PM2 托管（实例名 wemind-<key>）。\n`);
+    print(`检测到 PM2 ${pm2.version}，使用 PM2 托管（实例名 wemind-<key>）。\n`);
     // 从系统触发器切到 PM2 时，先停掉并移除旧单元；否则开机时 systemd/launchd 会再拉起一份。
     if (process.platform !== "win32") cleanupSystemTriggers();
     let failed = 0;
@@ -157,7 +157,7 @@ async function install(argv: string[]): Promise<void> {
       // 切换外壳前先停旧链（builtin / 系统服务）：旧 daemon 占着 token 时，pm2 实例会以 75 退出并被标记停止。
       stopDaemon(key);
       const r = pm2Start(key, cliPath);
-      console.log(r.msg);
+      print(r.msg);
       if (!r.ok) failed++;
     }
     if (process.platform === "win32") {
@@ -165,8 +165,8 @@ async function install(argv: string[]): Promise<void> {
       // 默认全部账号才用 --all；明确 --key / --label 时只写点名的 key。
       installWindowsAutostart(nodePath, cliPath, all ? undefined : keys, "pm2");
     } else if (!isPersistenceConfigured()) {
-      console.log("\n要让 PM2 在重启后自动恢复，请执行一次（只需一次）：");
-      console.log("  pm2 startup\n  pm2 save");
+      print("\n要让 PM2 在重启后自动恢复，请执行一次（只需一次）：");
+      print("  pm2 startup\n  pm2 save");
       markPersistenceConfigured();
     }
     if (failed) process.exitCode = 1;
@@ -174,7 +174,7 @@ async function install(argv: string[]): Promise<void> {
   }
 
   // 3) 没有 PM2：用系统原生触发器
-  console.log("未检测到 PM2，使用系统原生自启方案。\n");
+  print("未检测到 PM2，使用系统原生自启方案。\n");
 
   if (process.platform === "win32") {
     // 装全部时用 --all（以后 login 的新账号也自动覆盖）；明确点名的账号只写这些 key。
@@ -204,7 +204,7 @@ function uninstall(): void {
 
   if (process.platform === "win32") {
     uninstallWindowsAutostart();
-    console.log("已移除 Windows 自启（计划任务 / 注册表 Run 键）。");
+    print("已移除 Windows 自启（计划任务 / 注册表 Run 键）。");
     return;
   }
 
@@ -215,41 +215,41 @@ async function status(): Promise<void> {
   const s = await detectMixedConfig();
   const pm2 = detectPM2();
 
-  console.log(`平台：${process.platform}`);
-  console.log(`PM2：${pm2.available ? `已安装（${pm2.version}），自启方式为 PM2` : "未安装"}`);
+  print(`平台：${process.platform}`);
+  print(`PM2：${pm2.available ? `已安装（${pm2.version}），自启方式为 PM2` : "未安装"}`);
 
   switch (s) {
     case "none":
-      console.log("自启：未安装");
-      console.log("\n运行 wemind autostart install 安装。");
+      print("自启：未安装");
+      print("\n运行 wemind autostart install 安装。");
       break;
     case "native-only":
-      console.log("自启：系统触发器已安装（计划任务 / systemd / LaunchAgent）");
+      print("自启：系统触发器已安装（计划任务 / systemd / LaunchAgent）");
       break;
     case "pm2-only":
       if (!pm2.available) {
-        console.log("自启：检测到 PM2 触发器，但 PM2 未安装（配置已失效）。");
-        console.log(
+        print("自启：检测到 PM2 触发器，但 PM2 未安装（配置已失效）。");
+        print(
           "\n重新运行 wemind autostart install（改用原生触发器），或 autostart uninstall 清理。",
         );
         break;
       }
-      console.log("自启：PM2 已托管（pm2 list 查看 wemind-* 实例）");
+      print("自启：PM2 已托管（pm2 list 查看 wemind-* 实例）");
       if (process.platform === "win32") {
         const trig = getSystemTriggerInfo();
         if (trig.pm2) {
-          console.log("Windows：登录任务 wemind-autostart-pm2 会执行 start --all --runner pm2。");
+          print("Windows：登录任务 wemind-autostart-pm2 会执行 start --all --runner pm2。");
         } else {
-          console.log("提醒：未检测到登录任务 wemind-autostart-pm2，重启后 PM2 实例不会自动恢复。");
-          console.log("\n运行 wemind autostart install 安装登录任务。");
+          print("提醒：未检测到登录任务 wemind-autostart-pm2，重启后 PM2 实例不会自动恢复。");
+          print("\n运行 wemind autostart install 安装登录任务。");
         }
       } else if (!isPersistenceConfigured()) {
-        console.log("提醒：还没记录 pm2 startup / pm2 save，重启后可能不会自动恢复。");
+        print("提醒：还没记录 pm2 startup / pm2 save，重启后可能不会自动恢复。");
       }
       break;
     case "mixed":
-      console.log("自启：检测到双重配置（系统触发器 + PM2），互相冲突！");
-      console.log("\n运行 wemind autostart install，按提示选择保留其中一种。");
+      print("自启：检测到双重配置（系统触发器 + PM2），互相冲突！");
+      print("\n运行 wemind autostart install，按提示选择保留其中一种。");
       break;
   }
 }

@@ -237,3 +237,5 @@ syncSettings():
 - **项目内 `.qoder/` 配置（worker）**：项目根 `.mcp.json` 已实测不会被自动加载，但任务项目目录里的 `.qoder/` 配置**仍未单独实测**（M3 的 worker 跑在没有 `.qoder/` 的临时目录）。
 - **PAT 兜底（`QODER_PERSONAL_ACCESS_TOKEN`）**：这是按 Qoder 官方文档变量名写的兜底建议，本项目**没有** PAT 路线的实测记录；认证仍以 `.auth/user` + `.auth/machine_id` 文件同步为准。
 - **更高版本 CLI**：本文结论**仅适用于 qodercli 1.1.78**；沙箱关闭了自动更新，但真实目录的 CLI 会升级，升级后需要重跑一次 `wemind brain check`。
+
+> **日志格式说明（2026-11-11，历史实测记录不改正文）**：本文记录的日志线索沿用当时的写法；现行运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部 stderr。ACP 帧级关键线索（`spawn` / `initialized` / `session/new` / `prompt ok`）归 **INFO**（排障必须可见），`prompt FAIL` 与自愈归 **WARN**。CLI 用户输出走 stdout 的 `print()`，无前缀无级别；`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。详见 [`AGENTS.md`](../../AGENTS.md) 与 [`repowiki/11`](../repowiki/11-开发指南.md)。

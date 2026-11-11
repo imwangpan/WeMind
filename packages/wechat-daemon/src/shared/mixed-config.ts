@@ -1,3 +1,4 @@
+import { print } from "@wemind/wechat-ilink-core";
 import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -132,14 +133,14 @@ export async function promptForMixedConfig(): Promise<"keep-native" | "keep-pm2"
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string): Promise<string> => new Promise((resolve) => rl.question(q, resolve));
 
-  console.log("\n检测到双重自启配置：");
-  console.log("  · 系统触发器（计划任务 / systemd / LaunchAgent）");
-  console.log("  · PM2 实例（wemind-*）");
-  console.log("\n同一个账号被拉起两次会争抢同一个 bot token，必须只保留一种。\n");
-  console.log("请选择处理方式：");
-  console.log("  1) 只保留系统触发器（删除所有 PM2 实例）");
-  console.log("  2) 只保留 PM2（删除所有系统触发器）");
-  console.log("  3) 全部清空（之后重新安装）");
+  print("\n检测到双重自启配置：");
+  print("  · 系统触发器（计划任务 / systemd / LaunchAgent）");
+  print("  · PM2 实例（wemind-*）");
+  print("\n同一个账号被拉起两次会争抢同一个 bot token，必须只保留一种。\n");
+  print("请选择处理方式：");
+  print("  1) 只保留系统触发器（删除所有 PM2 实例）");
+  print("  2) 只保留 PM2（删除所有系统触发器）");
+  print("  3) 全部清空（之后重新安装）");
 
   const choice = (await ask("你的选择 [1-3]：")).trim();
   rl.close();
@@ -170,7 +171,7 @@ export function cleanupPM2Instances(): void {
   for (const inst of instances) {
     if (!inst.name?.startsWith("wemind-")) continue;
     runPM2(`delete ${Number(inst.pm_id)}`);
-    console.log(`已删除 PM2 实例：${inst.name}`);
+    print(`已删除 PM2 实例：${inst.name}`);
     deleted++;
   }
   // 不同步 dump 的话，`pm2 resurrect`（pm2 startup 生成的单元）会在重启后把这些实例重新拉起来
@@ -195,7 +196,7 @@ export function cleanupSystemTriggers(): void {
           "/F",
         ]);
       }
-      console.log("已删除 Windows 计划任务与注册表 Run 键（若存在）");
+      print("已删除 Windows 计划任务与注册表 Run 键（若存在）");
       return;
     }
     case "linux": {
@@ -222,7 +223,7 @@ export function cleanupSystemTriggers(): void {
         /* 目录不存在：本来就没装 */
       }
       run("systemctl", ["--user", "daemon-reload"]);
-      console.log("已禁用并移除 systemd 用户单元");
+      print("已禁用并移除 systemd 用户单元");
       return;
     }
     case "darwin": {
@@ -241,7 +242,7 @@ export function cleanupSystemTriggers(): void {
       } catch {
         /* 目录不存在 */
       }
-      console.log("已卸载并移除 LaunchAgent");
+      print("已卸载并移除 LaunchAgent");
       return;
     }
     default:

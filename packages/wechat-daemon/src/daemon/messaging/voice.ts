@@ -1,4 +1,7 @@
 /** 微信语音为 SILK；微信没有转写时，尽量转成 WAV 交给大脑的文件工具处理。 */
+import { createLogger } from "@wemind/wechat-ilink-core";
+
+const log = createLogger("wechat-daemon");
 
 /** 微信语音常见采样率；silk-wasm 解码固定用它。 */
 export const VOICE_SAMPLE_RATE = 24_000;
@@ -53,7 +56,7 @@ export async function silkToWav(silk: Buffer): Promise<Buffer | null> {
     const result = await decode(silk, VOICE_SAMPLE_RATE);
     return pcmToWav(result.data, VOICE_SAMPLE_RATE);
   } catch (e) {
-    console.error("[wemind/wechat-daemon] silkToWav failed:", String(e));
+    log.warn("silkToWav failed:", String(e));
     return null;
   }
 }

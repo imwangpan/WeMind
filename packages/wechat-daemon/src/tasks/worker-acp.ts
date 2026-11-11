@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 
-import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 import { WORKER_HOME, workerMcpServers } from "../agents/sandbox/worker-sandbox.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
 import {
@@ -33,6 +33,7 @@ import {
   type AcpProgressEvent,
 } from "../acp/protocol/acp-connection.js";
 import { LineDecoder } from "../shared/io/line-decoder.js";
+const log = createLogger("wechat-daemon/worker");
 
 /**
  * worker ACP 连接：**一条连接＝一个 ACP agent 进程**；协议细节（帧处理/请求与回合超时/模型与模式设置/回放静默）与 brain 共用 `acp-connection.ts`，本模块只保留任务侧差异：
@@ -43,10 +44,6 @@ import { LineDecoder } from "../shared/io/line-decoder.js";
  * - **更宽松超时**（漫长任务，env 可调）；去掉 brain 的「可发图」首轮提示（任务执行不是聊天发图场景）。
  * 自愈：session/prompt 超时/失败 → 只杀**这一条**连接的进程；下次 ask 重建并 session/load 恢复（→ 用户回「继续」即可续跑）。
  */
-
-function dlog(...a: unknown[]): void {
-  console.error("[wemind/wechat-daemon/worker]", ...a);
-}
 
 const WORKER_CWD = process.env.WEMIND_WORKER_CWD?.trim() || os.homedir(); // 任务工作目录默认值
 
@@ -78,7 +75,7 @@ function loadSessionMap(a: ResolvedAgent): Record<string, string> {
     raw = readSessionMapStrict(SESSION_MAP_FILE);
   } catch (e) {
     const backup = backupCorruptSessionMap(SESSION_MAP_FILE);
-    dlog(
+    log.warn(
       `session map unreadable (${String(e)}) → ${backup ? `backed up to ${backup}` : "backup failed"}；按空表继续`,
     );
     return {};
@@ -126,7 +123,12 @@ export class WorkerConn {
       noProcessMessage: "no worker process",
       nextId: () => ++this.idCounter,
       write: (payload) => this.write(JSON.stringify(payload)),
-      log: (message) => dlog(`${this.id}(${this.agent.name}) ${message}`),
+      log: (message, level) => {
+        const line = `${this.id}(${this.agent.name}) ${message}`;
+        if (level === "error") log.error(line);
+        else if (level === "warn") log.warn(line);
+        else log.info(line);
+      },
     };
   }
 
@@ -179,7 +181,7 @@ export class WorkerConn {
     this.sessions.clear();
     clearAcpTurn(this.turn);
     this.stdoutLines.reset();
-    dlog(`${this.id}(${this.agent.name}) killed`);
+    log.info(`${this.id}(${this.agent.name}) killed`);
   }
 
   /** 丢弃某个会话（内存 + 磁盘上的当前会话记录）：任务结束用，下个任务全新开始。 */
@@ -223,14 +225,14 @@ export class WorkerConn {
         },
       );
       const txt = acpTurnText(this.turn, sid);
-      dlog(
+      log.info(
         `${this.id}(${this.agent.name}) prompt ok ${Date.now() - t0}ms chunks=${acpTurnChunks(this.turn, sid)} updateTypes=[${[...this.turn.seenUpdateTypes].join(",")}]`,
       );
       return txt;
     } catch (e) {
       const chunks = acpTurnChunks(this.turn, sid);
       const sinceFrame = this.rpcState.lastFrameAt ? Date.now() - this.rpcState.lastFrameAt : -1;
-      dlog(
+      log.warn(
         `${this.id}(${this.agent.name}) prompt FAIL ${Date.now() - t0}ms chunks=${chunks} lastFrameAgo=${sinceFrame}ms err=${String(e)} -> rebuild`,
       );
       this.kill();
@@ -250,7 +252,7 @@ export class WorkerConn {
     this.spawnError = undefined; // 上一次的 spawn 失败不能污染这一次
     const kept: string[] = [];
     const env = agentEnv(this.agent, WORKER_HOME, kept); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
-    if (kept.length) dlog(`${this.id} env defaults kept from parent: ${kept.join(",")}`);
+    if (kept.length) log.info(`${this.id} env defaults kept from parent: ${kept.join(",")}`);
     prepareAgent(this.agent); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
     const cwd = this.effectiveCwd();
     const proc = spawnAgent(this.agent, {
@@ -258,7 +260,7 @@ export class WorkerConn {
       env,
     });
     this.child = proc;
-    dlog(
+    log.info(
       `${this.id} spawn ${this.agent.name} worker pid=${proc.pid} cwd=${cwd} home=${WORKER_HOME} task=${this.taskId ?? "-"}`,
     );
     this.onSpawn?.(this); // 立刻落 pid 身份记录（在握手之前，`wemind stop` 才来得及找到它）
@@ -271,12 +273,14 @@ export class WorkerConn {
     proc.on("exit", (code) => {
       // A：握手前就退出时附上 args 诊断（与 brain 侧同一提示，见 brain-agents.ts 的 acpArgsHint）
       const hint = this.child === proc && !this.initialized ? acpArgsHint(this.agent) : "";
-      dlog(`${this.id}(${this.agent.name}) exited code=${code}${hint}`);
+      (code === 0 ? log.info : log.warn)(
+        `${this.id}(${this.agent.name}) exited code=${code}${hint}`,
+      );
       if (this.child === proc) this.kill();
     });
     proc.on("error", (e) => {
       this.spawnError = e instanceof Error ? e : new Error(String(e));
-      dlog(`${this.id}(${this.agent.name}) error ${String(e)}`);
+      log.error(`${this.id}(${this.agent.name}) error ${String(e)}`);
       if (this.child === proc) this.kill();
     });
     try {
@@ -289,11 +293,11 @@ export class WorkerConn {
     } catch (e) {
       // spawn 失败（cwd 不存在/权限）不是「args 漏了 acp」，别贴那条误导性提示
       const hint = this.spawnError ? "" : acpArgsHint(this.agent);
-      dlog(`${this.id}(${this.agent.name}) initialize failed: ${String(e)}${hint}`);
+      log.error(`${this.id}(${this.agent.name}) initialize failed: ${String(e)}${hint}`);
       throw e;
     }
     this.initialized = true;
-    dlog(`${this.id} initialized`);
+    log.info(`${this.id} initialized`);
   }
 
   /** 取会话：内存 → 磁盘（load/resume 恢复） → 新建。key 由调用方给（每任务一个）。
@@ -327,12 +331,12 @@ export class WorkerConn {
             REQ_TIMEOUT,
           );
           this.sessions.set(key, saved);
-          dlog(
+          log.info(
             `${this.id} session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`,
           );
           return saved;
         } catch (e) {
-          dlog(`${this.id} session/${method} failed (${String(e)})`);
+          log.warn(`${this.id} session/${method} failed (${String(e)})`);
         }
       }
       if (strictResume)
@@ -360,7 +364,7 @@ export class WorkerConn {
     const fresh = loadSessionMap(this.agent);
     fresh[mapKey] = res.sessionId;
     saveSessionMap(fresh);
-    dlog(
+    log.info(
       `${this.id} session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`,
     );
     return res.sessionId;

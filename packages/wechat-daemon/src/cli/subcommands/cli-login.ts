@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import {
+  print,
   WEMIND_ROOT,
   accountDir,
   deriveAccountKey,
@@ -185,10 +186,10 @@ async function loginInto(
     await QRCode.toFile(png, qr.qrcode_img_content, { width: 480, margin: 2 });
     // 用 small：半块字符一行装两行模块，宽高各约为默认渲染器的一半（面积约 1/4）；否则登录码会大到一屏放不下（字体比例可能让它偏长方形，PNG 始终是正方形）。
     const term = await QRCode.toString(qr.qrcode_img_content, { type: "terminal", small: true });
-    console.log("\n用要登录的微信扫下面的二维码（过期会自动刷新）：\n");
-    console.log(term);
-    console.log("图片(已自动打开): " + png);
-    console.log("链接: " + qr.qrcode_img_content + "\n");
+    print("\n用要登录的微信扫下面的二维码（过期会自动刷新）：\n");
+    print(term);
+    print("图片(已自动打开): " + png);
+    print("链接: " + qr.qrcode_img_content + "\n");
     if (!opened) {
       openFile(png);
       opened = true;
@@ -196,7 +197,7 @@ async function loginInto(
   };
 
   await refresh();
-  console.log("等待扫码确认…（最多 15 分钟，Ctrl+C 取消）");
+  print("等待扫码确认…（最多 15 分钟，Ctrl+C 取消）");
   while (Date.now() < overall) {
     let s;
     try {
@@ -226,21 +227,21 @@ async function loginInto(
           /* ignore */
         }
       }
-      console.log("\n登录成功，正在登记…");
+      print("\n登录成功，正在登记…");
       const { key, msg } = finalizeStaging(staging, label);
-      console.log(msg);
+      print(msg);
       await unpauseIfRunning(key);
       if (autoStart) {
         const r = deps.startDaemon(key, runner);
-        if (r.ok) console.log(`已启动 daemon（账号 ${key}）。`);
+        if (r.ok) print(`已启动 daemon（账号 ${key}）。`);
         else console.error(`启动 daemon 失败（账号 ${key}），原因见上方输出。`);
       } else {
-        console.log(`启动：wemind start ${key}`);
+        print(`启动：wemind start ${key}`);
       }
       return;
     }
     if (s.status === "expired") {
-      console.log("二维码过期，自动刷新…");
+      print("二维码过期，自动刷新…");
       await refresh();
       continue;
     }

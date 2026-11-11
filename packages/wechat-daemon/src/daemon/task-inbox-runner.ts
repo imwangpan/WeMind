@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { taskInboxDir } from "../tasks/task-inbox.js";
+import type { LeveledLog } from "../shared/io/leveled-log.js";
 
 /** 收件箱命令执行方：由 daemon 注入 task-manager 的真实实现（测试可注入假实现）。 */
 export type TaskInboxOps = {
@@ -13,7 +14,7 @@ export type TaskInboxOps = {
   inject: (owner: string, text: string, id?: number, ackId?: string) => string;
   stop: (owner: string, id?: number | "all", ackId?: string) => string;
   writeAck: (ackId: string | undefined, text: string) => void;
-  log: (...args: unknown[]) => void;
+  log: LeveledLog;
 };
 
 /**
@@ -59,6 +60,7 @@ export function scanTaskInbox(dataDir: string, owner: string, ops: TaskInboxOps)
       if (cmd.kind === "dispatch") {
         // 答复由 task-manager 在**起进程有结果之后**发（达上限/起不来都是那时才知道），这里只把 ack id 递进去
         ops.log(
+          "info",
           "local task dispatch:",
           ops
             .dispatch(owner, String(cmd.text ?? ""), {
@@ -73,6 +75,7 @@ export function scanTaskInbox(dataDir: string, owner: string, ops: TaskInboxOps)
         const ackId = cmd.ack === undefined ? undefined : String(cmd.ack);
         const r = ops.inject(owner, String(cmd.text ?? ""), id, ackId);
         ops.log(
+          "info",
           "local task reply:",
           id ? `#${id}` : "-",
           String(cmd.text ?? "").slice(0, 40),
@@ -80,6 +83,7 @@ export function scanTaskInbox(dataDir: string, owner: string, ops: TaskInboxOps)
         );
       } else if (cmd.kind === "stop") {
         ops.log(
+          "info",
           "local task stop:",
           ops.stop(
             owner,
@@ -88,14 +92,14 @@ export function scanTaskInbox(dataDir: string, owner: string, ops: TaskInboxOps)
           ),
         );
       } else {
-        ops.log("unknown task-inbox cmd:", cmd.kind);
+        ops.log("warn", "unknown task-inbox cmd:", cmd.kind);
         ops.writeAck(
           cmd.ack === undefined ? undefined : String(cmd.ack),
           `❌ 不认识的任务命令：${cmd.kind}`,
         );
       }
     } catch (e) {
-      ops.log("task-inbox dispatch error:", String(e));
+      ops.log("error", "task-inbox dispatch error:", String(e));
       ops.writeAck(
         cmd.ack === undefined ? undefined : String(cmd.ack),
         `❌ 命令执行出错：${String(e)}`,

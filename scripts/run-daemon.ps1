@@ -153,15 +153,15 @@ $mutexName = "wemind-daemon-" + ([System.BitConverter]::ToString($sha) -replace 
 $createdNew = $false
 $global:WeMindMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
 if (-not $createdNew) {
-  if ($nodeFallbackNote) { "[wemind/wechat-daemon/wrapper] $nodeFallbackNote" | Add-Content $log }
-  "[wemind/wechat-daemon/wrapper] 已有实例在跑（dataKey=$dataKey, mutex=$mutexName），本次退出。$(Get-Date -Format o)" | Add-Content $log
+  if ($nodeFallbackNote) { "[wemind/wechat-daemon/wrapper][WARN] $nodeFallbackNote" | Add-Content $log }
+  "[wemind/wechat-daemon/wrapper][WARN] 已有实例在跑（dataKey=$dataKey, mutex=$mutexName），本次退出。$(Get-Date -Format o)" | Add-Content $log
   exit 0
 }
 
 # 写 wrapper.pid 供管理命令（logout/delete）精确停止整条链
 try { "$PID" | Set-Content -Path (Join-Path $dataDir 'wrapper.pid') -Encoding ascii } catch {}
 
-if ($nodeFallbackNote) { "[wemind/wechat-daemon/wrapper] $nodeFallbackNote" | Add-Content $log }
+if ($nodeFallbackNote) { "[wemind/wechat-daemon/wrapper][WARN] $nodeFallbackNote" | Add-Content $log }
 
 $maxRestarts = if ($env:WEMIND_MAX_RESTARTS -and [int]$env:WEMIND_MAX_RESTARTS -gt 0) { [int]$env:WEMIND_MAX_RESTARTS } else { 50 }
 $crashes = 0
@@ -169,19 +169,19 @@ $crashes = 0
 while ($true) {
   $startedAt = Get-Date
   Rotate-DaemonLog
-  "[wemind/wechat-daemon/wrapper] start daemon $(Get-Date -Format o)" | Add-Content $log
+  "[wemind/wechat-daemon/wrapper][INFO] start daemon $(Get-Date -Format o)" | Add-Content $log
   & $node $cli daemon *>> $log
   $code = $LASTEXITCODE
   # 退出码 78 = 大脑配置错误（见 brain-agents.ts 的 BRAIN_CONFIG_EXIT_CODE）：
   # 需人工修（换预设 / 装二进制），重拉无益 → 停在循环外，避免每 5s 刷一条日志。
   if ($code -eq 78) {
-    "[wemind/wechat-daemon/wrapper] 大脑配置错误（exit 78），已停止自动重启。修好后重新登录或手动启动。$(Get-Date -Format o)" | Add-Content $log
+    "[wemind/wechat-daemon/wrapper][ERROR] 大脑配置错误（exit 78），已停止自动重启。修好后重新登录或手动启动。$(Get-Date -Format o)" | Add-Content $log
     break
   }
   # 退出码 75 = 同账号已有另一个 daemon 在跑（见 watchdog-runner.ts 的 DAEMON_ALREADY_RUNNING_EXIT_CODE）：
   # 另一个实例已经在消费同一个 bot token，重拉只会每 5s 撞一次 → 停在循环外。
   if ($code -eq 75) {
-    "[wemind/wechat-daemon/wrapper] 同账号已有 daemon 在跑（exit 75），已停止自动重启。$(Get-Date -Format o)" | Add-Content $log
+    "[wemind/wechat-daemon/wrapper][WARN] 同账号已有 daemon 在跑（exit 75），已停止自动重启。$(Get-Date -Format o)" | Add-Content $log
     break
   }
   # 连续崩溃上限（与 pm2 / builtin watchdog 对齐）：跑满 10 分钟视为稳定、计数清零，
@@ -189,9 +189,9 @@ while ($true) {
   if (((Get-Date) - $startedAt).TotalMilliseconds -ge 600000) { $crashes = 0 }
   $crashes += 1
   if ($crashes -gt $maxRestarts) {
-    "[wemind/wechat-daemon/wrapper] 连续崩溃 $crashes 次（上限 $maxRestarts），已停止自动重启。看 daemon.log 排查；修好后重新启动。$(Get-Date -Format o)" | Add-Content $log
+    "[wemind/wechat-daemon/wrapper][ERROR] 连续崩溃 $crashes 次（上限 $maxRestarts），已停止自动重启。看 daemon.log 排查；修好后重新启动。$(Get-Date -Format o)" | Add-Content $log
     break
   }
-  "[wemind/wechat-daemon/wrapper] daemon exited (code=$code), restart in 5s $(Get-Date -Format o)" | Add-Content $log
+  "[wemind/wechat-daemon/wrapper][WARN] daemon exited (code=$code), restart in 5s $(Get-Date -Format o)" | Add-Content $log
   Start-Sleep -Seconds 5
 }

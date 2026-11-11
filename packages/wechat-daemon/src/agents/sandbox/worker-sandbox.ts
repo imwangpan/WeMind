@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 import { ensureKiroV3Permissions, type ResolvedAgent } from "../brain-agents.js";
 import { getAgent } from "../agent-slot.js";
 import {
@@ -14,6 +14,7 @@ import {
 } from "./agent-mcp.js";
 import { copyProfilePatch } from "../profile-model.js";
 import { syncInherited } from "./sandbox-inherit.js";
+const log = createLogger("wechat-daemon/mcp");
 
 /**
  * worker 沙箱：与 brain 沙箱（mcp-sandbox.ts）并列，但 MCP 策略相反。
@@ -159,8 +160,7 @@ export function workerMcpServers(forAgent?: ResolvedAgent) {
     picked[name] = def;
   }
   const { servers, skipped } = toAcpMcpServers(picked, { exclude: ex });
-  if (skipped.length)
-    console.error(`[wemind/wechat-daemon/mcp] worker 跳过无法转换的 MCP：${skipped.join(", ")}`);
+  if (skipped.length) log.warn(`worker 跳过无法转换的 MCP：${skipped.join(", ")}`);
   return servers;
 }
 
@@ -253,8 +253,8 @@ function syncProfilePatch(ag: ResolvedAgent): void {
     if (!fs.existsSync(src)) return;
     const removed = copyProfilePatch(ag.realHome, ag.realProfile, WORKER_HOME);
     if (removed.length) {
-      console.error(
-        `[wemind/wechat-daemon/mcp] 真实 profile 里的微信 MCP 已从 worker 沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
+      log.warn(
+        `真实 profile 里的微信 MCP 已从 worker 沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
       );
     }
   } catch {

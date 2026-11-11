@@ -1,5 +1,6 @@
 import { MessageState, type MessageItem, type MediaKind } from "@wemind/wechat-ilink-core";
 
+import type { LeveledLog } from "../../shared/io/leveled-log.js";
 import { PENDING_PUSH_MAX_TRIES, PendingPushes } from "./pending-push.js";
 
 /** 按收件人维护的连续发送预算（service 端按「距用户上一条消息」计）。 */
@@ -37,7 +38,7 @@ export type SendPipelineDeps = {
   onSendError: (e: unknown) => void;
   /** 是否为 ret=-2 参数错误（限流或旧 token）。 */
   isParamError: (e: unknown) => boolean;
-  log: (...args: unknown[]) => void;
+  log: LeveledLog;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   minGapMs?: number;
@@ -136,7 +137,7 @@ export class SendPipeline {
         this.lastSendAt = this.deps.now();
       })
       // 串行链不能因为一次意外抛错而永久卡死（后续 .then 全被跳过，所有消息静默不发）
-      .catch((e) => this.deps.log("send chain error:", String(e)))
+      .catch((e) => this.deps.log("error", "send chain error:", String(e)))
       .finally(() => this.trackInflight(to, -1));
     return this.replyChain;
   }
@@ -160,7 +161,7 @@ export class SendPipeline {
       })
       .catch((e) => {
         ok = false;
-        this.deps.log(`${label} chain error:`, String(e));
+        this.deps.log("error", `${label} chain error:`, String(e));
       })
       .finally(() => this.trackInflight(to, -1));
     this.replyChain = task;
@@ -213,7 +214,7 @@ export class SendPipeline {
         } catch (e) {
           // 回退成功就不算投递失败；真正失败由 sendMediaOrdered 统一交给 onSendError。
           if (!fallbackText) throw e;
-          this.deps.log("send item failed, fallback to text:", String(e));
+          this.deps.log("warn", "send item failed, fallback to text:", String(e));
           await this.deps.sendText(to, ctx, fallbackText, MessageState.GENERATING);
           // 只有文本真的发出去才记账：item 不占额度、不抑制固定提示，回退文本要按可见进度补上。
           onFallback?.();
@@ -254,7 +255,7 @@ export class SendPipeline {
         try {
           await this.deps.sendFileMd(to, ctx, finalText);
         } catch (e) {
-          this.deps.log("send md file failed, fallback to text:", String(e));
+          this.deps.log("warn", "send md file failed, fallback to text:", String(e));
           await this.deps
             .sendText(to, ctx, finalText, MessageState.FINISH, fallbackToken)
             .catch((er) => {
@@ -264,7 +265,7 @@ export class SendPipeline {
         }
         this.lastSendAt = this.deps.now();
       })
-      .catch((e) => this.deps.log("send md chain error:", String(e)))
+      .catch((e) => this.deps.log("error", "send md chain error:", String(e)))
       .finally(() => this.trackInflight(to, -1));
     return this.replyChain;
   }
@@ -273,7 +274,10 @@ export class SendPipeline {
   holdUndelivered(to: string, text: string, e: unknown): void {
     if (!this.deps.isParamError(e) || this.freshTokenUsers.has(to)) return;
     const n = this.deps.pending.push(to, text);
-    this.deps.log(`send -2（旧 token）→ 挂起，累计 ${n} 条，等该用户下一条消息补发（${to}）`);
+    this.deps.log(
+      "warn",
+      `send -2（旧 token）→ 挂起，累计 ${n} 条，等该用户下一条消息补发（${to}）`,
+    );
   }
 
   /** 补发又失败：重新挂起，试够上限就放弃——防一条永远被服务端拒绝的内容每次发消息都拖着串行链。 */
@@ -281,12 +285,13 @@ export class SendPipeline {
     const n = tries + 1;
     if (n >= PENDING_PUSH_MAX_TRIES) {
       this.deps.log(
+        "error",
         `补发 ${n} 次仍失败 → 放弃这条挂起的推送（${to}）：${text.slice(0, 40)}（原因：${e instanceof Error ? e.message : String(e)}）`,
       );
       return;
     }
     const size = this.deps.pending.push(to, text, n);
-    this.deps.log(`补发 ${n} 次仍失败 → 重新挂起，累计 ${size} 条（${to}）`);
+    this.deps.log("warn", `补发 ${n} 次仍失败 → 重新挂起，累计 ${size} 条（${to}）`);
   }
 
   /** 新 token 到了：按序补发，受单轮批量与「给最终答案留两条」双重限制；剩下的留给后续消息。 */
@@ -294,6 +299,7 @@ export class SendPipeline {
     const room = Math.max(0, this.deps.consecLimit - 2 - this.budgetOf(to).count);
     if (room === 0) {
       this.deps.log(
+        "info",
         `挂起 ${this.deps.pending.size(to)} 条，但本回合连发额度已不够 → 留给后续消息补发（${to}）`,
       );
       return;
@@ -302,6 +308,7 @@ export class SendPipeline {
     if (held.length === 0) return;
     const rest = this.deps.pending.size(to);
     this.deps.log(
+      "info",
       `新 token 已到 → 补发挂起消息 ${held.length} 条（${to}）${rest > 0 ? `，还有 ${rest} 条排在后续消息` : ""}`,
     );
     for (const item of held) {
@@ -341,6 +348,7 @@ export class SendPipeline {
       } else {
         const n = this.deps.pending.push(to, text);
         this.deps.log(
+          "info",
           `任务推送让位后仍无额度 → 挂起，等该用户下一条消息补发（累计 ${n} 条，${to}）`,
         );
       }

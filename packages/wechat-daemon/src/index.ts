@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
+  createLogger,
+  describeError,
   getUpdates,
   sendMessage,
   sendTyping,
@@ -103,8 +105,10 @@ import { clearTaskDirs, writeTaskAck } from "./tasks/task-inbox.js";
 import { scanTaskInbox } from "./daemon/task-inbox-runner.js";
 import { killAll as killWorkerPool, sweep as sweepWorkerPool } from "./tasks/worker-pool.js";
 import { ensureWorkerHome } from "./agents/sandbox/worker-sandbox.js";
+import { bindLogger } from "./shared/io/leveled-log.js";
+import { createRepeatLog } from "./shared/io/repeat-log.js";
+import { CLI_VERSION } from "./shared/version.js";
 
-const log = (...a: unknown[]) => console.error("[wemind/wechat-daemon]", ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 import {
@@ -129,6 +133,8 @@ import {
   type QuoteContext,
   type TaskFacts,
 } from "./daemon/daemon-routing.js";
+const log = createLogger("wechat-daemon");
+const leveledLog = bindLogger(log);
 
 export {
   brainErrorMessage,
@@ -162,7 +168,7 @@ async function setTyping(
     });
   } catch (e) {
     // typing 是体验增强（best-effort 不阻断），但失败要留痕：区分「偶发网络失败」与「ticket 拿不到」
-    log(`setTyping(${status}) failed:`, String(e));
+    log.warn(`setTyping(${status}) failed:`, String(e));
   }
 }
 
@@ -197,7 +203,7 @@ async function reply(
     // ret=-2 既可能是「限流」(rapid sends)也可能是「context_token 失效/不匹配」(参数错误)。
     // 两者都靠：退避 ~1.5s 后重试一次——限流靠等待恢复，失效 token 则换用该用户最新缓存 token。
     if (e instanceof ILinkError && e.kind === "param_error") {
-      log("send -2(限流或token失效) → 退避 1.5s 后重试");
+      log.warn("send -2(限流或token失效) → 退避 1.5s 后重试");
       await new Promise((r) => setTimeout(r, 1500));
       await send(fallbackToken && fallbackToken !== ctx ? fallbackToken : ctx);
       return;
@@ -206,7 +212,7 @@ async function reply(
     if (!(e instanceof ILinkError)) {
       const t = classifyTransportError(e);
       if (t.retryable) {
-        log(`send 传输错误(${t.kind}) → 退避 1.5s 后重试`);
+        log.warn(`send 传输错误(${t.kind}) → 退避 1.5s 后重试`);
         await new Promise((r) => setTimeout(r, 1500));
         await send(ctx);
         return;
@@ -219,14 +225,14 @@ async function reply(
 /** 统一的发送错误处理：按错误类型分类记录；会话过期则暂停账号。 */
 function handleSendError(e: unknown, account: AccountData): void {
   if (e instanceof ILinkError) {
-    log("send error:", e.message);
+    log.warn("send error:", e.message);
     if (e.kind === "session_expired") {
       pauseSession(account.botId);
-      log("会话过期(-14) on send → 该账号暂停 1h，待重新登录");
+      log.warn("会话过期(-14) on send → 该账号暂停 1h，待重新登录");
     }
   } else {
     const t = classifyTransportError(e);
-    log(`send error(传输/${t.kind}${t.retryable ? ",可重试" : ""}):`, t.message);
+    log.warn(`send error(传输/${t.kind}${t.retryable ? ",可重试" : ""}):`, t.message);
   }
 }
 
@@ -319,11 +325,11 @@ function createSendPipeline(account: AccountData): SendPipeline {
         kind: "file",
         contextToken: ctx,
       });
-      log(`final as md file: ${fileName} (${text.length} chars)`);
+      log.info(`final as md file: ${fileName} (${text.length} chars)`);
     },
     onSendError: (e) => handleSendError(e, account),
     isParamError,
-    log,
+    log: leveledLog,
     minGapMs: Number(process.env.WECHAT_MIN_SEND_GAP_MS) || 1500,
     consecLimit: CONSEC_SEND_LIMIT,
   });
@@ -453,7 +459,7 @@ async function handleMessage(
   // 第 5s 的即时确认：只在之前没有任何可见进度时发（工具/心跳/图片/附件提示都会顶替它）。
   if (attachments.length === 0) {
     const t = cx();
-    log(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
+    log.info(`turn start to=${to} msgAge=${msgAge()} usingCtx=…${t ? t.slice(-12) : "NONE"}`);
     ackTimer = setTimeout(() => {
       ackTimer = undefined;
       if (finalStarted || !shouldShowAck(visibleProgressSent)) return;
@@ -505,7 +511,7 @@ async function handleMessage(
       const buf = await downloadImage(im);
       images.push({ data: buf.toString("base64"), mimeType: sniffMime(buf) });
     } catch (e) {
-      log("image download failed:", String(e));
+      log.warn("image download failed:", String(e));
       incomingFailures.push("图片");
     }
   }
@@ -522,7 +528,7 @@ async function handleMessage(
         incomingNotes.push(
           `[用户发来文件] 名称: ${name}；大小: ${fmtBytes(buf.length)}；本地路径: ${saved}`,
         );
-        log(`inbound file saved: ${saved} (${buf.length}B)`);
+        log.info(`inbound file saved: ${saved} (${buf.length}B)`);
       } else if (a.kind === "video") {
         const buf = await downloadMediaBuffer({
           media: a.item.media,
@@ -538,7 +544,7 @@ async function handleMessage(
         incomingNotes.push(
           `[用户发来视频] 大小: ${fmtBytes(buf.length)}${dur}；本地路径: ${saved}`,
         );
-        log(`inbound video saved: ${saved} (${buf.length}B)`);
+        log.info(`inbound video saved: ${saved} (${buf.length}B)`);
       } else {
         // 无微信转写的语音：下载后 SILK→WAV（有转写的语音在 extractInbound 里已作为文本，不会进附件）。
         const buf = await downloadMediaBuffer({
@@ -557,12 +563,12 @@ async function handleMessage(
           `[用户发来语音] 格式: ${wav ? "audio/wav" : "audio/silk"}${dur}；本地路径: ${saved}；` +
             "微信没有提供转写，请用可用工具尽力理解；若无法读取音频，请如实告诉用户。",
         );
-        log(`inbound voice saved: ${saved} (${buf.length}B${wav ? ", wav" : ", raw silk"})`);
+        log.info(`inbound voice saved: ${saved} (${buf.length}B${wav ? ", wav" : ", raw silk"})`);
       }
     } catch (e) {
       const label =
         a.kind === "file" ? a.item.file_name || "文件" : a.kind === "video" ? "视频" : "语音";
-      log(`inbound ${a.kind} download failed:`, label, String(e));
+      log.warn(`inbound ${a.kind} download failed:`, label, String(e));
       incomingFailures.push(label);
     }
   }
@@ -581,7 +587,7 @@ async function handleMessage(
         sendFailed = true;
         sends.holdUndelivered(to, msg, e);
       });
-      log(logMsg);
+      log.info(logMsg);
     } finally {
       sends.flushDeferredTaskPushes(to, latestToken ? latestToken() : cx(), sendFailed);
       activeTurn = null;
@@ -595,7 +601,8 @@ async function handleMessage(
   if (plan.kind === "reject")
     return rejectWith(plan.text, "image unusable and no text; rejected gracefully");
   const imageNote = plan.kind === "text-only" ? plan.note : "";
-  if (imageNote) log(`image ignored (${images.length}/${imageItems.length} usable): ${imageNote}`);
+  if (imageNote)
+    log.warn(`image ignored (${images.length}/${imageItems.length} usable): ${imageNote}`);
   if (!hasTextOrOther && images.length === 0) {
     const reason = incomingFailures.length
       ? `📎 附件没能下载下来（${incomingFailures.join("、")}），请重新发一次。`
@@ -711,7 +718,7 @@ async function handleMessage(
         return await attempt(promptText, imgs);
       } catch (e) {
         const plan = brainFailurePlan(e);
-        log(`brain error (try ${n}, ${plan.category}): ${String(e)}`);
+        log.warn(`brain error (try ${n}, ${plan.category}): ${String(e)}`);
         if (n < plan.attemptLimit) {
           sendProgress(
             plan.category === "backend"
@@ -750,20 +757,20 @@ async function handleMessage(
     try {
       buf = await resolveImageBytes(im.src);
     } catch (e) {
-      log("image download failed:", im.src, String(e));
+      log.warn("image download failed:", im.src, String(e));
       failedImgs.push({ src: im.src, reason: "download" });
       continue;
     }
     if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
-      log("image skipped (连发额度留给最终文字):", im.src);
+      log.warn("image skipped (连发额度留给最终文字):", im.src);
       failedImgs.push({ src: im.src, reason: "budget" });
       continue;
     }
     sends.budgetOf(to).count += 1; // 图片也占一条连发额度
     if (await sends.sendImageOrdered(to, cx(), buf)) {
-      log(`sent image: ${im.src.slice(0, 80)}`);
+      log.info(`sent image: ${im.src.slice(0, 80)}`);
     } else {
-      log("send image failed:", im.src);
+      log.warn("send image failed:", im.src);
       failedImgs.push({ src: im.src, reason: "send" });
     }
   }
@@ -780,7 +787,7 @@ async function handleMessage(
         allowSensitive: sensitiveAllowActive(),
       });
     } catch (e) {
-      log("attachment rejected:", attachment.src, String(e));
+      log.warn("attachment rejected:", attachment.src, String(e));
       if (isSensitiveFileError(e)) {
         // 先拦截、后放行：记进待补发队列，用户回「允许敏感文件」时直接补发，不用让大脑重发一遍。
         blockedSensitive.push({ src: attachment.src, kind: attachment.kind });
@@ -791,23 +798,23 @@ async function handleMessage(
       continue;
     }
     if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
-      log("attachment skipped (连发额度留给最终文字):", attachment.src);
+      log.warn("attachment skipped (连发额度留给最终文字):", attachment.src);
       failedAttachments.push({ src: attachment.src, reason: "budget" });
       continue;
     }
     sends.budgetOf(to).count += 1; // 文件/视频也占一条连发额度
     if (await sends.sendFileOrdered(to, cx(), resolved.data, resolved.fileName, resolved.kind)) {
-      log(
+      log.info(
         `sent attachment (${resolved.kind}${resolved.sensitiveBypassed ? "，敏感文件已临时放行" : ""}): ${resolved.fileName} ${resolved.data.length}B <- ${attachment.src.slice(0, 80)}`,
       );
     } else {
-      log("send attachment failed:", attachment.src);
+      log.warn("send attachment failed:", attachment.src);
       failedAttachments.push({ src: attachment.src, reason: "send" });
     }
   }
   if (blockedSensitive.length > 0) {
     const n = rememberPendingSensitive(to, blockedSensitive);
-    log(
+    log.info(
       `blocked sensitive attachments: ${blockedSensitive.length}（待补发 ${n} 条，回复「允许敏感文件」）`,
     );
   }
@@ -825,7 +832,9 @@ async function handleMessage(
   let finalSendFailed = false;
   if (finalText) {
     sends.budgetOf(to).count += 1; // 最终答案占一条额度（等待段预留的最后一条）
-    log(`final send: msgAge=${msgAge()} sent=${sends.budgetOf(to).count} len=${finalText.length}`);
+    log.info(
+      `final send: msgAge=${msgAge()} sent=${sends.budgetOf(to).count} len=${finalText.length}`,
+    );
     const ft = latestToken ? latestToken() : undefined;
     const onError = (e: unknown) => {
       finalSendFailed = true;
@@ -837,7 +846,7 @@ async function handleMessage(
       await sends.sendOrdered(to, cx(), finalText, MessageState.FINISH, ft, onError);
     }
   }
-  log(`replied to ${to} (msgAge=${msgAge()}): ${(answer || "").slice(0, 60)}`);
+  log.info(`replied to ${to} (msgAge=${msgAge()}): ${(answer || "").slice(0, 60)}`);
   sends.flushDeferredTaskPushes(to, latestToken ? latestToken() : cx(), finalSendFailed);
   activeTurn = null; // 回合结束（计数 budgetOf 不清零，留待用户下条消息重置）
   return ok;
@@ -882,6 +891,10 @@ async function pollerLoop(
   state: ServerState,
   sends: SendPipeline,
 ): Promise<void> {
+  // 网络断开时 getUpdates 每 2s 失败一次；不节流会把同一行刷满 10MB 日志，把之前的线索顶进轮转文件。
+  const pollErrors = createRepeatLog((line, kind) =>
+    kind === "recovery" ? log.info(line) : log.error("getUpdates error:", line),
+  );
   while (true) {
     if (isSessionPaused(account.botId)) {
       await sleep(Math.min(getRemainingPauseMs(account.botId), 60_000) || 60_000);
@@ -896,21 +909,24 @@ async function pollerLoop(
         timeoutMs: 25_000,
       });
     } catch (e) {
-      log("getUpdates error:", String(e));
+      pollErrors.error(String(e));
       await sleep(2000);
       continue;
     }
     try {
       if (resp.errcode === SESSION_EXPIRED_ERRCODE) {
-        log("session expired (-14); pausing 1h. Send a WeChat message to revive after re-login.");
+        log.info(
+          "session expired (-14); pausing 1h. Send a WeChat message to revive after re-login.",
+        );
         pauseSession(account.botId);
         continue;
       }
       if (resp.errcode) {
-        log("server error:", resp.errcode, resp.errmsg);
+        pollErrors.error(`server error: ${resp.errcode} ${resp.errmsg ?? ""}`);
         await sleep(2000);
         continue;
       }
+      pollErrors.success();
       if (resp.get_updates_buf) state.updatesBuf = resp.get_updates_buf;
 
       const news = (resp.msgs ?? []).filter(
@@ -924,7 +940,7 @@ async function pollerLoop(
       for (const m of news) {
         const f = m.from_user_id ?? "";
         if (isAuthorizedSender(f, owner, isAllowed))
-          log(
+          log.info(
             `recv msg id=${m.message_id} ctx=…${m.context_token ? m.context_token.slice(-12) : "NONE"} age=${m.create_time_ms ? Math.round((Date.now() - m.create_time_ms) / 1000) + "s" : "?"}`,
           );
         if (m.context_token) {
@@ -939,14 +955,14 @@ async function pollerLoop(
         // 本批/本进程已处理过的 ID 直接跳过。服务端游标 updatesBuf 才是防重放的主防线；
         // 旧版 number 游标刚迁移时 seenMessageIds 可能是空的，不能依赖它补历史。
         if (seenBefore.has(messageId)) {
-          log(`skip duplicate message id=${messageId}`);
+          log.info(`skip duplicate message id=${messageId}`);
           continue;
         }
         seenBefore.add(messageId);
         state.seenMessageIds = rememberMessageId(state.seenMessageIds ?? [], messageId);
         const from = msg.from_user_id ?? "";
         if (!isAuthorizedSender(from, owner, isAllowed)) {
-          log("ignore unauthorized sender:", from);
+          log.info("ignore unauthorized sender:", from);
           continue;
         }
         const parts = extractInbound(msg);
@@ -955,7 +971,7 @@ async function pollerLoop(
           (it) => it.type === MessageItemType.VOICE,
         )?.voice_item;
         if (voiceItem)
-          log(
+          log.info(
             `recv voice: text=${voiceItem.text ? `"${voiceItem.text.slice(0, 30)}"` : "(空,无微信转写)"} playtime=${voiceItem.playtime ?? "?"}`,
           );
         // 只引用、不输入正文的消息也要入队（由 workerLoop 明确提示），不能静默丢。
@@ -965,11 +981,11 @@ async function pollerLoop(
           parts.unsupportedTypes.length === 0 &&
           !parts.quote
         ) {
-          log("skip empty/unsupported message");
+          log.info("skip empty/unsupported message");
           continue;
         }
         if (parts.unsupportedTypes.length)
-          log(`recv unsupported item types: [${parts.unsupportedTypes.join(",")}]`);
+          log.info(`recv unsupported item types: [${parts.unsupportedTypes.join(",")}]`);
         // 服务端按「距用户上一条消息」计连续发送数 → 任何来自 owner 的消息都重置该用户计数 + 退出等待段。但已经进了 replyChain、会在本条消息之后才上线路的发送（补发、上一回合没发完的）仍占新窗口的额度，所以不能直接清零，而是把它们算进来。
         const b = sends.budgetOf(from);
         const wasAwaiting = b.awaiting;
@@ -978,7 +994,7 @@ async function pollerLoop(
         // 「继续」且当前回合正处于「等待继续」段：换用本消息新 token 恢复，且仅作恢复信号、不入队
         if (text.trim() === "继续" && activeTurn && activeTurn.from === from && wasAwaiting) {
           activeTurn.token = msg.context_token ?? activeTurn.token;
-          log("收到「继续」(等待中) → 恢复进度、重置计数、换新 token");
+          log.info("收到「继续」(等待中) → 恢复进度、重置计数、换新 token");
           continue;
         }
         const queued: QueuedMsg = {
@@ -1019,13 +1035,9 @@ async function pollerLoop(
           notifyFast();
         },
       );
-      if (saveErr)
-        log(
-          "save state failed:",
-          saveErr instanceof Error ? saveErr.stack || saveErr.message : String(saveErr),
-        );
+      if (saveErr) log.error("save state failed:", describeError(saveErr, import.meta.url));
     } catch (e) {
-      log("poller error:", e instanceof Error ? e.stack || e.message : String(e));
+      log.error("poller error:", describeError(e, import.meta.url));
     }
   }
 }
@@ -1049,24 +1061,24 @@ async function releasePendingSensitive(
         allowSensitive: true,
       });
     } catch (e) {
-      log("pending attachment rejected:", item.src, String(e));
+      log.warn("pending attachment rejected:", item.src, String(e));
       failed += 1;
       continue;
     }
     if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
-      log("pending attachment skipped (连发额度):", item.src);
+      log.warn("pending attachment skipped (连发额度):", item.src);
       failed += 1;
       continue;
     }
     sends.budgetOf(to).count += 1; // 与普通附件一样占一条连发额度
     if (await sends.sendFileOrdered(to, ctx, resolved.data, resolved.fileName, resolved.kind)) {
       sent += 1;
-      log(
+      log.info(
         `sent pending attachment (${resolved.kind}${resolved.sensitiveBypassed ? "，敏感文件已临时放行" : ""}): ${resolved.fileName} ${resolved.data.length}B <- ${item.src.slice(0, 80)}`,
       );
     } else {
       failed += 1;
-      log("send pending attachment failed:", item.src);
+      log.warn("send pending attachment failed:", item.src);
     }
   }
   return { sent, failed };
@@ -1095,7 +1107,7 @@ async function handleFastItem(
   ): Promise<void> => {
     if (activeTurn?.from === from && sends.budgetOf(from).count >= CONSEC_SEND_LIMIT - 2) {
       const n = sends.deferTaskPush(from, text);
-      log(`快车道答复让位给本回合最终答案 → 回合结束后发（累计 ${n} 条，${from}）`);
+      log.info(`快车道答复让位给本回合最终答案 → 回合结束后发（累计 ${n} 条，${from}）`);
       return Promise.resolve();
     }
     return sends.sendNotice(from, ctx, text, fallback);
@@ -1112,7 +1124,7 @@ async function handleFastItem(
     // owner-only（切脑/交接）：非本人 → 短提示拒绝，**不**转发给大脑（否则大脑可能替用户执行越权动作）
     if (isOwnerOnly(ctrl) && from !== owner) {
       const r = "这条指令仅登录者可用。发送「帮助」看你自己的指令。";
-      log("control: denied(not owner)", JSON.stringify(ctrl));
+      log.info("control: denied(not owner)", JSON.stringify(ctrl));
       await notice(r);
       return;
     }
@@ -1139,7 +1151,7 @@ async function handleFastItem(
     } catch (e) {
       r = "处理指令出错：" + String(e);
     }
-    log("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
+    log.info("control:", JSON.stringify(ctrl), "->", r.replace(/\n/g, " | "));
     await notice(r);
     return;
   }
@@ -1149,7 +1161,7 @@ async function handleFastItem(
   const tcmd = item.text ? parseTaskControl(item.text) : null;
   if (tcmd?.kind === "stop") {
     const r = stopTask(from, tcmd.id);
-    log("task: stop ->", r.replace(/\n/g, " | "));
+    log.info("task: stop ->", r.replace(/\n/g, " | "));
     await notice(r);
     return;
   }
@@ -1161,7 +1173,7 @@ async function handleFastItem(
   // 3) 给指定编号的任务回话
   if (tcmd?.kind === "reply") {
     const r = injectTask(from, tcmd.text, tcmd.id);
-    log(`task: inject(#${tcmd.id}):`, tcmd.text.slice(0, 40));
+    log.info(`task: inject(#${tcmd.id}):`, tcmd.text.slice(0, 40));
     if (r) await notice(r);
     return;
   }
@@ -1169,7 +1181,7 @@ async function handleFastItem(
   if (tcmd?.kind === "toWorker" && tcmd.agentToken) {
     // 指定的 agent **只对这条任务生效**，不改默认任务大脑：那是账号级状态（`切换任务大脑` 是 owner-only），顺手改会让「派一条任务」变成一次隐形的全局设置变更，也破坏微信与 CLI（`--agent` 只影响那一条任务）两边的对称。
     const r = dispatchTask(from, tcmd.text, { agentKey: tcmd.agentToken });
-    log(`task: dispatch(agent=${tcmd.agentToken}):`, r.replace(/\n/g, " | "));
+    log.info(`task: dispatch(agent=${tcmd.agentToken}):`, r.replace(/\n/g, " | "));
     await notice(r);
     return;
   }
@@ -1178,11 +1190,11 @@ async function handleFastItem(
     // 没有活跃任务 → 派发新任务（不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活）。
     if (hasActiveTask(from)) {
       const r = injectTask(from, tcmd.text);
-      log("task: inject(explicit):", tcmd.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
+      log.info("task: inject(explicit):", tcmd.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
       if (r) await notice(r);
     } else {
       const r = dispatchTask(from, tcmd.text);
-      log("task: dispatch:", r.replace(/\n/g, " | "));
+      log.info("task: dispatch:", r.replace(/\n/g, " | "));
       await notice(r);
     }
     return;
@@ -1192,7 +1204,7 @@ async function handleFastItem(
   // 这时交回大脑队列，保持「到出队才最终判定」的旧语义。
   if (shouldResumeTask(item.text, facts)) {
     const r = injectTask(from, item.text);
-    log("task: resume(unnumbered):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
+    log.info("task: resume(unnumbered):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
     if (r) await notice(r);
     return;
   }
@@ -1226,7 +1238,7 @@ async function fastWorkerLoop(
     try {
       await handleFastItem(account, sends, state, owner, item);
     } catch (e) {
-      log("fast command error:", e instanceof Error ? e.stack || e.message : String(e));
+      log.error("fast command error:", describeError(e, import.meta.url));
       await sends
         .sendNotice(
           item.from,
@@ -1279,7 +1291,7 @@ async function workerLoop(
       })
     ) {
       const r = injectTask(from, item.text);
-      log("task: resume(unnumbered):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
+      log.info("task: resume(unnumbered):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
       if (r) await sends.sendNotice(from, token, r, latestToken());
       continue;
     }
@@ -1295,7 +1307,7 @@ async function workerLoop(
       quote: item.quote,
     });
     if (emptyNotice) {
-      log(
+      log.info(
         `message without usable content (quote=${!!item.quote}, types=${item.unsupportedTypes.join(",")}); rejected gracefully`,
       );
       await sends.sendNotice(from, token, emptyNotice, latestToken());
@@ -1309,7 +1321,8 @@ async function workerLoop(
     const htext = takeHandoffFor(pending, goal, from);
     const withHandoff =
       pending && htext ? handoffPrefix(pending.fromAgent, htext) + brainText : brainText;
-    if (htext) log(`handoff injected from=${pending?.fromAgent} to=${goal} chars=${htext.length}`);
+    if (htext)
+      log.info(`handoff injected from=${pending?.fromAgent} to=${goal} chars=${htext.length}`);
     try {
       const answered = await handleMessage(
         account,
@@ -1326,9 +1339,9 @@ async function workerLoop(
       // 切回来答话（回滚到来源大脑，或切换目标就是它）也不消费——那是它自己写的摘要，留着下次切走时用。
       const answeredBy = getAgent("brain").name;
       if (htext && answered && answeredBy !== pending?.fromAgent && clearHandoff(DATA_DIR))
-        log(`handoff consumed by ${answeredBy}`);
+        log.info(`handoff consumed by ${answeredBy}`);
     } catch (e) {
-      log("handleMessage error:", e instanceof Error ? e.stack || e.message : String(e));
+      log.error("handleMessage error:", describeError(e, import.meta.url));
       await sends.sendNotice(from, token, "处理这条消息时出错了，请再发一次试试。", latestToken());
     }
   }
@@ -1354,7 +1367,7 @@ export async function runDaemon(): Promise<void> {
   const pidFile = path.join(DATA_DIR, "daemon.pid");
   const existing = otherOurProcessPid(readPidFile(pidFile), process.pid, CLI_PID_MARKERS);
   if (existing) {
-    log(`another daemon is already running for this account (pid=${existing}); exit.`);
+    log.info(`another daemon is already running for this account (pid=${existing}); exit.`);
     process.exit(DAEMON_ALREADY_RUNNING_EXIT_CODE);
   }
   // 启动即校验大脑：早失败、说人话——避免「进程看着正常、直到第一条消息才炸」（历史上表现为反复「⏳ 响应中断了，正在自动重试…」，实为默认大脑的二进制没装）。
@@ -1363,25 +1376,25 @@ export async function runDaemon(): Promise<void> {
   const agent = getAgent("brain");
   const brainProblem = agentProblem(agent);
   if (brainProblem) {
-    log(`FATAL 大脑不可用：${brainProblem}`);
+    log.error(`FATAL 大脑不可用：${brainProblem}`);
     process.exit(BRAIN_CONFIG_EXIT_CODE); // 后台守护进程据此停止自动重启（配置错误重拉无益）
   }
-  log(
+  log.info(
     `brain=${agent.name} bin=${agent.bin} args=[${agent.args.join(" ")}] shell=${agent.shell} (source: ${agent.source})`,
   );
   // 运行时身份：list 在 daemon 活着时据此显示「实际生效的大脑」（brain.pid 要等 ACP 懒启动才有）
   writeBrainState(DATA_DIR, agent);
   const wagent = getAgent("worker");
   if (wagent.name !== agent.name)
-    log(
+    log.info(
       `worker=${wagent.name} bin=${wagent.bin} args=[${wagent.args.join(" ")}] (source: ${wagent.source})`,
     );
   // 任务大脑不可用只警告、不退出：只聊天的用户不受影响，但派发任务会失败——早说清楚比任务静默失败好。
   const workerProblem = agentProblem(wagent);
-  if (workerProblem) log(`WARN 任务大脑不可用（派发任务会失败）：${workerProblem}`);
+  if (workerProblem) log.warn(`任务大脑不可用（派发任务会失败）：${workerProblem}`);
   const account = loadAccount();
   if (!account?.botToken) {
-    log("not logged in; run the MCP login_qrcode flow first.");
+    log.info("not logged in; run the MCP login_qrcode flow first.");
     process.exit(1);
   }
   const owner = process.env.WECHAT_OWNER_ID?.trim() || account.userId; // 登录者：始终授权（兜底校验）
@@ -1416,19 +1429,19 @@ export async function runDaemon(): Promise<void> {
   });
   // 防御：任何未捕获的 promise 拒绝/异常（多为瞬时网络 fetch failed 或回合内 send 被拒）只记录、不退出，避免 daemon 崩溃丢掉在途回合、用户卡在心跳。此前的 code=1 崩溃即源于此类未捕获拒绝。
   process.on("unhandledRejection", (reason) => {
-    log(
-      "unhandledRejection:",
-      reason instanceof Error ? reason.stack || reason.message : String(reason),
-    );
+    log.error("unhandledRejection:", describeError(reason, import.meta.url));
   });
   process.on("uncaughtException", (err) => {
-    log("uncaughtException:", err?.stack || String(err));
+    log.error("uncaughtException:", describeError(err, import.meta.url));
   });
   ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
   ensureWorkerHome(); // 准备 worker 沙箱（继承全量 MCP 除 wechat + 记忆/技能/settings）
   const pruned = pruneInboundMediaIfDue(); // 启动时清一次过期/超额入站附件（并把节流时钟起好）
-  if (pruned?.removed) log(`pruned inbound media: ${pruned.removed} files, ${pruned.bytes}B left`);
-  log(`up. bot=${account.botId} owner=${owner} allowFrom=${readAllowFrom(DATA_DIR).length}`);
+  if (pruned?.removed)
+    log.info(`pruned inbound media: ${pruned.removed} files, ${pruned.bytes}B left`);
+  log.info(
+    `up. v${CLI_VERSION} bot=${account.botId} owner=${owner} allowFrom=${readAllowFrom(DATA_DIR).length}`,
+  );
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
 
   const state: ServerState = loadState();
@@ -1442,7 +1455,7 @@ export async function runDaemon(): Promise<void> {
     // 但大脑回合已接近上限时，最后一条额度要留给最终答案：先延后，回合结束后再发（见 flushDeferredTaskPushes）。
     if (shouldDeferTaskPush(activeTurn?.from, to, b.count, CONSEC_SEND_LIMIT)) {
       const n = sends.deferTaskPush(to, text);
-      log(`任务推送遇大脑回合额度将满 → 延后到回合结束（累计 ${n} 条，${to}）`);
+      log.info(`任务推送遇大脑回合额度将满 → 延后到回合结束（累计 ${n} 条，${to}）`);
       return;
     }
     b.count += 1;
@@ -1472,30 +1485,47 @@ export async function runDaemon(): Promise<void> {
     inject: injectTask,
     stop: stopTask,
     writeAck: (ackId: string | undefined, text: string) => writeTaskAck(DATA_DIR, ackId, text),
-    log,
+    log: leveledLog,
   };
-  setInterval(() => scanTaskInbox(DATA_DIR, owner, taskInboxOps), TASK_SCAN_MS);
+  setInterval(() => {
+    try {
+      scanTaskInbox(DATA_DIR, owner, taskInboxOps);
+    } catch (e) {
+      log.error("task inbox scan failed:", describeError(e, import.meta.url));
+    }
+  }, TASK_SCAN_MS);
   // 控制桥：同样「启动清空 + 独立定时器扫描」（作废重启前的残留命令，防重放）
   clearControlDirs(DATA_DIR);
   markBridgeReady(DATA_DIR, process.pid); // 凭据：CLI 据此判断「在跑的这个 daemon 认不认识控制桥」
   const controlInbox = new ControlInboxRunner(DATA_DIR, {
     handle: handleControlRequest,
-    log,
+    log: leveledLog,
   });
-  setInterval(() => void controlInbox.scan(owner), TASK_SCAN_MS);
+  setInterval(
+    () =>
+      void controlInbox
+        .scan(owner)
+        .catch((e) => log.error("control inbox scan failed:", describeError(e, import.meta.url))),
+    TASK_SCAN_MS,
+  );
   // 任务表：读回上次的（未完成的标「已中断」，不自动恢复）；编号接着排
   const restored = initTasks(DATA_DIR);
   if (restored.interrupted.length)
-    log(`restored tasks: interrupted=[${restored.interrupted.join(",")}]（回「继续」可续跑）`);
+    log.info(`restored tasks: interrupted=[${restored.interrupted.join(",")}]（回「继续」可续跑）`);
   // 会话登记表：把当前会话表里有、登记表里还没有的旧会话补进去（功能上线前的老账号，一次性、幂等）
   const backfilled = syncFromPointerMap(DATA_DIR);
-  if (backfilled) log(`session registry backfilled: ${backfilled} 条（来自当前会话表）`);
+  if (backfilled) log.info(`session registry backfilled: ${backfilled} 条（来自当前会话表）`);
   // 进程池清扫：空闲超时的 worker 回收（默认 5 分钟）
   const poolSweep = setInterval(() => sweepWorkerPool(), 30_000);
   poolSweep.unref?.();
   // 解耦运行：拉取器持续抓消息(永不被大脑阻塞)，大脑与快车道各一个处理器并发
-  void pollerLoop(account, owner, state, sends);
-  void fastWorkerLoop(account, sends, state, owner);
+  // 两个常驻循环若在自身 try 之外意外退出，进程还活着却不再收消息（list 显示运行中、pid 文件还在）——必须显式叫停，交给 watchdog 5s 重拉。
+  const fatalLoop = (name: string) => (e: unknown) => {
+    log.error(`${name} loop exited:`, describeError(e, import.meta.url));
+    process.exit(1);
+  };
+  void pollerLoop(account, owner, state, sends).catch(fatalLoop("poller"));
+  void fastWorkerLoop(account, sends, state, owner).catch(fatalLoop("fast worker"));
   await workerLoop(account, sends, state);
 }
 

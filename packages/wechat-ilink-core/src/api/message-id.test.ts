@@ -23,7 +23,8 @@ describe("parseJsonWithLosslessIds", () => {
         message_id: 123,
       });
       expect(warn).toHaveBeenCalledOnce();
-      expect(String(warn.mock.calls[0]?.[0])).toContain("test");
+      // logger 把 `[wemind/...][WARN]` 放在第一个参数、正文在后面，断言拼接后的整行。
+      expect(warn.mock.calls[0]?.join(" ")).toContain("test");
     } finally {
       vi.restoreAllMocks();
     }

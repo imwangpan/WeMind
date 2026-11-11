@@ -1,9 +1,11 @@
+import { createLogger } from "../logging.js";
 import fs from "node:fs";
 import path from "node:path";
 
 import { WEMIND_ROOT } from "./accounts.js";
 import { normalizeMessageId } from "../api/message-id.js";
 import type { AccountData, ServerState, QrLoginState } from "../api/types.js";
+const log = createLogger("wechat-ilink-core/store");
 
 /**
  * 数据目录解析（按优先级）：
@@ -39,9 +41,7 @@ function readJson<T>(filePath: string): T | null {
     return JSON.parse(raw) as T;
   } catch (e) {
     // 文件存在但解析失败（写途崩溃/外部破坏）：不静默清空，备份坏文件 + 记日志，便于排查与人工恢复
-    console.error(
-      `[wemind/wechat-ilink-core/store] ${filePath} parse failed, backing up and treating as empty: ${String(e)}`,
-    );
+    log.warn(`${filePath} parse failed, backing up and treating as empty: ${String(e)}`);
     try {
       fs.renameSync(filePath, `${filePath}.corrupt-${Date.now()}`);
     } catch {
@@ -108,8 +108,8 @@ export function saveAccountTo(dir: string, account: AccountData): void {
     // Windows 上 fs.chmod 实际是 no-op，无法用 0o600 限制访问。
     // 不做无效操作，改为一次性提醒（详见 README 的安全说明）。
     warnedWinPerms = true;
-    console.error(
-      `[wemind/wechat-ilink-core] warning: ${file} stores the bot token in plaintext; ` +
+    log.warn(
+      `${file} stores the bot token in plaintext; ` +
         `Windows cannot restrict it via chmod. Protect ${dir} with folder permissions or disk encryption.`,
     );
   }
@@ -174,7 +174,7 @@ function removeFile(filePath: string, strict = false): boolean {
     return true;
   } catch (e) {
     if (isNotFound(e)) return false; // 本来就没有：正常
-    console.error(`[wemind/wechat-ilink-core/store] failed to remove ${filePath}: ${String(e)}`);
+    log.warn(`failed to remove ${filePath}: ${String(e)}`);
     if (strict) throw e instanceof Error ? e : new Error(String(e));
     return false;
   }

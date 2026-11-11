@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 import { ensureKiroV3Permissions, type ResolvedAgent } from "../brain-agents.js";
 import { getAgent } from "../agent-slot.js";
 import {
@@ -14,6 +14,7 @@ import {
 } from "./agent-mcp.js";
 import { copyProfilePatch } from "../profile-model.js";
 import { syncInherited } from "./sandbox-inherit.js";
+const log = createLogger("wechat-daemon/mcp");
 
 /**
  * brain 的 MCP 沙箱：brain 跑在独立配置目录下，默认不加载任何 MCP。
@@ -185,8 +186,7 @@ export function activeMcpServers(ag: ResolvedAgent = getAgent("brain")) {
   const picked: Record<string, unknown> = {};
   for (const n of active) picked[n] = cat[n];
   const { servers, skipped } = toAcpMcpServers(picked, { exclude: FORBIDDEN });
-  if (skipped.length)
-    console.error(`[wemind/wechat-daemon/mcp] 跳过无法转换的 MCP：${skipped.join(", ")}`);
+  if (skipped.length) log.warn(`跳过无法转换的 MCP：${skipped.join(", ")}`);
   return servers;
 }
 
@@ -287,8 +287,8 @@ function syncProfilePatch(ag: ResolvedAgent): void {
     if (!fs.existsSync(src)) return;
     const removed = copyProfilePatch(ag.realHome, ag.realProfile, BRAIN_HOME);
     if (removed.length) {
-      console.error(
-        `[wemind/wechat-daemon/mcp] 真实 profile 里的微信 MCP 已从大脑沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
+      log.warn(
+        `真实 profile 里的微信 MCP 已从大脑沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
       );
     }
   } catch {

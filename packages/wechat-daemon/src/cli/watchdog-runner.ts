@@ -57,6 +57,12 @@ function acquireSingleton(wrapperPidFile: string): boolean {
 }
 
 /** 后台守护进程循环本体（由 `cli.js _watchdog` 调用，常驻）：单实例守卫 → 循环拉起 daemon、退出 5s 重拉。 */
+
+/** watchdog 自己的日志不走 console（stderr 被 ignore），但格式与 createLogger 保持一致，保证 daemon.log 每行都有级别标记。 */
+function wrapperLine(level: "INFO" | "WARN" | "ERROR", text: string): string {
+  return `[wemind/wechat-daemon/wrapper][${level}] ${text}`;
+}
+
 export async function runWatchdog(): Promise<void> {
   const dataDir = DATA_DIR; // 本进程已设 WECHAT_ACCOUNT，core 据此解析到账号目录
   fs.mkdirSync(dataDir, { recursive: true });
@@ -66,7 +72,7 @@ export async function runWatchdog(): Promise<void> {
   if (!acquireSingleton(wrapperPidFile)) {
     fs.appendFileSync(
       log,
-      `[wemind/wechat-daemon/wrapper] 已有实例在跑，本次退出。${new Date().toISOString()}\n`,
+      wrapperLine("WARN", `已有实例在跑，本次退出。${new Date().toISOString()}`) + "\n",
     );
     return;
   }
@@ -101,7 +107,7 @@ export async function runWatchdog(): Promise<void> {
   let crashes = 0;
   for (;;) {
     const startedAt = Date.now();
-    rotator.writeLine(`[wemind/wechat-daemon/wrapper] start daemon ${new Date().toISOString()}`);
+    rotator.writeLine(wrapperLine("INFO", `start daemon ${new Date().toISOString()}`));
     const child: ChildProcess = spawn(nodePath, [cliPath, "daemon"], {
       // WECHAT_ACCOUNT 已在本进程环境中；同时摘掉 VS Code 终端注入的调试引导（后台守护进程若本身被注入过，daemon 不能再被带坏，见 debug-env.ts）
       env: stripVscodeDebugEnv(process.env),
@@ -122,14 +128,20 @@ export async function runWatchdog(): Promise<void> {
     if (code === DAEMON_ALREADY_RUNNING_EXIT_CODE) {
       // 同账号已有另一个 daemon 在消费同一个 bot token：本后台守护进程再拉只会每 5s 撞一次，停在这里。
       rotator.writeLine(
-        `[wemind/wechat-daemon/wrapper] 同账号已有 daemon 在跑（exit ${code}），本后台守护进程退出。${new Date().toISOString()}`,
+        wrapperLine(
+          "WARN",
+          `同账号已有 daemon 在跑（exit ${code}），本后台守护进程退出。${new Date().toISOString()}`,
+        ),
       );
       return;
     }
     if (code === BRAIN_CONFIG_EXIT_CODE) {
       // 大脑配置错误：重拉无益（需人工修），停在后台守护进程循环外，避免每 5s 刷一条。
       rotator.writeLine(
-        `[wemind/wechat-daemon/wrapper] 大脑配置错误（exit ${code}），已停止自动重启。修好后执行：wemind start <账号>`,
+        wrapperLine(
+          "ERROR",
+          `大脑配置错误（exit ${code}），已停止自动重启。修好后执行：wemind start <账号>`,
+        ),
       );
       return;
     }
@@ -137,12 +149,18 @@ export async function runWatchdog(): Promise<void> {
     crashes = plan.crashes;
     if (plan.stop) {
       rotator.writeLine(
-        `[wemind/wechat-daemon/wrapper] 连续崩溃 ${crashes} 次（上限 ${maxRestarts}），已停止自动重启。看 daemon.log 排查；修好后执行：wemind start <账号>${new Date().toISOString()}`,
+        wrapperLine(
+          "ERROR",
+          `连续崩溃 ${crashes} 次（上限 ${maxRestarts}），已停止自动重启。看 daemon.log 排查；修好后执行：wemind start <账号>${new Date().toISOString()}`,
+        ),
       );
       return;
     }
     rotator.writeLine(
-      `[wemind/wechat-daemon/wrapper] daemon exited (code=${code}), restart in 5s ${new Date().toISOString()}`,
+      wrapperLine(
+        "WARN",
+        `daemon exited (code=${code}), restart in 5s ${new Date().toISOString()}`,
+      ),
     );
     await sleep(RESTART_DELAY_MS);
   }

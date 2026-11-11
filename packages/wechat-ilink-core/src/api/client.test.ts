@@ -340,8 +340,11 @@ describe("fetchQRCode", () => {
 describe("notifyStart / notifyStop（best-effort）", () => {
   it("失败不抛，只记日志", async () => {
     const errors: unknown[] = [];
-    const orig = console.error;
+    const origError = console.error;
+    const origWarn = console.warn;
+    // best-effort 现在是 WARN 级别（console.warn），两个都接住，别让级别调整弄脆这条测试。
     console.error = (...args: unknown[]) => errors.push(args);
+    console.warn = (...args: unknown[]) => errors.push(args);
 
     try {
       handler = (_req, res) => {
@@ -352,7 +355,8 @@ describe("notifyStart / notifyStop（best-effort）", () => {
       expect(errors).toHaveLength(1);
       expect(String(errors[0])).toMatch(/notifyStart failed/);
     } finally {
-      console.error = orig;
+      console.error = origError;
+      console.warn = origWarn;
     }
   });
 });

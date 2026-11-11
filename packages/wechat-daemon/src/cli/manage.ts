@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import {
+  print,
   WEMIND_ROOT,
   accountDir,
   setLabel,
@@ -13,6 +14,7 @@ import { cmdBrain } from "./subcommands/cli-brain.js";
 import { cmdLogin, finalizeStaging } from "./subcommands/cli-login.js";
 import { cmdSession, cmdSessionCurrent } from "./subcommands/cli-session.js";
 import { cmdAutostart } from "./subcommands/autostart.js";
+import { cmdLog, LOG_USAGE, parseLogArgs } from "./subcommands/cli-log.js";
 import { pickKey, resolveKey } from "./cli-context.js";
 import {
   cmdTask,
@@ -87,86 +89,95 @@ export async function runManage(argv: string[]): Promise<void> {
     case "version":
     case "--version":
     case "-v":
-      console.log(versionLine());
+      print(versionLine());
       break;
     case "login":
       await cmdLogin(label, autoStart, runner, { startDaemon });
       break;
     case "list":
-      console.log(cmdList());
+      print(cmdList());
       break;
+    case "log": {
+      if (rest[0] === "help" || rest.includes("--help") || rest.includes("-h")) {
+        print(LOG_USAGE);
+        break;
+      }
+      const opts = parseLogArgs(rest);
+      print(cmdLog(pickKey(opts.sel), opts));
+      break;
+    }
     case "brain":
-      console.log(await cmdBrain(rest, { startDaemon }));
+      print(await cmdBrain(rest, { startDaemon }));
       break;
     case "session": {
       const sub = (rest[0] ?? "").toLowerCase();
-      if (sub === "current") console.log(cmdSessionCurrent(pickKey(rest[1])));
-      else console.log(await cmdSession(rest));
+      if (sub === "current") print(cmdSessionCurrent(pickKey(rest[1])));
+      else print(await cmdSession(rest));
       break;
     }
     case "adopt":
-      console.log(cmdAdopt(rest[0], label));
+      print(cmdAdopt(rest[0], label));
       break;
     case "start":
       // --all / all / 全部：遍历注册表逐个启动（自启触发时用的就是它）
       // 多个 key/label：逐个启动（Windows 计划任务只装部分账号时用）
       if (["--all", "all", "全部"].includes((rest[0] ?? "").toLowerCase()))
-        console.log(cmdStartAll(runner));
-      else if (rest.length > 1) console.log(cmdStartKeys(rest, runner));
-      else console.log(cmdStart(rest[0], runner));
+        print(cmdStartAll(runner));
+      else if (rest.length > 1) print(cmdStartKeys(rest, runner));
+      else print(cmdStart(rest[0], runner));
       break;
     case "stop": {
       const k = pickKey(rest[0]); // 省略账号 = 默认账号（答复带上解析到的账号，避免「静默换目标」）
-      console.log(`账号 ${k}：${stopDaemon(k).msg}`);
+      print(`账号 ${k}：${stopDaemon(k).msg}`);
       break;
     }
     case "task":
-      console.log(await cmdTask(rest[0], cwd, rest[1], agentKey));
+      print(await cmdTask(rest[0], cwd, rest[1], agentKey));
       break;
     case "task-reply": {
       // 兼容两种写法：`task-reply "#3 内容"` 与 `task-reply 3 "内容"`
       const first = rest[0] ?? "";
       const m = first.match(/^[#＃](\d+)\s*([\s\S]*)$/);
-      if (m) console.log(await cmdTaskReply(m[2], rest[1], parseTaskId(m[1])));
+      if (m) print(await cmdTaskReply(m[2], rest[1], parseTaskId(m[1])));
       else if (rest.length >= 2 && /^\d+$/.test(first))
-        console.log(await cmdTaskReply(rest[1], rest[2], parseTaskId(first)));
-      else console.log(await cmdTaskReply(first, rest[1]));
+        print(await cmdTaskReply(rest[1], rest[2], parseTaskId(first)));
+      else print(await cmdTaskReply(first, rest[1]));
       break;
     }
     case "task-list":
-      console.log(cmdTaskList(rest[0]));
+      print(cmdTaskList(rest[0]));
       break;
     case "task-status":
-      console.log(cmdTaskStatus(rest[0]));
+      print(cmdTaskStatus(rest[0]));
       break;
     case "task-stop": {
       const a = rest[0];
       const id: number | "all" | undefined =
         a === "all" || a === "全部" ? "all" : a && /^\d+$/.test(a) ? parseTaskId(a) : undefined;
-      console.log(await cmdTaskStop(id === undefined ? a : rest[1], id));
+      print(await cmdTaskStop(id === undefined ? a : rest[1], id));
       break;
     }
     case "label": {
       const k = resolveKey(rest[0]);
       setLabel(k, rest.slice(1).join(" "));
-      console.log(`已设置 ${k} 的别名为「${rest.slice(1).join(" ")}」`);
+      print(`已设置 ${k} 的别名为「${rest.slice(1).join(" ")}」`);
       break;
     }
     case "set-default": {
       const k = resolveKey(rest[0]);
       setDefaultKey(k);
-      console.log(`默认账号 = ${k}`);
+      print(`默认账号 = ${k}`);
       break;
     }
     case "logout":
-      console.log(await cmdLogout(rest[0]));
+      print(await cmdLogout(rest[0]));
       break;
     case "delete":
-      console.log(cmdDelete(rest[0]));
+      print(cmdDelete(rest[0]));
       break;
     case "finalize": {
       const { msg } = finalizeStaging(LEGACY_STAGING, label);
-      console.log(msg);
+      print(msg);
       break;
     } // 兼容旧流程（staging 已有登录时直接收进账号目录）
     case "allow": {
@@ -174,7 +185,7 @@ export async function runManage(argv: string[]): Promise<void> {
       const uid = rest[1];
       if (!uid) throw new Error("用法: allow <key|label> <userId>");
       const list = addAllowFrom(uid, accountDir(k));
-      console.log(`已加入白名单 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ")}`);
+      print(`已加入白名单 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ")}`);
       break;
     }
     case "revoke": {
@@ -182,7 +193,7 @@ export async function runManage(argv: string[]): Promise<void> {
       const uid = rest[1];
       if (!uid) throw new Error("用法: revoke <key|label> <userId>");
       const list = removeAllowFrom(uid, accountDir(k));
-      console.log(
+      print(
         `已从白名单移除 ${uid} → ${k}\n当前清单(${list.length})：${list.join(", ") || "（空）"}`,
       );
       break;
@@ -190,7 +201,7 @@ export async function runManage(argv: string[]): Promise<void> {
     case "allowlist": {
       const k = resolveKey(rest[0]);
       const list = readAllowFrom(accountDir(k));
-      console.log(
+      print(
         `${k} 登录者白名单(${list.length})：\n${list.map((u) => "  - " + u).join("\n") || "  （空）"}`,
       );
       break;
@@ -199,7 +210,7 @@ export async function runManage(argv: string[]): Promise<void> {
     case "--help":
     case "-h":
     case undefined:
-      console.log(helpText());
+      print(helpText());
       break;
     default:
       // 拼错命令不能静默成功：脚本里 `wemind strat x` 以前 exit 0，看起来像成功。
@@ -216,6 +227,8 @@ export function helpText(): string {
 
   login [--label 名] [--start]   一条命令完成扫码登录：自刷新二维码 + 自动登记（--start 顺带启动 daemon）
   list                           列出账号、别名、运行状态（含 brain 进程与 worker 池）
+  log [key|label] [--lines N] [--errors] [--file N]
+                                 看该账号 daemon.log 尾部（默认 50 行、全量日志；--errors 只筛错误行；--file 1 看轮转文件）
   start [key|label]              启动某账号的 daemon（省略 = 默认账号）
   start --all | <key1> <key2>…   启动所有 / 指定的多个账号（开机自启触发时用 --all）
   stop [key|label]               停止某账号的 daemon（连带 brain 与全部 worker 进程树；省略 = 默认账号）
