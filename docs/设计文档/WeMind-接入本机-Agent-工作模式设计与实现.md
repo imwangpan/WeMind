@@ -183,7 +183,8 @@ AgentHomeResolver ──► ConfigViewBuilder ──► Agent 进程
 | `AgentHomeResolver`（`agents/config/runtime.ts`） | 根据 Agent 预设、账号配置与角色（brain/worker）决定 `homeMode`、视图/沙箱根、`cwd`、媒体目录 |
 | `ConfigViewBuilder`（`agents/config/config-view.ts`） | 构建 config view：链接/复制 real home，生成必须覆盖的文件（MCP、yolo、overlay） |
 | `OverlayStore`（`agents/config/overlay.ts`） | 读写 `<账号>/agent-overrides/<agent>.json`，做路径级 patch |
-| `McpPolicy`（`agents/sandbox/mcp-sandbox.ts`、`worker-sandbox.ts`） | 计算 brain / worker 的有效 MCP 集；排除 `wechat`；处理 disable/extra |
+| `McpAdapter`（`agents/sandbox/mcp-adapters.ts`） | 每个 Agent 的 MCP 路径/格式/读写/剥离/ACP 转换/原生只读/设置继承；新增 Agent 只实现或复用它 |
+| `McpPolicy`（`agents/sandbox/mcp-sandbox.ts`、`worker-sandbox.ts`） | 只算 brain / worker 的有效 MCP 集；排除 `wechat`；处理 disable/extra |
 | `WorkspaceManager`（`agents/config/workspace.ts`） | 校验、创建、读取 brain/worker 默认工作区；区分 managed/external |
 | `EnvProvider`（`agents/config/env-snapshot.ts` + `brain-agents.ts`） | 继承 daemon 环境，或加载非敏感快照（PATH/代理/locale）；解析顺序不绑定某个版本管理器 |
 | `SessionBinder`（`agents/config/session-cwd.ts`） | 保存 `<agent>:<sessionId> → cwd`；恢复时使用并校验 cwd |

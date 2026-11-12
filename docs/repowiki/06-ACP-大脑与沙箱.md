@@ -145,7 +145,7 @@ graph TD
 
 每个会话首轮会带上一段「可发图」系统提示，告诉大脑：需要发图时用 Markdown `![](图片链接或本地绝对路径)`，并提示**服务器从中国大陆下载图片**，优先选可直链下载的源（如 `raw.githubusercontent.com`），避开被墙或带热链保护的图床。该提示只影响「发图」；「收图」取决于 agent 的 `image` 能力。
 
-## 6.3 brain 的配置视图与 MCP（config-view.ts / mcp-sandbox.ts）
+## 6.3 brain 的配置视图与 MCP（config-view.ts / mcp-sandbox.ts / mcp-adapters.ts）
 
 默认 `homeMode=real`。大脑不再整份复制到 `brain-home`，而是由 `agentRuntime("brain", ag)` 构建 `<账号>/agent-view/brain/<agent>/` 最小视图，交给 agent 的 `homeEnvVar`：
 
@@ -154,6 +154,18 @@ graph TD
 3. **可控覆盖** —— 只对 MCP、`settingsBase`、kiro v3 权限文件和微信 overlay 目标生成副本。
 
 `sandbox` 是显式回退：它继续使用 `BRAIN_HOME` / `<账号>/brain-home`，完整复制并按 `inheritDirs` / `inheritFiles` 选择性继承。`mirror` 与 `real` 共用最小视图；区别是后续 Phase 2 会在需要时做三路合并。
+
+### MCP 适配器分层
+
+per-agent 的 MCP 格式知识集中在 `agents/sandbox/mcp-adapters.ts` 的 `McpAdapter` 接口，brain / worker 只负责「算激活集 / 全量集与排除集」，不再按 agent 名或格式写分支：
+
+| 实现 | 文件形状 | 读写 | 设置继承 |
+|---|---|---|---|
+| `kiro` | `{ mcpServers: {...} }` | 读/写同一套 JSONC 逻辑，保留同文件其它键 | `sandbox` 模式复制真实 `settings/`（跳过 `mcp.json`） |
+| `opencode` | `{ mcp: { servers: {...} } }` | 写入时默认补 `permission=allow`（用户显式配置优先） | 复制真实 `opencode.json(c)` 并剔除 `mcp` 段；`real`/`mirror` 也要重建基底 |
+| `toml` | `[mcp_servers.*]` | **只读**；写入直接报错 | 不参与 |
+
+`mcpCatalogPath()` / `mcpConfigPath()` 也由该模块统一：前者支持 `WEMIND_MCP_CATALOG` 覆盖，后者按 agent 的 `mcpConfigFile` 拼配置目录。新增 agent 时先复用或新增 adapter，不要在 `mcp-sandbox.ts` / `worker-sandbox.ts` 里加格式分支。
 
 ### 默认空 MCP + 按 agent 持久激活
 
@@ -167,7 +179,7 @@ brain **默认不加载任何 MCP**（既快又安全，内置工具如 web_sear
 
 加载/卸载后 daemon 重启 ACP 进程以按新视图重载，下一条消息生效。**只有激活集真的变了才重启**（重复加载/卸载未激活项不会白杀一次进程）；**切脑进行中先等切换结束再重启**。激活集持久化在 `<账号>/brain-mcps.json`，结构 `{version:2, active:{"<agent>":[...]}}`；**只影响该 agent、且只影响之后由 WeMind 新建的 brain 会话**。切到另一个 agent 用它自己的集合（没加载过就是空），切回来恢复原集合。终端自己开的会话不受影响。
 
-**catalog 按 agent 各自约定、从该 agent 的「真实」配置目录读**（`catalogPath()` 用 `realHome`，不是视图）：kiro 是 `~/.kiro/settings/mcp.json`，opencode 是 `~/.config/opencode/opencode.json` 的 `mcp.servers`，qoder 是 `~/.qoder/settings.json` 的 `mcpServers`，cline 是 `~/.cline/data/settings/cline_mcp_settings.json`，gemini 是 `~/.gemini/settings.json`（JSONC），pi 是 `~/.pi/agent/mcp.json`（kiro 格式 `{mcpServers}`）；DSH / Claude Code / Copilot 走 ACP `mcpServers`。`WEMIND_MCP_CATALOG` 可覆盖成任意路径。**「读真实、写视图」**：`加载 <名>` 只把定义写进配置视图，真实配置文件一律不动。**不要跨 agent 借配置文件。** overlay 的 `mcp.extra` 扩充可选目录，`mcp.disable` 最后生效；worker 同样支持两者。
+**catalog 按 agent 各自约定、从该 agent 的「真实」配置目录读**（`mcpCatalogPath()` 用 `realHome`，不是视图）：kiro 是 `~/.kiro/settings/mcp.json`，opencode 是 `~/.config/opencode/opencode.json` 的 `mcp.servers`，qoder 是 `~/.qoder/settings.json` 的 `mcpServers`，cline 是 `~/.cline/data/settings/cline_mcp_settings.json`，gemini 是 `~/.gemini/settings.json`（JSONC），pi 是 `~/.pi/agent/mcp.json`（kiro 格式 `{mcpServers}`）；DSH / Claude Code / Copilot 走 ACP `mcpServers`。`WEMIND_MCP_CATALOG` 可覆盖成任意路径。**「读真实、写视图」**：`加载 <名>` 只把定义写进配置视图，真实配置文件一律不动。**不要跨 agent 借配置文件。** overlay 的 `mcp.extra` 扩充可选目录，`mcp.disable` 最后生效；worker 同样支持两者。
 
 ### 记忆/规则/技能共享（config view + sandbox-inherit）
 
@@ -179,9 +191,9 @@ brain **默认不加载任何 MCP**（既快又安全，内置工具如 web_sear
 
 ### settings 处理
 
-`real` / `mirror` 下普通 settings 文件直接在视图中链接真实文件；`settingsBase` 型 agent（qoder / gemini 等）生成副本，按 `settingsStrip` 剥离必须由 WeMind 控制的键（默认 `mcpServers` / `enabledPlugins` / `providers` / `model`；gemini 只剥 `mcpServers`，保留用户 `model` / `security`），并强制 `general.enableAutoUpdate=false`。MCP 仍由 `applySandbox()` 权威覆盖同一文件里的 MCP 段；配了 `mcpViaAcp` 的 agent 由 `activeMcpServers(ag)` 转成 ACP 声明随 `session/new|resume` 下发——**必须传正在启动的那个 agent**。
+`real` / `mirror` 下普通 settings 文件直接在视图中链接真实文件；`settingsBase` 型 agent（qoder / gemini 等）生成副本，按 `settingsStrip` 剥离必须由 WeMind 控制的键（默认 `mcpServers` / `enabledPlugins` / `providers` / `model`；gemini 只剥 `mcpServers`，保留用户 `model` / `security`），再由 adapter 的 `stripSettings()` 剥掉该格式的 MCP 段，并强制 `general.enableAutoUpdate=false`。MCP 仍由 adapter 的 `writeCatalog()` 权威覆盖同一文件里的 MCP 段；配了 `mcpViaAcp` 的 agent 由 `activeMcpServers(ag)` 转成 ACP 声明随 `session/new|resume` 下发——**必须传正在启动的那个 agent**。
 
-`ensureBrainHome()` 的顺序是：构建 config view → overlay → 生成 MCP/权限文件 → `applySettingsDefaults`。`sandbox` 模式额外执行 `syncKiroSettings` / `syncOpencodeBase` / `syncProfilePatch` / `syncCredentials` 与 `mirrorRealKiro`。`syncProfilePatch` 对 DSH 的真实 `profiles/<名>/cordis.patch.yml` 原样复制，但剔除用户自己挂的微信 MCP 条目（`stripWechatMcpEntries`；真实文件不动）。
+`ensureBrainHome()` 的顺序是：构建 config view → overlay → 生成 MCP/权限文件 → `applySettingsDefaults`。`sandbox` 模式额外执行 adapter 的 `inheritSettings()` / `syncProfilePatch` / `syncCredentials` 与 `mirrorRealKiro`。`syncProfilePatch` 对 DSH 的真实 `profiles/<名>/cordis.patch.yml` 原样复制，但剔除用户自己挂的微信 MCP 条目（`stripWechatMcpEntries`；真实文件不动）。
 
 > 换模型/权限后旧 ACP 会话可能仍绑旧配置，需要新会话或 `wemind config reload`。真实配置变化由 `configFingerprint()` 在下一轮开始前发现并重建；`wemind config reload` 会在空闲时重建视图并重启常驻 brain。
 

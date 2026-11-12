@@ -197,7 +197,7 @@ poller（长轮询，不被大脑阻塞）
 | 改反向请求应答（权限 / fs / terminal） | `acp/protocol/acp-reverse.ts` | `acp/protocol/acp-reverse.test.ts`；brain、worker、`brain check` 三处共用 |
 | 改 ACP 连接公共层 | `acp/protocol/acp-connection.ts`：帧分类、请求/回合超时、模型与模式、回放静默 | `acp/protocol/acp-connection.test.ts`（覆盖上述全部）；brain 与 worker 共用，改一处两边生效 |
 | 改配置视图 / 微信独享配置 | `agents/config/config-view.ts`（最小视图与链接） | `agents/config/overlay.ts`（`agent-overrides/<agent>.json`）、`agents/config/workspace.ts`（默认工作区）、`cli/subcommands/cli-config.ts`（`wemind config`） |
-| 改 MCP 挂载 | `agents/config/config-view.ts` + `agents/sandbox/mcp-sandbox.ts` | `agents/sandbox/agent-mcp.ts`、`agents/sandbox/worker-sandbox.ts`、`agents/sandbox/sandbox-inherit.ts`（仅 `sandbox` 模式的记忆/技能继承）、`docs/ai/recipes/add-mcp.md` |
+| 改 MCP 挂载 | `agents/config/config-view.ts` + `agents/sandbox/mcp-sandbox.ts` | `agents/sandbox/mcp-adapters.ts`（按 agent 的格式/路径/ACP 转换）、`agents/sandbox/agent-mcp.ts`、`agents/sandbox/toml-mcp.ts`、`agents/sandbox/worker-sandbox.ts`、`agents/sandbox/sandbox-common.ts`、`agents/sandbox/sandbox-inherit.ts`（仅 `sandbox` 模式的记忆/技能继承）、`docs/ai/recipes/add-mcp.md` |
 | **改热切换大脑** | `acp/brain-switch.ts`（预检 → 等在途回合结束 → 启动新大脑 → 成功才落盘 → 失败退回） | `acp/acp-brain.ts` 的 `beginSwitch`/`drainTurn`/`warmup`、`agents/agent-slot.ts`（槽位）、`daemon/daemon-control.ts` 的 `AI`/`切换大脑` 分支 |
 | **改多任务 / 进程池 / 任务编号** | `tasks/worker-pool.ts`（`planAcquire`/`planReap` 纯函数；`acquire` 起进程前按这条任务的 agent 调 `ensureWorkerHome(ag)`） | `tasks/worker-acp.ts`（`class WorkerConn`）、`tasks/task-manager.ts`、`tasks/task-store.ts`、`docs/repowiki/07` |
 | **改会话五条指令 / 恢复语义** | `sessions/session-manager.ts`（操作层） | `sessions/session-registry.ts`（登记表，派生元数据）、`sessions/session-map.ts`（当前会话表，唯一权威）、`acp/acp-brain.ts` 的 `resumeSession`（严格恢复） |
