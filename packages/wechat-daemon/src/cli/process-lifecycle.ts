@@ -9,8 +9,8 @@ import {
   CLI_PID_MARKERS,
   brainPidMarkers,
   commandLines,
+  identifyProcess,
   isAlive,
-  matchesMarkers,
 } from "../shared/process/proc-identity.js";
 import { resolveAgent } from "../agents/brain-agents.js";
 import { loadBrainConfig } from "../agents/brain-config.js";
@@ -138,7 +138,16 @@ export function startDaemon(key: string, runner?: string): { ok: boolean; msg: s
   const cliPath =
     process.argv[1] || path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
   // start 前先停现有任何 runner（pm2 app / builtin 后台守护进程），避免同账号双跑抢 token
-  stopDaemon(key);
+  const stop = stopDaemon(key);
+  if (!stop.ok) {
+    // 旧进程没停干净（或无法确认是否停了）时绝不启动：两个 daemon 抢同一个 bot token 会互相吞消息。
+    const msg = stop.unknown
+      ? `无法确认账号 ${key} 的旧进程是否已停止（进程命令行查询失败），为避免双开抢同一 bot token，本次没有启动。先排查 PowerShell/CIM 可用性，再用 wemind list 确认状态。`
+      : `账号 ${key} 的旧进程没有停干净（${stop.msg}），为避免双开抢同一 bot token，本次没有启动。先手动结束它，再重试。`;
+    process.exitCode = 1;
+    print(msg);
+    return { ok: false, msg };
+  }
   const useRunner = (runner || process.env.WEMIND_RUNNER || "builtin").toLowerCase();
   const r = useRunner === "pm2" ? pm2Start(key, cliPath) : watchdogStart(key, cliPath);
   if (!r.ok) process.exitCode = 1; // runner 起不来时别让「已启动」的文案配一个成功退出码
@@ -148,18 +157,30 @@ export function startDaemon(key: string, runner?: string): { ok: boolean; msg: s
 
 export type StopResult = {
   msg: string;
-  /** kill 后所有目标都确认不在了。false 时调用方**不能**删账号目录（进程可能还在写）。 */
+  /** kill 后所有目标都确认不在了（且没有「无法确认」的）。false 时调用方**不能**删账号目录（进程可能还在写）。 */
   ok: boolean;
+  /** 有存活 pid 但命令行查不到（权限/查询失败）：既不能确认是我们、也不能确认不是，未杀。 */
+  unknown: boolean;
 };
 
-/** 汇总 stop 的三类结果。`survivors` 是 kill 后仍活着的目标；导出仅供单测。 */
-export function stopSummary(stopped: string[], skipped: string[], survivors: string[]): StopResult {
+/** 汇总 stop 的三类结果。`survivors` 是 kill 后仍活着的目标，`unknown` 是查不到命令行的目标；导出仅供单测。 */
+export function stopSummary(
+  stopped: string[],
+  skipped: string[],
+  survivors: string[],
+  unknown: string[] = [],
+): StopResult {
   const parts: string[] = [];
   if (stopped.length) parts.push(`已停止 ${stopped.join(" + ")}`);
   if (skipped.length)
     parts.push(`跳过 ${skipped.join(" + ")}（非本程序，未杀；已清陈旧 pid 文件）`);
+  if (unknown.length) parts.push(`无法确认 ${unknown.join(" + ")}（进程命令行查询失败，未杀）`);
   if (survivors.length) parts.push(`未能停止 ${survivors.join(" + ")}（仍在运行）`);
-  return { msg: parts.length ? parts.join("；") : "无运行中的进程", ok: survivors.length === 0 };
+  return {
+    msg: parts.length ? parts.join("；") : "无运行中的进程",
+    ok: survivors.length === 0 && unknown.length === 0,
+    unknown: unknown.length > 0,
+  };
 }
 
 /**
@@ -197,19 +218,23 @@ export function stopDaemon(key: string): StopResult {
   }
   // 只杀「活着**且身份确认**」的：pid 会被复用，陈旧 pid 文件可能指向别人的进程 → 绝不误杀。
   // 命令行一次批量查（Windows 下较慢）；正常情况（陈旧 pid 早已不存在）根本不会发起查询。
-  const lines = commandLines(cand.map((c) => c.pid));
+  const query = commandLines(cand.map((c) => c.pid));
   const stopped: string[] = [];
   const skipped: string[] = [];
+  const unknown: string[] = [];
   const toKill: number[] = [];
   const nameOf = new Map<number, string>();
   const seen = new Set<number>();
   for (const c of cand) {
     if (!c.pid || seen.has(c.pid) || !isAlive(c.pid)) continue;
     seen.add(c.pid);
-    if (matchesMarkers(lines.get(c.pid), c.markers)) {
+    const identity = identifyProcess(c.pid, c.markers, query);
+    if (identity === "ours") {
       toKill.push(c.pid);
       nameOf.set(c.pid, c.name);
       stopped.push(`${c.name} ${c.pid}`);
+    } else if (identity === "unknown") {
+      unknown.push(`${c.name} ${c.pid}`); // 活着但查不到命令行 → 不杀，也不能当成「已停止」
     } else {
       skipped.push(`${c.name} ${c.pid}`); // 活着的 pid 但不是我们的（pid 复用）→ 不杀
     }
@@ -220,7 +245,8 @@ export function stopDaemon(key: string): StopResult {
   const survivors = toKill
     .filter((pid) => isAlive(pid))
     .map((pid) => `${nameOf.get(pid) ?? "进程"} ${pid}`);
-  if (!survivors.length)
+  // 有「无法确认」的也不清 pid 文件：下次 stop/list 还要靠它找到这个进程。
+  if (!survivors.length && !unknown.length)
     for (const f of [
       "wrapper.pid",
       "daemon.pid",
@@ -235,14 +261,17 @@ export function stopDaemon(key: string): StopResult {
         /* ignore */
       }
     }
-  return stopSummary(stopped, skipped, survivors);
+  return stopSummary(stopped, skipped, survivors, unknown);
 }
 
 /**
  * `delete` 前的最后一道闸：stop 失败/被跳过时 daemon 可能还活着，此时删目录等于删它正在用的文件。
+ * `unknown` 优先：进程活着但查不到命令行时，连「它是不是我们的」都无法确认，更不能删。
  * 导出仅供单测。
  */
-export function deleteGuard(key: string, alive: boolean): string | null {
+export function deleteGuard(key: string, alive: boolean, unknown = false): string | null {
+  if (unknown)
+    return `无法确认账号 ${key} 的进程是否仍在运行（进程命令行查询失败），为避免删掉它正在使用的文件，本次**没有删除目录**。\n先排查 PowerShell/CIM 是否可用（wemind list 会标「无法确认」），确认进程已结束后再执行 delete。`;
   return alive
     ? `账号 ${key} 仍有 WeMind 进程未能停止（仍在运行），为避免删掉它正在使用的文件，本次**没有删除目录**。\n先确认并结束它：wemind stop ${key}（或看 wemind list / 进程管理器），再执行 delete。`
     : null;

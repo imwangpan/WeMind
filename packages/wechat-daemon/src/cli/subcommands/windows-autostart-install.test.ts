@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 // 只替换 execFileSync：安装流程会调 schtasks / reg / powershell，测试里全部走假实现。
 vi.mock("node:child_process", () => ({ execFileSync: vi.fn() }));
+// PowerShell 解析器单独 mock：测试机（含 CI 的 ubuntu）未必装了 Windows PowerShell / pwsh。
+const ps = vi.hoisted(() => ({
+  ok: true,
+  exe: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  source: "windows-powershell",
+  error: "",
+}));
+vi.mock("../../shared/process/powershell.js", () => ({ resolvePowerShell: () => ps }));
 
 import { execFileSync } from "node:child_process";
 import { installWindowsAutostart } from "./windows-autostart.js";
@@ -18,6 +26,10 @@ describe("installWindowsAutostart", () => {
   beforeEach(() => {
     execMock.mockReset();
     execMock.mockImplementation(() => Buffer.from(""));
+    ps.ok = true;
+    ps.exe = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+    ps.source = "windows-powershell";
+    ps.error = "";
   });
 
   it("安装计划任务前先清掉旧任务与 Run 键，避免登录时启动两次", () => {
@@ -46,6 +58,31 @@ describe("installWindowsAutostart", () => {
 
     const all = calls();
     expect(all.some((c) => c.includes("schtasks /Delete /TN wemind-autostart /F"))).toBe(true);
+    const runKey = all.find((c) => c.startsWith("reg add"));
+    expect(runKey).toContain("/v wemind-autostart");
+    expect(runKey).toContain('"C:\\node.exe" "C:\\cli.js" start --all');
+  });
+
+  it("系统自带 PowerShell 5.1 缺失时回退 PATH 上的 pwsh", () => {
+    ps.exe = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+    ps.source = "pwsh";
+
+    expect(installWindowsAutostart("C:\\node.exe", "C:\\cli.js")).toBe("scheduled-task");
+
+    const register = calls().find((c) => c.includes("Register-ScheduledTask"));
+    expect(register).toContain("C:\\Program Files\\PowerShell\\7\\pwsh.exe");
+  });
+
+  it("既没有 5.1 也没有 pwsh → 不执行 PowerShell，直接降级 Run 键", () => {
+    ps.ok = false;
+    ps.exe = "";
+    ps.source = "none";
+    ps.error = "找不到可用的 PowerShell";
+
+    expect(installWindowsAutostart("C:\\node.exe", "C:\\cli.js")).toBe("run-key");
+
+    const all = calls();
+    expect(all.some((c) => c.includes("Register-ScheduledTask"))).toBe(false);
     const runKey = all.find((c) => c.startsWith("reg add"));
     expect(runKey).toContain("/v wemind-autostart");
     expect(runKey).toContain('"C:\\node.exe" "C:\\cli.js" start --all');

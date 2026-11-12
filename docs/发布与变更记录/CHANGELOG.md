@@ -8,6 +8,10 @@
 
 <!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
 
+### Changed
+
+- **Windows PowerShell 加固（2026-11-12）**：① 新增 `shared/process/powershell.ts` 的 `resolvePowerShell()`：优先系统自带 Windows PowerShell 5.1（固定路径，不依赖 PATH），缺失时回退 PATH 上的 `pwsh`（先试跑 `exit 0`），都不可用才让计划任务注册失败并降级 Run 键；`windows-autostart.ts` 与进程身份查询共用。② Windows 进程命令行查询输出改为 `WEMIND|<pid>|<base64(UTF-8)>`，Node 侧解码，绕开 PS 5.1 控制台代码页（中文 Windows 为 936）导致的乱码。③ 进程身份从布尔改为三态 `ours/other/unknown`（`commandLines()` 返回 `{lines,error}`）：查询失败不再当成「没有别的实例」——`start` 与 watchdog 单实例守卫 fail-closed（拒绝启动），`stop` 不杀且保留 pid 文件，`wemind list` / `delete` 显示「无法确认」；`StopResult` / `stopSummary` 增加 `unknown`。守卫：`powershell.test.ts`、`proc-identity.test.ts`、`windows-autostart-install.test.ts`、`manage.test.ts`。文档同步：AGENTS.md、开机自启、daemon-常驻原理、repowiki/10、代码地图、docs/ai/README、已知坑。
+
 ## [1.8.0] 统一日志出口 · 错误定位到 .ts 行号 · `wemind log`（2026-11-11）
 
 > 同批发布 `@wemind/wechat-mcp` **1.1.3**（core 内联 + MCP 侧 `sourcemap` 与错误钩子、日志收敛；无 API 变化，故只升 patch）。

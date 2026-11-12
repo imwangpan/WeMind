@@ -10,7 +10,7 @@ import { BRAIN_CONFIG_EXIT_CODE } from "../agents/brain-agents.js";
 import { stripVscodeDebugEnv } from "../shared/debug-env.js";
 import { launcherEnv, stableExecPath } from "../shared/launcher-env.js";
 import { logLimitsFromEnv, RotatingLog } from "../shared/io/log-rotate.js";
-import { CLI_PID_MARKERS, otherOurProcessPid } from "../shared/process/proc-identity.js";
+import { CLI_PID_MARKERS, findOtherOurProcess } from "../shared/process/proc-identity.js";
 
 const RESTART_DELAY_MS = 5000;
 /** 连续崩溃上限（与 pm2 的默认 max_restarts 对齐）：只统计「短暂运行就崩」的连续次数。 */
@@ -47,13 +47,24 @@ function readPidFile(file: string): number | null {
   }
 }
 
-/** 单实例守卫：已有存活**且确认是我们**的后台守护进程返回 false；否则写自己 pid、返回 true。 */
-function acquireSingleton(wrapperPidFile: string): boolean {
+type SingletonResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * 单实例守卫：已有存活**且确认是我们**的后台守护进程 → 拒绝；活着但命令行查不到（unknown）→ 也拒绝（防双开抢 token）。
+ * 只有确认 pid 不是我们自己（含已退出）才写自己的 pid、返回 true。
+ */
+function acquireSingleton(wrapperPidFile: string): SingletonResult {
   const old = readPidFile(wrapperPidFile);
   // 身份校验：陈旧 pid + 重启后 pid 复用时会误判「已有实例」→ 后台守护进程直接退出、daemon 静默不起。
-  if (otherOurProcessPid(old, process.pid, CLI_PID_MARKERS)) return false;
+  const other = findOtherOurProcess(old, process.pid, CLI_PID_MARKERS);
+  if (other.pid) return { ok: false, reason: `已有实例在跑（pid=${other.pid}），本次退出。` };
+  if (other.unknown)
+    return {
+      ok: false,
+      reason: `无法确认 pid=${old} 是否另一个 wemind 实例（${other.error ?? "进程命令行查询失败"}）；为避免双开抢同一 bot token，本次退出。确认该 pid 不是 wemind 后删除 ${wrapperPidFile} 再启动。`,
+    };
   fs.writeFileSync(wrapperPidFile, String(process.pid), "ascii");
-  return true;
+  return { ok: true };
 }
 
 /** 后台守护进程循环本体（由 `cli.js _watchdog` 调用，常驻）：单实例守卫 → 循环拉起 daemon、退出 5s 重拉。 */
@@ -69,10 +80,11 @@ export async function runWatchdog(): Promise<void> {
   const log = path.join(dataDir, "daemon.log");
   const wrapperPidFile = path.join(dataDir, "wrapper.pid");
 
-  if (!acquireSingleton(wrapperPidFile)) {
+  const singleton = acquireSingleton(wrapperPidFile);
+  if (!singleton.ok) {
     fs.appendFileSync(
       log,
-      wrapperLine("WARN", `已有实例在跑，本次退出。${new Date().toISOString()}`) + "\n",
+      wrapperLine("WARN", `${singleton.reason}${new Date().toISOString()}`) + "\n",
     );
     return;
   }

@@ -44,7 +44,7 @@ import { switchInFlightTarget } from "./acp/brain-switch.js";
 import { loadBrainConfig } from "./agents/brain-config.js";
 import { getAgent, seedSlots } from "./agents/agent-slot.js";
 import { writeBrainState } from "./agents/brain-state.js";
-import { CLI_PID_MARKERS, otherOurProcessPid } from "./shared/process/proc-identity.js";
+import { CLI_PID_MARKERS, findOtherOurProcess } from "./shared/process/proc-identity.js";
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./cli/watchdog-runner.js";
 import { isOwnerOnly } from "./ipc/chat-commands.js";
 import { ensureBrainHome } from "./agents/sandbox/mcp-sandbox.js";
@@ -1365,9 +1365,17 @@ export async function runDaemon(): Promise<void> {
   // 单实例：同账号只允许一个 daemon 消费同一个 bot token。
   // `wimind start` 有 wrapper.pid 守卫；这里挡住直接 `wimind daemon` / `npm run daemon`，以及两套 runner 并存。
   const pidFile = path.join(DATA_DIR, "daemon.pid");
-  const existing = otherOurProcessPid(readPidFile(pidFile), process.pid, CLI_PID_MARKERS);
-  if (existing) {
-    log.info(`another daemon is already running for this account (pid=${existing}); exit.`);
+  const recordedPid = readPidFile(pidFile);
+  const existing = findOtherOurProcess(recordedPid, process.pid, CLI_PID_MARKERS);
+  if (existing.pid) {
+    log.info(`another daemon is already running for this account (pid=${existing.pid}); exit.`);
+    process.exit(DAEMON_ALREADY_RUNNING_EXIT_CODE);
+  }
+  if (existing.unknown) {
+    // 查询失败不能当成「没有别的实例」：两个 daemon 抢同一个 bot token 会互相吞消息。
+    log.error(
+      `无法确认 pid=${recordedPid} 是否另一个 wemind daemon（${existing.error ?? "进程命令行查询失败"}）；为避免双开抢同一 bot token，本次不启动。确认该 pid 不是 wemind 后删除 ${pidFile} 再试。`,
+    );
     process.exit(DAEMON_ALREADY_RUNNING_EXIT_CODE);
   }
   // 启动即校验大脑：早失败、说人话——避免「进程看着正常、直到第一条消息才炸」（历史上表现为反复「⏳ 响应中断了，正在自动重试…」，实为默认大脑的二进制没装）。

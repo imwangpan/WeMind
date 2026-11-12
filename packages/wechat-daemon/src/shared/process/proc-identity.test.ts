@@ -4,9 +4,11 @@ import { spawn } from "node:child_process";
 import {
   isAlive,
   matchesMarkers,
+  parseCommandLineOutput,
   commandLines,
+  identifyProcess,
   isOurProcess,
-  otherOurProcessPid,
+  findOtherOurProcess,
   brainPidMarkers,
   CLI_PID_MARKERS,
 } from "./proc-identity.js";
@@ -14,13 +16,22 @@ import {
 // 一个「活着但绝不是我们」的进程：用来复现「陈旧 pid 文件 + pid 复用 → 误杀/误判」的场景。
 const dummy = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
 const dummyPid = dummy.pid ?? 0;
+// 一个「活着且命令行确实命中 CLI marker」的进程：验证 findOtherOurProcess 的正向路径。
+const ours = spawn(
+  process.execPath,
+  ["-e", "setTimeout(() => {}, 60000)", "wemind", "cli.js", "daemon"],
+  { stdio: "ignore" },
+);
+const oursPid = ours.pid ?? 0;
 const NEVER = 2147483647; // 必然不存在的 pid
 
 afterAll(() => {
-  try {
-    dummy.kill();
-  } catch {
-    /* ignore */
+  for (const child of [dummy, ours]) {
+    try {
+      child.kill();
+    } catch {
+      /* ignore */
+    }
   }
 });
 
@@ -98,12 +109,75 @@ describe("matchesMarkers（纯逻辑，无系统调用）", () => {
   });
 });
 
-describe("otherOurProcessPid（同账号单实例判定）", () => {
-  it("null/自己/不是我们 → null；另一个我们自己的进程 → 返回它的 pid", () => {
-    expect(otherOurProcessPid(null, 1, CLI_PID_MARKERS, () => true)).toBeNull();
-    expect(otherOurProcessPid(1, 1, CLI_PID_MARKERS, () => true)).toBeNull();
-    expect(otherOurProcessPid(2, 1, CLI_PID_MARKERS, () => false)).toBeNull();
-    expect(otherOurProcessPid(2, 1, CLI_PID_MARKERS, () => true)).toBe(2);
+describe("parseCommandLineOutput（PowerShell 输出解码）", () => {
+  const record = (pid: number, line: string): string =>
+    `WEMIND|${pid}|${Buffer.from(line, "utf8").toString("base64")}`;
+
+  it("按 WEMIND|<pid>|<base64> 还原 UTF-8 命令行（中文路径不乱码）", () => {
+    const lines = [
+      record(123, String.raw`node C:\用户\微信\wemind\dist\cli.js daemon`),
+      record(456, "node /opt/wemind/dist/cli.js brain"),
+    ];
+    const out = parseCommandLineOutput(lines.join("\r\n"));
+    expect(out.get(123)).toBe(String.raw`node C:\用户\微信\wemind\dist\cli.js daemon`);
+    expect(out.get(456)).toBe("node /opt/wemind/dist/cli.js brain");
+  });
+
+  it("忽略噪声行、坏 pid、非法 base64", () => {
+    const out = parseCommandLineOutput(
+      [
+        "",
+        "Get-CimInstance: Access denied",
+        "WEMIND|",
+        "WEMIND|0|eA==",
+        "WEMIND|abc|eA==",
+        "WEMIND|789|not base64!!!",
+        record(790, "ok"),
+      ].join("\n"),
+    );
+    expect([...out.keys()]).toEqual([790]);
+  });
+});
+
+describe("identifyProcess（三态身份）", () => {
+  const query = (line?: string): { lines: Map<number, string>; error: string | null } => ({
+    lines: line === undefined ? new Map() : new Map([[4242, line]]),
+    error: null,
+  });
+
+  it("命令行命中 → ours；命中失败 → other；活着但查不到 → unknown", () => {
+    expect(identifyProcess(4242, CLI_PID_MARKERS, query("node /x/wemind/dist/cli.js daemon"))).toBe(
+      "ours",
+    );
+    expect(identifyProcess(4242, CLI_PID_MARKERS, query("node /x/other.js"))).toBe("other");
+    expect(identifyProcess(dummyPid, CLI_PID_MARKERS, query())).toBe("unknown");
+  });
+
+  it("pid 不存在 → other（不查询也安全）", () => {
+    expect(identifyProcess(NEVER, CLI_PID_MARKERS, query())).toBe("other");
+    expect(identifyProcess(null, CLI_PID_MARKERS, query())).toBe("other");
+  });
+});
+
+describe("findOtherOurProcess（同账号单实例判定）", () => {
+  it("null/自己 → 没有别的实例", () => {
+    expect(findOtherOurProcess(null, 1, CLI_PID_MARKERS)).toEqual({
+      pid: null,
+      unknown: false,
+      error: null,
+    });
+    expect(findOtherOurProcess(1, 1, CLI_PID_MARKERS)).toEqual({
+      pid: null,
+      unknown: false,
+      error: null,
+    });
+  });
+
+  it("另一个我们自己进程 → 返回 pid；无关进程 → 不算", () => {
+    expect(findOtherOurProcess(oursPid, process.pid, CLI_PID_MARKERS).pid).toBe(oursPid);
+    const other = findOtherOurProcess(dummyPid, process.pid, CLI_PID_MARKERS);
+    expect(other.pid).toBeNull();
+    expect(other.unknown).toBe(false);
   });
 });
 
@@ -118,7 +192,8 @@ describe("isAlive / commandLines / isOurProcess（真实系统调用）", () => 
   });
 
   it("commandLines：能查到自己与 dummy；不存在的 pid 查不到（不白起进程）", () => {
-    const lines = commandLines([process.pid, dummyPid, NEVER]);
+    const { lines, error } = commandLines([process.pid, dummyPid, NEVER]);
+    expect(error).toBeNull();
     expect(lines.get(process.pid)?.toLowerCase()).toContain("node");
     expect(lines.has(dummyPid)).toBe(true);
     expect(lines.has(NEVER)).toBe(false);

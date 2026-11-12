@@ -155,7 +155,13 @@ async function install(argv: string[]): Promise<void> {
     let failed = 0;
     for (const key of keys) {
       // 切换外壳前先停旧链（builtin / 系统服务）：旧 daemon 占着 token 时，pm2 实例会以 75 退出并被标记停止。
-      stopDaemon(key);
+      // 停不干净（或无法确认）就不起 pm2，否则两个实例抢同一个 bot token。
+      const stop = stopDaemon(key);
+      if (!stop.ok) {
+        print(`跳过 ${key}：${stop.msg}`);
+        failed++;
+        continue;
+      }
       const r = pm2Start(key, cliPath);
       print(r.msg);
       if (!r.ok) failed++;

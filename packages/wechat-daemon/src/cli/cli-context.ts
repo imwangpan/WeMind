@@ -7,7 +7,12 @@ import {
   listAccounts,
   loadAccount as readAccount,
 } from "@wemind/wechat-ilink-core";
-import { CLI_PID_MARKERS, isOurProcess } from "../shared/process/proc-identity.js";
+import {
+  CLI_PID_MARKERS,
+  commandLines,
+  identifyProcess,
+  type ProcessIdentity,
+} from "../shared/process/proc-identity.js";
 import {
   awaitControlResponse,
   bridgePidOf,
@@ -30,12 +35,21 @@ export function readPid(dir: string, name: string): number | null {
   }
 }
 
+/** 进程身份三态：ours / other / unknown（活着但命令行查不到，查询失败或无权限）。 */
+export function processIdentity(
+  pid: number | null,
+  markers: string[][] = CLI_PID_MARKERS,
+): ProcessIdentity {
+  return identifyProcess(pid, markers, commandLines([pid]));
+}
+
 /**
  * 该 pid 是否「活着**且确实是我们自己的** CLI 进程」。
  * 只判存活不够：pid 会复用（尤其重启后），陈旧 pid 文件可能指向**别人的**进程 → 会误杀/误判。
+ * 查询失败（unknown）在这里判否；需要区分「不是我们」和「无法确认」的调用方用 processIdentity。
  */
 export function aliveOurs(pid: number | null, markers: string[][] = CLI_PID_MARKERS): boolean {
-  return isOurProcess(pid, markers);
+  return processIdentity(pid, markers) === "ours";
 }
 
 /** key 或 label → key（label 唯一匹配才行）。 */
@@ -66,15 +80,25 @@ export function pickKey(sel?: string): string {
 /** 预检 daemon 存活（本地命令需 daemon 在跑才有人消费收件箱）。 */
 export function requireDaemonAlive(key: string): void {
   const pid = readPid(accountDir(key), "daemon.pid");
-  if (!aliveOurs(pid))
+  const identity = processIdentity(pid);
+  if (identity === "ours") return;
+  if (identity === "unknown")
     throw new Error(
-      `账号 ${key} 的 daemon 未运行。先启动：wemind start ${key}（用 wemind list 查看状态）`,
+      `无法确认账号 ${key} 的 daemon 是否在运行（pid=${pid}，进程命令行查询失败）。为避免把命令发给一个不确定的进程，本次不执行。用 wemind list 查看状态；确认该 pid 不是 wemind 后删除账号目录下的 daemon.pid，或排查 PowerShell/CIM 是否可用。`,
     );
+  throw new Error(
+    `账号 ${key} 的 daemon 未运行。先启动：wemind start ${key}（用 wemind list 查看状态）`,
+  );
+}
+
+/** daemon 的三态身份（读 daemon.pid）。 */
+export function daemonIdentity(key: string): ProcessIdentity {
+  return processIdentity(readPid(accountDir(key), "daemon.pid"));
 }
 
 /** daemon 是否活着（且确实是我们自己的进程）。读命令不需要它，写命令优先走它。 */
 export function daemonAlive(key: string): boolean {
-  return aliveOurs(readPid(accountDir(key), "daemon.pid"));
+  return daemonIdentity(key) === "ours";
 }
 
 /**

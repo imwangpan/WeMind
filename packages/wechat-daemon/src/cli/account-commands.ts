@@ -14,12 +14,13 @@ import {
   CLI_PID_MARKERS,
   brainPidMarkers,
   commandLines,
-  matchesMarkers,
+  identifyProcess,
+  type ProcessIdentity,
 } from "../shared/process/proc-identity.js";
 import { resolveAgent } from "../agents/brain-agents.js";
 import { loadBrainConfig } from "../agents/brain-config.js";
 import { agentLabel } from "./subcommands/cli-brain.js";
-import { daemonAlive, pickKey, readPid, resolveKey } from "./cli-context.js";
+import { daemonIdentity, pickKey, readPid, resolveKey } from "./cli-context.js";
 import { readPidRecords, recordMarkers } from "../shared/process/pid-record.js";
 import { readBrainState } from "../agents/brain-state.js";
 import { brainRecord, deleteGuard, startDaemon, stopDaemon } from "./process-lifecycle.js";
@@ -58,22 +59,35 @@ export function cmdList(): string {
       })),
     };
   });
-  const lines = commandLines(
+  const query = commandLines(
     entries.flatMap((e) => [e.dpid, e.bpid, ...e.workers.map((w) => w.pid)]),
   );
-  const aliveOursIn = (pid: number | null, markers: string[][]): boolean =>
-    !!pid && matchesMarkers(lines.get(pid), markers);
+  const identityIn = (pid: number | null, markers: string[][]): ProcessIdentity =>
+    identifyProcess(pid, markers, query);
   return entries
     .map((e) => {
-      const runningNow = aliveOursIn(e.dpid, CLI_PID_MARKERS);
-      const running = runningNow ? `运行中(pid ${e.dpid})` : "已停止";
-      const brainPid = aliveOursIn(e.bpid, e.brainMarkers)
-        ? `  brain(pid ${e.bpid}${e.brainAgent ? ` ${e.brainAgent}` : ""})`
-        : "";
-      const live = e.workers.filter((w) => aliveOursIn(w.pid, w.markers));
-      const pool = live.length
-        ? `  pool[${live.map((w) => `${w.agent}${w.taskId ? `#${w.taskId}` : ""}:${w.state}`).join(", ")}]`
-        : "";
+      const dIdentity = identityIn(e.dpid, CLI_PID_MARKERS);
+      const runningNow = dIdentity === "ours";
+      const running =
+        dIdentity === "ours"
+          ? `运行中(pid ${e.dpid})`
+          : dIdentity === "unknown"
+            ? `无法确认(pid ${e.dpid})`
+            : "已停止";
+      const bIdentity = identityIn(e.bpid, e.brainMarkers);
+      const brainPid =
+        bIdentity === "ours"
+          ? `  brain(pid ${e.bpid}${e.brainAgent ? ` ${e.brainAgent}` : ""})`
+          : bIdentity === "unknown"
+            ? `  brain(pid ${e.bpid} 无法确认)`
+            : "";
+      const live = e.workers.filter((w) => identityIn(w.pid, w.markers) === "ours");
+      const unknownWorkers = e.workers.filter((w) => identityIn(w.pid, w.markers) === "unknown");
+      const poolParts = [
+        ...live.map((w) => `${w.agent}${w.taskId ? `#${w.taskId}` : ""}:${w.state}`),
+        ...unknownWorkers.map((w) => `${w.agent}${w.taskId ? `#${w.taskId}` : ""}:无法确认`),
+      ];
+      const pool = poolParts.length ? `  pool[${poolParts.join(", ")}]` : "";
       return `- ${e.a.key}${e.a.key === def ? " [默认]" : ""}  label=${e.a.label}  botId=${e.a.botId}  agent=${agentLabel(e.dir, runningNow ? e.brainRuntime : null)}  ${running}${brainPid}${pool}`;
     })
     .join("\n");
@@ -120,7 +134,13 @@ export function cmdDelete(sel: string): string {
   const key = resolveKey(sel);
   const stop = stopDaemon(key);
   // 用 stop 的实际结果判定，而不是再看 daemonAlive：旧实现先删 pid 文件再查，永远得到「已停止」。
-  const blocked = deleteGuard(key, !stop.ok || daemonAlive(key));
+  // 三态：查询失败（unknown）也不能删——进程可能还在写目录。
+  const identity = daemonIdentity(key);
+  const blocked = deleteGuard(
+    key,
+    !stop.ok || identity !== "other",
+    identity === "unknown" || stop.unknown,
+  );
   if (blocked) throw new Error(blocked);
   try {
     fs.rmSync(accountDir(key), { recursive: true, force: true });

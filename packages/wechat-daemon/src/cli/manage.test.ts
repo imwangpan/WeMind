@@ -85,6 +85,13 @@ describe("deleteGuard（daemon 没停干净不删目录）", () => {
   it("已停止 → 放行", () => {
     expect(deleteGuard("abc", false)).toBeNull();
   });
+
+  it("无法确认（查询失败）→ 拒绝并提示先排查 PowerShell/CIM", () => {
+    const msg = deleteGuard("abc", true, true);
+    expect(msg).toMatch(/无法确认/);
+    expect(msg).toMatch(/没有删除目录/);
+    expect(msg).toMatch(/wemind list/);
+  });
 });
 
 describe("stopSummary（stop 的实际结果决定能否删目录）", () => {
@@ -102,8 +109,15 @@ describe("stopSummary（stop 的实际结果决定能否删目录）", () => {
     expect(r.msg).toContain("跳过 runner 2");
   });
 
+  it("无法确认的进程不算「已停止」→ ok=false，且不清理 pid 文件", () => {
+    const r = stopSummary([], [], [], ["daemon 3"]);
+    expect(r.ok).toBe(false);
+    expect(r.unknown).toBe(true);
+    expect(r.msg).toMatch(/无法确认 daemon 3/);
+  });
+
   it("没有任何候选 → 明确「无运行中的进程」", () => {
-    expect(stopSummary([], [], [])).toEqual({ msg: "无运行中的进程", ok: true });
+    expect(stopSummary([], [], [])).toEqual({ msg: "无运行中的进程", ok: true, unknown: false });
   });
 });
 

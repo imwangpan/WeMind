@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **最后核对**：2026-11-11
+> **最后核对**：2026-11-12
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -180,7 +180,7 @@ poller（长轮询，不被大脑阻塞）
 | 「切 daemon 大脑是跨账号权限」 | ⚪ **不是** | 微信侧只有**该账号的登录者**能切**它自己**那个 daemon（`OWNER_ONLY_KINDS`）；本机 CLI 才可指定任意账号（`wemind brain switch X <key\|label>`），因为「能在本机敲命令 = 机主」 |
 | 除登录者外还有谁能把消息发进 bot | ✅ **已确认：没有** | 微信平台限制——**必须扫码登录该 bot 才能给它发消息**，所以每个 bot 只有其登录者能发（用户 2026-10-29 确认）。`allowFrom` 因此是**兜底校验**（默认拒绝、默认只放行登录者）：防的是发送范围将来变化 / daemon 被接到别的入口；旧文档里「换个微信号验证」的写法已删 |
 | `wemind start` 继承 `WECHAT_DATA_DIR`（P0） | ✅ **已修（2026-11-07）** | 启动器统一走 `launcherEnv()`：丢弃 `WECHAT_DATA_DIR`、强制 `WECHAT_ACCOUNT`；Linux/macOS 自启单元用 `Environment=WECHAT_DATA_DIR=` 空值覆盖；`wemind daemon` 直跑仍可一次性覆盖目录。守卫：`launcher-env.test.ts` |
-| 开机自启（`wemind autostart`）已实现 | ✅ **Windows 原生方案已实测（2026-11-07）**；Linux / macOS / PM2 未验（🟡） | Windows 计划任务（失败降级 HKCU Run 键）跑 `start --all`；Linux systemd / macOS LaunchAgent 跑 `wemind daemon`，按安装时的账号逐个生成（新增账号要重跑 `install`）；检测到 PM2 优先用 PM2（`wemind-<key>`）。安装时把 node / cli.js 路径 `realpath` 到真实位置，避开 fnm 临时联接。实际重启（2026-11-08）通过：任务触发成功（`LastTaskResult=0`），单实例运行；首次重启发现的遗留启动文件夹 `wemind-daemon.vbs` 已删除（配套 `autostart-daemons.mjs` / `autostart.log` 一并清理），第二次重启确认它没有再执行 |
+| 开机自启（`wemind autostart`）已实现 | ✅ **Windows 原生方案已实测（2026-11-07）**；Linux / macOS / PM2 未验（🟡） | Windows 计划任务（失败降级 HKCU Run 键）跑 `start --all`；Linux systemd / macOS LaunchAgent 跑 `wemind daemon`，按安装时的账号逐个生成（新增账号要重跑 `install`）；检测到 PM2 优先用 PM2（`wemind-<key>`）。安装时把 node / cli.js 路径 `realpath` 到真实位置，避开 fnm 临时联接。实际重启（2026-11-08）通过：任务触发成功（`LastTaskResult=0`），单实例运行；首次重启发现的遗留启动文件夹 `wemind-daemon.vbs` 已删除（配套 `autostart-daemons.mjs` / `autostart.log` 一并清理），第二次重启确认它没有再执行。PowerShell 解析走共享 `resolvePowerShell()`（5.1 优先、缺失回退 `pwsh`）；进程身份查询是 `ours/other/unknown` 三态，unknown 时 fail-closed（不杀、不删 pid 文件、`list` 显示「无法确认」） |
 
 > **规矩**：新增 agent 接入文档时，必须写清「已实测 / 仅代码 / 未验证」，并给版本与日期。
 
@@ -202,7 +202,7 @@ poller（长轮询，不被大脑阻塞）
 | 改微信消息/回复 | `index.ts`、`daemon/messaging/send-pipeline.ts` | `daemon/messaging/attachments.ts`（出站附件与安全闸）、`media-store.ts`（入站落盘/清理）、`voice.ts`（SILK→WAV）、`md-reply.ts`、`image-reply.ts`、`pending-push.ts`；入站 item 解析在 `daemon/daemon-routing.ts` 的 `extractInbound()` |
 | 改消息 ID / 上游协议类型 | `wechat-ilink-core/src/api/message-id.ts`、`api/types.ts` | `api/client.ts`（无损 JSON 解析）、`store/account.ts`（游标迁移）、`wechat-mcp/src/tools/messages.ts` |
 | 改 CLI | `cli.ts`（分派 `cli/cli-dispatch.ts`） | `cli/manage.ts`（参数解析/分派）+ `cli/account-commands.ts` / `cli/process-lifecycle.ts` + `cli/cli-context.ts` + `cli/subcommands/cli-*.ts` |
-| **改开机自启** | `cli/subcommands/autostart.ts`（install/status/uninstall） | `cli/subcommands/windows-autostart.ts`、`cli/subcommands/posix-autostart.ts`、`shared/mixed-config.ts`（冲突探测/清理）、`shared/pm2-detector.ts`、`shared/launcher-env.ts`、`docs/部署与运维/开机自启.md` |
+| **改开机自启** | `cli/subcommands/autostart.ts`（install/status/uninstall） | `cli/subcommands/windows-autostart.ts`、`cli/subcommands/posix-autostart.ts`、`shared/process/powershell.ts`（5.1 优先、回退 `pwsh`）、`shared/mixed-config.ts`（冲突探测/清理）、`shared/pm2-detector.ts`、`shared/launcher-env.ts`、`docs/部署与运维/开机自启.md` |
 | 改启动器环境（P0） | `shared/launcher-env.ts`（丢弃 `WECHAT_DATA_DIR`、强制 `WECHAT_ACCOUNT`） | 集成点：`cli/watchdog-runner.ts`、`cli/pm2-runner.ts`；`wemind daemon` 直跑不走这里 |
 | 改数据/账号 | `wechat-ilink-core/src/store/*` | `agents/brain-config.ts`、`docs/repowiki/08` |
 | 排查不回复 | `docs/ai/recipes/debug-daemon.md` | `daemon.log`、`brain.json`、`brain check` |

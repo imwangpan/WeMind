@@ -1,6 +1,6 @@
 import { print } from "@wemind/wechat-ilink-core";
 import { execFileSync } from "node:child_process";
-import * as path from "node:path";
+import { resolvePowerShell } from "../../shared/process/powershell.js";
 import { AUTOSTART_TASK_NAME, AUTOSTART_TASK_NAME_PM2 } from "../../shared/mixed-config.js";
 
 /**
@@ -14,12 +14,6 @@ import { AUTOSTART_TASK_NAME, AUTOSTART_TASK_NAME_PM2 } from "../../shared/mixed
  * （Windows 的 `pm2 startup` 不原生支持，靠这条命令让 pm2 重启实例），**不是** `autostart install`。
  * 两种用途用不同任务名区分（见 mixed-config.ts），状态探测不必解析任务内容。
  */
-
-/** Windows PowerShell 5.1 的固定位置：不依赖 PATH，也不要求装 PowerShell 7。 */
-function windowsPowerShell(): string {
-  const root = process.env.SystemRoot || "C:\\Windows";
-  return path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-}
 
 /** PowerShell 单引号字符串转义。 */
 function psQuote(s: string): string {
@@ -90,8 +84,11 @@ function registerScheduledTask(
     `Register-ScheduledTask -TaskName ${psQuote(name)} -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null`,
   ].join("; ");
 
+  // 5.1 缺失时 resolvePowerShell 会回退 pwsh；两者都没有则抛错，由 installWindowsAutostart 降级 Run 键。
+  const ps = resolvePowerShell();
+  if (!ps.ok) throw new Error(ps.error);
   execFileSync(
-    windowsPowerShell(),
+    ps.exe,
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
     {
       stdio: "pipe",
