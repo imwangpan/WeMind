@@ -18,15 +18,16 @@ export type AcpMcpDeclaration = AcpMcpServer | AcpMcpHttpServer;
 export type AcpConversion = { servers: AcpMcpDeclaration[]; skipped: string[] };
 
 /**
- * 一个 Agent 的 MCP 适配器：把「这个 Agent 的 MCP 放在哪、长什么样、怎么写、怎么交给 ACP」
+ * 一种 MCP **文件格式**的适配器：把「这种格式的 MCP 放在哪、长什么样、怎么写、怎么交给 ACP」
  * 集中到一处。brain/worker 沙箱只负责算激活集/排除集，不再按 agent 名或格式分支。
  *
- * - `kiro`：`{ mcpServers: { 名: {...} } }`（kiro / pi / cline / gemini / qoder / Claude Code catalog）
- * - `opencode`：`{ mcp: { servers: { 名: {...} } } }`（与 model 等同文件，默认补 permission:allow）
- * - `toml`：Codex `config.toml` 的 `[mcp_servers.*]`，只读；写入一律视为配置错误
+ * 实现按**文件格式**划分，与 agent 名无关（多个 agent 可以共用同一种格式）：
+ * - `jsonMcpServers`：顶层 `{ "mcpServers": { 名: {...} } }`
+ * - `jsonMcpNested`：嵌套 `{ "mcp": { "servers": { 名: {...} } } }`（与 model 等同文件，默认补 permission:allow）
+ * - `tomlMcpServers`：Codex `config.toml` 的 `[mcp_servers.*]`，只读；写入一律视为配置错误
  */
 export interface McpAdapter {
-  readonly id: "kiro" | "opencode" | "toml";
+  readonly id: "jsonMcpServers" | "jsonMcpNested" | "tomlMcpServers";
   /** Agent 自己会加载、WeMind 改不了的原生 MCP（目前只有 Codex） */
   readonly nativeOwned: boolean;
   /** real/mirror 视图下也要重建设置基底（MCP 与其它设置同文件时，不能直接链接真实文件） */
@@ -94,8 +95,9 @@ function readTomlServers(file: string): McpCatalog {
   }
 }
 
-const kiroAdapter: McpAdapter = {
-  id: "kiro",
+/** 顶层 `{ "mcpServers": { ... } }`。 */
+const jsonMcpServersAdapter: McpAdapter = {
+  id: "jsonMcpServers",
   nativeOwned: false,
   rebuildSettingsInView: false,
   readCatalog: (file) => readJsonServers(file, "kiro"),
@@ -131,8 +133,9 @@ const kiroAdapter: McpAdapter = {
   },
 };
 
-const opencodeAdapter: McpAdapter = {
-  id: "opencode",
+/** 嵌套 `{ "mcp": { "servers": { ... } } }`。 */
+const jsonMcpNestedAdapter: McpAdapter = {
+  id: "jsonMcpNested",
   nativeOwned: false,
   rebuildSettingsInView: true,
   readCatalog: (file) => readJsonServers(file, "opencode"),
@@ -166,8 +169,9 @@ const opencodeAdapter: McpAdapter = {
   },
 };
 
-const tomlAdapter: McpAdapter = {
-  id: "toml",
+/** TOML `[mcp_servers.*]`，只读。 */
+const tomlMcpServersAdapter: McpAdapter = {
+  id: "tomlMcpServers",
   nativeOwned: true,
   rebuildSettingsInView: false,
   readCatalog: readTomlServers,
@@ -182,20 +186,21 @@ const tomlAdapter: McpAdapter = {
 };
 
 export const MCP_ADAPTERS = {
-  kiro: kiroAdapter,
-  opencode: opencodeAdapter,
-  toml: tomlAdapter,
+  jsonMcpServers: jsonMcpServersAdapter,
+  jsonMcpNested: jsonMcpNestedAdapter,
+  tomlMcpServers: tomlMcpServersAdapter,
 } as const;
 
 /** 按 Agent 的配置格式选写入/设置继承适配器；TOML 且走 ACP 的 Agent 用只读适配器。 */
 export function mcpAdapterFor(ag: ResolvedAgent): McpAdapter {
   if (ag.mcpViaAcp && path.extname(ag.catalogFile ?? "").toLowerCase() === ".toml") {
-    return tomlAdapter;
+    return tomlMcpServersAdapter;
   }
-  return ag.mcpFormat === "opencode" ? opencodeAdapter : kiroAdapter;
+  // 预设里的 mcpFormat 是历史命名（"kiro"/"opencode"），含义只是 JSON 键路径的形状。
+  return ag.mcpFormat === "opencode" ? jsonMcpNestedAdapter : jsonMcpServersAdapter;
 }
 
 /** 按实际目录文件后缀读定义（`WEMIND_MCP_CATALOG` 可把目录指到 TOML）。 */
 export function mcpAdapterForFile(ag: ResolvedAgent, file: string): McpAdapter {
-  return path.extname(file).toLowerCase() === ".toml" ? tomlAdapter : mcpAdapterFor(ag);
+  return path.extname(file).toLowerCase() === ".toml" ? tomlMcpServersAdapter : mcpAdapterFor(ag);
 }

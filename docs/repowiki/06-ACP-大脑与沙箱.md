@@ -157,13 +157,15 @@ graph TD
 
 ### MCP 适配器分层
 
-per-agent 的 MCP 格式知识集中在 `agents/sandbox/mcp-adapters.ts` 的 `McpAdapter` 接口，brain / worker 只负责「算激活集 / 全量集与排除集」，不再按 agent 名或格式写分支：
+MCP **文件格式**知识集中在 `agents/sandbox/mcp-adapters.ts` 的 `McpAdapter` 接口，brain / worker 只负责「算激活集 / 全量集与排除集」，不再按 agent 名或格式写分支：
 
-| 实现 | 文件形状 | 读写 | 设置继承 |
+| 实现（按文件格式） | 文件形状 | 读写 | 设置继承 |
 |---|---|---|---|
-| `kiro` | `{ mcpServers: {...} }` | 读/写同一套 JSONC 逻辑，保留同文件其它键 | `sandbox` 模式复制真实 `settings/`（跳过 `mcp.json`） |
-| `opencode` | `{ mcp: { servers: {...} } }` | 写入时默认补 `permission=allow`（用户显式配置优先） | 复制真实 `opencode.json(c)` 并剔除 `mcp` 段；`real`/`mirror` 也要重建基底 |
-| `toml` | `[mcp_servers.*]` | **只读**；写入直接报错 | 不参与 |
+| `jsonMcpServers` | `{ mcpServers: {...} }` | 读/写同一套 JSONC 逻辑，保留同文件其它键 | `sandbox` 模式复制真实 `settings/`（跳过 `mcp.json`） |
+| `jsonMcpNested` | `{ mcp: { servers: {...} } }` | 写入时默认补 `permission=allow`（用户显式配置优先） | 复制真实 `opencode.json(c)` 并剔除 `mcp` 段；`real`/`mirror` 也要重建基底 |
+| `tomlMcpServers` | `[mcp_servers.*]` | **只读**；写入直接报错 | 不参与 |
+
+名称描述的是**文件格式**，不是 Agent：多个 Agent 可以共用同一种格式，adapter 本身不认识 agent 名。
 
 `mcpCatalogPath()` / `mcpConfigPath()` 也由该模块统一：前者支持 `WEMIND_MCP_CATALOG` 覆盖，后者按 agent 的 `mcpConfigFile` 拼配置目录。新增 agent 时先复用或新增 adapter，不要在 `mcp-sandbox.ts` / `worker-sandbox.ts` 里加格式分支。
 

@@ -23,7 +23,7 @@ function tmpDir(label: string): string {
 
 function agent(over: Partial<ResolvedAgent> = {}): ResolvedAgent {
   return {
-    name: "kiro",
+    name: "demo",
     realHome: tmpDir("home"),
     catalogFile: "settings/mcp.json",
     mcpConfigFile: "settings/mcp.json",
@@ -39,36 +39,36 @@ afterEach(() => {
   for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe("kiro adapter", () => {
+describe("顶层 mcpServers（JSON）adapter", () => {
   it("读 mcpServers、写回时保留同文件其它键并剥离 MCP 段", () => {
-    const file = path.join(tmpDir("kiro"), "settings", "mcp.json");
+    const file = path.join(tmpDir("flat"), "settings", "mcp.json");
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify({ other: 1, mcpServers: { demo: { command: "node" } } }));
 
-    expect(MCP_ADAPTERS.kiro.readCatalog(file)).toEqual({ demo: { command: "node" } });
-    MCP_ADAPTERS.kiro.writeCatalog(file, { next: { command: "npx" } });
+    expect(MCP_ADAPTERS.jsonMcpServers.readCatalog(file)).toEqual({ demo: { command: "node" } });
+    MCP_ADAPTERS.jsonMcpServers.writeCatalog(file, { next: { command: "npx" } });
     expect(JSON.parse(fs.readFileSync(file, "utf-8"))).toEqual({
       other: 1,
       mcpServers: { next: { command: "npx" } },
     });
 
     const base: Record<string, unknown> = { mcpServers: {}, model: "x" };
-    MCP_ADAPTERS.kiro.stripSettings(base);
+    MCP_ADAPTERS.jsonMcpServers.stripSettings(base);
     expect(base).toEqual({ model: "x" });
-    expect(MCP_ADAPTERS.kiro.nativeCatalog(file)).toEqual({});
+    expect(MCP_ADAPTERS.jsonMcpServers.nativeCatalog(file)).toEqual({});
   });
 
   it("继承真实 settings/，但不继承 mcp.json；只读缺失目录时保持安静", () => {
-    const realHome = tmpDir("kiro-real");
+    const realHome = tmpDir("flat-real");
     fs.mkdirSync(path.join(realHome, "settings"), { recursive: true });
     fs.writeFileSync(path.join(realHome, "settings", "cli.json"), JSON.stringify({ model: "x" }));
     fs.writeFileSync(
       path.join(realHome, "settings", "mcp.json"),
       JSON.stringify({ mcpServers: {} }),
     );
-    const target = tmpDir("kiro-target");
+    const target = tmpDir("flat-target");
 
-    MCP_ADAPTERS.kiro.inheritSettings?.(agent({ realHome }), realHome, target);
+    MCP_ADAPTERS.jsonMcpServers.inheritSettings?.(agent({ realHome }), realHome, target);
 
     expect(JSON.parse(fs.readFileSync(path.join(target, "settings", "cli.json"), "utf-8"))).toEqual(
       {
@@ -79,16 +79,16 @@ describe("kiro adapter", () => {
   });
 });
 
-describe("opencode adapter", () => {
+describe("嵌套 mcp.servers（JSON）adapter", () => {
   it("读 mcp.servers；写入保留其它键并默认补 permission=allow", () => {
-    const file = path.join(tmpDir("opencode"), "opencode.json");
+    const file = path.join(tmpDir("nested"), "opencode.json");
     fs.writeFileSync(
       file,
       JSON.stringify({ model: "demo/model", mcp: { servers: { old: { command: ["x"] } } } }),
     );
 
-    expect(MCP_ADAPTERS.opencode.readCatalog(file)).toEqual({ old: { command: ["x"] } });
-    MCP_ADAPTERS.opencode.writeCatalog(file, { demo: { command: ["node", "s.js"] } });
+    expect(MCP_ADAPTERS.jsonMcpNested.readCatalog(file)).toEqual({ old: { command: ["x"] } });
+    MCP_ADAPTERS.jsonMcpNested.writeCatalog(file, { demo: { command: ["node", "s.js"] } });
     expect(JSON.parse(fs.readFileSync(file, "utf-8"))).toEqual({
       model: "demo/model",
       mcp: { servers: { demo: { command: ["node", "s.js"] } } },
@@ -96,34 +96,34 @@ describe("opencode adapter", () => {
     });
 
     const base: Record<string, unknown> = { mcp: {}, model: "x" };
-    MCP_ADAPTERS.opencode.stripSettings(base);
+    MCP_ADAPTERS.jsonMcpNested.stripSettings(base);
     expect(base).toEqual({ model: "x" });
   });
 
   it("用户显式配置的 permission 不会被默认值覆盖", () => {
-    const file = path.join(tmpDir("opencode-perm"), "opencode.json");
+    const file = path.join(tmpDir("nested-perm"), "opencode.json");
     fs.writeFileSync(file, JSON.stringify({ permission: { bash: "deny" } }));
-    MCP_ADAPTERS.opencode.writeCatalog(file, {});
+    MCP_ADAPTERS.jsonMcpNested.writeCatalog(file, {});
     expect(JSON.parse(fs.readFileSync(file, "utf-8")).permission).toEqual({ bash: "deny" });
   });
 
   it("inheritSettings 复制 model 等设置，但剔除 mcp 段", () => {
-    const realHome = tmpDir("opencode-real");
+    const realHome = tmpDir("nested-real");
     fs.writeFileSync(
       path.join(realHome, "opencode.json"),
       JSON.stringify({ model: "demo/model", mcp: { servers: { wechat: {} } } }),
     );
-    const target = tmpDir("opencode-target");
+    const target = tmpDir("nested-target");
     const ag = agent({ mcpFormat: "opencode", realHome });
 
-    MCP_ADAPTERS.opencode.inheritSettings?.(ag, realHome, target);
+    MCP_ADAPTERS.jsonMcpNested.inheritSettings?.(ag, realHome, target);
 
     const out = JSON.parse(fs.readFileSync(mcpConfigPath(ag, target), "utf-8"));
     expect(out).toEqual({ model: "demo/model" });
   });
 });
 
-describe("toml adapter", () => {
+describe("TOML [mcp_servers.*] adapter", () => {
   it("只读解析 [mcp_servers.*]，写入直接报错", () => {
     const file = path.join(tmpDir("toml"), "config.toml");
     fs.writeFileSync(
@@ -131,25 +131,27 @@ describe("toml adapter", () => {
       '[mcp_servers.fake]\ncommand = "node"\nargs = ["s.js"]\n\n[mcp_servers.remote]\nurl = "https://x/mcp"\n',
     );
 
-    expect(MCP_ADAPTERS.toml.readCatalog(file)).toEqual({
+    expect(MCP_ADAPTERS.tomlMcpServers.readCatalog(file)).toEqual({
       fake: { command: "node", args: ["s.js"] },
       remote: { url: "https://x/mcp" },
     });
-    expect(MCP_ADAPTERS.toml.nativeCatalog(file)).toEqual(MCP_ADAPTERS.toml.readCatalog(file));
-    expect(() => MCP_ADAPTERS.toml.writeCatalog(file, {})).toThrow(/只读/);
+    expect(MCP_ADAPTERS.tomlMcpServers.nativeCatalog(file)).toEqual(
+      MCP_ADAPTERS.tomlMcpServers.readCatalog(file),
+    );
+    expect(() => MCP_ADAPTERS.tomlMcpServers.writeCatalog(file, {})).toThrow(/只读/);
   });
 });
 
 describe("adapter 选择与路径", () => {
   it("按 mcpFormat / mcpViaAcp+TOML 选择；按实际文件后缀覆盖", () => {
-    expect(mcpAdapterFor(agent())).toBe(MCP_ADAPTERS.kiro);
-    expect(mcpAdapterFor(agent({ mcpFormat: "opencode" }))).toBe(MCP_ADAPTERS.opencode);
+    expect(mcpAdapterFor(agent())).toBe(MCP_ADAPTERS.jsonMcpServers);
+    expect(mcpAdapterFor(agent({ mcpFormat: "opencode" }))).toBe(MCP_ADAPTERS.jsonMcpNested);
     expect(
       mcpAdapterFor(agent({ name: "codex", mcpViaAcp: true, catalogFile: "config.toml" })),
-    ).toBe(MCP_ADAPTERS.toml);
+    ).toBe(MCP_ADAPTERS.tomlMcpServers);
     expect(
       mcpAdapterForFile(agent({ name: "custom", catalogFile: "config.toml" }), "x/config.toml"),
-    ).toBe(MCP_ADAPTERS.toml);
+    ).toBe(MCP_ADAPTERS.tomlMcpServers);
   });
 
   it("catalog 可用环境变量覆盖；MCP 文件按配置目录拼接", () => {
