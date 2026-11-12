@@ -1,5 +1,7 @@
 # 接入 Qoder CLI（设计与实测）
 
+> **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+
 > **状态**：M0–M4 全部完成 ✅（`qoder` 是内置预设；M2 按 M0 结果为空）。
 > **实测范围**：Qoder CLI 1.1.78（M0 探针 + M3 真机 E2E，见 §2 / §2.1）｜ **最后核对**：2026-11-05
 > **实测环境**：Windows 11 / Node 24 / Qoder CLI 1.1.78（官方原生安装）。结论**仅适用于 qodercli 1.1.78**。

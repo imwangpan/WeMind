@@ -1,5 +1,7 @@
 # 接入 GitHub Copilot CLI
 
+> **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+
 > **最后核对**：2026-11-09 ｜ **实测环境**：Windows 11、Node 24.21.0、GitHub Copilot CLI 1.0.107 ｜ **状态**：✅ 已内置预设并通过 ACP 探针；WeChat brain/worker 真机 E2E 待验证。
 
 Copilot CLI 原生支持 ACP，可作为 WeMind 的对话大脑与任务 worker。内置 `copilot` 预设隔离 `COPILOT_HOME`，登录配置与个人指令/技能同步进沙箱；MCP 按 WeMind 激活集经 ACP 提供，`wechat` 始终排除。
@@ -47,7 +49,7 @@ copilot: {
 
 - `initialize`、`session/new`、流式 `session/update`、`session/load` 成功；强杀后恢复同一 session 并答出此前提示词中的秘密词。
 - 图片 prompt 被 ACP 接收；本次 Auto 模型拒绝 1×1 PNG，CLI 提示后退化为不带图重试。不同模型的图像能力可能不同，属于待复测项。
-- `initialize` 只广告 MCP HTTP/SSE，但把 stdio MCP 通过 `session/new.mcpServers` 传入后，模型实际调用测试工具并答出 `PONG`；不能仅按 capabilities 字段推断。
+- `initialize` 只声明 MCP HTTP/SSE，但把 stdio MCP 通过 `session/new.mcpServers` 传入后，模型实际调用测试工具并答出 `PONG`；不能仅按 capabilities 字段推断。
 - 默认不开 `--allow-all-tools` 时文件工具触发 `session/request_permission` 并被 WeMind 探针拒绝；加该参数后，测试文件在临时工作目录成功写入，且未产生权限反向请求。
 - `--acp` 输出包含 usage/tool/thought 等 activity 帧。短 prompt 首段正文约 6 秒；带 MCP 工具的测试约 18 秒。
 

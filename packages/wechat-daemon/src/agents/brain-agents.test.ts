@@ -49,6 +49,7 @@ const VARS = [
   "WEMIND_BRAIN_REAL_HOME",
   "WEMIND_BRAIN_INHERIT_DIRS",
   "WEMIND_ACP_SESSION_MODE",
+  "WEMIND_HOME_MODE",
   "KIRO_CLI_BIN",
   "CLINE_PROVIDER",
   "CLINE_API_KEY",
@@ -284,6 +285,7 @@ describe("resolveAgent agent", () => {
 
   it("deepseek：dsh.cmd + DSH_HOME + resume/model/images=false", () => {
     clearVars();
+    process.env.WEMIND_HOME_MODE = "sandbox"; // sessionPatch 只在 sandbox 下启用（real 用真实会话目录）
     process.env.WEMIND_BRAIN = "deepseek";
     const ag = resolveAgent();
     expect(ag.name).toBe("deepseek");
@@ -309,6 +311,7 @@ describe("resolveAgent agent", () => {
 
   it("deepseek 会话目录隔离：prepareAgent 落盘 --patch，root 按 brain/worker 分开；用户自己的 --patch 不覆盖", () => {
     clearVars();
+    process.env.WEMIND_HOME_MODE = "sandbox";
     const fake = {
       sessionPatch: {
         file: path.join(scratch, "dsh-sessions", "session-root-brain.patch.yml"),
@@ -362,8 +365,10 @@ describe("resolveAgent agent", () => {
     expect(cx.bin).toBe(process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
     expect(cx.shell).toBe(true);
     expect(cx.heartbeatMs).toBe(60_000);
-    // 适配器不支持客户端提供的 stdio MCP server（探针实测 mcpCapabilities.acp=false）→ 不开 mcpViaAcp
-    expect(cx.mcpViaAcp).toBe(false);
+    // 2026-11-12 复测：codex-acp 2.5.0 与 2.6.0 都支持客户端提供的 stdio MCP（模型实际调用了 fake_ping）。
+    // `mcpCapabilities.acp=false` 指 MCP-over-ACP，不是 stdio；旧结论是误读。
+    expect(cx.mcpViaAcp).toBe(true);
+    expect(cx.catalogFile).toBe("config.toml");
     // 没用会话模式的 agent 不乱调 set_mode
     expect(resolveAgent({ agent: "kiro" }).sessionMode).toBeUndefined();
     expect(resolveAgent({ agent: "deepseek" }).sessionMode).toBeUndefined();
@@ -443,6 +448,8 @@ describe("resolveAgent agent", () => {
     expect(ag.shell).toBe(false); // 原生 .exe/.bin，不走 shell
     expect(ag.homeEnvVar).toBeUndefined(); // 用 env 指到「配置目录」本身，而非沙箱根
     expect(ag.env.QODER_CONFIG_DIR).toMatch(/^%HOME%[\\/]qoder$/);
+    // real 模式直接用真实 home 时，%HOME% 模板会拼成 ~/.qoder/qoder；realEnv 必须改成真实目录
+    expect(agentEnv(ag, ag.realHome!).QODER_CONFIG_DIR).toBe(ag.realHome);
     expect(ag.configSubdir).toBe("qoder");
     expect(ag.mcpFormat).toBe("kiro"); // 键名同为 mcpServers
     expect(ag.mcpConfigFile).toBe("settings.json");
@@ -467,6 +474,11 @@ describe("resolveAgent agent", () => {
     expect(ag.env.CLINE_DIR).toMatch(/^%HOME%[\\/]cline$/);
     expect(ag.env.CLINE_DATA_DIR).toMatch(/^%HOME%[\\/]cline[\\/]data$/);
     expect(ag.env.CLINE_MCP_SETTINGS_PATH).toMatch(/^%HOME%[\\/]cline[\\/]mcp\.json$/);
+    // real 模式：CLINE_* 必须指到真实的 ~/.cline，而不是 ~/.cline/cline
+    const realEnv = agentEnv(ag, ag.realHome!);
+    expect(realEnv.CLINE_DIR).toBe(ag.realHome);
+    expect(realEnv.CLINE_DATA_DIR).toBe(path.join(ag.realHome!, "data"));
+    expect(realEnv.CLINE_MCP_SETTINGS_PATH).toBe(path.join(ag.realHome!, "mcp.json"));
     expect(ag.configSubdir).toBe("cline");
     expect(ag.mcpFormat).toBe("kiro"); // cline_mcp_settings.json 的键名同为 mcpServers
     expect(ag.mcpConfigFile).toBe("mcp.json");
@@ -478,7 +490,7 @@ describe("resolveAgent agent", () => {
     expect(ag.inheritDirs).toEqual(["rules", "skills", "agents"]);
     expect(ag.mcpViaAcp).toBe(false); // ACP session/new 的 mcpServers 不被 Cline 使用
     expect(ag.restore).toBeUndefined(); // 有 session/load，用默认
-    expect(ag.images).toBe(false); // 3.0.74 ACP 广告 image:true 但 de() 只保留 text（图片被丢）
+    expect(ag.images).toBe(false); // 3.0.74 ACP 声明 image:true 但 de() 只保留 text（图片被丢）
   });
 
   it("cline：父进程没给认证变量时，从真实 providers.json 派生 CLINE_PROVIDER/KEY；显式 env 优先", () => {
@@ -531,6 +543,8 @@ describe("resolveAgent agent", () => {
     expect(agentEnv(ag, path.join("/tmp", "wemind-home")).CLAUDE_CONFIG_DIR).toBe(
       path.join("/tmp", "wemind-home", "claude"),
     );
+    // real 模式：直接指到 ~/.claude，而不是 ~/.claude/claude
+    expect(agentEnv(ag, ag.realHome!).CLAUDE_CONFIG_DIR).toBe(ag.realHome);
     // 记忆/技能继承；凭据同步（OAuth 登录态）
     expect(ag.realHome).toBe(path.join(os.homedir(), ".claude"));
     expect(ag.inheritDirs).toEqual(["skills", "agents", "commands"]);

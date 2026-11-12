@@ -1,10 +1,16 @@
 import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
-import os from "node:os";
 import fs from "node:fs";
 
 import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
-import { WORKER_HOME, workerMcpServers } from "../agents/sandbox/worker-sandbox.js";
+import { ensureWorkerHome, workerMcpServers } from "../agents/sandbox/worker-sandbox.js";
+import { assertNoForbiddenNativeMcp, nativeMcpServers } from "../agents/sandbox/mcp-sandbox.js";
+import { agentRuntime } from "../agents/config/runtime.js";
+import { configFingerprint } from "../agents/config/config-fingerprint.js";
+import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
+import { readHomeMode } from "../agents/config/home-mode.js";
+import { deleteSessionCwd, getSessionCwd, setSessionCwd } from "../agents/config/session-cwd.js";
+import { ensureWorkspace } from "../agents/config/workspace.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
 import {
   backupCorruptSessionMap,
@@ -17,6 +23,7 @@ import {
   applyAcpModel,
   applyAcpSessionMode,
   availableAcpModes,
+  acpTurnFirstFrameMs,
   acpTurnChunks,
   acpTurnText,
   beginAcpTurn,
@@ -40,16 +47,26 @@ const log = createLogger("wechat-daemon/worker");
  * - **每连接一实例**（child/pending/session/进度全在实例里，不再是模块级全局）——多任务并行要有多个进程；
  *   进程池（worker-pool.ts）持有它们、按 agent 复用，任务结束把连接**还给进程池**而不是杀掉；
  * - **每任务一个 session key**（`task-<编号>@<userId>`），持久化到 worker-sessions.json，重建后 session/load 续上下文；
- * - **cwd = 任务工作目录**（本地派发可指定，默认用户主目录），而沙箱走 WORKER_HOME（继承全量 MCP 除 wechat + 记忆）；
+ * - **cwd = 任务工作目录**（本地派发可指定，默认账号 workspace/worker），而配置 home 走 agent-view/worker（sandbox 才是 WORKER_HOME）；
  * - **更宽松超时**（漫长任务，env 可调）；去掉 brain 的「可发图」首轮提示（任务执行不是聊天发图场景）。
  * 自愈：session/prompt 超时/失败 → 只杀**这一条**连接的进程；下次 ask 重建并 session/load 恢复（→ 用户回「继续」即可续跑）。
  */
 
-const WORKER_CWD = process.env.WEMIND_WORKER_CWD?.trim() || os.homedir(); // 任务工作目录默认值
-
-/** 实际生效的任务工作目录：显式 cwd 优先，否则 `WEMIND_WORKER_CWD` / 用户主目录。 */
+/** 实际生效的任务工作目录：显式 cwd > `WEMIND_WORKER_CWD`（一次性覆盖）> 账号的 worker 默认工作区。 */
 export function effectiveWorkerCwd(cwd?: string): string {
-  return cwd?.trim() || WORKER_CWD;
+  const explicit = cwd?.trim() || process.env.WEMIND_WORKER_CWD?.trim();
+  if (explicit) {
+    const p = path.resolve(explicit);
+    try {
+      if (!fs.statSync(p).isDirectory()) throw new Error("不是目录");
+    } catch (e) {
+      throw new Error(`任务工作目录不可用：${p}（${e instanceof Error ? e.message : String(e)}）`);
+    }
+    return p;
+  }
+  const ws = ensureWorkspace("worker", DATA_DIR);
+  if (ws.problem) throw new Error(`worker 默认工作区不可用：${ws.problem}`);
+  return ws.path;
 }
 const REQ_TIMEOUT = 30_000; // initialize / session/new / session/load
 const PROMPT_IDLE_MS = Number(process.env.WEMIND_WORKER_IDLE_MS) || 180_000; // 无任何帧多久算"卡死"（比 brain 宽松：3min）
@@ -100,9 +117,11 @@ export class WorkerConn {
 
   private child: ChildProcessWithoutNullStreams | null = null;
   private initialized = false;
+  private configFp = "";
   private idCounter = 0;
   private pending = new Map<number, AcpPending>();
   private sessions = new Map<string, string>(); // sessionKey -> sessionId
+  private sessionPerf = new Map<string, { mcpCount: number; sessionNewMs: number }>();
   private turn = newTurnState(); // 当前回合的拼接缓冲与进度状态
   private rpcState = { lastFrameAt: 0, frameSeq: 0 }; // 最近收帧时间 + 累计序号
   private stdoutLines = new LineDecoder();
@@ -158,6 +177,7 @@ export class WorkerConn {
     const c = this.child;
     this.child = null;
     this.initialized = false;
+    this.configFp = "";
     if (c?.pid) {
       try {
         if (process.platform === "win32")
@@ -179,6 +199,7 @@ export class WorkerConn {
     }
     this.pending.clear();
     this.sessions.clear();
+    this.sessionPerf.clear();
     clearAcpTurn(this.turn);
     this.stdoutLines.reset();
     log.info(`${this.id}(${this.agent.name}) killed`);
@@ -188,8 +209,10 @@ export class WorkerConn {
   dropSession(key: string): void {
     this.sessions.delete(key);
     const map = loadSessionMap(this.agent);
+    const sid = map[sessionKey(this.agent.name, key)];
     delete map[sessionKey(this.agent.name, key)];
     saveSessionMap(map);
+    if (sid) deleteSessionCwd(this.agent.name, sid);
   }
 
   /** 提前起进程：只做「起进程 + initialize」，不建会话（任务拿到连接时用；失败由调用方处理）。 */
@@ -225,9 +248,14 @@ export class WorkerConn {
         },
       );
       const txt = acpTurnText(this.turn, sid);
+      const turnPerf = {
+        mcpCount: this.sessionPerf.get(sid)?.mcpCount ?? 0,
+        firstFrameMs: acpTurnFirstFrameMs(this.turn),
+      };
       log.info(
-        `${this.id}(${this.agent.name}) prompt ok ${Date.now() - t0}ms chunks=${acpTurnChunks(this.turn, sid)} updateTypes=[${[...this.turn.seenUpdateTypes].join(",")}]`,
+        `${this.id}(${this.agent.name}) prompt ok ${Date.now() - t0}ms chunks=${acpTurnChunks(this.turn, sid)} updateTypes=[${[...this.turn.seenUpdateTypes].join(",")}] ${formatMcpPerf(turnPerf)}`,
       );
+      for (const warning of mcpPerfWarnings(turnPerf)) log.warn(`${this.id} ${warning}`);
       return txt;
     } catch (e) {
       const chunks = acpTurnChunks(this.turn, sid);
@@ -247,21 +275,32 @@ export class WorkerConn {
   }
 
   private async ensureProcess(): Promise<void> {
-    if (this.isAlive() && this.initialized) return;
+    const fp = readHomeMode() === "sandbox" ? "" : configFingerprint(this.agent);
+    if (this.isAlive() && this.initialized && this.configFp === fp) return;
+    if (this.isAlive() && this.initialized)
+      log.info(`${this.id}(${this.agent.name}) real config changed → rebuild`);
     this.kill();
     this.spawnError = undefined; // 上一次的 spawn 失败不能污染这一次
     const kept: string[] = [];
-    const env = agentEnv(this.agent, WORKER_HOME, kept); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
+    // 视图链接 + 生成的 MCP/settings/overlay 副本一起重建：长驻的空闲 worker 复用时也能看到终端侧的新配置。
+    // 用 effectiveCwd() 而不是 this.cwd：后者不含 WEMIND_WORKER_CWD 一次性覆盖，
+    // 否则 spawn 的 cwd 与 session/new 的 cwd 可能不一致。
+    const taskCwd = this.effectiveCwd();
+    // 视图链接 + 生成的 MCP/settings/overlay 副本一起重建：长驻的空闲 worker 复用时也能看到终端侧的新配置。
+    ensureWorkerHome(this.agent, DATA_DIR, { cwd: taskCwd });
+    assertNoForbiddenNativeMcp(this.agent); // Codex 的 config.toml 由它自己加载 → 有 wechat 就拒绝启动
+    const rt = agentRuntime("worker", this.agent, DATA_DIR, { cwd: taskCwd }); // real/mirror 会构建 config view；sandbox 用账号沙箱
+    const env = agentEnv(this.agent, rt.home, kept); // 父进程 env → 配置视图/沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
     if (kept.length) log.info(`${this.id} env defaults kept from parent: ${kept.join(",")}`);
     prepareAgent(this.agent); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
-    const cwd = this.effectiveCwd();
+    const cwd = rt.cwd;
     const proc = spawnAgent(this.agent, {
       cwd, // 任务工作目录（本地派发可指定，否则默认 WORKER_CWD），区别于沙箱
       env,
     });
     this.child = proc;
     log.info(
-      `${this.id} spawn ${this.agent.name} worker pid=${proc.pid} cwd=${cwd} home=${WORKER_HOME} task=${this.taskId ?? "-"}`,
+      `${this.id} spawn ${this.agent.name} worker pid=${proc.pid} cwd=${cwd} home=${rt.home} task=${this.taskId ?? "-"}`,
     );
     this.onSpawn?.(this); // 立刻落 pid 身份记录（在握手之前，`wemind stop` 才来得及找到它）
     proc.stdout.on("data", (d) =>
@@ -297,6 +336,7 @@ export class WorkerConn {
       throw e;
     }
     this.initialized = true;
+    this.configFp = fp;
     log.info(`${this.id} initialized`);
   }
 
@@ -305,7 +345,7 @@ export class WorkerConn {
   private async ensureSession(key: string, strictResume = false): Promise<string> {
     const existing = this.sessions.get(key);
     if (existing) return existing;
-    // 配了 mcpViaAcp 的 agent（DSH）：worker 继承全量 MCP（除排除集），随 session 下发；其余 agent 传空
+    // 配了 mcpViaAcp 的 agent（DSH / Claude Code / Copilot / Codex）：worker 继承全量 MCP（除排除集），随 session 下发；其余 agent 传空
     const mcpServers = this.agent.mcpViaAcp ? workerMcpServers(this.agent) : [];
     const mapKey = sessionKey(this.agent.name, key);
     const map = loadSessionMap(this.agent);
@@ -313,14 +353,19 @@ export class WorkerConn {
     if (saved) {
       const methods: Array<"load" | "resume"> =
         this.agent.restore === "resume" ? ["resume"] : ["load", "resume"];
+      const savedCwd = getSessionCwd(this.agent.name, saved);
+      const cwd = savedCwd ?? this.effectiveCwd();
       for (const method of methods) {
+        let establishMs = 0;
         try {
+          const tEstablish = Date.now();
           const restored = await requestAcp(
             this.host,
             `session/${method}`,
-            { sessionId: saved, cwd: this.effectiveCwd(), mcpServers },
+            { sessionId: saved, cwd, mcpServers },
             REQ_TIMEOUT,
           );
+          establishMs = Date.now() - tEstablish;
           await drainAcpReplay(this.host, this.agent);
           await applyAcpModel(this.host, this.agent, saved, REQ_TIMEOUT);
           await applyAcpSessionMode(
@@ -331,9 +376,17 @@ export class WorkerConn {
             REQ_TIMEOUT,
           );
           this.sessions.set(key, saved);
+          if (!savedCwd) setSessionCwd(this.agent.name, saved, cwd);
+          const perf = {
+            mcpCount: mcpServers.length,
+            nativeMcpCount: Object.keys(nativeMcpServers(this.agent)).length,
+            sessionNewMs: establishMs,
+          };
+          this.sessionPerf.set(saved, perf);
           log.info(
-            `${this.id} session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`,
+            `${this.id} session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}] ${formatMcpPerf(perf)}`,
           );
+          for (const warning of mcpPerfWarnings(perf)) log.warn(`${this.id} ${warning}`);
           return saved;
         } catch (e) {
           log.warn(`${this.id} session/${method} failed (${String(e)})`);
@@ -344,12 +397,15 @@ export class WorkerConn {
           `接不上原会话 ${saved}（该 agent 不支持恢复、或这条会话已被它自己清理）。重试还是同一个结果——想重来请结束这条任务后重新派一条（把进展写进新任务里）。`,
         );
     }
+    const newCwd = this.effectiveCwd();
+    const tNew = Date.now();
     const res = (await requestAcp(
       this.host,
       "session/new",
-      { cwd: this.effectiveCwd(), mcpServers },
+      { cwd: newCwd, mcpServers },
       REQ_TIMEOUT,
     )) as { sessionId?: string };
+    const sessionNewMs = Date.now() - tNew;
     if (!res?.sessionId) throw new Error("session/new returned no sessionId");
     await applyAcpModel(this.host, this.agent, res.sessionId, REQ_TIMEOUT);
     await applyAcpSessionMode(
@@ -360,13 +416,21 @@ export class WorkerConn {
       REQ_TIMEOUT,
     );
     this.sessions.set(key, res.sessionId);
+    setSessionCwd(this.agent.name, res.sessionId, newCwd);
     // 重新读改写：多个连接并存时，别用陈旧的记录整张覆盖（会抹掉别的任务刚写的 key）
     const fresh = loadSessionMap(this.agent);
     fresh[mapKey] = res.sessionId;
     saveSessionMap(fresh);
+    const perf = {
+      mcpCount: mcpServers.length,
+      nativeMcpCount: Object.keys(nativeMcpServers(this.agent)).length,
+      sessionNewMs,
+    };
+    this.sessionPerf.set(res.sessionId, perf);
     log.info(
-      `${this.id} session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`,
+      `${this.id} session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}] ${formatMcpPerf(perf)}`,
     );
+    for (const warning of mcpPerfWarnings(perf)) log.warn(`${this.id} ${warning}`);
     return res.sessionId;
   }
 }

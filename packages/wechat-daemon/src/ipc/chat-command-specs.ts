@@ -40,6 +40,16 @@ export type ChatCommand =
   | { kind: "handoff" }
   /** 临时放行敏感文件（凭证/状态文件）的外发窗口。 */
   | { kind: "allowSensitive"; minutes?: number }
+  /** 查看 / 设置 brain 默认工作区（登录者）。 */
+  | { kind: "workspace"; path?: string; reset?: boolean }
+  /** 微信独享配置：查看 / 设置 / 删除（登录者，确定性入口）。 */
+  | {
+      kind: "wechatConfig";
+      action: "show" | "set" | "unset";
+      agent: string;
+      target?: string;
+      value?: string;
+    }
   | { kind: "help" };
 
 export type TaskCommand =
@@ -59,6 +69,8 @@ export const OWNER_ONLY_KINDS: ReadonlySet<ChatCommand["kind"]> = new Set([
   "workerBrain",
   "handoff",
   "allowSensitive",
+  "workspace",
+  "wechatConfig",
 ]);
 
 export function isOwnerOnly(cmd: ChatCommand): boolean {
@@ -259,6 +271,59 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
       const m = t.match(/^(?:允许(?:发送)?敏感文件|\/allow-sensitive)(?:\s*(\d+)\s*分?钟?)?$/i);
       if (!m) return null;
       return m[1] ? { kind: "allowSensitive", minutes: Number(m[1]) } : { kind: "allowSensitive" };
+    },
+  },
+  {
+    id: "workspace.show",
+    section: "brain",
+    ownerOnly: true,
+    zh: "工作区",
+    slash: "/workspace",
+    cli: "wemind workspace show",
+    brief: "查看 brain 默认工作区",
+    match: (t) => (/^(?:工作区|\/workspace)$/i.test(t) ? { kind: "workspace" } : null),
+  },
+  {
+    id: "workspace.set",
+    section: "brain",
+    ownerOnly: true,
+    zh: "设置工作区 <绝对路径>",
+    slash: "/workspace set <绝对路径>",
+    cli: "wemind workspace set <绝对路径> --role brain",
+    brief: "设置 brain 默认工作区（新会话生效）",
+    match: (t) => {
+      const m = t.match(/^(?:设置工作区|\/workspace\s+set)\s+([\s\S]+)$/i);
+      return m ? { kind: "workspace", path: m[1].trim() } : null;
+    },
+  },
+  {
+    id: "workspace.reset",
+    section: "brain",
+    ownerOnly: true,
+    zh: "重置工作区",
+    slash: "/workspace reset",
+    cli: "wemind workspace reset --role brain",
+    brief: "恢复 brain 默认 managed 工作区",
+    match: (t) =>
+      /^(?:重置工作区|\/workspace\s+reset)$/i.test(t) ? { kind: "workspace", reset: true } : null,
+  },
+  {
+    id: "wechat.config",
+    section: "brain",
+    ownerOnly: true,
+    zh: "微信配置 <查看|设置|删除> <agent> [<file#键路径>] [值]",
+    brief: "只改微信独享 overlay，不污染真实配置",
+    match: (t) => {
+      const m = t.match(/^微信配置\s+(查看|设置|删除)\s+(\S+)(?:\s+(\S+))?(?:\s+([\s\S]+))?$/i);
+      if (!m) return null;
+      const action = m[1] === "查看" ? "show" : m[1] === "设置" ? "set" : "unset";
+      return {
+        kind: "wechatConfig",
+        action,
+        agent: m[2],
+        target: m[3]?.trim(),
+        value: m[4]?.trim(),
+      };
     },
   },
   {

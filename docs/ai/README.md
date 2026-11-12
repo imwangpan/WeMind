@@ -84,7 +84,7 @@ poller（长轮询，不被大脑阻塞）
 关键点：
 
 - **入站消息类型**：文本、图片、语音、文件、视频；引用消息做**内联引用**（`[引用消息] 标题 | 正文`，只有 `svr_id` 时给「内容未缓存」占位；引用正文缓存暂未实现）。没有 emoji/位置/小程序/合并转发的 item 类型；纯未知类型、以及只引用不输入正文的消息都会被明确告知，不静默丢、也不拿空 prompt 问大脑。
-- **入站媒体**：图片下载解密成 ACP image 块；文件/视频/无转写语音下载后存 `<BRAIN_HOME>/media/inbound`，prompt 里给绝对路径（语音用 SILK→WAV，失败保留原始 SILK 并说明）。有微信转写的语音直接当文本，不再下载、也不算附件（语音里的控制/续跑指令照常生效）。媒体目录默认保留 30 天 / 总量 1GB，启动时清理，之后每次写入入站媒体时检查、至少间隔 1 小时才真正清理。
+- **入站媒体**：图片下载解密成 ACP image 块；文件/视频/无转写语音在默认 `real` / `mirror` 模式存 `<账号>/media/inbound`（`sandbox` 才在 `<sandbox>/media/inbound`），prompt 里给绝对路径（语音用 SILK→WAV，失败保留原始 SILK 并说明）。有微信转写的语音直接当文本，不再下载、也不算附件（语音里的控制/续跑指令照常生效）。媒体目录默认保留 30 天 / 总量 1GB，启动时清理，之后每次写入入站媒体时检查、至少间隔 1 小时才真正清理。
 - **出站文件/视频**：brain 用显式 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)` 触发（路径含 `)` 用 `<...>`）；读取前 realpath + 敏感文件 denylist（含各 agent 登录态、`.auth/`、沙箱/真实 home 的 `settings.json`/`models*.json`）+ 拒绝 UNC/网络路径与 NTFS 数据流 + 单文件 25MB 上限；硬链接属已接受风险。临时要发 `account.json` 这类文件时，登录者发 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30，仅本进程内生效；只跳过名单，其余闸门照旧）：先开后发、或被拦下后再发这条指令补发（内存里留 30 分钟）都成立。**不通**用普通链接扫描方式发本地文件。
 - **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`（键 `<agent>:<userId>`，换大脑不丢各自上下文）——**这张当前会话表是「当前是哪个会话」的唯一权威**；`session-registry.json` 只是展示用的登记表（名字/标题/轮次），坏了不影响恢复；
 - **worker 是 N 个独立 ACP 进程**（进程池，一条任务一条连接），任务会话在 `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`）；任务表另存 `tasks.json` 供**重启后续跑**（未完成的标「已中断」，回「继续」才续跑）；
@@ -124,6 +124,8 @@ poller（长轮询，不被大脑阻塞）
 | 事实 | 状态 | 证据/备注 |
 |---|---|---|
 | 默认大脑是 `auto`，不是固定 kiro | ✅ 代码 | `brain-agents.ts` `resolveAgent()` |
+| 默认 `homeMode=real`，Agent 真实配置/技能/记忆/会话库与终端共享 | ✅ 代码/测试 | `agents/config/home-mode.ts`；`real`/`mirror` 只生成 `<账号>/agent-view/<role>/<agent>/` 最小视图，未覆盖项链接真实 home；`sandbox` 才用 `brain-home`/`worker-home`（`config.test.ts`） |
+| brain 默认工作区是 `<账号>/workspace/brain`，worker 是 `<账号>/workspace/worker` | ✅ 代码/测试 | `agents/config/workspace.ts`；可用 `wemind config workspace set <role> <绝对路径>` 改为外部目录；cwd 变化只对新会话生效 |
 | kiro agent 可用 | ✅ 实测 | 现有 daemon（v2 2.37.1 真机；v3 探针级）；`docs/接入方案/接入其它-ACP-Agent.md` §5 |
 | kiro 只有 v2 一套启动方式 | ⚪ **不成立（2026-11-03）** | v3 拒绝 `--trust-all-tools`/`-a`/`--trust-tools`（会连 `initialize` 都不回）；预设 `kiroEngine: true` 按 `--agent-engine` → 真实 `settings/cli.json` 的 `acp.agentEngine` → CLI 主版本 ≥3 判定（`acp --help`：两者都没设时默认 v2；CLI ≥3 默认 v3 为假设/待实测），v3 时剔除 v2 参数、补 `--agent-engine v3`，免审批改沙箱 `settings/permissions.yaml` 的 allow-all 规则（真实已有则原样保留）。`session/new` 的 `_meta.kiro.policyPreset` 实测无效 |
 | opencode agent 可用（`session/load`、无反向请求） | ✅ 实测 | `docs/接入方案/接入-OpenCode.md` §3.3 |
@@ -134,10 +136,10 @@ poller（长轮询，不被大脑阻塞）
 | `wemind brain check` 默认 60s | ✅ 代码 | 冷启动慢的 agent 仍可能误报 |
 | `deepseek` agent 已内置 | ✅ 代码/实测 | `dsh.cmd` + `DSH_HOME` + `.credentials.yaml` + `model` + `resume` + `mcpViaAcp`（动态 MCP）；微信 brain/worker E2E、MCP（含微信侧全链路）、记忆/技能、图片友好拒绝均已验。**2026-11-03（rc.3）**：预设 `isolateSessions: true`，`prepareAgent()` 落盘 `--patch` 把会话 root 指到 `<账号目录>/agent-sessions/deepseek/<brain\|worker>`（共用沙箱根的 `sessions/` 被 kiro/pi 写过会让 DSH 报 `unsupported flat-file layout`）；`- id: acp` 的 model 被桌面端目录淘汰时 `wemind brain` 用 `acpModelHint` 给替换提示（只提示不代改） |
 | `qoder` agent 已内置 | ✅ 代码/实测 | `qodercli --acp --yolo` + `QODER_CONFIG_DIR` + `settingsBase`（剥离 providers/model）+ `.auth/user`/`.auth/machine_id`；M0–M3 全部已验：发图、动态 MCP、冷重启 `session/load`、worker 中断续跑、`memory/` junction 继承 |
-| `cline` agent 已内置 | ✅ 代码/实测（3.0.74） | `cline --acp --auto-approve true` + `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 沙箱（`configSubdir: "cline"`）；`providers.json` 同步；`models.json` 模型目录同步（缺它会回退 gpt-4o）；**自定义 provider 由 `credentialEnv`（`clineCredentialEnv()`）从 `providers.json` 自动派生 `CLINE_PROVIDER`+`CLINE_API_KEY`，父进程显式值优先**；`loadSession`/硬杀后 `session/load` 已验证；**图片 ❌**（广告 `image:true` 但 ACP `prompt` 只保留 text → `images:false`）；ACP `mcpServers` 不生效→文件式 MCP；`session/close` 无 |
+| `cline` agent 已内置 | ✅ 代码/实测（3.0.74） | `cline --acp --auto-approve true` + `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 沙箱（`configSubdir: "cline"`）；`providers.json` 同步；`models.json` 模型目录同步（缺它会回退 gpt-4o）；**自定义 provider 由 `credentialEnv`（`clineCredentialEnv()`）从 `providers.json` 自动派生 `CLINE_PROVIDER`+`CLINE_API_KEY`，父进程显式值优先**；`loadSession`/硬杀后 `session/load` 已验证；**图片 ❌**（声明 `image:true` 但 ACP `prompt` 只保留 text → `images:false`）；ACP `mcpServers` 不生效→文件式 MCP；`session/close` 无 |
 | `gemini` 预设已内置 | ✅ 代码/探针级实测 + 真机 E2E（0.66.0，2026-11-01） | `gemini --acp --approval-mode yolo --skip-trust`；`GEMINI_CLI_HOME` 指向沙箱根、配置目录 `<它>/.gemini`（`configSubdir: ".gemini"`）；MCP 走配置目录 `settings.json` 的 `mcpServers`（探针实测 `probe_ping` 可调用）；`settingsBase` 只剥 `mcpServers`（保留 model/security，按 JSONC 解析）+ `.env` / `oauth_creds.json` / `google_accounts.json` 凭据同步 + `skills/`/`GEMINI.md` 继承；`loadSession: true`、图片 ✅、工具调用 0 反向请求；**`load` 返回后会异步回放历史** → `replayOnLoad` 先等帧安静；`session/set_config_option` ❌（`--model` 走 `modelArg`）；在 `AUTO_PROBE_ORDER` 第 4 位（opencode → cline → qoder → gemini）。见 [接入-Gemini.md](../接入方案/接入-Gemini.md) |
 | `claude-code` 预设已内置（探针级实测 + 真机微信单轮 E2E） | ✅ 探针级实测 + 真机微信单轮 E2E 已通过（2026-10-31；重启续聊 / MCP / 任务待复测） | 全局 `npm i -g @agentclientprotocol/claude-agent-acp`（Node ≥22；`binWin=claude-agent-acp.cmd` + `shell: true`）+ `CLAUDE_CONFIG_DIR` 沙箱（`~/.claude.json` 一并隔离）+ `mcpViaAcp`（目录 `~/.claude.json`；`initialize` 只声明 http/sse，**stdio 实测可用**）+ `sessionMode bypassPermissions`（适配器不解析 CLI flag）；`loadSession: true`、`sessionCapabilities.resume/close/delete/fork/list`；**不在** `AUTO_PROBE_ORDER`（独立安装、各有认证），只能显式选用。见 `docs/接入方案/接入-ClaudeCode.md` |
-| `codex` 预设存在且已实测 | ✅ 代码/实测（探针 + 真机 E2E） | 适配器 `@agentclientprotocol/codex-acp` 2.5.0（**全局安装**，口径同 claude-code）：`load`/图片/`set_mode`/`set_config_option(model)` ✅、工具调用 0 反向请求；**stdio MCP ❌**（`mcpCapabilities.acp=false`）→ 不开 `mcpViaAcp`；心跳 60s；**没有沙箱配置目录**（只有 cwd 指向沙箱根）；**不在** `AUTO_PROBE_ORDER`，只能显式选用；真机 E2E：worker 与 brain 通道均通过（见 [接入-Codex.md](../接入方案/接入-Codex.md)） |
+| `codex` 预设存在且已实测 | ✅ 代码/实测（探针 + 真机 E2E + 2026-11-12 MCP/2.6.0 复测） | 适配器 `@agentclientprotocol/codex-acp` 2.6.0（**全局安装**，口径同 claude-code；2.5.0 结论保留）：`load`/图片/`set_mode`/`set_config_option(model)` ✅、工具调用 0 反向请求；**stdio MCP ✅**（2.5.0 与 2.6.0 都实测模型调用 fake MCP；`mcpCapabilities.acp=false` 只指 MCP-over-ACP）→ 已开 `mcpViaAcp`；原生 `~/.codex/config.toml` 仍由 Codex 加载，同名时原生优先；WeMind **只读**解析它的 `[mcp_servers.*]`（列出/指标，不写回、无法 unload，含 `wechat` 拒绝启动）；心跳 60s；**没有独立配置目录**（cwd 是角色工作区）；**不在** `AUTO_PROBE_ORDER`，只能显式选用；真机 E2E：worker 与 brain 通道均通过（见 [接入-Codex.md](../接入方案/接入-Codex.md)） |
 | `pi` 预设已内置 | ✅ 代码/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务） | 社区适配器 `pi-acp`（**全局安装**）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent`，先登录/配好模型；只装适配器会被 `agentProblem()` 提前拒绝）；`PI_CODING_AGENT_DIR` 沙箱根、`settings.json`/`auth.json`/`models*.json` 同步、`skills/` junction + `AGENTS.md` 复制；MCP 走 `<沙箱根>/mcp.json`（kiro 格式，`pi mcp list` 实测）、`mcpViaAcp: false`（pi-acp 只存不读）；免审批无需开关；`loadSession: true`/图片 ✅/0 反向请求；**不在** `AUTO_PROBE_ORDER`；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动横幅（`## Context` / `## Skills`，用户显式设过则保留）；worker 沙箱在每次派发前按该任务的 agent 重备（`worker-pool.acquire` → `ensureWorkerHome(ag)`，否则派到非默认 agent 时拿空配置跑）；沙箱隔离不完整（pi-acp 从真实 `homedir()` 读 session-map/prompts/skills）。见 [接入-pi.md](../接入方案/接入-pi.md) |
 | `copilot` 预设已内置（Copilot CLI 1.0.107） | ✅ ACP 探针级实测（Windows，2026-11-09；WeChat E2E 待验证） | 原生 `copilot --acp --no-auto-update --allow-all-tools`，Windows `copilot.cmd` 经 shell 启动；`COPILOT_HOME` 沙箱同步 `config.json`、`skills/` 与 `copilot-instructions.md`；MCP 从真实 `~/.copilot/mcp-config.json` 读目录，经 ACP `mcpServers` 传递，stdio 工具实测可调用且排除 `wechat`；`loadSession: true`、强杀后恢复成功；图片 prompt 被接受但本次 Auto 模型拒绝 PNG 后退化文本重试；**不在** `AUTO_PROBE_ORDER`，需显式选择（安装不代表已登录）。见 [接入-Copilot.md](../接入方案/接入-Copilot.md) |
 | Qoder 沙箱 MCP 生效 | ✅ 实测 | 沙箱 `settings.json.mcpServers` 可被真实调用；项目级 `.mcp.json` 即使 `--yolo` 也不自动加载 |
@@ -150,9 +152,9 @@ poller（长轮询，不被大脑阻塞）
 | 用户 `- id: acp` 的 model 会一直有效 | ⚪ **不成立（2026-11-03，rc.3）** | 桌面端升级会重写 `llm-pi-ai` 的模型目录，独立一条的 `- id: acp` 不会被迁移；`session/new` 报 `no configured model`。`wemind brain` 检查并给出可粘贴替换（优先 `agent-default-model` 的值），**不自动改真实 profile** |
 | DSH `0.2.1-rc.2` 有 `session/load` | ❌ 实测 | `-32601 Method not found` |
 | DSH `0.2.1-rc.2` 接受图片 | ❌ 实测 | `image:false`；带图 `-32602` |
-| DSH `0.2.1-rc.2` 接受 stdio/HTTP MCP | ✅ 实测 | stdio：假 MCP 在 `session/new`/`resume` 均被模型真实调用（两个方法各调用 2 次）；HTTP 能力已广告、未实测 |
+| DSH `0.2.1-rc.2` 接受 stdio/HTTP MCP | ✅ 实测 | stdio：假 MCP 在 `session/new`/`resume` 均被模型真实调用（两个方法各调用 2 次）；HTTP 能力已声明、未实测 |
 | DSH 能保留多轮上下文（resume 后） | ✅ 实测 | PINEAPPLE：close + 强杀 + resume 后答出 |
-| DSH 默认模型路由可直接用 | ⚪ **不成立** | 默认 `deepseek-official/deepseek-v4-flash` 需 `DEEPSEEK_API_KEY`（2026-10-29 用 `acp-probe` 在 `0.2.1-rc.3` 复测，空 home 与桌面登录态下默认值都是它）——根因是桥插件的 bundle patch 写死了 `- id: acp` 的 `provider/model`，用户 profile 只覆盖 `agent-default-model`（另一个服务的键），`- id: acp` 要用户自己写（插件 README 写明的覆盖点）。WeMind 侧**原样复制** `profiles/acp/cordis.patch.yml`、不追加条目（复制前剔除用户自己挂的微信 MCP 条目——跑 `wemind-mcp` 的或 `serverName: wechat` 的 mcp-client，防沙箱里的 agent 抢同一个 bot token）；读默认模型时优先 `- id: acp`、否则 `agent-default-model`（典型 `["magpie","auto/deepseek-v4.1-flash"]`，需桌面端在运行；这个值被桌面端目录淘汰时 `wemind brain` 会提示换成目录里现有的，如 `auto/dfmodel`），会话建立后按它发 `set_config_option`（agent 自己的接口）；缺 `- id: acp` 时 `wemind brain` 给可粘贴的片段、由用户补到真实 profile；读不到才回退 `deepseek-account/deepseek-flash`；显式覆盖 `wemind brain set deepseek --model …`，`--model auto` = 跟随真实 profile 的默认 |
+| DSH 默认模型路由可直接用 | ⚪ **不成立** | 默认 `deepseek-official/deepseek-v4-flash` 需 `DEEPSEEK_API_KEY`（2026-10-29 用 `acp-probe` 在 `0.2.1-rc.3` 复测，空 home 与桌面登录态下默认值都是它）——根因是桥插件的 bundle patch 写死了 `- id: acp` 的 `provider/model`，用户 profile 只覆盖 `agent-default-model`（另一个服务的键），`- id: acp` 要用户自己写（插件 README 写明的覆盖点）。WeMind 侧 `real` 模式把整个 `profiles/` 链接真实 home，`sandbox` 模式才**原样复制** `profiles/acp/cordis.patch.yml`、不追加条目（复制前剔除用户自己挂的微信 MCP 条目——跑 `wemind-mcp` 的或 `serverName: wechat` 的 mcp-client，防沙箱里的 agent 抢同一个 bot token）；读默认模型时优先 `- id: acp`、否则 `agent-default-model`（值由用户自己的 DSH 配置决定；被目录淘汰时 `wemind brain` 会提示换成目录里现有的），会话建立后按它发 `set_config_option`（agent 自己的接口）；缺 `- id: acp` 时 `wemind brain` 给可粘贴的片段、由用户补到真实 profile；读不到才回退旧 `deepseek-account/deepseek-flash`（rc.3 已失效，只记 WARN）；显式覆盖 `wemind brain set deepseek --model …`，`--model auto` = 跟随真实 profile 的默认 |
 | DSH 首帧很慢 | ⚪ **不成立**（短任务） | 实测 1.0–2.3s；长任务仍可能静默 |
 | DSH 会发 thought/tool/usage 帧 | ✅ 实测 | `agent_thought_chunk` / `tool_call` / `usage_update` |
 | 微信连发上限约 10 条 | ✅ 实测/代码 | `CONSEC_SEND_LIMIT=10`，预留最后一条；图片/文件/视频也各占一条 |
@@ -176,7 +178,7 @@ poller（长轮询，不被大脑阻塞）
 | 多任务并发时 `sendNotice` 会撞 `ret=-2` | ⚪ **未观察到限流型（2026-10-29）** | 真机里的 `-2` 全是重启后旧 token（见下一行）；额度仍按用户共享，压力大就调小并发 |
 | Windows `taskkill /T /F` 杀池中特定进程 | ⚪ **待实测** | daemon 强杀 + `wemind stop` 已验证无孤儿；「杀池中某个特定 pid」与「`session/load` 途中强杀」未单独测 |
 | **daemon 重启后、用户下一条消息前的外发** | ✅ **已确认会静默丢失（2026-10-29，已修）** | `state.contextTokens` 是上次运行留下的 token，任务结果/指令答复必然 `-2 (prepare failed)`；现在只在该用户本进程还没发过消息时挂进 `pending-push.ts`，等新 token 到达按序补发（每人 20 条、每轮 5 条且给答复留额度、同一条最多 3 次） |
-| 「多个微信账号之间有一个主号」 | ⚪ **不存在** | 一个微信账号 = 一个真人（扫码登录者）；N 个账号 = N 个 daemon，各有自己的 `brain.json`/会话表/沙箱/登录者，互不越界（README「多账号管理」、`repowiki/06` §6.2） |
+| 「多个微信账号之间有一个主号」 | ⚪ **不存在** | 一个微信账号 = 一个真人（扫码登录者）；N 个账号 = N 个 daemon，各有自己的 `brain.json`/会话表/`agent-view`/`agent-overrides`/工作区/登录者，互不越界（README「多账号管理」、`repowiki/06` §6.2） |
 | 「切 daemon 大脑是跨账号权限」 | ⚪ **不是** | 微信侧只有**该账号的登录者**能切**它自己**那个 daemon（`OWNER_ONLY_KINDS`）；本机 CLI 才可指定任意账号（`wemind brain switch X <key\|label>`），因为「能在本机敲命令 = 机主」 |
 | 除登录者外还有谁能把消息发进 bot | ✅ **已确认：没有** | 微信平台限制——**必须扫码登录该 bot 才能给它发消息**，所以每个 bot 只有其登录者能发（用户 2026-10-29 确认）。`allowFrom` 因此是**兜底校验**（默认拒绝、默认只放行登录者）：防的是发送范围将来变化 / daemon 被接到别的入口；旧文档里「换个微信号验证」的写法已删 |
 | `wemind start` 继承 `WECHAT_DATA_DIR`（P0） | ✅ **已修（2026-11-07）** | 启动器统一走 `launcherEnv()`：丢弃 `WECHAT_DATA_DIR`、强制 `WECHAT_ACCOUNT`；Linux/macOS 自启单元用 `Environment=WECHAT_DATA_DIR=` 空值覆盖；`wemind daemon` 直跑仍可一次性覆盖目录。守卫：`launcher-env.test.ts` |
@@ -190,11 +192,12 @@ poller（长轮询，不被大脑阻塞）
 
 | 任务 | 先读 | 再读 |
 |---|---|---|
-| 接新 ACP agent | `agents/brain-agents.ts` | `acp/acp-brain.ts`、`agents/sandbox/mcp-sandbox.ts`、`docs/ai/recipes/add-acp-agent.md` |
+| 接新 ACP agent | `agents/brain-agents.ts` | `agents/brain-presets.ts`、`agents/config/runtime.ts`、`docs/ai/recipes/add-acp-agent.md` |
 | 改 ACP 自愈/超时 | `acp/protocol/acp-connection.ts`（帧/超时/模型与模式，brain 与 worker 共用） | `acp/acp-brain.ts` / `tasks/worker-acp.ts`（进程生命周期与会话持久化各自实现）、`acp/brain-check.ts` |
 | 改反向请求应答（权限 / fs / terminal） | `acp/protocol/acp-reverse.ts` | `acp/protocol/acp-reverse.test.ts`；brain、worker、`brain check` 三处共用 |
 | 改 ACP 连接公共层 | `acp/protocol/acp-connection.ts`：帧分类、请求/回合超时、模型与模式、回放静默 | `acp/protocol/acp-connection.test.ts`（覆盖上述全部）；brain 与 worker 共用，改一处两边生效 |
-| 改 MCP 挂载 | `agents/sandbox/mcp-sandbox.ts` | `agents/sandbox/agent-mcp.ts`、`agents/sandbox/worker-sandbox.ts`、`agents/sandbox/sandbox-inherit.ts`（记忆/技能继承与换 agent 清理）、`docs/ai/recipes/add-mcp.md` |
+| 改配置视图 / 微信独享配置 | `agents/config/config-view.ts`（最小视图与链接） | `agents/config/overlay.ts`（`agent-overrides/<agent>.json`）、`agents/config/workspace.ts`（默认工作区）、`cli/subcommands/cli-config.ts`（`wemind config`） |
+| 改 MCP 挂载 | `agents/config/config-view.ts` + `agents/sandbox/mcp-sandbox.ts` | `agents/sandbox/agent-mcp.ts`、`agents/sandbox/worker-sandbox.ts`、`agents/sandbox/sandbox-inherit.ts`（仅 `sandbox` 模式的记忆/技能继承）、`docs/ai/recipes/add-mcp.md` |
 | **改热切换大脑** | `acp/brain-switch.ts`（预检 → 等在途回合结束 → 启动新大脑 → 成功才落盘 → 失败退回） | `acp/acp-brain.ts` 的 `beginSwitch`/`drainTurn`/`warmup`、`agents/agent-slot.ts`（槽位）、`daemon/daemon-control.ts` 的 `AI`/`切换大脑` 分支 |
 | **改多任务 / 进程池 / 任务编号** | `tasks/worker-pool.ts`（`planAcquire`/`planReap` 纯函数；`acquire` 起进程前按这条任务的 agent 调 `ensureWorkerHome(ag)`） | `tasks/worker-acp.ts`（`class WorkerConn`）、`tasks/task-manager.ts`、`tasks/task-store.ts`、`docs/repowiki/07` |
 | **改会话五条指令 / 恢复语义** | `sessions/session-manager.ts`（操作层） | `sessions/session-registry.ts`（登记表，派生元数据）、`sessions/session-map.ts`（当前会话表，唯一权威）、`acp/acp-brain.ts` 的 `resumeSession`（严格恢复） |
@@ -208,7 +211,7 @@ poller（长轮询，不被大脑阻塞）
 | 排查不回复 | `docs/ai/recipes/debug-daemon.md` | `daemon.log`、`brain.json`、`brain check` |
 | 端到端验收 | `docs/ai/recipes/run-e2e.md` | `scripts/doctor.ps1` |
 
-单文件职责（约 35 个模块）见 [代码地图](代码地图.md)。
+单文件职责（约 45 个模块）见 [代码地图](代码地图.md)。
 
 ---
 

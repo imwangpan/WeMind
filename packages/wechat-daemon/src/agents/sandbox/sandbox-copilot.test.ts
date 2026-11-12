@@ -37,6 +37,7 @@ beforeAll(() => {
   process.env.WEMIND_WORKER_BRAIN = "copilot";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
   process.env.WECHAT_DATA_DIR = dataDir;
+  process.env.WEMIND_HOME_MODE = "sandbox";
   delete process.env.WEMIND_MCP_CATALOG;
 });
 
@@ -46,6 +47,7 @@ afterAll(() => {
   delete process.env.WEMIND_WORKER_BRAIN;
   delete process.env.WEMIND_BRAIN_REAL_HOME;
   delete process.env.WECHAT_DATA_DIR;
+  delete process.env.WEMIND_HOME_MODE;
   delete process.env.WEMIND_MCP_CATALOG;
 });
 

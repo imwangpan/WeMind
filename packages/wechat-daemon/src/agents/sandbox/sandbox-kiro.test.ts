@@ -37,6 +37,7 @@ beforeAll(async () => {
   process.env.WEMIND_BRAIN = "kiro";
   process.env.WEMIND_BRAIN_REAL_HOME = v3Home;
   process.env.WECHAT_DATA_DIR = dataDir;
+  process.env.WEMIND_HOME_MODE = "sandbox";
   delete process.env.WEMIND_BRAIN_INHERIT;
   ({ ensureBrainHome } = await import("./mcp-sandbox.js"));
   ({ ensureWorkerHome } = await import("./worker-sandbox.js"));
@@ -49,6 +50,7 @@ afterAll(() => {
   delete process.env.WEMIND_BRAIN;
   delete process.env.WEMIND_BRAIN_REAL_HOME;
   delete process.env.WECHAT_DATA_DIR;
+  delete process.env.WEMIND_HOME_MODE;
   delete process.env.WEMIND_BRAIN_INHERIT;
 });
 

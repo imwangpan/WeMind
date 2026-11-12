@@ -6,6 +6,8 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config.js";
 import { readProfileDefaultModel } from "./profile-model.js";
 import { ACP_AGENT_PRESETS, DEFAULT_SETTINGS_STRIP, type AcpAgentPreset } from "./brain-presets.js";
+import { readEnvSnapshot, mergeEnvSnapshot } from "./config/env-snapshot.js";
+import { readHomeMode } from "./config/home-mode.js";
 
 /**
  * ACP agent 与解析。
@@ -156,6 +158,7 @@ export type ResolvedAgent = {
   bin: string;
   args: string[];
   homeEnvVar?: string;
+  extraConfigFiles: Array<{ source: string; target: string }>;
   shell: boolean;
   inherit: boolean;
   realHome?: string;
@@ -168,6 +171,8 @@ export type ResolvedAgent = {
   env: Record<string, string>;
   /** 预设给的「默认环境变量」：父进程已设同名变量时不覆盖（用于审批类开关，部署方可以收紧）。 */
   envDefaults: Record<string, string>;
+  /** 没有 homeEnvVar 时，real/mirror 直接用真实 home 需要覆盖的 env（见 preset 注释）。 */
+  realEnv: Record<string, string>;
   /** 从 agent 自己的凭据文件派生环境变量（父进程未显式提供时；如 Cline 自定义 provider）。 */
   credentialEnv?: (
     realHome: string | undefined,
@@ -218,16 +223,22 @@ export function agentEnv(
   ag: ResolvedAgent,
   home: string,
   skipped: string[] = [],
+  dataDir: string = DATA_DIR,
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
+  const env: NodeJS.ProcessEnv = mergeEnvSnapshot(process.env, readEnvSnapshot(dataDir));
   if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把沙箱目录传给 agent
   // 从 agent 自己的凭据文件派生（如 Cline 的 CLINE_PROVIDER/CLINE_API_KEY）；helper 内部已保证父进程显式值优先
   for (const [k, v] of Object.entries(ag.credentialEnv?.(ag.realHome, process.env) ?? {})) {
     if (env[k] === undefined) env[k] = v;
   }
   for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
+  // 没有 homeEnvVar 的 agent 在 real/mirror 下 home 就是真实目录：`env` 里的 %HOME% 模板会多拼一层
+  // （如 CLAUDE_CONFIG_DIR 变成 ~/.claude/claude）。realEnv 给出真实路径下的正确值，只在这个分支生效。
+  if (!ag.homeEnvVar && ag.realHome && path.resolve(home) === path.resolve(ag.realHome)) {
+    for (const [k, v] of Object.entries(ag.realEnv)) env[k] = v.replaceAll("%HOME%", home);
+  }
   for (const [k, v] of Object.entries(ag.envDefaults ?? {})) {
-    if (process.env[k] !== undefined) {
+    if (env[k] !== undefined) {
       skipped.push(k);
       continue;
     }
@@ -393,6 +404,7 @@ function resolveAgentCore(
     key = "kiro";
   }
   const preset = ACP_AGENT_PRESETS[key];
+  const homeMode = readHomeMode(opts.dataDir ?? DATA_DIR);
   // 按 agent 名存的启动覆盖：无论谁在用这个 agent 都适用（顶层覆盖只属于「写入磁盘那个 agent」，切走后不该跟过去）。
   const presetOv = cfg?.presets?.[key];
 
@@ -460,7 +472,7 @@ function resolveAgentCore(
   // 会话目录隔离：agent 的 `--patch` 指向账号数据目录下的 per-role 文件（DSH）。
   // 用户自己显式给了 `--patch` 就尊重用户，不追加第二个。
   let sessionPatch: ResolvedAgent["sessionPatch"];
-  if (preset.isolateSessions && !args.includes("--patch")) {
+  if (preset.isolateSessions && homeMode === "sandbox" && !args.includes("--patch")) {
     sessionPatch = dshSessionPatchFor(role, opts.dataDir ?? DATA_DIR);
     args.push("--patch", sessionPatch.file);
   }
@@ -500,6 +512,7 @@ function resolveAgentCore(
     bin,
     args,
     homeEnvVar,
+    extraConfigFiles: preset.extraConfigFiles ?? [],
     shell,
     inherit,
     realHome,
@@ -511,6 +524,7 @@ function resolveAgentCore(
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},
     envDefaults: preset.envDefaults ?? {},
+    realEnv: preset.realEnv ?? {},
     credentialEnv: preset.credentialEnv,
     restore: preset.restore,
     replayOnLoad: preset.replayOnLoad ?? false,

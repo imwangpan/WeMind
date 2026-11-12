@@ -48,6 +48,7 @@ beforeAll(() => {
   process.env.WEMIND_BRAIN = "gemini";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
   process.env.WECHAT_DATA_DIR = dataDir;
+  process.env.WEMIND_HOME_MODE = "sandbox";
   delete process.env.WEMIND_BRAIN_INHERIT;
 });
 
@@ -56,6 +57,7 @@ afterAll(() => {
   delete process.env.WEMIND_BRAIN;
   delete process.env.WEMIND_BRAIN_REAL_HOME;
   delete process.env.WECHAT_DATA_DIR;
+  delete process.env.WEMIND_HOME_MODE;
 });
 
 // 真实 settings.json 带注释（JSONC），沙箱写出的仍是严格 JSON；两者都用宽松解析读取。

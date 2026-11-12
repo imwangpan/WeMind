@@ -79,6 +79,12 @@ export type AcpTurnState = {
   seenUpdateTypes: Set<string>;
   seenTools: Set<string>;
   endedTools: Set<string>;
+  /** 本回合开始时间（beginAcpTurn 写入）；首帧/首字耗时都以它为基准。 */
+  startedAt: number;
+  /** 本回合收到第一帧的时间；0 = 还没收到（诊断用，不参与超时判定）。 */
+  firstFrameAt: number;
+  /** 本回合绑定的 sessionId；只统计这个会话的帧，避免并发会话互相污染。 */
+  sessionId: string | null;
 };
 
 export type AcpHost = {
@@ -103,6 +109,9 @@ export function newTurnState(): AcpTurnState {
     seenUpdateTypes: new Set(),
     seenTools: new Set(),
     endedTools: new Set(),
+    startedAt: 0,
+    firstFrameAt: 0,
+    sessionId: null,
   };
 }
 
@@ -110,6 +119,8 @@ export function newTurnState(): AcpTurnState {
 export function clearAcpTurn(turn: AcpTurnState): void {
   turn.assembling.clear();
   turn.currentOnProgress = null;
+  turn.firstFrameAt = 0;
+  turn.sessionId = null;
 }
 
 export function beginAcpTurn(
@@ -124,6 +135,14 @@ export function beginAcpTurn(
   turn.seenUpdateTypes.clear();
   turn.seenTools.clear();
   turn.endedTools.clear();
+  turn.startedAt = Date.now();
+  turn.firstFrameAt = 0;
+  turn.sessionId = sessionId;
+}
+
+/** 首帧耗时（毫秒）；还没收到任何帧时返回 -1。 */
+export function acpTurnFirstFrameMs(turn: AcpTurnState): number {
+  return turn.firstFrameAt ? turn.firstFrameAt - turn.startedAt : -1;
 }
 
 export function acpTurnText(turn: AcpTurnState, sessionId: string): string {
@@ -184,6 +203,10 @@ export function handleAcpFrame(f: Record<string, any>, host: AcpHost): void {
     return;
   }
   const turn = host.turn;
+  // 只记本回合自己的会话；并发 worker/控制桥的帧不能算进首帧。
+  if (turn.sessionId && f.params?.sessionId === turn.sessionId && !turn.firstFrameAt) {
+    turn.firstFrameAt = Date.now();
+  }
   if (f.method === "session/update") {
     const u = f.params?.update;
     if (u?.sessionUpdate) turn.seenUpdateTypes.add(String(u.sessionUpdate)); // 诊断
@@ -347,8 +370,12 @@ export async function applyAcpModel(
     );
     host.log(`model set ${ag.model}`);
   } catch (e) {
-    host.log(`model set failed (${String(e)})`, "warn");
-    throw e;
+    host.log(
+      `model set failed (${String(e)}) → 继续用 agent 自己的默认模型；可用 wemind brain set <agent> --model 覆盖`,
+      "warn",
+    );
+    // 不抛：模型是「跟随用户配置」的可选项，agent 升级后旧 model id 失效（如 DSH 0.2.1-rc.3）
+    // 不应把整轮打成失败。继续用 session/new 的默认模型，日志留 WARN 供排查。
   }
 }
 

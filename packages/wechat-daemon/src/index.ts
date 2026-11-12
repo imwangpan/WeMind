@@ -48,6 +48,8 @@ import { CLI_PID_MARKERS, findOtherOurProcess } from "./shared/process/proc-iden
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./cli/watchdog-runner.js";
 import { isOwnerOnly } from "./ipc/chat-commands.js";
 import { ensureBrainHome } from "./agents/sandbox/mcp-sandbox.js";
+import { ensureParityAccountDirs } from "./agents/config/account-bootstrap.js";
+import { migrateLegacySandbox } from "./agents/config/migrate-legacy.js";
 import { syncFromPointerMap } from "./sessions/session-registry.js";
 import { clearControlDirs, markBridgeReady } from "./ipc/control-bridge.js";
 import { ControlInboxRunner } from "./daemon/control-inbox-runner.js";
@@ -1442,8 +1444,16 @@ export async function runDaemon(): Promise<void> {
   process.on("uncaughtException", (err) => {
     log.error("uncaughtException:", describeError(err, import.meta.url));
   });
-  ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
-  ensureWorkerHome(); // 准备 worker 沙箱（继承全量 MCP 除 wechat + 记忆/技能/settings）
+  try {
+    ensureParityAccountDirs();
+    migrateLegacySandbox();
+    ensureBrainHome(); // 准备 brain 配置视图/沙箱（默认空 MCP）
+    ensureWorkerHome(); // 准备 worker 配置视图/沙箱（继承全量 MCP 除 wechat + 记忆/技能/settings）
+  } catch (e) {
+    // 工作区或配置视图不可用属于“启动前就能发现”的配置错误：明确报错，不带着半份配置跑。
+    log.error("agent config/workspace unavailable:", describeError(e, import.meta.url));
+    throw e;
+  }
   const pruned = pruneInboundMediaIfDue(); // 启动时清一次过期/超额入站附件（并把节流时钟起好）
   if (pruned?.removed)
     log.info(`pruned inbound media: ${pruned.removed} files, ${pruned.bytes}B left`);

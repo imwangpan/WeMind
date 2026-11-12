@@ -17,6 +17,8 @@ fs.mkdirSync(dataDir, { recursive: true });
 process.env.WECHAT_DATA_DIR = dataDir;
 process.env.WEMIND_MAX_WORKERS = "2"; // 便于测「第三条被拒」
 process.env.WEMIND_MCP_CATALOG = path.join(root, "no-such-catalog.json");
+// 本文件断言的是旧沙箱路径（data/worker-home）；默认已是 real，这里显式固定 sandbox。
+process.env.WEMIND_HOME_MODE = "sandbox";
 const savedNodeOptions = process.env.NODE_OPTIONS;
 process.env.NODE_OPTIONS = ""; // 子进程会继承它；调试器注入会让假 agent 卡在握手
 vi.setConfig({ testTimeout: 20_000 });
@@ -132,6 +134,7 @@ afterEach(() => {
 afterAll(() => {
   if (savedNodeOptions === undefined) delete process.env.NODE_OPTIONS;
   else process.env.NODE_OPTIONS = savedNodeOptions;
+  delete process.env.WEMIND_HOME_MODE;
   fs.rmSync(root, { recursive: true, force: true });
 });
 

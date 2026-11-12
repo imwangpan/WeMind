@@ -1,5 +1,7 @@
 # 接入 OpenCode（设计与实测）
 
+> **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+
 > **状态**：M1–M4 全部落地 ✅ —— `opencode` 是内置预设（见 §3.6）。**brain 通道的真机 E2E 已在 2026-10-29 通过**（微信发消息 → opencode acp → 自动回复，记录见 [CHANGELOG](../发布与变更记录/CHANGELOG.md)），M4 行与此一致。
 > **实测范围**：OpenCode v2.0.29（M1 探针）；2026-10-29 在 2.0.32 上复测 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）｜ **最后核对**：2026-11-05
 > **实测环境**：Windows 11 / Node ≥20 / OpenCode v2.0.29。本文结论基于该版本；其它 agent 的能力（load/image/MCP）可能不同。

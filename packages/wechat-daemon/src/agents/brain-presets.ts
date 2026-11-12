@@ -17,17 +17,20 @@ export type AcpAgentPreset = {
   requiresBins?: string[]; // 除 bin 外还必须在 PATH 上解析到的运行时（如 pi-acp 内部 spawn `pi`；只装适配器不够）
   args: string[]; // 进入 ACP 模式的启动参数
   homeEnvVar?: string; // agent 读取其配置/数据目录的环境变量名；指向 brain 沙箱。留空=不设置
+  /** 配置目录之外、但属于该 agent 的文件（如 Claude Code 的 ~/.claude.json）；target 相对视图根。 */
+  extraConfigFiles?: Array<{ source: string; target: string }>;
   shell?: boolean; // 是否经 shell 启动（npx/.cmd/.bat 类适配器在 Windows 需要 true）
   // —— 继承「记忆/规则/技能」配置（让微信大脑与日常使用读到同样内容）——
   realHome?: string; // 该 agent 真实配置目录（被继承的来源）。不同 agent 布局不同，故下沉到 agent
   inheritDirs?: string[]; // 从 realHome junction 进沙箱的「知识/记忆」类子目录（不含 MCP/会话目录）
   inheritFiles?: string[]; // 从 realHome 拷进沙箱配置目录的「单文件」记忆（如 AGENTS.md；目录式记忆用 inheritDirs）
   // —— 沙箱约定（不同 agent 的配置目录位置与 MCP 文件格式不同）——
-  configSubdir?: string; // agent 配置目录相对沙箱根的子路径（kiro 空=沙箱根；opencode "opencode"）
+  configSubdir?: string; // agent 配置目录相对 home（配置视图根 / sandbox 根）的子路径（kiro 空=根本身；opencode "opencode"）
   mcpFormat?: "kiro" | "opencode"; // MCP 配置文件的组织格式（默认 kiro）
   mcpConfigFile?: string; // MCP 配置文件相对「配置目录」的路径（默认 settings/mcp.json）
   catalogFile?: string; // 可选 MCP 目录来源文件相对 realHome 的路径（默认 settings/mcp.json）
-  env?: Record<string, string>; // 额外注入的环境变量（强制；值里 %HOME% → 沙箱根目录）
+  env?: Record<string, string>; // 额外注入的环境变量（强制；值里 %HOME% → home 目录（视图根 / sandbox 根））
+  realEnv?: Record<string, string>; // 没有 homeEnvVar 的 agent 在 real/mirror 下直接用真实 home 时，覆盖 env 里按 %HOME% 拼出来的错误路径（如 CLAUDE_CONFIG_DIR / CLINE_DIR / QODER_CONFIG_DIR）
   envDefaults?: Record<string, string>; // 默认值：父进程已设同名变量时不覆盖。审批类开关（DSH_PERMISSION_MODE / INITIAL_AGENT_MODE）用它，部署方可用环境变量收紧权限
   credentialEnv?: (
     realHome: string | undefined,
@@ -103,7 +106,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   },
   // GitHub Copilot CLI（原生 ACP，1.0.107 探针实测）。
   // - COPILOT_HOME 指向独立沙箱；只同步 config.json 登录元数据、skills 与 copilot-instructions.md，不继承用户 MCP/插件/hooks。
-  // - 用户 MCP 目录是 ~/.copilot/mcp-config.json；stdio MCP 经 session/new 实测可调用（尽管 initialize 只广告 http/sse）。
+  // - 用户 MCP 目录是 ~/.copilot/mcp-config.json；stdio MCP 经 session/new 实测可调用（尽管 initialize 只声明 http/sse）。
   // - --allow-all-tools 免除工具审批，但不启用 --allow-all 的路径/URL 放宽；默认 auto 不探测，避免「已安装但未登录」导致误选。
   copilot: {
     name: "copilot",
@@ -145,18 +148,18 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // - 桌面端自带 `dsh.cmd`（只有 .cmd，没有无扩展名 dsh），故 binWin 必须写全；
   // - DSH_HOME 指向 brain 沙箱；`.credentials.yaml` 由沙箱同步（桌面登录态）；
   // - 无 session/load，用 session/resume；image:false（收图需上层拦截）；
-  // - **模型：跟着用户自己 dsh 的配置走（WeMind 只读、只复制，不替 agent 合成配置）。** 桌面端把 provider 目录与默认模型写进 `~/.dsh/profiles/<profile>/cordis.patch.yml`。
+  // - **模型：跟着用户自己 dsh 的配置走（WeMind 只读；real 链接、sandbox 复制，不替 agent 合成配置）。** 桌面端或用户自己的配置工具把 provider 目录与默认模型写进 `~/.dsh/profiles/<profile>/cordis.patch.yml`。
   //   `dsh --profile acp` 的 ACP 桥插件（`@deepseek-ai/dsh-acp`）默认模型写死在它**自己的 bundle patch**里：`- id: acp` 的
-  //   `config: { provider: deepseek-official, model: deepseek-v4-flash }`；profile 用户层只覆盖 `llm-pi-ai` / `agent-default-model`，
+  //   `config: { provider: deepseek-official, model: deepseek-v4-flash }`；profile 用户层只覆盖 `llm-pi-ai` / `agent-default-model` / `web-search-deepseek`，
   //   `- id: acp` 要靠**用户自己**补（插件 README：a later patch can replace that row's complete config）——这就是
-  //   「agent-default-model 写着 magpie、session/new 仍报 deepseek-official、一 prompt 就 no API key」的原因（2026-10-29 拆开 app.asar 核实）。
-  //   所以 `realProfile: "acp"`：沙箱**原样复制**真实 profile 用户层（否则沙箱是空壳 `[]`，连 magpie 路由都没有；不追加条目），
-  //   缺 `- id: acp` 时由 `wemind brain` 提示用户补到真实 profile（`acpOverrideHint`）。
+  //   「agent-default-model 写着用户的默认、session/new 仍报 deepseek-official、一 prompt 就 no API key」的原因（2026-10-29 拆开 app.asar 核实）。
+  //   所以 `realProfile: "acp"`：real 模式把整个 `profiles/` 链接真实 home；sandbox 模式才**原样复制**真实 profile 用户层（否则沙箱是空壳 `[]`，连用户自己的 provider 路由都没有；不追加条目），
+  //   缺 `- id: acp` 时由 `wemind brain` 提示用户补到真实 profile（`acpOverrideHint`）；不少配置工具只写 `agent-default-model` / `web-search-deepseek`，`- id: acp` 仍要用户单独补。
   //   默认模型从这份配置读（优先 `- id: acp`，否则 `agent-default-model`）→ 用户日常用哪个模型，微信大脑就用哪个。
-  // - 读不到时回退到下面的 `model`（deepseek-account/deepseek-flash：同样显示为 DeepSeek-V4.1-Flash，走账号登录）；
+  // - 读不到时回退到下面的 `model`（deepseek-account/deepseek-flash：rc.2 的账号登录兜底；rc.3 已从模型目录移除，真被用到时只记 WARN，不拖垮回合）；
   //   显式换模型用 `wemind brain set deepseek --model "…"`，`--model auto` = 跟随真实 profile 的默认。
   //   `set_config_option`（agent 自己的 ACP 接口）在会话建立后按同一个值下发一次：幂等，也是显式覆盖的通道。
-  // - magpie 路由走桌面端的本机模型网关（127.0.0.1:3425），**桌面端要在运行**——和用户日常 dsh 用 magpie 时的前提一样。
+  // - 走哪个 provider、需要什么凭据/依赖（如自建网关是否在运行），都由用户的 DSH 配置自己决定；WeMind 只跟随 `- id: acp`（否则 `agent-default-model`）的值。
   // 详见 docs/接入-DeepSeek.md（含 0.2.1-rc.2 / 0.2.1-rc.3 真机实测）。
   deepseek: {
     name: "deepseek",
@@ -202,6 +205,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
         : [],
     args: ["--acp", "--yolo"],
     env: { QODER_CONFIG_DIR: `%HOME%${path.sep}qoder` },
+    realEnv: { QODER_CONFIG_DIR: "%HOME%" },
     realHome: path.join(os.homedir(), ".qoder"),
     // memory/ 是 Qoder agent 的用户画像/偏好记忆（实测存在），与日常使用共用一份（junction）；skills/agents/commands/AGENTS.md 在 Qoder 1.1.78 的本机不存在 → 当前为空操作，保留以便上游新增后自动生效
     inheritDirs: ["memory", "skills", "agents", "commands"],
@@ -230,13 +234,18 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     binWin: "cline.cmd",
     args: ["--acp", "--auto-approve", "true"],
     shell: true,
-    // 3.0.74 实测：initialize 广告 image:true，但 ACP prompt 的 de() 只保留 text 块（image 被直接丢弃），
+    // 3.0.74 实测：initialize 声明 image:true，但 ACP prompt 的 de() 只保留 text 块（image 被直接丢弃），
     // 模型只会看到「用户发来一张图片」的文字提示。按「实际不支持」处理，让 daemon 友好拒绝而不是让模型猜。
     images: false,
     env: {
       CLINE_DIR: `%HOME%${path.sep}cline`,
       CLINE_DATA_DIR: `%HOME%${path.sep}cline${path.sep}data`,
       CLINE_MCP_SETTINGS_PATH: `%HOME%${path.sep}cline${path.sep}mcp.json`,
+    },
+    realEnv: {
+      CLINE_DIR: "%HOME%",
+      CLINE_DATA_DIR: `%HOME%${path.sep}data`,
+      CLINE_MCP_SETTINGS_PATH: `%HOME%${path.sep}mcp.json`,
     },
     realHome: path.join(os.homedir(), ".cline"),
     // 用户级规则/技能/agent 定义与日常 Cline 共用一份；hooks/plugins 不继承（插件可自带 MCP，沙箱不允许 wechat 之外的意外入口）
@@ -246,7 +255,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     mcpConfigFile: "mcp.json",
     catalogFile: "data/settings/cline_mcp_settings.json",
     // providers.json：登录态（OAuth / API-key）；models.json：provider 的模型目录缓存——
-    // 缺它时 Cline 的 session/new 会回退到 gpt-4o（自定义 provider 下 prompt 直接报「magpie knows no model "gpt-4o"」）
+    // 缺它时 Cline 的 session/new 会回退到 gpt-4o（自定义 provider 下 prompt 直接报「knows no model "gpt-4o"」）
     credentialFiles: ["data/settings/providers.json", "data/settings/models.json"],
     // 自定义/API-key provider：Cline ACP 不读 providers.json 的 lastUsedProvider，按官方 ACP 逃生口补 env
     // （父进程显式设了 CLINE_PROVIDER/CLINE_API_KEY 时完全不接管；OAuth 条目没有 apiKey，返回空）
@@ -303,17 +312,20 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     args: [],
     shell: true,
     env: { CLAUDE_CONFIG_DIR: `%HOME%${path.sep}claude` },
+    realEnv: { CLAUDE_CONFIG_DIR: "%HOME%" },
     realHome: path.join(os.homedir(), ".claude"),
     inheritDirs: ["skills", "agents", "commands"],
     inheritFiles: ["CLAUDE.md"],
     configSubdir: "claude",
     // 真实 ~/.claude.json 与 realHome 同级；path.join 后得到 ~/.claude/../.claude.json
     catalogFile: path.join("..", ".claude.json"),
+    extraConfigFiles: [{ source: path.join(os.homedir(), ".claude.json"), target: ".claude.json" }],
     credentialFiles: [".credentials.json"],
     mcpViaAcp: true,
     sessionMode: "bypassPermissions",
   },
-  // Codex：需适配器（Codex CLI 本身不说 ACP）。适配器是 npm 包 `@agentclientprotocol/codex-acp`（bin: codex-acp；官方维护）。
+  // Codex：需适配器（Codex CLI 本身不说 ACP）。适配器是 npm 包 `@agentclientprotocol/codex-acp`（bin: codex-acp；
+  // ACP 项目维护，非 OpenAI 官方）。npm latest 2.6.0（2026-11-11）；本预设的实测基线是 2.6.0（2026-11-12 全量复测通过），升级后重跑探针。
   // - **全局安装，不用 npx**（口径同 claude-code）：daemon 常驻、worker 每条任务起进程，npx 每次冷启动都要问 registry/现下包，离线不可用且版本漂移；
   //   `npm i -g @agentclientprotocol/codex-acp`。适配器自带 @openai/codex 依赖（含平台原生二进制，约 100MB）；
   //   想复用本机已装的 Codex 可装适配器时加 --omit=optional 并设 CODEX_PATH=<codex.exe 绝对路径>（适配器官方支持的环境变量）。
@@ -321,8 +333,11 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // - codex-acp **不解析** CLI 参数（codex 的 --yolo/--full-auto 都不适用）；免审批走 ACP `session/set_mode {modeId:"agent-full-access"}`
   //   （= approval never + sandbox danger-full-access），并同时用 README 记录的环境变量 INITIAL_AGENT_MODE 兜底（旧版本无 set_mode 时仍生效）。
   // - 认证走 Codex 自己（ChatGPT 登录或 OPENAI_API_KEY）；已有 ~/.codex/config.toml 直接沿用——适配器不读 WeMind 沙箱，故无 homeEnvVar。
-  // - MCP：**不支持客户端提供的 stdio MCP server**（探针实测 mcpCapabilities.acp=false，session/new 带 stdio mcpServers 不报错但模型看不到工具）→ 不开 mcpViaAcp；
-  //   微信侧「加载/卸载 MCP」对 codex 无效（与 claude-code 的 stdio MCP 可用相反——能力字段也不完全可信，以实测为准）。
+  // - MCP：**支持客户端提供的 stdio MCP server**（2026-11-12 复测 codex-acp 2.5.0 与 2.6.0：session/new 传 stdio mcpServers，
+  //   模型实际调用 fake_ping 并返回 FAKE_PONG）。旧结论「mcpCapabilities.acp=false = 不支持 stdio」是误读：
+  //   `acp` 指 MCP-over-ACP 传输，stdio 是 ACP 的基础传输，不靠这个字段声明。故开 mcpViaAcp。
+  //   Codex 自己的 ~/.codex/config.toml 仍会被 Codex 原生加载；同名 server 由 Codex 自身条目优先，适配器会跳过客户端重复项。
+  //   微信侧额外 MCP 可走 overlay 的 mcp.extra；WeMind 暂不解析 config.toml 的 MCP 列表（catalog 只用于列出/加载额外项）。
   // - 2026-10-30 探针实测（codex-acp 2.5.0 / Codex CLI 0.165，Windows）：
   //   loadSession ✅、promptCapabilities.image ✅、session/set_mode ✅、session/set_config_option(model) ✅、session/load 后上下文保留、
   //   工具调用 0 反向请求（只收到无 id 的 _auth/status_update 通知）；首帧 ~20ms、首字 3–4s、带图整轮 ~24s。
@@ -335,6 +350,11 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     shell: true,
     envDefaults: { INITIAL_AGENT_MODE: "agent-full-access" },
     sessionMode: "agent-full-access",
+    // Codex 的真实配置目录（仅用于配置指纹/危险路径判断；homeEnvVar 为空，不传给适配器）。
+    // catalogFile 指向 config.toml：WeMind 目前不解析 TOML，catalog 默认为空；原生 MCP 由 Codex 自己加载。
+    realHome: path.join(os.homedir(), ".codex"),
+    catalogFile: "config.toml",
+    mcpViaAcp: true,
     // 回合可能跑几十秒（实测带图的回合 ~24s），且适配器会发 thought / tool_call / usage 帧；心跳放长，少占微信连发额度（约 10 条/用户）。
     heartbeatMs: 60_000,
   },

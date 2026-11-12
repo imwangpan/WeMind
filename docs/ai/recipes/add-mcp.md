@@ -1,6 +1,6 @@
 # 配方：新增 / 调试 MCP 挂载
 
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-12
 >
 > 目标：让 brain 能在微信里通过「加载/卸载 MCP」动态获得工具，同时不破坏隔离、不引入 `wechat` 回环。
 
@@ -9,7 +9,7 @@
 ## 0. 先理解三条链路
 
 ```text
-catalog（定义从哪来；一律读**真实**配置目录，不读沙箱）
+catalog（定义从哪来；一律读**真实**配置目录，不读配置视图/沙箱）
   └─ 按 agent 各自约定读取（不要跨 agent 借文件）：
        kiro     ~/.kiro/settings/mcp.json                 { "mcpServers": { ... } }
        opencode ~/.config/opencode/opencode.json          { "mcp": { "servers": { ... } } }
@@ -19,27 +19,35 @@ catalog（定义从哪来；一律读**真实**配置目录，不读沙箱）
        pi       ~/.pi/agent/mcp.json                      { "mcpServers": { ... } }
        DSH               ACP session/new 的 mcpServers   （无文件式 catalog 时用 WEMIND_MCP_CATALOG）
        claude-code       ~/.claude.json 的 mcpServers     （catalogFile 写成 `../.claude.json`，回到 realHome 上一层）
+       copilot           ~/.copilot/mcp-config.json        （经 ACP session/new 传递）
        codex             ❌ 适配器 mcpCapabilities.acp=false，stdio MCP 不可用
   └─ 可用 WEMIND_MCP_CATALOG / WECHAT_MCP_CATALOG 覆盖
 
 激活集（哪些允许给 brain）
-  └─ <数据目录>/brain-mcps.json  { "active": ["name", ...] }
-  └─ 微信指令「加载 <名>」/「卸载 <名>」修改；wechat 永久禁止
+  └─ <数据目录>/brain-mcps.json  { "version": 2, "active": { "<agent>": ["name", ...] } }
+  └─ 微信指令「加载 <名>」/「卸载 <名>」修改；按 agent 分键，wechat 永久禁止
 
 transport（怎么让 agent 看到）
-  └─ brain：applySandbox() 写沙箱配置文件（文件式 MCP 的 agent），或 mcpViaAcp 传 session/new|resume（DSH / claude-code，已实现）
+  └─ brain：applySandbox() 写配置视图（`real`/`mirror`）或沙箱（`sandbox`）的文件式 MCP 配置，或 mcpViaAcp 传 session/new|resume（DSH / claude-code / copilot）
   └─ worker：applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）
+
+微信独享增删（不改真实配置）
+  └─ <账号>/agent-overrides/<agent>.json 的 mcp.extra / mcp.disable
+  └─ mcp.disable 最后生效；wechat 任何路径都进不了有效集
 ```
 
-> 注意「catalog 读真实、transport 写沙箱」：`加载 <名>` 只把定义**拷进沙箱**（brain 默认空、worker 全量），真实配置文件一律不动。
+> 注意「catalog 读真实、transport 写视图/沙箱」：`加载 <名>` 只把定义**写进 WeMind 生成的配置视图**（brain 默认空、worker 全量），真实配置文件一律不动。
 
 关键代码：
 
 | 文件 | 作用 |
 |---|---|
-| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | brain 沙箱、catalog、激活集、`加载/卸载` |
+| `packages/wechat-daemon/src/agents/config/config-view.ts` | 最小配置视图；MCP 目标文件生成副本，其余链接真实 home |
+| `packages/wechat-daemon/src/agents/config/overlay.ts` | 微信独享 `mcp.extra` / `mcp.disable` |
+| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | brain 视图/沙箱、catalog、激活集、`加载/卸载` |
 | `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | worker 全量继承、排除集 |
 | `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts` | 文件式 MCP 格式（kiro / opencode / HTTP）的读/写/转换 |
+| `packages/wechat-daemon/src/cli/subcommands/cli-config.ts` | `wemind config mcp list/enable/disable/add/remove` 的 CLI 入口 |
 | `packages/wechat-daemon/src/index.ts` | 指令拦截；加载/卸载后 `restart()` |
 | `packages/wechat-daemon/src/acp/acp-brain.ts` | 重启 ACP，重建后恢复 session |
 
@@ -154,9 +162,9 @@ MCP                 # 列出可选与已激活
 
 - `mcpViaAcp`：把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入（`deepseek`、`claude-code` 预设为 `true`）；
 - `toAcpMcpServers()`：kiro/opencode 格式 → `{ name, command, args, env }` / `{ name, type:"http", url, headers }`；
-- 官方不支持 SSE；HTTP 已广告（未单独真机实测）；stdio 已真机实测；
+- 官方不支持 SSE；HTTP 已声明（未单独真机实测）；stdio 已真机实测；
 - 坏条目预校验：无 command/url 的条目拒绝加载，结构残缺的条目跳过并记日志——官方 `session/new` 失败会回滚整个会话，所以不能让一条坏定义拖挂全部；
-- 能力字段不自动适配：`initialize` 回包目前不被解析，`mcpViaAcp` 是**人工写进预设**的结论；接新 agent 时用探针实测 stdio/HTTP，别照抄声明。
+- 能力字段不自动适配：`initialize` 回包目前不被解析，`mcpViaAcp` 是**人工写进预设**的结论；接新 agent 时用探针实测 stdio/HTTP，不要只按 capabilities 声明推断。
 
 ---
 

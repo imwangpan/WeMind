@@ -31,6 +31,8 @@ export type ControlKind =
   | "session.resume"
   | "session.rename"
   | "session.delete"
+  /** 重建 brain/worker 配置视图并重启常驻 brain（空闲时执行）。 */
+  | "config.reload"
   /** 重新登录后解除 daemon 进程内的 -14 冷却（`clearSessionPause` 是进程内状态，CLI 自己清不到）。 */
   | "session.unpause";
 
@@ -43,6 +45,7 @@ const KINDS: ReadonlySet<string> = new Set<ControlKind>([
   "session.resume",
   "session.rename",
   "session.delete",
+  "config.reload",
   "session.unpause",
 ]);
 

@@ -39,7 +39,7 @@ packages/wechat-daemon/src/
 │       ├── acp-connection.ts # 帧处理、请求与回合超时、模型/模式、load 后回放静默（→ 第 6 章）
 │       ├── acp-reverse.ts    # 反向请求应答器（权限默认拒绝；未知 method 回 -32601）
 │       └── acp-quiet.ts      # 恢复会话后等回放帧安静（200ms 静默窗口 / 最多 3s）
-├── agents/                   # agent 预设、配置状态与沙箱
+├── agents/                   # agent 预设、配置状态、配置视图与 sandbox 回退
 │   ├── brain-presets.ts      # AcpAgentPreset 类型与 10 个内置预设（纯数据，无 IO）
 │   ├── brain-agents.ts       # resolveAgent、agentProblem、派生配置落盘（→ 第 6 章）
 │   ├── brain-config.ts       # brain.json 读写
@@ -47,9 +47,16 @@ packages/wechat-daemon/src/
 │   ├── agent-slot.ts         # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
 │   ├── profile-model.ts      # 真实 profile 的默认模型读取与「缺 - id: acp」提示
 │   ├── cline-credentials.ts  # 从 Cline providers.json 派生 CLINE_PROVIDER/CLINE_API_KEY
-│   └── sandbox/              # 沙箱与 MCP
-│       ├── mcp-sandbox.ts    # brain 沙箱：MCP 隔离 + 记忆继承（→ 第 6 章）
-│       ├── worker-sandbox.ts # worker 沙箱（继承全量 MCP，排除 wechat）（→ 第 7 章）
+│   ├── config/               # homeMode、配置视图、overlay、工作区、环境快照
+│   │   ├── home-mode.ts      # runtime.json：real（默认）/ mirror / sandbox
+│   │   ├── runtime.ts        # 一次启动的 home/configDir/cwd/mediaDir 总装
+│   │   ├── config-view.ts    # agent-view 最小视图（链接真实技能/记忆/会话）
+│   │   ├── overlay.ts        # agent-overrides/<agent>.json（仅微信侧）
+│   │   ├── workspace.ts      # workspace.json + 默认工作区
+│   │   └── agent-config-writer.ts # 真实配置备份、并发校验、原子写
+│   └── sandbox/              # 仅 sandbox 模式的复制隔离与 MCP
+│       ├── mcp-sandbox.ts    # brain 视图/沙箱：MCP 隔离（→ 第 6 章）
+│       ├── worker-sandbox.ts # worker 视图/沙箱（全量 MCP 除 wechat）（→ 第 7 章）
 │       ├── agent-mcp.ts      # MCP 激活集与按 agent 的挂载格式
 │       └── sandbox-inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单）
 ├── tasks/                    # 任务（worker）
@@ -105,7 +112,7 @@ graph TD
     B2 --> C["loadAccount（未登录则 exit 1）"]
     C --> D["解析登录者 owner（WECHAT_OWNER_ID 或扫码登录者）<br/>→ addAllowFrom(owner) 种入白名单（迁移老账号）"]
     D --> E["写 daemon.pid + 注册 exit/SIGINT/SIGTERM 清理<br/>+ 全局 unhandledRejection / uncaughtException（只记录不退出）"]
-    E --> F["ensureBrainHome() + ensureWorkerHome()<br/>准备两个沙箱；按 TTL/总量清理 brain-home/media/inbound"]
+    E --> F["ensureParityAccountDirs() + migrateLegacySandbox()<br/>+ ensureBrainHome() + ensureWorkerHome()<br/>准备 agent-view/工作区；按 TTL/总量清理 media/inbound"]
     F --> G["notifyStart 通知上线"]
     G --> H["接入 setTaskPush / setTaskTyping / setTaskStateSink / setTaskAckSink"]
     H --> I["clearTaskDirs + 启动 task-inbox 扫描定时器(1s)"]
@@ -324,7 +331,7 @@ graph TD
 | `VIDEO` | 同上，文件名固定 `video.mp4`，prompt 写「大小/时长/本地路径」 |
 | 其它 / 工具 item 11/12 | 未知类型计入 `unsupportedTypes`；只有未知类型时明确告知用户；入站工具 item 直接忽略（它们只用于出站进度） |
 
-- **落盘位置**：`<BRAIN_HOME>/media/inbound`。brain 的 cwd 就是 `BRAIN_HOME`，所以 prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
+- **落盘位置**：默认 `real`/`mirror` 是 `<账号>/media/inbound`，`sandbox` 才是 `<sandbox>/media/inbound`。prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
 - **文件名安全**：`safeMediaFileName()` 去掉路径分隔符/控制字符、替换 Windows 非法字符、给保留名（`CON`/`NUL`/`COM1`…）加后缀、保留扩展名；同名用 `-1`/`-2` 后缀，绝不覆盖。
 - **清理**：`saveInboundMedia()` 每次写入后问一次 `pruneInboundMediaIfDue()`，daemon 启动时也调一次（时钟为「从未清理」→ 必执行）；真正清理至少间隔 1 小时，避免同一批附件重复扫目录（挂在 poller 主循环上没有必要，目录只在写入时才增长）。每次先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 30 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 1GB）从最旧开始删；best-effort，失败不影响消息处理。
 - **大小上限**：入站文件/视频/语音默认 `WECHAT_INBOUND_MEDIA_MAX_MB=100`；图片仍走图片专用链路（20MB 上限）。
@@ -334,7 +341,7 @@ graph TD
 ### 出站
 
 - **发图**：`extractImages` 从大脑回复里提取 Markdown `![](src)` 或裸图片 URL → `resolveImageBytes` 下载/读取 → `sendImage` 发出，剩余文本另发。下载带 15s 超时 + 浏览器 UA（规避图床热链 403）、10MB 上限；失败的图把原链接附文本发给用户（不静默丢图）。URL 逐跳过安全闸（`image-url.ts` 的 `assertPublicHttpUrl`）：非 http(s)、本机/私网/CGNAT/链路本地/组播（含 IPv6 与 `::ffff:` 映射）以及解析到这些地址的域名都拒绝；重定向手动跟随、每跳复查、最多 3 跳——防大脑输出被提示注入成内网 SSRF。本地文件绝对路径不受影响（那是大脑自己就能读的文件）。
-- **发文件/视频**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 时写 `[附件](<路径>)`；普通形式遇到 `(` 或 `<` 不猜、整段保留为正文；没有附件链接时正文原样返回，不 trim、不压缩空行）。`extractAttachments()` 只认这三种标签（普通 Markdown 链接保留在正文，不误发）；`file://` 只接受空 host（`localhost` 会被 WHATWG URL 规范化为空 host，等价 `file:///`），**UNC `\\server\share` 与 `file://host/...` 一律拒绝**（避免 `realpath`/`stat` 触发 SMB 认证；软链接/junction 先看链接目标、再看 realpath 结果），Windows 还拒绝 **NTFS 数据流**（`account.json::$DATA` 可绕过按名规则）；必须是绝对路径；`realpathSync` 后过敏感文件 denylist（数据状态文件、agent 登录态与 `.auth/`、brain-home/worker-home 与 preset `realHome` 下的 `settings.json`/`models*.json`、密钥，见 §4.19 与 `attachments.test.ts`）与单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）；按标签或扩展名判 `file`/`video`，`sendFileOrdered` 逐条发出。失败/额度不足的原因会归并成附注写进最终文本（`attachmentFailureNote`），用户仍能看到原路径。需要临时外发敏感文件时，登录者发微信指令 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30）：`sensitive-allow.ts` 在**本进程内**记一个截止时间，窗口内 `resolveAttachment` 只跳过敏感名单，UNC/数据流/大小上限照旧；日志会写「敏感文件已临时放行」。被拦下的附件会按用户记进内存队列（30 分钟 TTL、最多 20 条），回这条指令时先开窗再补发，所以**先开后发、先拦后放两种顺序都成立**。窗口与队列都不落盘，重启即失效。
+- **发文件/视频**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 时写 `[附件](<路径>)`；普通形式遇到 `(` 或 `<` 不猜、整段保留为正文；没有附件链接时正文原样返回，不 trim、不压缩空行）。`extractAttachments()` 只认这三种标签（普通 Markdown 链接保留在正文，不误发）；`file://` 只接受空 host（`localhost` 会被 WHATWG URL 规范化为空 host，等价 `file:///`），**UNC `\\server\share` 与 `file://host/...` 一律拒绝**（避免 `realpath`/`stat` 触发 SMB 认证；软链接/junction 先看链接目标、再看 realpath 结果），Windows 还拒绝 **NTFS 数据流**（`account.json::$DATA` 可绕过按名规则）；必须是绝对路径；`realpathSync` 后过敏感文件 denylist（数据状态文件、agent 登录态与 `.auth/`、数据目录（含 `agent-view` / `brain-home` / `worker-home`）与 preset `realHome` 下的 `settings.json`/`models*.json`、密钥，见 §4.19 与 `attachments.test.ts`）与单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）；按标签或扩展名判 `file`/`video`，`sendFileOrdered` 逐条发出。失败/额度不足的原因会归并成附注写进最终文本（`attachmentFailureNote`），用户仍能看到原路径。需要临时外发敏感文件时，登录者发微信指令 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30）：`sensitive-allow.ts` 在**本进程内**记一个截止时间，窗口内 `resolveAttachment` 只跳过敏感名单，UNC/数据流/大小上限照旧；日志会写「敏感文件已临时放行」。被拦下的附件会按用户记进内存队列（30 分钟 TTL、最多 20 条），回这条指令时先开窗再补发，所以**先开后发、先拦后放两种顺序都成立**。窗口与队列都不落盘，重启即失效。
 - **发语音**：不做。微信语音回复需要 TTS + SILK，且体验通常不如文本；大脑要表达「语音」时按文件发。
 - **发工具进度**：默认发文本「步骤 N」。结构化 item（`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`）需 `WECHAT_TOOL_PROGRESS_ITEMS=1` 才启用；代码已对齐官方 2.4.10（`FINISH` + 本回合 `run_id`，不占连发额度、不顶替固定提示；回退文本计额度），但**微信客户端目前不渲染**（服务端 200/空响应/不分配 `message_id`，多家第三方实测一致），所以默认关闭。等微信端开放后改回默认开启即可。真机异常见 [`docs/ai/已知坑.md`](../ai/已知坑.md) 的「工具进度 item」条。
 

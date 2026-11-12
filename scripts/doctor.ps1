@@ -214,6 +214,58 @@ if (Test-Path -LiteralPath $dshHome) {
   Item "  sessions" "$sessCount 个"
 }
 
+# ---------- MCP / 首帧耗时 ----------
+# 阈值与 packages/wechat-daemon/src/agents/config/mcp-perf.ts 保持一致；只提示，不修改任何配置。
+$McpWarnCount = 10
+$SessionNewWarnMs = 5000
+$FirstFrameWarnMs = 15000
+Section "MCP / 首帧耗时（最近日志）"
+$logFiles = @()
+Get-ChildItem -Path $DataRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+  foreach ($name in @("daemon.log", "daemon.log.1")) {
+    $f = Join-Path $_.FullName $name
+    if (Test-Path -LiteralPath $f) { $logFiles += $f }
+  }
+}
+if ($logFiles.Count -eq 0) {
+  Write-Output "- 没找到 daemon.log（账号目录下还没有日志）。"
+} else {
+  $logLines = @()
+  foreach ($f in $logFiles) {
+    $logLines += @(Get-Content -LiteralPath $f -Tail 4000 -ErrorAction SilentlyContinue)
+  }
+  $sessionLines = @($logLines | Where-Object { $_ -match 'mcpCount=\d+' })
+  if ($sessionLines.Count -eq 0) {
+    Write-Output "- 最近日志里没有会话指标（旧版本日志，或还没建立过会话）。"
+  } else {
+    $sessionCounts = @($sessionLines | ForEach-Object { if ($_ -match 'mcpCount=(\d+)') { [int]$Matches[1] } })
+    $sessionMs = @($sessionLines | ForEach-Object { if ($_ -match 'sessionNewMs=(\d+)') { [int]$Matches[1] } })
+    Item "最近一次 mcpCount" ([string]$sessionCounts[-1])
+    if ($sessionCounts.Count -gt 0) { Item "历史最大 mcpCount" ([string]($sessionCounts | Measure-Object -Maximum).Maximum) }
+    if ($sessionMs.Count -gt 0) {
+      Item "最近一次 sessionNewMs" ("{0} ms" -f $sessionMs[-1])
+      Item "历史最大 sessionNewMs" ("{0} ms" -f ($sessionMs | Measure-Object -Maximum).Maximum)
+    }
+    if ($sessionCounts[-1] -gt $McpWarnCount) {
+      Write-Output ("  ⚠ MCP 数量 {0} 超过 {1}：启动/首帧会变慢，不会自动禁用；可用 mcp.disable 或终端配置精简。" -f $sessionCounts[-1], $McpWarnCount)
+    }
+    if ($sessionMs.Count -gt 0 -and $sessionMs[-1] -gt $SessionNewWarnMs) {
+      Write-Output ("  ⚠ 会话建立耗时 {0} ms 超过 {1} ms（含 MCP 启动）：先看 mcpCount，再按 agent 实测决定。" -f $sessionMs[-1], $SessionNewWarnMs)
+    }
+  }
+  $frameLines = @($logLines | Where-Object { $_ -match 'firstFrameMs=-?\d+' })
+  if ($frameLines.Count -gt 0) {
+    $frameMs = @($frameLines | ForEach-Object { if ($_ -match 'firstFrameMs=(-?\d+)') { [int]$Matches[1] } } | Where-Object { $_ -ge 0 })
+    if ($frameMs.Count -gt 0) {
+      Item "最近一次 firstFrameMs" ("{0} ms" -f $frameMs[-1])
+      Item "历史最大 firstFrameMs" ("{0} ms" -f ($frameMs | Measure-Object -Maximum).Maximum)
+      if ($frameMs[-1] -gt $FirstFrameWarnMs) {
+        Write-Output ("  ⚠ 首帧 {0} ms 超过 {1} ms：可能是 MCP 工具 schema 过大或模型排队；不会自动改变行为。" -f $frameMs[-1], $FirstFrameWarnMs)
+      }
+    }
+  }
+}
+
 # ---------- 环境变量 ----------
 Section "环境变量（只显示是否设置，不显示值）"
 $vars = @(

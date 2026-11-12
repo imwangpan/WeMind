@@ -20,7 +20,25 @@ import {
   sessionsCmd,
   type SessionCtx,
 } from "../sessions/session-manager.js";
-import { addMcp, listMcp, removeMcp } from "../agents/sandbox/mcp-sandbox.js";
+import { addMcp, ensureBrainHome, listMcp, removeMcp } from "../agents/sandbox/mcp-sandbox.js";
+import { ensureWorkerHome } from "../agents/sandbox/worker-sandbox.js";
+import {
+  defaultWorkspacePath,
+  resolveWorkspace,
+  updateWorkspace,
+  WORKSPACE_CHANGE_NOTICE,
+} from "../agents/config/workspace.js";
+import {
+  mergeOverlayPatch,
+  patchWithDelete,
+  setConfigPath,
+} from "../agents/config/agent-config-writer.js";
+import {
+  overlayPath,
+  readOverlay,
+  writeOverlay,
+  type AgentOverlay,
+} from "../agents/config/overlay.js";
 import {
   HANDOFF_PROMPT,
   HANDOFF_TTL_MS,
@@ -223,6 +241,60 @@ export async function handleControl(
       "网络路径、NTFS 数据流与大小上限仍然生效。窗口只在本 daemon 进程内，重启即失效。"
     );
   }
+  if (c.kind === "workspace") {
+    if (c.path !== undefined) {
+      try {
+        updateWorkspace("brain", c.path, DATA_DIR);
+      } catch (e) {
+        return `❌ ${e instanceof Error ? e.message : String(e)}`;
+      }
+      return `✅ ${WORKSPACE_CHANGE_NOTICE}\n新工作区：${c.path}`;
+    }
+    if (c.reset) {
+      updateWorkspace("brain", null, DATA_DIR);
+      return `✅ brain 工作区已恢复默认：${defaultWorkspacePath("brain", DATA_DIR)}\n${WORKSPACE_CHANGE_NOTICE}`;
+    }
+    const ws = resolveWorkspace("brain", DATA_DIR);
+    return `brain 默认工作区：${ws.mode} ${ws.path}${ws.problem ? `（${ws.problem}）` : ""}\n切换用 \`设置工作区 <绝对路径>\`，恢复用 \`重置工作区\`；已有会话保持原 cwd。`;
+  }
+  if (c.kind === "wechatConfig") {
+    const ag = c.agent.toLowerCase();
+    const read = readOverlay(ag, DATA_DIR);
+    if (read.problems.length) return `❌ ${read.problems.join("；")}`;
+    if (c.action === "show") {
+      return `微信侧 overlay（${overlayPath(ag, DATA_DIR)}）：\n${JSON.stringify(read.overlay, null, 2)}`;
+    }
+    if (!c.target) return "❌ 需要 <file#键路径>（例如 settings.json#model）";
+    const i = c.target.indexOf("#");
+    if (i <= 0 || i === c.target.length - 1)
+      return "❌ 目标要写成 <file#键路径>，例如 settings.json#model";
+    const file = c.target.slice(0, i);
+    const keyPath = c.target.slice(i + 1);
+    const overlay: AgentOverlay = {
+      ...read.overlay,
+      config: { ...read.overlay.config },
+    };
+    if (c.action === "set") {
+      if (c.value === undefined) return "❌ 需要值";
+      let value: unknown;
+      try {
+        value = JSON.parse(c.value);
+      } catch {
+        value = c.value;
+      }
+      overlay.config = {
+        ...overlay.config,
+        [file]: setConfigPath(overlay.config?.[file] ?? {}, keyPath, value),
+      };
+    } else {
+      overlay.config = {
+        ...overlay.config,
+        [file]: mergeOverlayPatch(overlay.config?.[file] ?? {}, patchWithDelete(keyPath)),
+      };
+    }
+    writeOverlay(ag, overlay, DATA_DIR);
+    return `✅ 已写入微信侧 overlay：${file} → ${keyPath}\n只影响微信侧；下一条新会话生效。真实配置未改。`;
+  }
   if (c.kind === "handoff") return await runHandoff(userId, ctx);
   // 兜底：指令表新增了 kind 但这里还没接通时（正常情况下 TS 会先把这里判成不可达），别静默吞掉
   return `「${(c as { kind: string }).kind}」这条指令还没接通（当前版本请先用 CLI 对应命令）。`;
@@ -251,6 +323,14 @@ export async function handleControlRequest(req: ControlRequest, owner: string): 
       return setTaskBrain(req.target);
     case "brain.handoff":
       return await runHandoff(owner, { owner, notify: async () => {} }, req.expiresAt);
+    case "config.reload": {
+      ensureBrainHome();
+      ensureWorkerHome();
+      killIdleConns();
+      if (!(await restartForMcpChange()))
+        return "配置视图已重建，但大脑正在切换中，这次没有重启；切换完成后用 `wemind config reload` 再试一次。";
+      return "配置视图已重建，常驻大脑已重启；下一条消息使用新配置。已有会话会在重启后自动 session/load 恢复。";
+    }
     case "session.new":
       return await newSessionCmd({
         ...sc(),

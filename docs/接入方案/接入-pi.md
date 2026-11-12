@@ -1,5 +1,7 @@
 # 接入 pi coding agent（经 pi-acp 适配器，探针 + 真机 E2E）
 
+> **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+
 > **最后核对**：2026-11-05 ｜ **实测环境**：Windows 11 + Node 24 + `pi-acp@0.0.34` + pi `1.4.0`
 >
 > **状态**：✅ 内置预设、ACP 探针全绿（`initialize` / `session/new` / prompt / 图片 / 强杀后 `session/load` / 工具调用 0 反向请求）；**微信真机 E2E 已通过（2026-11-01：brain 单轮、热切换 pi↔codex、微信「任务 pi：…」派发）**。
@@ -25,7 +27,7 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 | 启动 | `pi-acp`（无参数），Windows shim 是 `.cmd` → `shell: true` | 适配器是 npm 全局装的**独立二进制**，非 npx |
 | 运行时依赖 | `requiresBins: ["pi"]` | pi-acp 内部 spawn `pi --mode rpc`；只装适配器不够 |
 | 沙箱 | `PI_CODING_AGENT_DIR` → brain/worker 沙箱根（pi 的配置目录 env，默认 `~/.pi/agent`） | 配置目录 = 沙箱根本身（同 kiro 布局） |
-| 凭据同步 | `settings.json` / `auth.json` / `models.json` / `models-store.json`（新者胜、原样复制） | 默认模型/供应商、登录态、自定义供应商（如 magpie 本机网关）跟着用户日常配置走 |
+| 凭据同步 | `settings.json` / `auth.json` / `models.json` / `models-store.json`（新者胜、原样复制） | 默认模型/供应商、登录态、自定义供应商（如用户自建网关）跟着用户日常配置走 |
 | 记忆/技能继承 | `skills/`（junction）+ `AGENTS.md`（拷贝） | pi 读 `<agent-dir>/AGENTS.md` 作跨目录全局指令（官方 configuration.md） |
 | 免审批 | **无需任何开关** | pi 默认不逐次审批（官方 security.md 明说），也没有需要切的 `session/set_mode` |
 | 启动横幅 | `settingsDefaults: { quietStartup: true }` | pi-acp 把 pi 的启动信息（`## Context` / `## Skills` …）当 `agent_message_chunk` 发出来；用 pi 自己的 `quietStartup`（官方 settings.md）关掉。只补缺失键：用户显式设过就保留用户的值，真实配置不动 |

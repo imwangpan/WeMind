@@ -29,6 +29,7 @@ beforeAll(() => {
   process.env.WEMIND_BRAIN = "opencode";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
   process.env.WECHAT_DATA_DIR = dataDir;
+  process.env.WEMIND_HOME_MODE = "sandbox";
   delete process.env.WEMIND_BRAIN_INHERIT;
 });
 
@@ -37,6 +38,7 @@ afterAll(() => {
   delete process.env.WEMIND_BRAIN;
   delete process.env.WEMIND_BRAIN_REAL_HOME;
   delete process.env.WECHAT_DATA_DIR;
+  delete process.env.WEMIND_HOME_MODE;
 });
 
 const readJson = (f: string): Record<string, any> => JSON.parse(fs.readFileSync(f, "utf-8"));

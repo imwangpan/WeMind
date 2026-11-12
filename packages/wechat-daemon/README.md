@@ -21,7 +21,7 @@
 
 ### 其它
 
-各 agent 的沙箱、凭据与免审批配置见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
+各 agent 的配置视图、凭据与免审批配置见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 
 ## 安装
 
@@ -84,8 +84,8 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 
 ## 数据与安全
 
-- 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标（读到哪条消息了）、`allowFrom.json` 授权清单、`brain-home/` 大脑沙箱、`agent-sessions/`（agent 自己的会话库；目前 DSH 的 `deepseek/{brain,worker}` 在这里，不再写 `brain-home/sessions`）、`daemon.log` 日志。
-- **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：`npm i -g <适配器包>` 后 `wemind brain set <agent 名>`；各适配器的安装命令、认证、沙箱与 MCP 差异见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
+- 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标、`allowFrom.json` 授权清单、`runtime.json`（homeMode）、`agent-view/`（real/mirror 最小视图）、`agent-overrides/`（微信独享配置）、`workspace.json` 与 `workspace/`、`media/inbound/`、`session-cwd.json`、`daemon.log` 等。`brain-home/` / `worker-home/` 只在 `sandbox` 模式使用。
+- **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：`npm i -g <适配器包>` 后 `wemind brain set <agent 名>`；各适配器的安装命令、认证、配置视图与 MCP 差异见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - ⚠️ **daemon 会让大脑免确认执行工具**：10 个内置预设默认都免审批，能给这个 bot 发消息的人即可让大脑在本机执行工具（shell / 写文件）；Copilot 预设仅使用 `--allow-all-tools`，不启用 `--allow-all`。微信平台限制决定了只有扫码登录这个 bot 的**登录者**能发消息；另有一道**发件人授权（allowFrom）兜底**：登录者自动写入，**勿清空**。想收紧权限见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - `account.json`（bot token）、`state.json`（`context_token`）、`qr_login.json` 在 POSIX 上统一 chmod 600；Windows 上都是明文，请用目录权限或磁盘加密。
 - **出站附件有安全闸**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 用 `<...>`）。只允许**本地**绝对路径（`file://host/...` 与 UNC 网络路径拒绝，软链接目标同样检查；Windows 的 `文件::$DATA` 数据流也拒绝）；读取前 `realpath` 并拒绝状态/凭据文件（`account.json`、`.env`、各 agent 的 `.credentials*`、`.auth/`、`oauth_creds.json`、`settings.json`/`models*.json` 等），单文件默认上限 25MB（`WECHAT_OUTBOUND_FILE_MAX_MB`）。硬链接无法从路径区分，属已接受风险。**临时要发这类文件**时，登录者在微信发 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30）开窗口：只跳过敏感名单，网络路径/数据流/大小上限照旧；**先开窗再发、或被拦下后回这条指令补发**都行（被拦下的路径在内存里保留 30 分钟）。窗口只在本 daemon 进程内，重启即失效。
@@ -105,7 +105,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                                               | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate` |
 | `WEMIND_LOG_LEVEL`                                                                     | 设为 `debug` 才输出 DEBUG 级别（预留级别，当前没有 debug 调用点）；INFO/WARN/ERROR 始终输出 |
 | `WECHAT_INBOUND_MEDIA_MAX_MB` / `WECHAT_OUTBOUND_FILE_MAX_MB`                         | 入站文件/视频/语音单文件上限（默认 100）/ 出站附件单文件上限（默认 25）                                                  |
-| `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`                                       | `brain-home/media/inbound` 保留天数 / 总量上限（默认 30 天 / 1GB；启动时 + 写入媒体时清理）                                          |
+| `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`                                       | 入站媒体（real/mirror 为 `<账号>/media/inbound`）保留天数 / 总量上限（默认 30 天 / 1GB；启动时 + 写入媒体时清理） |
 | `WECHAT_TOOL_PROGRESS_ITEMS`                                                          | 结构化工具进度 item（11/12）开关（**默认关**：微信客户端目前不渲染，只发文本「步骤 N」；`1` = 启用）                      |
 
 ## 与 MCP 形态的区别

@@ -19,6 +19,11 @@ fs.mkdirSync(dataDir, { recursive: true });
 process.env.WECHAT_DATA_DIR = dataDir;
 process.env.WEMIND_MCP_CATALOG = path.join(root, "no-such-catalog.json"); // 别去读用户真实的 MCP 配置
 process.env.WEMIND_SWITCH_DRAIN_MS = "400"; // drain 门缩短，好测超时分支
+// 本文件会真实构建配置视图；不覆盖 realHome 的话，默认预设会去读写当前用户真实的 ~/.kiro 等目录。
+const realHome = path.join(root, "real-home");
+fs.mkdirSync(realHome, { recursive: true });
+const savedRealHome = process.env.WEMIND_BRAIN_REAL_HOME;
+process.env.WEMIND_BRAIN_REAL_HOME = realHome;
 const savedNodeOptions = process.env.NODE_OPTIONS;
 process.env.NODE_OPTIONS = ""; // 子进程会继承它；调试器注入会让假 agent 卡在握手（同 spawn-agent.test.ts）
 
@@ -540,6 +545,8 @@ afterEach(() => {
 });
 // NODE_OPTIONS 放到最后再恢复：本文件每条用例都要起子进程，中途恢复会把调试器注入带回去（同 spawn-agent.test.ts 的顾虑）
 afterAll(() => {
+  if (savedRealHome === undefined) delete process.env.WEMIND_BRAIN_REAL_HOME;
+  else process.env.WEMIND_BRAIN_REAL_HOME = savedRealHome;
   if (savedNodeOptions === undefined) delete process.env.NODE_OPTIONS;
   else process.env.NODE_OPTIONS = savedNodeOptions;
 });

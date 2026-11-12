@@ -30,14 +30,14 @@ $env:ACP_ARGS = '["--profile","acp"]'
 $env:ACP_SHELL = "1"
 $env:ACP_HOME_ENV = "DSH_HOME"
 $env:ACP_HOME = "$env:TEMP\dsh-probe"
-$env:ACP_MODEL = '["deepseek-account","deepseek-flash"]'   # 桌面登录必须选 account（探针会显式 set_config_option）；想复现「跟随日常 dsh」，把你**真实**的 `~/.dsh/profiles/acp/cordis.patch.yml` 复制进 ACP_HOME、并去掉 ACP_MODEL——那份里要有你自己写的 `- id: acp`（`wemind brain` 会给片段），否则 dsh 仍会退回 deepseek-official（沙箱副本与之逐字节一致，复制哪份都行；需桌面端在运行）
+$env:ACP_MODEL = '["<provider>","<model>"]'   # 可选覆盖（rc.3 已无 deepseek-account；探针会显式 set_config_option）；想复现「跟随日常 dsh」，把你**真实**的 `~/.dsh/profiles/acp/cordis.patch.yml` 复制进 ACP_HOME、并去掉 ACP_MODEL——那份里要有 `- id: acp` / `agent-default-model` / `web-search-deepseek`（缺 `- id: acp` 时 `wemind brain` 会给片段），否则 dsh 仍会退回 deepseek-official（需要该路由的凭据）
 # 可选：把 ~/.dsh/.credentials.yaml 复制到 ACP_HOME（敏感文件，测完删除）
 node scripts/acp-probe.mjs
 ```
 
 > **2026-11-03 两个回归点**（改 kiro/DSH 相关代码后重跑）：
-> - **kiro v3**：临时 `KIRO_HOME` 的 `settings/cli.json` 写 `{"acp.agentEngine":"v3"}`，`wemind brain check` 应通过；看沙箱 `brain-home/settings/permissions.yaml` 是 allow-all，且解析出的 args 已没有 `--trust-all-tools`（多了 `--agent-engine v3`）。真实设置已有 `permissions.yaml` 时不得被覆盖。
-> - **DSH 会话隔离**：看 `<账号目录>/agent-sessions/deepseek/session-root-{brain,worker}.patch.yml` 与两个 root 目录；要复现旧故障，先在 `brain-home/sessions/` 放一个平铺会话文件再跑 `wemind brain check`（修复后 DSH 不再读那个目录）。模型过期用 `wemind brain` 看是否给出 `no configured model` 的替换提示。
+> - **kiro v3**：临时 `KIRO_HOME` 的 `settings/cli.json` 写 `{"acp.agentEngine":"v3"}`，`wemind brain check` 应通过；看 `agent-view/brain/kiro/settings/permissions.yaml`（`sandbox` 模式才是 `brain-home/settings/permissions.yaml`）是 allow-all，且解析出的 args 已没有 `--trust-all-tools`（多了 `--agent-engine v3`）。真实设置已有 `permissions.yaml` 时不得被覆盖。
+> - **DSH 会话隔离（仅 `sandbox` 模式）**：看 `<账号目录>/agent-sessions/deepseek/session-root-{brain,worker}.patch.yml` 与两个 root 目录；要复现旧故障，先在 `brain-home/sessions/` 放一个平铺会话文件再跑 `wemind brain check`（修复后 DSH 不再读那个目录）。`real` 模式不追加 `--patch`，用 DSH 真实会话库。模型过期用 `wemind brain` 看是否给出 `no configured model` 的替换提示。
 
 Claude Code 的 L3 示例（需要先 `npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；用临时 `CLAUDE_CONFIG_DIR`，别碰真实 `~/.claude`）：
 
@@ -193,7 +193,7 @@ wemind task-stop 2                                         # 单条；task-stop 
 
 - 发一张图 → 支持 image 的 agent 应能描述；不支持（如 DSH 官方）应被友好拦截，而不是反复 `-32602` 重试。
 - 看 `promptCapabilities.image`：`wemind brain check` 不打印能力，跑 `scripts/acp-probe.mjs` 看 `initialize`。
-- **文件/视频/无转写语音（2026-11-09）**：给 bot 发一个文件、一段视频、一条语音 → prompt 里应带 `<BRAIN_HOME>/media/inbound/` 下的本地绝对路径；文件确实存在且大小正确（语音是 **WAV**，24kHz 单声道）。有微信转写的语音不发附件，直接按文本进 prompt。
+- **文件/视频/无转写语音（2026-11-09）**：给 bot 发一个文件、一段视频、一条语音 → prompt 里应带 `<账号>/media/inbound/`（`sandbox` 才是 `<sandbox>/media/inbound/`）下的本地绝对路径；文件确实存在且大小正确（语音是 **WAV**，24kHz 单声道）。有微信转写的语音不发附件，直接按文本进 prompt。
 - **引用消息（2026-11-09）**：回复某条文本消息 → prompt 里应有 `[引用消息] 标题 | 正文`；只带 `svr_id` 的引用给「内容未缓存」占位，不报错（引用正文缓存暂未实现）。**只引用、不输入正文**（2026-11-10）→ 微信应收到一条明确提示「请把要说的话一起打出来」，不是零反馈；`daemon.log` 有 `message without usable content`，且不会多烧一个模型回合。
 - **出站文件/视频（2026-11-09）**：让大脑回复一行 `[附件](file:///<绝对路径>)`（或 `[文件](...)` / `[视频](...)`；路径含 `)` 用 `[附件](<...>)`）→ 微信应收到对应文件/视频；路径不存在、是目录、超过 `WECHAT_OUTBOUND_FILE_MAX_MB`、命中敏感文件 denylist（`account.json`/`state.json`/`.env`/密钥/`brain-home/.credentials.json`/`.auth/user`/`~/.claude/settings.json` 等），或是 `file://host/...`/UNC 网络路径（含软链接目标）、Windows `account.json::$DATA` 数据流时，回复里应有失败说明而不是静默丢附件。
 - **敏感文件临时放行（2026-11-09）**：先让大脑发 `account.json` → 被拒，回复附注「被敏感文件名单拦下（回复「允许敏感文件」可补发）」；回「允许敏感文件」→ 之前那个附件直接补发（日志 `sent pending attachment (... 敏感文件已临时放行)`），无需大脑重发；也可以先发「允许敏感文件」再让大脑发（日志 `sent attachment (... 敏感文件已临时放行)`）。窗口过期或重启 daemon 后再发 → 恢复 `拒绝发送敏感文件`。窗口内 `file://attacker/...`、`::$DATA`、超 25MB 仍应被拒。
@@ -229,7 +229,7 @@ MCP
 | 9 | 图片 | 按 agent 能力工作或友好拒绝 |
 | 10 | MCP | 加载/卸载生效；`wechat` 禁止 |
 | 11 | worker | 派发/中断/继续可用（多任务见 §7.1） |
-| 12 | 多账号 | 沙箱/会话隔离 |
+| 12 | 多账号 | token/会话指针/overlay/工作区按账号隔离；`real` 下 Agent 真实配置/技能/记忆/会话库按设计共享 |
 | 13 | 热切换 | 不重启 daemon 换大脑，在途回合跑完 |
 | 14 | 切换回滚 | 坏 bin（**存在但不是 ACP agent**）被拒，旧大脑继续答，`brain.json` 未变 |
 | 15 | 多任务并行 | 两条不同 agent 同时跑且都出结果 |
@@ -238,12 +238,15 @@ MCP
 | 18 | 会话四件套 | 列表 / 恢复 / 重命名 / 删除 与权限都对 |
 | 19 | 交接 | 摘要只带上一次，切回来源不带上 |
 | 20 | CLI 热切换 | `wemind brain switch` 在 daemon 运行时免重启生效 |
-| 21 | 入站富媒体 | 文件/视频/无转写语音落盘到 `brain-home/media/inbound/`，prompt 带绝对路径；有转写语音按文本处理 |
+| 21 | 入站富媒体 | 文件/视频/无转写语音落盘到 `<账号>/media/inbound/`（`sandbox` 才是 `<sandbox>/media/inbound/`），prompt 带绝对路径；有转写语音按文本处理 |
 | 22 | 引用消息 | 引用后 prompt 带 `[引用消息] 标题 | 正文`（或占位），不中断回合；只引用不输入正文时收到明确提示，不零反馈 |
 | 23 | 出站附件 | `[附件]`/`[文件]`/`[视频]` 送达；非法/敏感/超限路径有失败说明 |
 | 24 | 工具进度 | 默认发文本「步骤 N」；`WECHAT_TOOL_PROGRESS_ITEMS=1` 才发结构化 11/12（客户端目前不渲染） |
 | 25 | 消息 ID 精度 | 连发两条，`state.json` 的字符串 ID 不同、不丢消息 |
 | 26 | 正在输入（typing） | 长回合里「正在输入」持续可见；每 5s 续发，发消息后立刻补一次 |
+| 27 | 终端等效 | 在终端改真实 Agent 配置/技能/记忆后，下一条微信消息可见；会话历史与终端共用（`homeMode=real`） |
+| 28 | 微信独享 overlay | `wemind config wechat set <agent> <path> <value>` 只改 `<账号>/agent-overrides/<agent>.json`，真实配置不变；新会话生效 |
+| 29 | 默认工作区 | brain/worker 分别使用 `<账号>/workspace/{brain,worker}`；`wemind config workspace set` 后已有会话 cwd 不变、新会话用新目录 |
 
 ### 7.1 控制面九项（1.2.0 新增，手工）
 
@@ -316,7 +319,7 @@ MCP
 | 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 watchdog + daemon + worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
 | 6 | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。 |
 | 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑已实测（2026-10-27，1.1.78：`session/load ok`，STEP-A/STEP-B 产物齐全，见 `docs/接入方案/接入-Qoder.md` M3-3）。 |
-| 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 广告 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**广告 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 预设 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进沙箱（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
+| 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 声明 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**声明 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 预设 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进沙箱（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
 
 ### 7.4 真机踩到的坑：重启后旧 `context_token`（2026-10-29 已修）
 

@@ -1,5 +1,7 @@
 # 接入 Kiro CLI（原生 ACP；v2 真机 / v3 探针级）
 
+> **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+
 > **最后核对**：2026-11-06 ｜ **实测环境**：Windows 11 + kiro-cli 2.37.1（v2）；v3 用临时 `KIRO_HOME` + `acp.agentEngine=v3` 验证
 >
 > **状态**：✅ 内置预设。v2（2.37.1）已实测，`wemind brain check` 通过（2026-11-03）；v3 探针级验证过握手（3812ms，2026-11-03）；**v3 的微信真机单轮待复测**。

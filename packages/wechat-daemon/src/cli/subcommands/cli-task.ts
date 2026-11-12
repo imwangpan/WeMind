@@ -73,20 +73,21 @@ export async function cmdTask(
   if (!text) throw new Error('用法: task "<任务描述>" [--cwd 目录] [--agent <名字>] [<key|label>]');
   const key = pickKey(sel);
   requireDaemonAlive(key);
-  const useCwd = resolveTaskCwd(cwd);
+  // 不传 --cwd 时不要拿 CLI 当前目录顶替：daemon 会使用该账号的 worker 默认工作区。
+  const useCwd = cwd ? resolveTaskCwd(cwd) : undefined;
   // 答复等 daemon：**起进程有结果之后**它才发（达上限/agent 起不来是那时才知道的），
   // 所以这里不能自己编「已派发」——旧写法轮询 task-state.json 的 active，会把「达上限被拒」和
   // 甚至上一条任务的编号报成成功。
   const ackId = writeTaskCmd(key, {
     kind: "dispatch",
     text,
-    cwd: useCwd,
+    ...(useCwd ? { cwd: useCwd } : {}),
     ...(agentKey ? { agent: agentKey } : {}),
   });
   return await taskOutcome(
     key,
     ackId,
-    `已发送任务（cwd=${useCwd}）。看进展用 task-list。`,
+    `已发送任务（cwd=${useCwd ?? "账号默认 worker 工作区"}）。看进展用 task-list。`,
     // 派发的答复要等「起进程有结果」：冷启动一个 agent 可能要几十秒，等得久一点好过说假话
     30_000,
   );

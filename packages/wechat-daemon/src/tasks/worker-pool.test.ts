@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   agentKey,
@@ -63,12 +66,22 @@ describe("agentKey", () => {
 describe("connKey", () => {
   it("cwd 也是身份：同 agent 换工作目录 → 不同键（不能复用旧进程）", () => {
     const a = { name: "kiro", bin: "/bin/kiro", args: ["acp"] } as unknown as ResolvedAgent;
-    expect(connKey(a, "/proj/a")).not.toBe(connKey(a, "/proj/b"));
+    const aDir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-conn-a-"));
+    const bDir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-conn-b-"));
+    expect(connKey(a, aDir)).not.toBe(connKey(a, bDir));
   });
 
   it("显式 cwd 与默认 cwd 相同 → 同一个键", () => {
     const a = { name: "kiro", bin: "/bin/kiro", args: ["acp"] } as unknown as ResolvedAgent;
-    expect(connKey(a)).toBe(connKey(a, "  "));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-conn-default-"));
+    const old = process.env.WEMIND_WORKER_CWD;
+    process.env.WEMIND_WORKER_CWD = dir;
+    try {
+      expect(connKey(a)).toBe(connKey(a, "  "));
+    } finally {
+      if (old === undefined) delete process.env.WEMIND_WORKER_CWD;
+      else process.env.WEMIND_WORKER_CWD = old;
+    }
   });
 });
 

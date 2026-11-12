@@ -5,6 +5,7 @@ import {
   applyAcpModel,
   applyAcpSessionMode,
   availableAcpModes,
+  acpTurnFirstFrameMs,
   beginAcpTurn,
   drainAcpReplay,
   feedAcpStdout,
@@ -44,6 +45,50 @@ function fakeHost(overrides: Partial<AcpHost> = {}) {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("首帧耗时", () => {
+  it("只统计本回合绑定的会话，并且只记第一帧", () => {
+    vi.useFakeTimers();
+    const { host, turn } = fakeHost();
+    vi.setSystemTime(new Date(1_000));
+    beginAcpTurn(turn, "sid-1");
+    vi.setSystemTime(new Date(1_250));
+    handleAcpFrame(
+      {
+        method: "session/update",
+        params: {
+          sessionId: "other",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "x" } },
+        },
+      },
+      host,
+    );
+    expect(acpTurnFirstFrameMs(turn)).toBe(-1);
+    handleAcpFrame(
+      {
+        method: "session/update",
+        params: {
+          sessionId: "sid-1",
+          update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "x" } },
+        },
+      },
+      host,
+    );
+    expect(acpTurnFirstFrameMs(turn)).toBe(250);
+    vi.setSystemTime(new Date(9_000));
+    handleAcpFrame(
+      {
+        method: "session/update",
+        params: {
+          sessionId: "sid-1",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "y" } },
+        },
+      },
+      host,
+    );
+    expect(acpTurnFirstFrameMs(turn)).toBe(250);
+  });
 });
 
 describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
@@ -355,6 +400,15 @@ describe("模型与模式设置", () => {
     });
     handleAcpFrame({ id: 1, result: {} }, host);
     await p;
+  });
+
+  it("applyAcpModel：agent 拒绝旧 model id 时只告警，不把整轮打成失败", async () => {
+    const { host, logs } = fakeHost();
+    const p = applyAcpModel(host, fakeAgent({ model: "stale" }), "s1", 1000);
+    handleAcpFrame({ id: 1, error: { code: -32602, message: "unknown model option" } }, host);
+    await expect(p).resolves.toBeUndefined();
+    expect(logs.some((l) => l.includes("model set failed"))).toBe(true);
+    expect(logs.some((l) => l.includes("unknown model option"))).toBe(true);
   });
 
   it("availableAcpModes：无 modes → null；有则取 id", () => {

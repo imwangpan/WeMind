@@ -155,7 +155,7 @@ export type AcpMcpServer = {
   env: Array<{ name: string; value: string }>;
 };
 
-/** ACP `session/new` 的 HTTP MCP 声明（官方 DSH 已广告 http:true；SSE 不支持）。 */
+/** ACP `session/new` 的 HTTP MCP 声明（官方 DSH 已声明 http:true；SSE 不支持）。 */
 export type AcpMcpHttpServer = {
   name: string;
   type: "http";

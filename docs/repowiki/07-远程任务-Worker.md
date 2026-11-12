@@ -132,21 +132,21 @@ stateDiagram-v2
 | 进程 | 1 个（槽位里的当前大脑） | **N 个**（池，各自一条任务） |
 | 会话 | 每用户一 session | 每任务一 session（键 `<agent>:task-<编号>@<userId>`） |
 | 持久化 | `brain-sessions.json`（键 `<agent>:userId`） | `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`） |
-| cwd | `BRAIN_HOME` 沙箱 | **任务工作目录**（`WEMIND_WORKER_CWD`，默认主目录；本地派发可用 `--cwd`） |
-| 沙箱 home | `BRAIN_HOME`（默认空 MCP） | `WORKER_HOME`（继承全量 MCP 除 wechat） |
+| cwd | 账号 `workspace/brain`（或 `session-cwd.json` 记录） | **任务工作目录**：`--cwd` > `WEMIND_WORKER_CWD` > `<账号>/workspace/worker` |
+| 配置 home | `agent-view/brain/<agent>`（`sandbox` 才是 `BRAIN_HOME`；默认空 MCP） | `agent-view/worker/<agent>`（`sandbox` 才是 `WORKER_HOME`；真实全量 MCP 除 wechat） |
 | 超时 | idle 120s / cap 15min / 首帧 25s | idle 180s / cap 30min / 首帧 30s（更宽松） |
 
 子进程 cwd 在 spawn 时固定，**且 cwd 是连接身份的一部分**（`connKey = agent 身份 + 实际生效 cwd`）：换 `--cwd` 会起新进程，绝不会复用停在上一个项目里的旧进程。中断恢复靠 `reset()` 后下次 `ensureSession` 走 `session/load`（不支持时 `session/resume`）。
 
 spawn 失败（cwd 不存在/权限不足）时，`WorkerConn` 把 `error` 事件的真实原因带进 pending 请求的拒绝信息（`进程启动失败：spawn … ENOENT`），不再被笼统的 `worker conn killed` 覆盖，也不会误贴「args 漏了 acp」的提示。
 
-### worker 沙箱
+### worker 配置视图
 
-`WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain 沙箱**策略相反**：worker 是无人值守的任务执行机，继承 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）—— 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。写入磁盘方式按 agent：kiro/opencode 由 `applyWorkerSandbox` 写沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。记忆/技能（`mirrorRealKiro`）与 settings（`syncSettings`，含模型/信任）继承与 brain 一致；预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`，关掉 pi-acp 当消息发出来的启动横幅）也只补缺失键、用户显式设过就保留。
+默认 `homeMode=real`，`ensureWorkerHome()` 为 `<账号>/agent-view/worker/<agent>` 构建最小视图；`sandbox` 模式才使用 `WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain **策略相反**：worker 是无人值守的任务执行机，默认加载 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。overlay 的 `mcp.disable` / `mcp.extra` 同样生效。写入磁盘方式按 agent：文件式 MCP 由 `applyWorkerSandbox` 写视图/沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH / Claude Code / Copilot）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。`real`/`mirror` 下未覆盖的 settings、技能与记忆由 config view 链接真实 home；`sandbox` 模式才走 `syncSettings` / `mirrorRealKiro` 的选择性继承。预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`）只补缺失键、用户显式设过就保留。
 
-沙箱按**这条任务的 agent** 准备：daemon 启动时只按默认任务大脑备一次；`worker-pool.ts` 的 `acquire` 在复用/起进程前会再调 `ensureWorkerHome(ag)`，否则派到别的 agent（如 `--agent pi`）时它自己的 settings/凭据/MCP 还没进沙箱，agent 会拿空配置跑。
+视图按**这条任务的 agent** 准备：daemon 启动时只按默认任务大脑备一次；`worker-pool.ts` 的 `acquire` 在复用/起进程前会再调 `ensureWorkerHome(ag)`，否则派到别的 agent（如 `--agent pi`）时它自己的 settings/凭据/MCP 还没进视图，agent 会拿空配置跑。
 
-> **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个配置目录（2026-10-29 一轮样本未见互踩，长期风险仍在）。
+> **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个配置视图/真实 home（2026-10-29 一轮样本未见互踩，长期风险仍在）。
 >
 > worker 沙箱的 `syncSettings` 与 brain 有少量重复（刻意复制以隔离演进）；记忆/技能继承已抽到 `sandbox-inherit.ts` 共用（含换 agent 时清掉上一个 agent 的 `skills`/`AGENTS.md`）。
 
@@ -288,7 +288,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `WEMIND_WORKER_CWD` | 用户主目录 | worker 默认工作目录（本地 `task --cwd` 覆盖） |
+| `WEMIND_WORKER_CWD` | `<账号>/workspace/worker` | worker 默认工作目录的一次性覆盖；本地 `task --cwd` 仍优先 |
 | `WEMIND_WORKER_BRAIN` | — | **默认任务大脑**（agent 名）。优先级：`WEMIND_WORKER_BRAIN` → `WEMIND_BRAIN`（env 回落）→ `brain.json` 的 `worker.agent ?? agent` → `auto` |
 | `WEMIND_MAX_WORKERS` | 3 | 同时运行的**任务**数上限 |
 | `WEMIND_IDLE_MAX` | 2 | 池中保留的**空闲** worker 进程数上限 |
@@ -297,7 +297,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 | `WEMIND_WORKER_CAP_MS` | 1800000 | 单轮硬上限（30min） |
 | `WEMIND_WORKER_FIRST_FRAME_MS` | 30000 | 首帧超时 |
 | `WEMIND_WORKER_PROGRESS` | `0` | 是否推全程文字进度 |
-| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | worker 沙箱目录 |
+| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | **仅 `sandbox` 模式**的 worker 沙箱目录；`real`/`mirror` 使用 `agent-view/worker/<agent>` |
 | `WEMIND_WORKER_MCP_EXCLUDE` | `wechat` | 不继承的 MCP（`wechat` 强制排除） |
 | `WEMIND_TASK_SCAN_MS` | 1000 | daemon 扫描 `task-inbox/` 与 `control-inbox/` 的间隔 |
 | `WEMIND_CONTROL_TIMEOUT_MS` | 30000 | CLI 等 daemon 回话的上限（`brain switch` 自动放大） |

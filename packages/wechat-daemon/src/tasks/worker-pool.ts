@@ -197,7 +197,13 @@ export async function acquire(
   taskId?: number,
   cwd?: string,
 ): Promise<{ ok: true; conn: WorkerConn } | { ok: false; problem: string }> {
-  const key = connKey(ag, cwd);
+  let key: string;
+  try {
+    key = connKey(ag, cwd);
+  } catch (e) {
+    // cwd 不存在/不可用是“这条任务不能派”的用户错误，不是 daemon 崩溃；按统一失败结果返回。
+    return { ok: false, problem: e instanceof Error ? e.message : String(e) };
+  }
   const plan = planAcquire(poolInfo(), key, poolLimits(), Date.now());
   if (plan.kind === "reject") return { ok: false, problem: plan.problem };
   // 为**这条任务的 agent** 备沙箱：daemon 启动时只按默认任务大脑备过一次，派到别的 agent（如 `--agent pi`）时

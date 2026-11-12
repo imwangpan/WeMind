@@ -1,5 +1,7 @@
 # 接入 Cline CLI（原生 ACP 实测）
 
+> **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+
 > **状态**：M0–M3 全部完成 ✅（`cline` 是内置预设；M2 协议层无改动）。
 > **实测范围**：Cline CLI 3.0.74（M0 探针 + 微信真机 E2E，2026-10-31，见 §2 / §6）｜ **最后核对**：2026-11-05
 > **实测环境**：Windows 11 / Node 24 / Cline CLI 3.0.74（npm 全局安装）。结论**仅适用于 cline 3.0.74**。
@@ -17,7 +19,7 @@
   -32000 Authentication required: Call authenticate before starting a session
   ```
 
-- 协议能力（3.0.74）：`loadSession:true`、`agent_thought_chunk` / `agent_message_chunk` / `session_info_update`、**0 反向请求**、硬杀后 `session/load` 能接回上下文；`session/close` ❌（`-32601`，WeMind 不调用）。**图片 ❌**：`initialize` 虽然广告 `image:true`，但 ACP `prompt` 的 `de()` 只保留 `text` 块（图片被丢弃），所以预设显式 `images:false`。
+- 协议能力（3.0.74）：`loadSession:true`、`agent_thought_chunk` / `agent_message_chunk` / `session_info_update`、**0 反向请求**、硬杀后 `session/load` 能接回上下文；`session/close` ❌（`-32601`，WeMind 不调用）。**图片 ❌**：`initialize` 虽然声明 `image:true`，但 ACP `prompt` 的 `de()` 只保留 `text` 块（图片被丢弃），所以预设显式 `images:false`。
 - **MCP 只能走配置文件**：Cline 收到 `session/new.mcpServers` 只存不用；预设用 `CLINE_MCP_SETTINGS_PATH` 指到 `<沙箱>/cline/mcp.json`（`{ "mcpServers": {…} }`，与 kiro 同格式）。
 
 ---
@@ -105,7 +107,7 @@ node scripts/acp-probe.mjs
 | Q3 | 首帧 / 更新类型 | prompt 首帧 **4.1s**、首字 **4.4s**；帧类型 `agent_thought_chunk` / `agent_message_chunk` / `session_info_update` |
 | Q4 | 反向请求 | **0 个**（未触发 `session/request_permission` / `fs/*` / `terminal/*`） |
 | Q5 | 硬杀后恢复 | `session/load` **成功**，`PINEAPPLE` 上下文保留（首字 2.1s）；`session/close` → `-32601` |
-| Q6 | 图片 / MCP | **图片实际不可用**：`initialize` 广告 `image:true`，但 3.0.74 的 ACP `prompt` 里 `de(e.prompt)` 只 `filter(type==="text")`，image 块被直接丢弃（2026-10-31 真机：模型只看到「用户发来一张图片」文字，回复没收到图）→ 预设 `images:false`；`session/new` 的 `mcpServers` **不生效**（只存进 session 对象，`buildConfig` 不再使用），MCP 走配置文件 |
+| Q6 | 图片 / MCP | **图片实际不可用**：`initialize` 声明 `image:true`，但 3.0.74 的 ACP `prompt` 里 `de(e.prompt)` 只 `filter(type==="text")`，image 块被直接丢弃（2026-10-31 真机：模型只看到「用户发来一张图片」文字，回复没收到图）→ 预设 `images:false`；`session/new` 的 `mcpServers` **不生效**（只存进 session 对象，`buildConfig` 不再使用），MCP 走配置文件 |
 
 结论：**协议层零改动**——默认 `restore: "load"`、默认首帧/心跳都够用；只要 agent + 沙箱。图片例外：预设显式 `images:false`（见 Q6）。
 
@@ -120,7 +122,7 @@ cline: {
   binWin: "cline.cmd",              // npm 全局安装的 Windows shim；shell:true
   args: ["--acp", "--auto-approve", "true"],
   shell: true,
-  images: false,                    // 3.0.74 实测：广告 image:true 但 ACP prompt 丢弃图片
+  images: false,                    // 3.0.74 实测：声明 image:true 但 ACP prompt 丢弃图片
   env: {
     CLINE_DIR: `%HOME%${path.sep}cline`,
     CLINE_DATA_DIR: `%HOME%${path.sep}cline${path.sep}data`,
@@ -144,7 +146,7 @@ cline: {
 - **MCP 文件**：`CLINE_MCP_SETTINGS_PATH` 指到 `<沙箱>/cline/mcp.json`，WeMind 的 `applySandbox()` 写 `{ "mcpServers": {…} }`；目录来源读真实的 `~/.cline/data/settings/cline_mcp_settings.json`。**真实文件不被改动**。
   - 验证方式（不需要起 daemon）：`cline config mcp --json` 在设置 `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 后能列出沙箱里的 server。
   - `wechat` 永久禁止；brain 默认空、按需 `加载 <名>`；worker 继承全量但排除 `wechat` 与 `disabled:true`。
-- **登录态与模型目录**：`data/settings/providers.json`（登录态/自定义 provider）与 `data/settings/models.json`（provider 的模型目录缓存）都按「新者胜」同步（与 DSH `.credentials.yaml` 同策略）。**`models.json` 不能漏**：缺它时 Cline 的 `session/new` 会回退到 `gpt-4o`，自定义 provider 下第一条 prompt 就报 `magpie knows no model "gpt-4o"`（2026-10-31 真机踩到并修复）。自定义 provider 另由 `credentialEnv: clineCredentialEnv` 在 spawn 前从**真实** `~/.cline/data/settings/providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）。**注意**：沙箱里 OAuth token 刷新不会写回真实文件，长期两条登录态可能漂移；用 API-key provider 或定期在日常环境 `cline auth` 可以规避。
+- **登录态与模型目录**：`data/settings/providers.json`（登录态/自定义 provider）与 `data/settings/models.json`（provider 的模型目录缓存）都按「新者胜」同步（与 DSH `.credentials.yaml` 同策略）。**`models.json` 不能漏**：缺它时 Cline 的 `session/new` 会回退到 `gpt-4o`，自定义 provider 下第一条 prompt 就报 `knows no model "gpt-4o"`（2026-10-31 真机踩到并修复）。自定义 provider 另由 `credentialEnv: clineCredentialEnv` 在 spawn 前从**真实** `~/.cline/data/settings/providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）。**注意**：沙箱里 OAuth token 刷新不会写回真实文件，长期两条登录态可能漂移；用 API-key provider 或定期在日常环境 `cline auth` 可以规避。
 - **记忆/技能**：`rules/`、`skills/`、`agents/` 以 junction（Windows）/ symlink 进沙箱，与日常 Cline 共用；`hooks/`、`plugins/` **不继承**（插件可自带 MCP，沙箱只允许 curated MCP）。
 - **免审批**：`--auto-approve true` 是 Cline 官方 ACP 文档给的启动开关（`auto_approve` config 的启动默认值）。这与其它预设一致——但宿主应答器仍默认拒绝边缘权限请求，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行。
 
@@ -153,7 +155,7 @@ cline: {
 - `session/new` 的 `model` 来自 provider 设置（本机实测 `auto/dfmodel`）；也可显式覆盖：
 
   ```powershell
-  wemind brain set cline --model "auto/deepseek-v4.1-flash"
+  wemind brain set cline --model "<你的模型 id>"
   wemind brain switch cline    # daemon 在跑时应用
   ```
 
@@ -188,7 +190,7 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 2. **`session/close` 不存在**（`-32601`）：WeMind 目前不调用它，杀进程即可；若未来加「优雅关闭」，要对 Cline 跳过。
 3. **MCP 走 ACP 不支持**：`mcpViaAcp` 必须保持 `false`；改用 `CLINE_MCP_SETTINGS_PATH`。
 4. **OAuth token 单向同步**：沙箱内刷新不会回写真实 `providers.json`（见 §3）。API-key provider 不受影响。
-5. **图片不支持（实测）**：`initialize` 广告 `image:true`，但 3.0.74 ACP `prompt` 的 `de()` 只保留 `text` 块，image 被丢弃；预设显式 `images:false`，daemon 收到纯图片消息会直接回「当前大脑暂不支持看图」，不再让模型猜；带文字的消息只按文字回答并注明图片被忽略。
+5. **图片不支持（实测）**：`initialize` 声明 `image:true`，但 3.0.74 ACP `prompt` 的 `de()` 只保留 `text` 块，image 被丢弃；预设显式 `images:false`，daemon 收到纯图片消息会直接回「当前大脑暂不支持看图」，不再让模型猜；带文字的消息只按文字回答并注明图片被忽略。
 6. **同 agent 并发**：两个 worker 共用 `<worker-home>/cline`（与其它 agent 相同）；**假设/待实测**：Cline 的会话库据其源码是 SQLite，长期并发风险未验证（本轮只跑过单任务与双 agent 并发，没跑同 agent 双 worker 的长时间样本）。
 7. **「新会话」不隔离文件系统（暂缓项）**：Cline 作为工具型 agent，会在任务 cwd 内看到并操作文件；旧 session transcript 也落在 `brain-home/cline/data/sessions/`（**假设/待实测**：目录位置来自 Cline 的数据布局，本轮未逐个文件核实）。这是工具型 agent 的预期行为，WeMind 不额外改写 `.clineignore` 或搬移其数据目录；需要强隔离时请把任务 `--cwd` 指到独立目录。
 
@@ -198,7 +200,7 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 
 - **M0 探针（3.0.74，2026-10-31，§2 Q1–Q6）**：`initialize` 返回 `loadSession:true`、`promptCapabilities.image:true`（`audio:false`、`embeddedContext:false`）、`authMethods: cline / cline-pass / openai-codex`；`session/new` 需先有登录态，返回 `modes`（`plan`/`act`）、`models` 与 `configOptions`（`model` / `mode` / `auto_approve`）；prompt 首帧 **4.1s**、首字 **4.4s**，帧类型 `agent_thought_chunk` / `agent_message_chunk` / `session_info_update`；**0 反向请求**；硬杀后 `session/load` 成功、`PINEAPPLE` 上下文保留（首字 2.1s），`session/close` 回 `-32601`。同批测出两个否定结论：图片在 ACP `prompt` 被丢弃（`images:false`）、`session/new.mcpServers` 不生效（MCP 走配置文件）。
 - **微信真机 E2E（2026-10-31，已通过）**：文本消息/回复、多轮上下文、重启后 `session/load`（`PINEAPPLE`）、worker 任务均通过。状态行记 M0–M3 全部完成 ✅，M2 协议层无改动。
-- **认证与模型（2026-10-31 真机）**：自定义 provider 由 `clineCredentialEnv()` 从 `providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）；缺 `models.json` 时 `session/new` 回退 `gpt-4o`、第一条 prompt 报 `magpie knows no model "gpt-4o"`，补齐 `models.json` 后修复（§3）。
+- **认证与模型（2026-10-31 真机）**：自定义 provider 由 `clineCredentialEnv()` 从 `providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）；缺 `models.json` 时 `session/new` 回退 `gpt-4o`、第一条 prompt 报 `knows no model "gpt-4o"`，补齐 `models.json` 后修复（§3）。
 
 ---
 

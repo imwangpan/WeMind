@@ -1,5 +1,7 @@
 # 接入 Gemini CLI（原生 ACP，探针 + 真机实测）
 
+> **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+
 > **最后核对**：2026-11-05 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
 >
 > **状态**：✅ 内置预设、ACP 探针全部通过（`initialize` / `session/new` / prompt / 图片 / 工具调用 0 反向请求 / 强杀后 `session/load`）；MCP 与沙箱已实测；`wemind brain check` 握手通过（约 3.0s）；**微信真机 E2E 已通过（2026-11-01：单轮、杀 daemon 后 `session/load`、热切换、worker 任务）**。
@@ -17,11 +19,11 @@ gemini --version               # 确认版本（0.66+）
 gemini --help                  # 确认 --acp 参数存在（--version 只打印版本号，不列参数）
 ```
 
-认证方式以 `~/.gemini/settings.json` 的 `security.auth.selectedType` 为准；API key / 自定义网关（如本机 magpie）的 base URL 写在 `~/.gemini/.env`：
+认证方式以 `~/.gemini/settings.json` 的 `security.auth.selectedType` 为准；API key / 自定义网关（如用户自建网关）的 base URL 写在 `~/.gemini/.env`：
 
 ```ini
 GEMINI_API_KEY=...
-GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:3425
+GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:<port>
 ```
 
 WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / `google_accounts.json` 作为**凭据文件**同步进沙箱，并把真实 `settings.json` 作为**设置基底**——终端 `gemini` 与微信大脑用同一套认证与模型。
@@ -78,7 +80,7 @@ node scripts/acp-probe.mjs
 ## 4. 已知限制 / 坑
 
 - **`--skip-trust` 不能省**：未信任目录 = yolo 降级 + MCP 全禁用。大脑 cwd 是沙箱根（每次都是「新目录」），所以必须显式信任。
-- **模型名必须能被你的网关解析**：`session/new` 的 `availableModels` 是 Gemini CLI 自己的候选列表，**不等于**网关实际提供的模型。实测在 magpie 网关下 `--model auto` 会路由到 `gemini-3.1-pro-preview`，网关回 `magpie knows no model …`；网关部署要写它认识的 id（如 `auto/hy3`）。`wemind brain set gemini --model …` 原样传给 `gemini --model`。
+- **模型名必须能被你的网关解析**：`session/new` 的 `availableModels` 是 Gemini CLI 自己的候选列表，**不等于**网关实际提供的模型。实测在自建网关下 `--model auto` 会路由到 `gemini-3.1-pro-preview`，网关回 `knows no model …`；网关部署要写它认识的 id（如 `auto/hy3`）。`wemind brain set gemini --model …` 原样传给 `gemini --model`。
 - **load 后回放**：这是 Gemini 的 ACP 实现细节，不是 WeMind 的会话记录；`replayOnLoad` 只在恢复后**丢掉**这些帧（不转发给微信用户）。上限 3s 是防它持续发帧把回合卡住；正常历史（几十条）实测 10ms 级回放完。
 - **自动更新关掉**：沙箱 `settings.json` 的 `general.enableAutoUpdate` 由 `settingsBase()` 统一写成 `false`（用户已有的其它 `general` 键保留）；终端日常 `gemini` 的真实配置不动。理由：常驻 daemon 不该在运行中自己换版本。
 - **MCP 视图**：大脑默认空 + 微信里 `加载 <名>` 才写进沙箱；worker 继承真实 `mcpServers` 全量但**永久排除 `wechat`**。真实 `~/.gemini/settings.json` 不动。

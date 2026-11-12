@@ -15,6 +15,7 @@ import { cmdLogin, finalizeStaging } from "./subcommands/cli-login.js";
 import { cmdSession, cmdSessionCurrent } from "./subcommands/cli-session.js";
 import { cmdAutostart } from "./subcommands/autostart.js";
 import { cmdLog, LOG_USAGE, parseLogArgs } from "./subcommands/cli-log.js";
+import { cmdConfig, cmdEnv, cmdMcp, cmdWorkspace } from "./subcommands/cli-config.js";
 import { pickKey, resolveKey } from "./cli-context.js";
 import {
   cmdTask,
@@ -108,6 +109,18 @@ export async function runManage(argv: string[]): Promise<void> {
     }
     case "brain":
       print(await cmdBrain(rest, { startDaemon }));
+      break;
+    case "config":
+      print(await cmdConfig(rest));
+      break;
+    case "mcp":
+      print(cmdMcp(rest));
+      break;
+    case "workspace":
+      print(cmdWorkspace(rest));
+      break;
+    case "env":
+      print(cmdEnv(rest));
       break;
     case "session": {
       const sub = (rest[0] ?? "").toLowerCase();
@@ -239,6 +252,17 @@ export function helpText(): string {
   brain set <agent 名|auto> [--bin X] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]
                                  改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--extra-args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用；--extra-args 追加在预设参数后，不会漏掉 ACP 子命令）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
+  config show|home-mode|reload [--key <key|label>]
+                                 查看/设置 homeMode（real/mirror/sandbox）与配置视图
+  config agent show|get|set|unset|edit <agent> [<file#键路径>] [值] [--file <相对路径>]
+                                 默认改**真实 Agent 配置**（JSON/JSONC；写前备份）
+  config wechat show|get|set|unset|edit <agent> [<file#键路径>] [值] [--file <相对路径>]
+                                 只改微信独享 overlay（不影响真实配置）
+  mcp list|enable|disable|add|remove [--key <key|label>]
+                                 管理 brain MCP 激活集 / overlay disable / extra
+  workspace show|set <绝对路径>|reset [--role brain|worker]
+                                 查看/设置默认工作区；已有会话不变，新会话生效
+  env capture|show|clear [--dry-run]   非敏感环境快照（PATH/代理/locale；不含密钥）
   logout <key|label>             停 daemon + 通知下线 + 清凭证（保留目录，可重登）
   delete <key|label>             停 daemon + 删除目录 + 移除注册
   label <key|label> <新别名>     改别名

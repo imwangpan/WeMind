@@ -1,13 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { BRAIN_HOME } from "../../agents/sandbox/mcp-sandbox.js";
+import type { AgentRole } from "../../agents/brain-config.js";
+import { readHomeMode, type HomeMode } from "../../agents/config/home-mode.js";
+import { mediaDirFor } from "../../agents/config/runtime.js";
 
 /**
  * 入站附件落盘。
  *
- * 放在 BRAIN_HOME/media/inbound：brain 的 cwd 就是 BRAIN_HOME，agent 用文件工具可直接按
- * 相对路径 media/inbound/... 找到；prompt 里同时给绝对路径，避免 agent 猜 cwd。
+ * `real` / `mirror` 放在 `<账号>/media/inbound`；`sandbox` 保持 `<brain-home>/media/inbound`。
+ * prompt 里给绝对路径，避免 agent 依赖 cwd 猜位置。
  * 目录/文件权限：POSIX 下 0700/0600；Windows 的 chmod 是 no-op，依赖数据目录本身的权限。
  */
 
@@ -77,8 +79,8 @@ export function saveInboundMedia(
 }
 
 /** inbox 目录（绝对路径）。 */
-export function mediaInboxDir(): string {
-  return path.join(BRAIN_HOME, "media", "inbound");
+export function mediaInboxDir(role: AgentRole = "brain", mode: HomeMode = readHomeMode()): string {
+  return mediaDirFor(role, mode);
 }
 
 /**

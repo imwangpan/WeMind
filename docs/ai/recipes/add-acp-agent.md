@@ -25,7 +25,7 @@ $env:ACP_ARGS = '["--profile","acp"]'
 $env:ACP_SHELL = "1"
 $env:ACP_HOME_ENV = "DSH_HOME"
 $env:ACP_HOME = "$env:TEMP\dsh-probe-home"   # 测试用；真实凭据见下
-$env:ACP_MODEL = '["deepseek-account","deepseek-flash"]'  # DSH 必须；否则默认 official 路由要 API key
+$env:ACP_MODEL = '["<provider>","<model>"]'  # 可选覆盖；DSH 的真实默认请用 profile 里的 - id: acp（rc.3 已无 deepseek-account）
 $env:ACP_PROMPT = "Reply with exactly: OK"
 $env:ACP_TEST_IMAGE = "1"   # 第 6 问（带图 prompt 能否接受）→ 决定预设 images
 $env:ACP_TEST_MCP = '[{"name":"fake","command":"node","args":["-e","0"],"env":[]}]'  # 第 6 问（mcpServers 能否被接受）→ 决定 mcpViaAcp
@@ -91,7 +91,7 @@ node scripts/acp-probe.mjs
 |---|---|---|---|
 | 1 | 二进制/路径 | PATH 名或绝对路径 | `dsh` / `dsh.cmd` |
 | 2 | ACP 启动参数 | 进入 ACP server over stdio | `--profile acp` |
-| 3 | 配置目录环境变量 | 该 agent 读取配置/数据目录的 env 名；WeMind 指向沙箱 | `DSH_HOME` |
+| 3 | 配置目录环境变量 | 该 agent 读取配置/数据目录的 env 名；WeMind 指向配置视图（`real`/`mirror`）或沙箱（`sandbox`） | `DSH_HOME` |
 | 4 | 配置目录布局 / MCP 格式 | `configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile` | 空 / ACP `mcpServers` |
 
 > 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
@@ -110,7 +110,7 @@ acme: {
   args: ["serve", "--acp"],
   shell: true,                   // .cmd/.bat/npx 必须；.exe 可 false
   // requiresBins: ["acme"],     // 适配器内部还要 spawn 的运行时（只装适配器不够）；缺失时 agentProblem() 提前报错
-  homeEnvVar: "ACME_HOME",       // 指向 BRAIN_HOME；没有就删掉
+  homeEnvVar: "ACME_HOME",       // 指向 agent-view/<role>/<agent> 或 sandbox 根；没有就删掉
   realHome: path.join(os.homedir(), ".acme"),
   inheritDirs: ["skills"],       // 目录式记忆/技能
   inheritFiles: ["AGENTS.md"],   // 单文件记忆
@@ -151,15 +151,15 @@ acme: {
 
 ---
 
-## 3. 沙箱 / MCP / 记忆
+## 3. 配置视图 / MCP / 记忆
 
-- `homeEnvVar` 指向 `BRAIN_HOME`；`configSubdir` 决定配置目录在沙箱内的位置。
+- `homeEnvVar` 指向 `agent-view/<role>/<agent>`（`real`/`mirror`）或 `BRAIN_HOME`/`WORKER_HOME`（`sandbox`）；`configSubdir` 决定配置目录在其中的位置。
 - `mcpFormat`：`kiro`（`mcpServers`）或 `opencode`（`mcp.servers`）；DSH 这类走 ACP 的用 `mcpViaAcp`，不要写文件。
-- 记忆继承：`realHome` + `inheritDirs` / `inheritFiles`；单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
-- 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时沙箱。
-- 设置继承：`settingsBase` 会在 brain/worker 两个沙箱生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）；`settingsStrip` 可改剥离键（gemini 只剥 `mcpServers`，保留用户的 `model`/`security`），`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。
-- **profile 继承**（`realProfile`，可选）：把真实 `<realHome>/profiles/<名>/cordis.patch.yml` **原样复制**进两个沙箱——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在；默认模型也从这份读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
-- 默认空 MCP；`wechat` 永久禁止（防它把消息发回自己）。
+- 记忆/技能：`real`/`mirror` 由 config view 直接链接 `realHome` 的未覆盖目录/文件；`sandbox` 才按 `inheritDirs` / `inheritFiles` 选择性复制。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
+- 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时视图/沙箱。
+- 设置继承：`settingsBase` 会在 brain/worker 两个角色的视图（`sandbox` 模式是沙箱）生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）；`settingsStrip` 可改剥离键（gemini 只剥 `mcpServers`，保留用户的 `model`/`security`），`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。
+- **profile**（`realProfile`，可选）：`real`/`mirror` 下整个 `profiles/` 链接真实 home；`sandbox` 模式把真实 `<realHome>/profiles/<名>/cordis.patch.yml` **原样复制**进沙箱——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在。默认模型从真实 profile 读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
+- brain 默认空 MCP、按 agent 持久激活；worker 真实全量。两者都永久禁止 `wechat`（防它把消息发回自己）。
 - **每个 agent 只读自己的 catalog**；不要把 kiro 的文件指给 DSH。
 
 验证：

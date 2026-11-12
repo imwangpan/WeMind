@@ -205,7 +205,7 @@ function entryConfig(text: string, head: RegExp): string | null {
   return JSON.stringify([provider, model]);
 }
 
-/** 取 `key: value` 的标量值（去引号与行尾注释）；块式与 flow 式都认（`config: {provider: magpie, model: auto/x}` 也是合法 YAML，DSH 接管）。 */
+/** 取 `key: value` 的标量值（去引号与行尾注释）；块式与 flow 式都认（`config: {provider: gw, model: auto/x}` 也是合法 YAML，DSH 接管）。 */
 function scalar(line: string, key: string): string {
   const block = new RegExp(`^\\s+${key}:\\s+(.+)$`).exec(line);
   const m = block ?? new RegExp(`[{,]\\s*${key}:\\s*("[^"]*"|'[^']*'|[^,}]+)`).exec(line);
