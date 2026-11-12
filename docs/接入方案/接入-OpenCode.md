@@ -128,7 +128,7 @@ opencode: {
   inheritDirs: ["skills", "agents", "commands"],
   inheritFiles: ["AGENTS.md"],
   configSubdir: "opencode",      // agent 配置目录相对沙箱的子路径（kiro 为空）
-  mcpFormat: "opencode",         // opencode.json 的 mcp.servers
+  mcpFormat: "mcp.servers",      // opencode.json 的 mcp.servers
   mcpConfigFile: "opencode.json",
   catalogFile: "opencode.json",
   env: { OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, // 不从 cwd 祖先目录发现用户 opencode.json
@@ -286,7 +286,7 @@ npm run build; npm run daemon
 |---|---|---|
 | 启动 | `opencode acp`；`shell: true`、`binWin: "opencode"` | §3.4 Step 1 / Step 7 |
 | 沙箱配置目录 | `XDG_CONFIG_HOME=<沙箱>` → 配置实到 `<沙箱>/opencode/`；`OPENCODE_CONFIG_DIR` 只「追加」、不替换 global，无法隔离，故不用 | §3.2、§3.3 |
-| MCP 文件 | `<沙箱>/opencode/opencode.json` 的 `mcp.servers`（`mcpFormat: "opencode"`） | §3.4 Step 3 |
+| MCP 文件 | `<沙箱>/opencode/opencode.json` 的 `mcp.servers`（`mcpFormat: "mcp.servers"`） | §3.4 Step 3 |
 | MCP 激活 | brain 默认空 MCP；微信 `加载/卸载` 后写激活集，重启 ACP 生效；`mcp.servers` 条目原样透传 | §3.4 Step 3 |
 | MCP 目录（CATALOG） | 默认 `<realHome>/opencode.json`；**不**回退 `opencode.jsonc`——真实配置只有 `.jsonc` 时用 `WEMIND_MCP_CATALOG` 显式指过去 | §3.4 Step 3 |
 | worker | 继承全量 MCP、仅排除 `wechat`；路径同为 `<WORKER_CONFIG_DIR>/opencode.json` | §3.4 Step 5 |

@@ -46,7 +46,7 @@ transport（怎么让 agent 看到）
 | `packages/wechat-daemon/src/agents/config/overlay.ts` | 微信独享 `mcp.extra` / `mcp.disable` |
 | `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | brain 视图/沙箱、catalog、激活集、`加载/卸载` |
 | `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | worker 全量继承、排除集 |
-| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts` | 文件式 MCP 格式（kiro / opencode / HTTP）的读/写/转换 |
+| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts` | 文件式 MCP 格式（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）的读/写/转换 |
 | `packages/wechat-daemon/src/cli/subcommands/cli-config.ts` | `wemind config mcp list/enable/disable/add/remove` 的 CLI 入口 |
 | `packages/wechat-daemon/src/index.ts` | 指令拦截；加载/卸载后 `restart()` |
 | `packages/wechat-daemon/src/acp/acp-brain.ts` | 重启 ACP，重建后恢复 session |
@@ -161,7 +161,7 @@ MCP                 # 列出可选与已激活
 ## 5. DSH 的 `mcpViaAcp`（已实现，2026-11-02 核对）
 
 - `mcpViaAcp`：把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入（`deepseek`、`claude-code` 预设为 `true`）；
-- `toAcpMcpServers()`：kiro/opencode 格式 → `{ name, command, args, env }` / `{ name, type:"http", url, headers }`；
+- `toAcpMcpServers()`：两种 JSON 键路径 → `{ name, command, args, env }` / `{ name, type:"http", url, headers }`；
 - 官方不支持 SSE；HTTP 已声明（未单独真机实测）；stdio 已真机实测；
 - 坏条目预校验：无 command/url 的条目拒绝加载，结构残缺的条目跳过并记日志——官方 `session/new` 失败会回滚整个会话，所以不能让一条坏定义拖挂全部；
 - 能力字段不自动适配：`initialize` 回包目前不被解析，`mcpViaAcp` 是**人工写进预设**的结论；接新 agent 时用探针实测 stdio/HTTP，不要只按 capabilities 声明推断。

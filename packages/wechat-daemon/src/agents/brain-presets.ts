@@ -26,7 +26,7 @@ export type AcpAgentPreset = {
   inheritFiles?: string[]; // 从 realHome 拷进沙箱配置目录的「单文件」记忆（如 AGENTS.md；目录式记忆用 inheritDirs）
   // —— 沙箱约定（不同 agent 的配置目录位置与 MCP 文件格式不同）——
   configSubdir?: string; // agent 配置目录相对 home（配置视图根 / sandbox 根）的子路径（kiro 空=根本身；opencode "opencode"）
-  mcpFormat?: "kiro" | "opencode"; // MCP 配置文件的组织格式（默认 kiro）
+  mcpFormat?: "mcpServers" | "mcp.servers"; // MCP 定义的 JSON 键路径（默认 mcpServers）
   mcpConfigFile?: string; // MCP 配置文件相对「配置目录」的路径（默认 settings/mcp.json）
   catalogFile?: string; // 可选 MCP 目录来源文件相对 realHome 的路径（默认 settings/mcp.json）
   env?: Record<string, string>; // 额外注入的环境变量（强制；值里 %HOME% → home 目录（视图根 / sandbox 根））
@@ -94,7 +94,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     configSubdir: ".gemini", // GEMINI_CLI_HOME 是「家目录」，Gemini 在它下面建 .gemini/
     inheritDirs: ["skills"],
     inheritFiles: ["GEMINI.md"],
-    mcpFormat: "kiro",
+    mcpFormat: "mcpServers",
     mcpConfigFile: "settings.json",
     catalogFile: "settings.json",
     settingsBase: "settings.json",
@@ -139,7 +139,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     inheritDirs: ["skills", "agents", "commands"],
     inheritFiles: ["AGENTS.md"],
     configSubdir: "opencode",
-    mcpFormat: "opencode",
+    mcpFormat: "mcp.servers",
     mcpConfigFile: "opencode.json",
     catalogFile: "opencode.json",
     env: { OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, // 不从 cwd 祖先目录发现用户 opencode.json
@@ -211,7 +211,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     inheritDirs: ["memory", "skills", "agents", "commands"],
     inheritFiles: ["AGENTS.md"],
     configSubdir: "qoder",
-    mcpFormat: "kiro",
+    mcpFormat: "mcpServers",
     mcpConfigFile: "settings.json",
     catalogFile: "settings.json",
     settingsBase: "settings.json",
@@ -251,7 +251,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     // 用户级规则/技能/agent 定义与日常 Cline 共用一份；hooks/plugins 不继承（插件可自带 MCP，沙箱不允许 wechat 之外的意外入口）
     inheritDirs: ["rules", "skills", "agents"],
     configSubdir: "cline",
-    mcpFormat: "kiro",
+    mcpFormat: "mcpServers",
     mcpConfigFile: "mcp.json",
     catalogFile: "data/settings/cline_mcp_settings.json",
     // providers.json：登录态（OAuth / API-key）；models.json：provider 的模型目录缓存——

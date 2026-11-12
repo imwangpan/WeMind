@@ -1,11 +1,12 @@
 /**
- * MCP 配置的「格式」适配：不同 ACP agent 把 MCP server 定义放在不同文件、不同结构里。
+ * MCP 配置的「格式」适配：不同 ACP agent 把 MCP server 定义放在不同文件、不同键路径里。
  * 本模块只做纯数据的组织/解析（无文件 IO），便于单测；沙箱模块负责写入磁盘。
  *
- * - `kiro`：独立文件 `settings/mcp.json`，结构 `{ "mcpServers": { 名: {command,args,env} } }`
- * - `opencode`：主配置 `opencode.json`，结构 `{ "mcp": { "servers": { 名: {type,command,environment} } } }`（与 model 等共处一文件）
+ * 取值是 JSON 里的**键路径**，与 agent 名无关：
+ * - `mcpServers`：`{ "mcpServers": { 名: {command,args,env} } }`
+ * - `mcp.servers`：`{ "mcp": { "servers": { 名: {type,command,environment} } } }`（与 model 等共处一文件）
  */
-export type McpFormat = "kiro" | "opencode";
+export type McpFormat = "mcpServers" | "mcp.servers";
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -34,7 +35,7 @@ export function isWechatMcpServer(entry: unknown): boolean {
 export function readMcpServers(obj: unknown, format: McpFormat): Record<string, unknown> {
   if (!isObj(obj)) return {};
   const servers =
-    format === "opencode"
+    format === "mcp.servers"
       ? isObj((obj as any).mcp)
         ? (obj as any).mcp.servers
         : undefined
@@ -49,7 +50,7 @@ export function withMcpServers(
   format: McpFormat,
 ): Record<string, unknown> {
   const base: Record<string, unknown> = isObj(obj) ? { ...obj } : {};
-  if (format === "opencode") {
+  if (format === "mcp.servers") {
     const mcp: Record<string, unknown> = isObj(base.mcp) ? { ...(base.mcp as object) } : {};
     mcp.servers = servers;
     base.mcp = mcp;

@@ -71,14 +71,14 @@ function readJsonc(file: string): McpCatalog | null {
   }
 }
 
-function readJsonServers(file: string, format: "kiro" | "opencode"): McpCatalog {
+function readJsonServers(file: string, format: "mcpServers" | "mcp.servers"): McpCatalog {
   return readMcpServers(readJsonc(file), format);
 }
 
 function writeJsonServers(
   file: string,
   servers: McpCatalog,
-  format: "kiro" | "opencode",
+  format: "mcpServers" | "mcp.servers",
   finalize?: (config: McpCatalog) => void,
 ): void {
   const next = withMcpServers(readJsonc(file) ?? {}, servers, format);
@@ -100,8 +100,8 @@ const jsonMcpServersAdapter: McpAdapter = {
   id: "jsonMcpServers",
   nativeOwned: false,
   rebuildSettingsInView: false,
-  readCatalog: (file) => readJsonServers(file, "kiro"),
-  writeCatalog: (file, servers) => writeJsonServers(file, servers, "kiro"),
+  readCatalog: (file) => readJsonServers(file, "mcpServers"),
+  writeCatalog: (file, servers) => writeJsonServers(file, servers, "mcpServers"),
   stripSettings: (base) => {
     delete base.mcpServers;
   },
@@ -138,9 +138,9 @@ const jsonMcpNestedAdapter: McpAdapter = {
   id: "jsonMcpNested",
   nativeOwned: false,
   rebuildSettingsInView: true,
-  readCatalog: (file) => readJsonServers(file, "opencode"),
+  readCatalog: (file) => readJsonServers(file, "mcp.servers"),
   writeCatalog: (file, servers) =>
-    writeJsonServers(file, servers, "opencode", (config) => {
+    writeJsonServers(file, servers, "mcp.servers", (config) => {
       // `opencode acp` 不接受 --auto；免审批只能走配置。用户显式设过就保留用户值。
       if (config.permission === undefined) config.permission = "allow";
     }),
@@ -196,8 +196,7 @@ export function mcpAdapterFor(ag: ResolvedAgent): McpAdapter {
   if (ag.mcpViaAcp && path.extname(ag.catalogFile ?? "").toLowerCase() === ".toml") {
     return tomlMcpServersAdapter;
   }
-  // 预设里的 mcpFormat 是历史命名（"kiro"/"opencode"），含义只是 JSON 键路径的形状。
-  return ag.mcpFormat === "opencode" ? jsonMcpNestedAdapter : jsonMcpServersAdapter;
+  return ag.mcpFormat === "mcp.servers" ? jsonMcpNestedAdapter : jsonMcpServersAdapter;
 }
 
 /** 按实际目录文件后缀读定义（`WEMIND_MCP_CATALOG` 可把目录指到 TOML）。 */

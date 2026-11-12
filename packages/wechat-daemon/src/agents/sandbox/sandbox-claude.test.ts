@@ -120,7 +120,7 @@ describe("brain 沙箱（Claude Code）", () => {
     const other = {
       realHome: otherHome,
       catalogFile: ".claude.json",
-      mcpFormat: "kiro",
+      mcpFormat: "mcpServers",
     } as ResolvedAgent;
     expect(activeMcpServers(other)).toEqual([
       { name: "demo", command: "other-server", args: [], env: [] },

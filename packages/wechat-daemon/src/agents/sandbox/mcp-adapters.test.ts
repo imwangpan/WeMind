@@ -27,7 +27,7 @@ function agent(over: Partial<ResolvedAgent> = {}): ResolvedAgent {
     realHome: tmpDir("home"),
     catalogFile: "settings/mcp.json",
     mcpConfigFile: "settings/mcp.json",
-    mcpFormat: "kiro",
+    mcpFormat: "mcpServers",
     mcpViaAcp: false,
     ...over,
   } as ResolvedAgent;
@@ -114,7 +114,7 @@ describe("嵌套 mcp.servers（JSON）adapter", () => {
       JSON.stringify({ model: "demo/model", mcp: { servers: { wechat: {} } } }),
     );
     const target = tmpDir("nested-target");
-    const ag = agent({ mcpFormat: "opencode", realHome });
+    const ag = agent({ mcpFormat: "mcp.servers", realHome });
 
     MCP_ADAPTERS.jsonMcpNested.inheritSettings?.(ag, realHome, target);
 
@@ -145,7 +145,7 @@ describe("TOML [mcp_servers.*] adapter", () => {
 describe("adapter 选择与路径", () => {
   it("按 mcpFormat / mcpViaAcp+TOML 选择；按实际文件后缀覆盖", () => {
     expect(mcpAdapterFor(agent())).toBe(MCP_ADAPTERS.jsonMcpServers);
-    expect(mcpAdapterFor(agent({ mcpFormat: "opencode" }))).toBe(MCP_ADAPTERS.jsonMcpNested);
+    expect(mcpAdapterFor(agent({ mcpFormat: "mcp.servers" }))).toBe(MCP_ADAPTERS.jsonMcpNested);
     expect(
       mcpAdapterFor(agent({ name: "codex", mcpViaAcp: true, catalogFile: "config.toml" })),
     ).toBe(MCP_ADAPTERS.tomlMcpServers);
@@ -158,8 +158,8 @@ describe("adapter 选择与路径", () => {
     const ag = agent();
     process.env.WEMIND_MCP_CATALOG = path.join("D:", "catalog", "mcp.json");
     expect(mcpCatalogPath(ag)).toBe(process.env.WEMIND_MCP_CATALOG);
-    expect(mcpConfigPath(ag, path.join("view", "kiro"))).toBe(
-      path.join("view", "kiro", "settings", "mcp.json"),
+    expect(mcpConfigPath(ag, path.join("view", "demo"))).toBe(
+      path.join("view", "demo", "settings", "mcp.json"),
     );
   });
 });

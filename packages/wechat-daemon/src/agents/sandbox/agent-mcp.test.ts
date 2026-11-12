@@ -9,35 +9,35 @@ import {
 } from "./agent-mcp.js";
 
 describe("readMcpServers", () => {
-  it("kiro：读 mcpServers", () => {
+  it("顶层 mcpServers：读取", () => {
     const obj = { mcpServers: { foo: { command: "x" } } };
-    expect(readMcpServers(obj, "kiro")).toEqual({ foo: { command: "x" } });
+    expect(readMcpServers(obj, "mcpServers")).toEqual({ foo: { command: "x" } });
   });
 
-  it("opencode：读 mcp.servers", () => {
+  it("嵌套 mcp.servers：读取", () => {
     const obj = { model: "a/b", mcp: { servers: { bar: { type: "local" } } } };
-    expect(readMcpServers(obj, "opencode")).toEqual({ bar: { type: "local" } });
+    expect(readMcpServers(obj, "mcp.servers")).toEqual({ bar: { type: "local" } });
   });
 
   it("缺失/格式不符 → 空表", () => {
-    expect(readMcpServers(null, "kiro")).toEqual({});
-    expect(readMcpServers({}, "opencode")).toEqual({});
-    expect(readMcpServers({ mcpServers: {} }, "opencode")).toEqual({}); // 用错格式
-    expect(readMcpServers({ mcp: {} }, "opencode")).toEqual({});
+    expect(readMcpServers(null, "mcpServers")).toEqual({});
+    expect(readMcpServers({}, "mcp.servers")).toEqual({});
+    expect(readMcpServers({ mcpServers: {} }, "mcp.servers")).toEqual({}); // 用错格式
+    expect(readMcpServers({ mcp: {} }, "mcp.servers")).toEqual({});
   });
 });
 
 describe("withMcpServers", () => {
-  it("kiro：写 mcpServers，返回新对象", () => {
+  it("顶层 mcpServers：写入，返回新对象", () => {
     const input = { other: 1 };
-    const out = withMcpServers(input, { a: {} }, "kiro");
+    const out = withMcpServers(input, { a: {} }, "mcpServers");
     expect(out).toEqual({ other: 1, mcpServers: { a: {} } });
     expect(input).toEqual({ other: 1 }); // 不改原对象
   });
 
-  it("opencode：写 mcp.servers，保留 model 与 mcp 其它键", () => {
+  it("嵌套 mcp.servers：写入，保留 model 与 mcp 其它键", () => {
     const input = { model: "a/b", mcp: { timeout: 1000, servers: { old: {} } } };
-    const out = withMcpServers(input, { new: { type: "local" } }, "opencode");
+    const out = withMcpServers(input, { new: { type: "local" } }, "mcp.servers");
     expect(out).toEqual({
       model: "a/b",
       mcp: { timeout: 1000, servers: { new: { type: "local" } } },
@@ -45,8 +45,10 @@ describe("withMcpServers", () => {
     expect((input.mcp as any).servers).toEqual({ old: {} }); // 不改原对象
   });
 
-  it("opencode：无 mcp 键也能建出", () => {
-    expect(withMcpServers({}, { a: {} }, "opencode")).toEqual({ mcp: { servers: { a: {} } } });
+  it("嵌套 mcp.servers：无 mcp 键也能建出", () => {
+    expect(withMcpServers({}, { a: {} }, "mcp.servers")).toEqual({
+      mcp: { servers: { a: {} } },
+    });
   });
 });
 
@@ -92,7 +94,7 @@ describe("parseJsonc", () => {
 });
 
 describe("toAcpMcpServers（mcpViaAcp 传输转换）", () => {
-  it("kiro local：command/args/env(map) → stdio 声明（env 转 {name,value}[]）", () => {
+  it("字符串 command/args/env(map) → stdio 声明（env 转 {name,value}[]）", () => {
     const { servers, skipped } = toAcpMcpServers({
       a: { command: "node", args: ["s.js"], env: { T: "1", U: 2 } },
     });
@@ -110,7 +112,7 @@ describe("toAcpMcpServers（mcpViaAcp 传输转换）", () => {
     ]);
   });
 
-  it("opencode local：command 数组拆 command[0]/args，environment → env", () => {
+  it("command 数组拆 command[0]/args，environment → env", () => {
     const { servers } = toAcpMcpServers({
       b: { type: "local", command: ["node", "x.js", "--flag"], environment: { K: "v" } },
     });
@@ -155,7 +157,7 @@ describe("toAcpMcpServers（mcpViaAcp 传输转换）", () => {
     expect(skipped).toEqual(["empty", "broken", "arr"]);
   });
 
-  it("opencode local 的 command 数组首项为空 → skipped", () => {
+  it("command 数组首项为空 → skipped", () => {
     const { servers, skipped } = toAcpMcpServers({ c: { type: "local", command: [] } });
     expect(servers).toEqual([]);
     expect(skipped).toEqual(["c"]);

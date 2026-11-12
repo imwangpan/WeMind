@@ -192,7 +192,7 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `inheritDirs` | 否 | 从 `realHome` 链入视图/沙箱的「目录式」记忆子目录 |
 | `inheritFiles` | 否 | 从 `realHome` 拷入视图/沙箱的单文件记忆（如 `AGENTS.md`） |
 | `configSubdir` | 否 | agent 配置目录相对视图根/沙箱根的子路径（kiro 空；opencode `opencode`） |
-| `mcpFormat` | 否 | MCP 配置格式：`kiro`（`mcpServers`）或 `opencode`（`mcp.servers`）；默认 `kiro` |
+| `mcpFormat` | 否 | MCP 定义的 JSON 键路径：`mcpServers`（顶层）或 `mcp.servers`（嵌套）；默认 `mcpServers` |
 | `mcpConfigFile` | 否 | MCP 配置文件相对配置目录的路径（默认 `settings/mcp.json`） |
 | `catalogFile` | 否 | 可选 MCP 目录来源文件相对 `realHome` 的路径（默认 `settings/mcp.json`） |
 | `mcpViaAcp` | 否 | MCP 是否走 ACP `session/new`/`resume` 的 `mcpServers`（不写配置文件；如 DSH、Claude Code） |
@@ -306,7 +306,7 @@ WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直
 
 - `homeEnvVar` 决定把哪个环境变量指向视图根/沙箱根（kiro 用 `KIRO_HOME`；opencode 用 `XDG_CONFIG_HOME`）；
 - `configSubdir` 决定 agent 配置目录相对视图根/沙箱根的位置（kiro 与 pi 空=根；opencode `opencode`；claude-code `claude`；gemini `.gemini`——它的 `GEMINI_CLI_HOME` 是「家目录」，配置目录在 `<它>/.gemini`）；
-- `mcpFormat` / `mcpConfigFile` / `catalogFile` 决定 MCP 文件的结构与路径（kiro：`settings/mcp.json` 的 `mcpServers`；opencode：`opencode.json` 的 `mcp.servers`；pi：沙箱根 `mcp.json` 的 `mcpServers`；gemini：配置目录 `settings.json` 的 `mcpServers`）。
+- `mcpFormat` / `mcpConfigFile` / `catalogFile` 决定 MCP 文件的结构与路径（`mcpFormat: "mcpServers"`：顶层 `mcpServers`，如 kiro 的 `settings/mcp.json`、pi 的 `mcp.json`、gemini 的 `settings.json`；`mcpFormat: "mcp.servers"`：嵌套 `mcp.servers`，如 opencode 的 `opencode.json`）。
 
 因此：**kiro、opencode、qoder、cline、pi、gemini 现已开箱支持「微信里动态加载/卸载 MCP」**（qoder 用 `QODER_CONFIG_DIR` + `settings.json` 的 `mcpServers`，沙箱实测生效；cline 用文件式 MCP：`CLINE_MCP_SETTINGS_PATH` → `cline/mcp.json`；pi 用 `<沙箱根>/mcp.json`，`pi mcp list` 实测可识别；gemini 用 `<沙箱>/.gemini/settings.json`，探针实测 MCP 工具可调用）；**DSH、Claude Code 与 Copilot 走 `mcpViaAcp: true`**——不写配置文件，激活集由 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发（DSH 已真机验证；Claude Code 与 Copilot 探针实测 stdio MCP 可用）。其它 agent 若格式不同，则是上述 agent 配置字段填对即可；实在不同再按其约定适配。
 

@@ -131,7 +131,7 @@ cline: {
   realHome: path.join(os.homedir(), ".cline"),
   inheritDirs: ["rules", "skills", "agents"],
   configSubdir: "cline",
-  mcpFormat: "kiro",
+  mcpFormat: "mcpServers",
   mcpConfigFile: "mcp.json",
   catalogFile: "data/settings/cline_mcp_settings.json",
   credentialFiles: ["data/settings/providers.json", "data/settings/models.json"],

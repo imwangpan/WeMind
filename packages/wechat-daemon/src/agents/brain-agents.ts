@@ -165,7 +165,7 @@ export type ResolvedAgent = {
   inheritDirs: string[];
   inheritFiles: string[];
   configSubdir: string;
-  mcpFormat: "kiro" | "opencode";
+  mcpFormat: "mcpServers" | "mcp.servers";
   mcpConfigFile: string;
   catalogFile: string;
   env: Record<string, string>;
@@ -519,7 +519,7 @@ function resolveAgentCore(
     inheritDirs,
     inheritFiles: preset.inheritFiles ?? [],
     configSubdir: preset.configSubdir ?? "",
-    mcpFormat: preset.mcpFormat ?? "kiro",
+    mcpFormat: preset.mcpFormat ?? "mcpServers",
     mcpConfigFile: preset.mcpConfigFile ?? "settings/mcp.json",
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},

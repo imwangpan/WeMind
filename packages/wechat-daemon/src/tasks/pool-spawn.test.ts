@@ -85,7 +85,7 @@ const agent = (name: string): ResolvedAgent =>
     inheritDirs: [],
     inheritFiles: [],
     configSubdir: "",
-    mcpFormat: "kiro",
+    mcpFormat: "mcpServers",
     mcpConfigFile: "settings/mcp.json",
     catalogFile: "settings/mcp.json",
     env: {},

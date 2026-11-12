@@ -99,7 +99,7 @@ qoder: {
   realHome: path.join(os.homedir(), ".qoder"),
   inheritDirs: ["memory", "skills", "agents", "commands"],
   inheritFiles: ["AGENTS.md"],
-  mcpFormat: "kiro",                   // 键名同为 mcpServers
+  mcpFormat: "mcpServers",             // 键名同为 mcpServers
   mcpConfigFile: "settings.json",
   catalogFile: "settings.json",
   settingsBase: "settings.json",       // 新字段，见 §4.2
@@ -133,7 +133,7 @@ qoder: {
 syncSettings():
   mcpViaAcp            → 跳过（不变）
   settingsBase 有值     → syncSettingsBase()      ← 新增（不依赖 inherit）
-  mcpFormat=opencode   → syncOpencodeBase()（不变）
+  mcpFormat=mcp.servers → adapter.inheritSettings()（重建 JSON 基底）
   否则                  → syncKiroSettings()（不变）
 ```
 

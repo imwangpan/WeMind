@@ -183,14 +183,14 @@ describe("resolveAgent agent", () => {
     expect(AUTO_PROBE_ORDER).not.toContain("copilot");
   });
 
-  it("显式 kiro：沿用 kiro 约定（沙箱根 / settings/mcp.json / 格式 kiro）", () => {
+  it("显式 kiro：沿用 kiro 约定（沙箱根 / settings/mcp.json / 格式 mcpServers）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
     const ag = resolveAgent();
     expect(ag.name).toBe("kiro");
     expect(ag.homeEnvVar).toBe("KIRO_HOME");
     expect(ag.configSubdir).toBe("");
-    expect(ag.mcpFormat).toBe("kiro");
+    expect(ag.mcpFormat).toBe("mcpServers");
     expect(ag.mcpConfigFile).toBe("settings/mcp.json");
     expect(ag.catalogFile).toBe("settings/mcp.json");
     expect(ag.shell).toBe(false);
@@ -248,7 +248,7 @@ describe("resolveAgent agent", () => {
     expect(ag.shell).toBe(true); // Windows shim 需经 shell
     expect(ag.homeEnvVar).toBe("XDG_CONFIG_HOME"); // 替换 global，实现隔离
     expect(ag.configSubdir).toBe("opencode"); // 配置落在 <沙箱>/opencode/
-    expect(ag.mcpFormat).toBe("opencode");
+    expect(ag.mcpFormat).toBe("mcp.servers");
     expect(ag.mcpConfigFile).toBe("opencode.json");
     expect(ag.catalogFile).toBe("opencode.json");
     expect(ag.inheritDirs).toEqual(["skills", "agents", "commands"]);
@@ -451,7 +451,7 @@ describe("resolveAgent agent", () => {
     // real 模式直接用真实 home 时，%HOME% 模板会拼成 ~/.qoder/qoder；realEnv 必须改成真实目录
     expect(agentEnv(ag, ag.realHome!).QODER_CONFIG_DIR).toBe(ag.realHome);
     expect(ag.configSubdir).toBe("qoder");
-    expect(ag.mcpFormat).toBe("kiro"); // 键名同为 mcpServers
+    expect(ag.mcpFormat).toBe("mcpServers"); // 键名同为 mcpServers
     expect(ag.mcpConfigFile).toBe("settings.json");
     expect(ag.catalogFile).toBe("settings.json");
     expect(ag.settingsBase).toBe("settings.json");
@@ -480,7 +480,7 @@ describe("resolveAgent agent", () => {
     expect(realEnv.CLINE_DATA_DIR).toBe(path.join(ag.realHome!, "data"));
     expect(realEnv.CLINE_MCP_SETTINGS_PATH).toBe(path.join(ag.realHome!, "mcp.json"));
     expect(ag.configSubdir).toBe("cline");
-    expect(ag.mcpFormat).toBe("kiro"); // cline_mcp_settings.json 的键名同为 mcpServers
+    expect(ag.mcpFormat).toBe("mcpServers"); // cline_mcp_settings.json 的键名同为 mcpServers
     expect(ag.mcpConfigFile).toBe("mcp.json");
     expect(ag.catalogFile).toBe("data/settings/cline_mcp_settings.json");
     expect(ag.credentialFiles).toEqual([
@@ -589,7 +589,7 @@ describe("resolveAgent agent", () => {
       "models-store.json",
     ]);
     // MCP：pi 读 <PI_CODING_AGENT_DIR>/mcp.json（与 kiro 同格式），不走 ACP mcpServers
-    expect(ag.mcpFormat).toBe("kiro");
+    expect(ag.mcpFormat).toBe("mcpServers");
     expect(ag.mcpConfigFile).toBe("mcp.json");
     expect(ag.catalogFile).toBe("mcp.json");
     expect(ag.mcpViaAcp).toBe(false);
@@ -621,7 +621,7 @@ describe("resolveAgent agent", () => {
     expect(ag.inheritFiles).toEqual(["GEMINI.md"]);
     expect(ag.credentialFiles).toEqual([".env", "oauth_creds.json", "google_accounts.json"]);
     // MCP：读 <配置目录>/settings.json 的 mcpServers（kiro 格式），不走 ACP mcpServers
-    expect(ag.mcpFormat).toBe("kiro");
+    expect(ag.mcpFormat).toBe("mcpServers");
     expect(ag.mcpConfigFile).toBe("settings.json");
     expect(ag.catalogFile).toBe("settings.json");
     expect(ag.mcpViaAcp).toBe(false);
