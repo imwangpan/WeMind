@@ -205,7 +205,7 @@ describe("isFastLane（控制/任务指令不排在大脑回合后面）", () =>
       expect(isFastLane(t, noTasks), t).toBe(false);
   });
 
-  it("带附件的消息一律走大脑（快车道不消费附件，避免静默丢弃）", () => {
+  it("带附件的消息一律走大脑（快车道不处理附件，避免静默丢弃）", () => {
     expect(isFastLane("新会话", noTasks, 1)).toBe(false);
     expect(isFastLane("任务：读一下", noTasks, 2)).toBe(false);
     expect(isFastLane("继续", { awaiting: 1, active: true, interrupted: 0 }, 1)).toBe(false);

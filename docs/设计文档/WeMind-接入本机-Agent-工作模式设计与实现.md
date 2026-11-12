@@ -110,7 +110,7 @@
 Phase 1 已落地（本分支）：
 
 - 账号默认 `homeMode = real`（`agents/config/home-mode.ts`），读取 `<账号>/runtime.json`；缺失/损坏回落 `real`，`WEMIND_HOME_MODE` 只做一次性覆盖。
-- `real` / `mirror` 使用 `<账号>/agent-view/<role>/<agent>/` 最小配置视图（`agents/config/config-view.ts`）：未被覆盖的目录/文件优先 junction/symlink 指向真实 home；MCP、`settingsBase`、kiro v3 权限文件和 overlay 目标生成副本。`sandbox` 仍使用 `brain-home` / `worker-home`。
+- 声明了 `homeEnvVar` 的 Agent，在 `real` / `mirror` 下使用 `<账号>/agent-view/<role>/<agent>/` 最小配置视图（`agents/config/config-view.ts`）：未被覆盖的目录/文件优先 junction/symlink 指向真实 home；MCP、`settingsBase`、kiro v3 权限文件和 overlay 目标生成副本。`sandbox` 仍使用 `brain-home` / `worker-home`。
 - 没有 `homeEnvVar` 的 Agent（`claude-code` / `cline` / `qoder`）在 real 模式直接用真实 home；预设新增 `realEnv` 修正 `env` 模板多拼一层的问题（`%HOME%` 按真实 home 展开），否则会指到 `~/.claude/claude` 这类不存在的目录。
 - brain 与 worker 的启动/会话 `cwd` 改为账号级默认工作区（`<账号>/workspace/brain`、`<账号>/workspace/worker`，`agents/config/workspace.ts`）；`session-cwd.json` 记录 `<agent>:<sessionId> → cwd`，恢复旧会话时优先使用它。`WEMIND_WORKER_CWD` 与 `task --cwd` 仍是一次性覆盖。
 - brain 默认空 MCP；激活集按 agent 分键持久化在 `<账号>/brain-mcps.json`（`version: 2`）。worker 默认真实全量减 `wechat`。两者都支持 overlay 的 `mcp.disable` 与 `mcp.extra`。
@@ -553,7 +553,7 @@ MCP 数量会同时影响：
 - 绝对路径、已存在、是目录；显式指定时不自动创建任意路径。
 - 本地磁盘，realpath 可解析；Windows 拒绝 UNC（`\\server\share` / `//server/share`），所有平台都拒绝显式网络挂载语义（例如 `file://host/...`）。
 - 当前用户可读写；POSIX 默认目录 0700、文件 0600，Windows 用数据目录自身的 ACL（`chmod` 是 no-op，不能假装等价）。
-- 不能是账号根目录（`<账号>/` 本身）、`brain-home`、`worker-home`、Agent 真实配置目录、系统目录或家目录根。
+- 不能是账号根目录（`<账号>/` 本身）、`agent-view`、`brain-home`、`worker-home`、Agent 真实配置目录、系统目录或家目录根。
 - 路径稳定；`session/new` 的 `cwd` 是会话身份的一部分。
 - 项目级技能/规则需要项目根时，用户应把工作区指到项目根。
 - `external` 工作区不随账号删除；`managed` 工作区随账号清理。
@@ -600,12 +600,13 @@ MCP 数量会同时影响：
 | `workspace.json` | 全部 | brain / worker 的默认工作区覆盖；唯一权威 |
 | `session-cwd.json` | 全部 | `<agent>:<sessionId> → cwd`；恢复会话时校验 |
 | `agent-overrides/<agent>.json` | 全部 | 微信独享的 Agent 配置 patch 与 MCP 增删 |
-| `agent-view/<role>/<agent>/` | `real` / `mirror` | 生成的配置视图；brain 与 worker 分目录，避免互相覆盖 |
+| `agent-view/<role>/<agent>/` | `real` / `mirror`（仅声明 `homeEnvVar` 的 Agent） | 生成的配置视图；brain 与 worker 分目录，避免互相覆盖；没有 `homeEnvVar` 的 Agent 直接用真实 home |
 | `wechat-settings.json` | 全部 | 预留的账号级微信行为设置（回复风格等），第一期空 |
 | `env.json` | 可选 | 非敏感环境快照（PATH/代理/locale），不含密钥 |
 | `brain-mcps.json` | 全部 | brain 显式激活的 MCP 集；按 agent 分键 |
-| `media/inbound/` | 全部（`real` 新增） | 入站文件/视频/无转写语音；`sandbox` 仍放各自 home 下 |
+| `media/inbound/` | `real` / `mirror` | 入站文件/视频/无转写语音；`sandbox` 仍放各自 home 下 |
 | `brain-home/`、`worker-home/` | 仅 `sandbox` | 旧沙箱布局；`real` 模式不再创建 |
+| `agent-sessions/` | 仅 `sandbox` | DSH 等 Agent 的派生会话配置；`real` 模式改用 Agent 真实会话库 |
 | `brain-sessions.json`、`worker-sessions.json`、`session-registry.json` | 全部 | 会话指针与展示元数据，语义不变 |
 
 `real` 模式的新入站媒体统一写到 `<账号>/media/inbound/`；迁移时把旧 `brain-home/media/inbound/` 整体搬到新位置，失败则保留备份并告警。`sandbox` 模式保持现有 `<sandbox>/media/inbound/`，避免一次改动同时动两套路径。该路径变化必须同步更新 `AGENTS.md` §4.19、`media-store` 测试与数据目录速查。其余账号数据（token、state、tasks、control-inbox/out、日志）保持现状，详见 [速查：数据目录与环境变量](../使用指南/速查-数据目录与环境变量.md)。
@@ -629,7 +630,7 @@ MCP 数量会同时影响：
 
 以下路径拒绝或要求二次确认：
 
-- 账号根、`brain-home`、`worker-home`；
+- 账号根、`agent-view`、`brain-home`、`worker-home`；
 - Agent real home（如 `~/.kiro`、`~/.claude`）；
 - 家目录根、系统目录、磁盘根；
 - 解析后指向上述位置的 symlink/junction；

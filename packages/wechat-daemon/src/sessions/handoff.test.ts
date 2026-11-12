@@ -18,7 +18,7 @@ import {
 
 /**
  * 交接的三条克制规则（本人 / 不切回来源 / TTL）与「作为前缀带上可原样剥回」都在这里钉死；
- * 文件侧只验「往返、过期即不可用、损坏降级、消费后消失」。
+ * 文件侧只验「往返、过期即不可用、损坏降级、清除后消失」。
  */
 let dir = "";
 beforeEach(() => {
@@ -80,7 +80,7 @@ describe("写入磁盘", () => {
     expect(loadHandoff(path.join(dir, "没这个目录"), 1)).toBeNull();
   });
 
-  it("clearHandoff：删掉后消失，再删返回 false（消费语义用）", () => {
+  it("clearHandoff：删掉后消失，再删返回 false（清除语义用）", () => {
     saveHandoff(mk(), dir);
     expect(clearHandoff(dir)).toBe(true);
     expect(fs.existsSync(handoffPath(dir))).toBe(false);

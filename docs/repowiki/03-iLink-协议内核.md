@@ -6,7 +6,7 @@
 
 协议内核是整个项目的地基：它封装了与腾讯 iLink 服务器通信的全部细节，对上提供纯粹、无状态依赖的 API。MCP server 和 daemon 都只依赖它。
 
-它是 **JIT 源码包（source-first）**：`package.json` 的 `main`/`types`/`exports` 指向 `src/index.ts`，没有构建步骤与 `dist/`；workspace 内 tsc / Vitest / tsdown / tsx 直接消费源码，发布时由 tsdown 内联进两个发布包（见 [11.3 构建拓扑与产物](11-开发指南.md#113-构建拓扑与产物)）。
+它是 **JIT 源码包（source-first）**：`package.json` 的 `main`/`types`/`exports` 指向 `src/index.ts`，没有构建步骤与 `dist/`；workspace 内 tsc / Vitest / tsdown / tsx 直接使用源码，发布时由 tsdown 内联进两个发布包（见 [11.3 构建拓扑与产物](11-开发指南.md#113-构建拓扑与产物)）。
 
 ## 3.1 模块结构
 
@@ -34,7 +34,7 @@ packages/wechat-ilink-core/src/
     └── media.ts          # 通用入站媒体下载（语音/文件/视频，按 media.aes_key）
 ```
 
-`index.ts` 是一个 barrel 文件，把 `config` / `pkg-version` / `api/*` / `store/account` / `store/accounts` / `store/allow-from` / `cdn/image` / `cdn/media` / `messaging/send-item` 统一导出，消费方只需 `import { ... } from "@wemind/wechat-ilink-core"`。注意 **`store/file-lock.ts` 不在 barrel 里**——它只供 core 内部（`accounts.ts` / `allow-from.ts`）使用，外部拿不到 `withFileLock`。新增的 `api/message-id.ts`、`cdn/media.ts`、`messaging/send-item.ts` 都有与源码同目录的测试；core 的测试文件与源码平铺，`api/error-codes.ts` 没有独立测试（由 `client.test.ts` 间接覆盖）。
+`index.ts` 是一个 barrel 文件，把 `config` / `pkg-version` / `api/*` / `store/account` / `store/accounts` / `store/allow-from` / `cdn/image` / `cdn/media` / `messaging/send-item` 统一导出，依赖方只需 `import { ... } from "@wemind/wechat-ilink-core"`。注意 **`store/file-lock.ts` 不在 barrel 里**——它只供 core 内部（`accounts.ts` / `allow-from.ts`）使用，外部拿不到 `withFileLock`。新增的 `api/message-id.ts`、`cdn/media.ts`、`messaging/send-item.ts` 都有与源码同目录的测试；core 的测试文件与源码平铺，`api/error-codes.ts` 没有独立测试（由 `client.test.ts` 间接覆盖）。
 
 ## 3.2 HTTP 客户端（api/client.ts）
 

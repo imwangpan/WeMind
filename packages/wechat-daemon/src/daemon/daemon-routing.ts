@@ -327,7 +327,7 @@ export type TaskFacts = { awaiting: number; active: boolean; interrupted: number
 /**
  * 这条消息是否走**快车道**：控制指令与任务指令不经过大脑，不该排在一条十几分钟的大脑回合后面。
  * 「继续」类短句在确实有可续跑任务时也走快车道；问大脑前缀永远走大脑。
- * 带附件的消息一律走大脑：控制/任务指令目前不消费附件，放快车道会静默丢掉用户发来的文件。
+ * 带附件的消息一律走大脑：控制/任务指令目前不处理附件，放快车道会静默丢掉用户发来的文件。
  * 注意：切脑 / 会话 / 交接也在快车道，但它们要操作同一个 ACP 连接，仍会在 ACP 门口等当前回合结束——那是语义要求，不是排队阻塞。
  */
 export function isFastLane(text: string, tasks: TaskFacts, attachmentCount = 0): boolean {

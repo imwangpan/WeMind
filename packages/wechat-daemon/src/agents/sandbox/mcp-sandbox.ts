@@ -220,7 +220,7 @@ export function ensureBrainHome(forAgent?: ResolvedAgent, dir: string = DATA_DIR
   }
   warnOverlayProblems(ag, rt);
   applySandbox(ag, rt, dir); // 再写 curated mcp（权威，保持 MCP 隔离——防它把消息发回自己）
-  applySettingsDefaults(ag, brainConfigDir(ag, rt), rt.view); // 预设默认设置项（如 pi 的 quietStartup：关掉 pi-acp 当消息发出来的启动横幅）
+  applySettingsDefaults(ag, brainConfigDir(ag, rt), rt.view); // 预设默认设置项（如 pi 的 quietStartup：关掉 pi-acp 当消息发出来的启动信息）
   if (ag.kiroV3) ensureKiroV3Permissions(ag, path.join(rt.configDir, "settings"));
 }
 

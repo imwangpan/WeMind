@@ -2,7 +2,7 @@
 
 > _Your AI mind, reachable on WeChat. —— 你的 AI 大脑，在微信上随时可达。_
 
-WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种可消费形态（均已发布到 npm）：一个 MCP Server 子包（`@wemind/wechat-mcp`），和一个常驻 daemon（`@wemind/cli`）。
+WeMind 让任何 AI Agent 都能通过「个人微信」收发消息。它把腾讯官方的 iLink / 微信 ClawBot 渠道封装成两种接入形态（均已发布到 npm）：一个 MCP Server 子包（`@wemind/wechat-mcp`），和一个常驻 daemon（`@wemind/cli`）。
 
 | 形态 | 怎么装 | 适合 |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 
 | 包                          | 路径                         | 说明                                                                                         | 发布                            |
 | --------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
-| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何「消费方」 | 私有（JIT 源码包；发布时内联进 `@wemind/cli` 与 `@wemind/wechat-mcp`） |
+| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密。不依赖任何使用它的包 | 私有（JIT 源码包；发布时内联进 `@wemind/cli` 与 `@wemind/wechat-mcp`） |
 | `@wemind/wechat-mcp`        | `packages/wechat-mcp`        | MCP server：把内核能力暴露为 MCP 工具，供任意 MCP 客户端接入                                 | **已发布**（bin: `wemind-mcp`） |
 | `@wemind/cli`               | `packages/wechat-daemon`     | 独立常驻 daemon：长轮询 + 常驻 ACP 大脑自动收发                                             | **已发布**（命令 `wemind`）     |
 
@@ -221,17 +221,17 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain-sessions.json`                         | `<agent>:<userId> → ACP sessionId` 映射（按大脑分开存，切换 agent 互不覆盖）；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建） |
 | `brain-mcps.json`                             | brain 当前激活的 MCP 集（默认空）                                                                           |
 | `runtime.json`                                | 账号级 `homeMode`：默认 `real`；可显式设 `mirror` / `sandbox`。缺失即 `real`，`WEMIND_HOME_MODE` 只做一次性覆盖 |
-| `agent-view/<role>/<agent>/`                  | `real` / `mirror` 的最小配置视图：未覆盖的配置/技能/记忆/会话链接真实 home，MCP/权限/overlay 文件生成副本 |
+| `agent-view/<role>/<agent>/`                  | `real` / `mirror` 的最小配置视图（仅用于有 `homeEnvVar` 的 Agent）：未覆盖的配置/技能/记忆/会话链接真实 home，MCP/权限/overlay 文件生成副本；没有 `homeEnvVar` 的 Agent 直接用真实 home |
 | `agent-overrides/<agent>.json`                | 微信独享配置：`config` 路径 patch + `mcp.disable` / `mcp.extra`；默认不写真实配置 |
 | `workspace.json` / `workspace/{brain,worker}/` | brain / worker 默认工作区配置与 managed 目录；改默认值只影响新会话 |
 | `session-cwd.json`                            | `<agent>:<sessionId> → cwd`；恢复旧会话时使用，避免把旧会话搬到新工作区 |
 | `env.json`                                    | 可选的非敏感环境快照（PATH/代理/locale）；API key/token 不落盘 |
 | `wechat-settings.json`                        | 预留的账号级微信行为设置（回复风格等），第一期为空 |
-| `media/inbound/`                              | `real` / `mirror` 的入站文件/视频/无转写语音；`sandbox` 仍放 `<brain-home>/media/inbound` |
+| `media/inbound/`                              | `real` / `mirror` 的入站文件/视频/无转写语音；`sandbox` 放当前角色沙箱下的 `media/inbound`（brain 为 `brain-home/media/inbound`，worker 为 `worker-home/media/inbound`） |
 | `brain-home/`                                 | **仅 `sandbox` 模式**的 brain 配置沙箱；`real` 模式不再使用（迁移时重命名为 `.bak-<时间>`） |
 | `worker-sessions.json`                        | worker（远程任务）`ACP sessionId` 映射（键 `<agent>:task-<编号>@<userId>`），任务中断后据此 `load`/`resume` 续跑 |
 | `worker-home/`                                | **仅 `sandbox` 模式**的 worker 配置沙箱；`real` 模式不再使用                                  |
-| `agent-sessions/`                             | agent 自己的会话库隔离位置（目前只有 DeepSeek/DSH 用：`deepseek/{brain,worker}/`，由预设的 `isolateSessions` + `--patch` 指过来，避免它把别的 agent 写的 `sessions/` 当成自己的库） |
+| `agent-sessions/`                             | **仅 `sandbox`**：DSH 的派生会话配置（`deepseek/{brain,worker}/` 与 `session-root-*.patch.yml`，由 `isolateSessions` + `--patch` 指过来，避免把别的 agent 写的 `sessions/` 当成自己的库）；`real` 模式不生成，DSH 使用真实会话库 |
 | `daemon.log`                                  | daemon 日志（stdout/stderr 合并；运行中按 `WEMIND_LOG_MAX_MB`（默认 10MB）轮转、保留 `WEMIND_LOG_KEEP`（默认 3）份） |
 | `wrapper.pid`                                 | 后台守护进程的 pid（builtin `_watchdog` 写；`wemind stop` 据此连它一起停，否则 daemon 会被 5s 后重拉）       |
 | `task-state.json`                             | 本地 `task-status` 读的运行态快照（状态/轮次/最近输出）                                                      |
@@ -379,7 +379,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_DATA_DIR`                                       | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则。**只对 `wemind daemon` 直跑有效**：`wemind start` / `login --start` / pm2 / 自启一律忽略它（并按账号 key 寻址），检测到时会向 stderr 打迁移指引 |
 | `WEMIND_HOME`                                           | 数据根目录（默认 `~/.wemind`）                                                                                                      |
 | `WEMIND_HOME_MODE`                                      | 一次性覆盖账号 `homeMode`：`real`（默认）/ `mirror` / `sandbox`。持久值在 `<账号>/runtime.json`，不要写进 profile |
-| `WECHAT_BRAIN_HOME`                                     | **仅 `sandbox` 模式**的 brain 沙箱目录（默认 `<数据目录>/brain-home`）；`real`/`mirror` 使用 `agent-view/<role>/<agent>` |
+| `WECHAT_BRAIN_HOME`                                     | **仅 `sandbox` 模式**的 brain 沙箱目录（默认 `<数据目录>/brain-home`）；`real`/`mirror` 下有 `homeEnvVar` 的 Agent 使用 `agent-view/brain/<agent>`，没有的直接用真实 home |
 | `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS`          | 大脑单回合空闲/硬超时（默认 120000 / 900000；重任务实测需 ~6.5min）                                                                 |
 | `WECHAT_BRAIN_FIRST_FRAME_MS`                           | 首帧超时：prompt 发出后多久仍无任何帧判「开局即卡死」并快速重试（默认 25000）                                                       |
 | `WECHAT_BRAIN_HEARTBEAT_MS`                             | 静默期心跳间隔：多久没有帧就发一条「还在处理」进度（默认 15000，DSH 预设 60000）                                                     |
@@ -505,7 +505,7 @@ iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 1
 
 ### 配置视图、MCP 与终端等效
 
-默认 `homeMode = real`。WeMind 不再把大脑/ worker 的整份配置复制进沙箱，而是生成一个**最小配置视图** `<账号>/agent-view/<role>/<agent>/`：未覆盖的目录/文件用 junction / symlink 指向该 Agent 的真实 home，只有必须由 WeMind 权威覆盖的 MCP、权限、`settingsBase` 与 overlay 目标生成副本。因此终端改模型、加技能、写记忆，微信侧默认读到的是同一份；真实配置里的微信 MCP 会被剔除到视图里，真实文件不动。
+默认 `homeMode = real`。WeMind 不再把大脑/ worker 的整份配置复制进沙箱：能通过 `homeEnvVar` 指向配置目录的 Agent，会得到**最小配置视图** `<账号>/agent-view/<role>/<agent>/`——未覆盖的目录/文件用 junction / symlink 指向该 Agent 的真实 home，只有必须由 WeMind 权威覆盖的 MCP、权限、`settingsBase` 与 overlay 目标生成副本。没有 `homeEnvVar` 的 Agent（如 `claude-code` / `cline` / `qoder` / `codex`）直接使用自己的真实配置目录；其中文件式 MCP 的权威副本仍按各 Agent 的配置能力写入，`mcpViaAcp` 的 Agent 则通过 ACP 下发。因此终端改模型、加技能、写记忆，微信侧默认读到的是同一份；真实配置里的微信 MCP 会被排除，避免形成第二个 poller。
 
 > **技能 / 记忆不是“软件自动继承”**：junction / symlink、清单与清理逻辑都是 WeMind 在 `config-view.ts` / `sandbox-inherit.ts` 里实现的。`real`/`mirror` 下未覆盖项直接链接真实目录；`sandbox` 模式才按预设的 `inheritDirs` / `inheritFiles` 选择性继承。Windows 没有 symlink 权限时会回退到复制，此时副本**不保证双向同步**，日志会告警。可用 `WEMIND_BRAIN_REAL_HOME` / `WEMIND_BRAIN_INHERIT_DIRS` 覆盖继承来源，`WEMIND_BRAIN_INHERIT=0` 关闭 sandbox 继承。
 
@@ -568,7 +568,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 >
 > **Cline 已内置 agent（原生 ACP，3.0.74 实测）**：装 `npm i -g cline` 后 `wemind brain set cline` 即用 `cline --acp --auto-approve true` 当大脑；`providers.json` / `models.json` 登录态与模型目录同步、`mcp.json` 文件式 MCP 写入配置视图。**认证**：ACP 只自动恢复 `cline` / `cline-pass` / `openai-codex`；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER` + `CLINE_API_KEY`（父进程显式设了就不接管），通常无需手工配置。实测与限制见 **[docs/接入方案/接入-Cline.md](docs/接入方案/接入-Cline.md)**。
 >
-> **pi 已内置（探针级实测 + 真机 E2E，2026-11-01）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，**Node ≥22.19**——它的 engines 要求，比适配器的 ≥20 更严）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 指向配置视图（`settings.json` / `auth.json` / `models*.json` 按需生成或链接，`skills/` 共享、`AGENTS.md` 链接/复制）；MCP 走 pi 自己的 `<配置根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动横幅用 pi 自己的 `quietStartup` 在生成的 settings 里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入方案/接入-pi.md](docs/接入方案/接入-pi.md)**。
+> **pi 已内置（探针级实测 + 真机 E2E，2026-11-01）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，**Node ≥22.19**——它的 engines 要求，比适配器的 ≥20 更严）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 指向配置视图（`settings.json` / `auth.json` / `models*.json` 按需生成或链接，`skills/` 共享、`AGENTS.md` 链接/复制）；MCP 走 pi 自己的 `<配置根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动信息用 pi 自己的 `quietStartup` 在生成的 settings 里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入方案/接入-pi.md](docs/接入方案/接入-pi.md)**。
 
 ### 收发消息与媒体
 
@@ -714,4 +714,4 @@ daemon 的**内置预设默认免审批**（每个 agent 用自己官方的开�
 
 ---
 
-> **最后核对**：2026-11-11 ｜ 本文档描述当前分支的最新代码，已发布版本见 [CHANGELOG](docs/发布与变更记录/CHANGELOG.md) 与 npm；接入类结论请看对应文档的「实测/假设」标注。
+> **最后核对**：2026-11-12 ｜ 本文档描述当前分支的最新代码，已发布版本见 [CHANGELOG](docs/发布与变更记录/CHANGELOG.md) 与 npm；接入类结论请看对应文档的「实测/假设」标注。

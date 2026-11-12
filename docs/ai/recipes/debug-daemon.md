@@ -1,6 +1,6 @@
 # 配方：排查 daemon 不回复 / 大脑异常
 
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-12
 >
 > 先跑 [`scripts/doctor.ps1`](../../../scripts/doctor.ps1) 收集环境事实，再按症状定位。不要一上来改代码。
 
@@ -86,7 +86,7 @@ wemind session list <key|label>
 | `control-inbox/` / `control-out/` | CLI ↔ daemon 控制桥；`control-out/.bridge` = daemon 自己的 pid（认桥凭据） |
 | `brain-mcps.json` | 当前激活的 MCP（按 agent 分键） |
 | `runtime.json` | 账号级 `homeMode`（缺省 `real`） |
-| `agent-view/` | `real`/`mirror` 的最小配置视图（技能/记忆/会话链接真实 home） |
+| `agent-view/` | `real`/`mirror` 的最小配置视图（仅 `homeEnvVar` Agent；技能/记忆/会话链接真实 home） |
 | `agent-overrides/` | 微信独享配置 patch |
 | `workspace/` / `workspace.json` | brain/worker 默认工作区 |
 | `media/inbound/` | `real`/`mirror` 的入站媒体（`sandbox` 才在 `<sandbox>/media/inbound`） |

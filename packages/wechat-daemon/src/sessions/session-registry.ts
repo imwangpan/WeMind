@@ -29,7 +29,7 @@ export * from "./registry-view.js";
  * 写入方只有 daemon（或 CLI 经控制桥，见 control-bridge.ts），避免多写者互相覆盖。
  * 所有写入走 tmp + rename；所有读取失败都降级为空表，只记日志、不抛——它不该有能力拖垮 daemon。
  *
- * 本文件是**门面**：存储与视图分别在 `registry-store.ts` / `registry-view.ts`，这里只保留需要同时用到两层的
+ * 本文件是**统一入口**：存储与视图分别在 `registry-store.ts` / `registry-view.ts`，这里只保留需要同时用到两层的
  * `renameSession` / `deleteSession`，并 re-export 两层的全部导出（外部 import 路径不变）。
  */
 

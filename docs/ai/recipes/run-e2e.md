@@ -1,6 +1,6 @@
 # 配方：端到端验收
 
-> **最后核对**：2026-11-09
+> **最后核对**：2026-11-12
 >
 > 目标：用最短路径证明「微信 → daemon → ACP 大脑 → 微信」真的通，而不是只看编译通过。
 > 前置：已构建、已登录一个 bot、`allowFrom` 包含你的微信（登录时自动写入，通常无需手动加）、至少一个 ACP agent 可用。
@@ -195,7 +195,7 @@ wemind task-stop 2                                         # 单条；task-stop 
 - 看 `promptCapabilities.image`：`wemind brain check` 不打印能力，跑 `scripts/acp-probe.mjs` 看 `initialize`。
 - **文件/视频/无转写语音（2026-11-09）**：给 bot 发一个文件、一段视频、一条语音 → prompt 里应带 `<账号>/media/inbound/`（`sandbox` 才是 `<sandbox>/media/inbound/`）下的本地绝对路径；文件确实存在且大小正确（语音是 **WAV**，24kHz 单声道）。有微信转写的语音不发附件，直接按文本进 prompt。
 - **引用消息（2026-11-09）**：回复某条文本消息 → prompt 里应有 `[引用消息] 标题 | 正文`；只带 `svr_id` 的引用给「内容未缓存」占位，不报错（引用正文缓存暂未实现）。**只引用、不输入正文**（2026-11-10）→ 微信应收到一条明确提示「请把要说的话一起打出来」，不是零反馈；`daemon.log` 有 `message without usable content`，且不会多烧一个模型回合。
-- **出站文件/视频（2026-11-09）**：让大脑回复一行 `[附件](file:///<绝对路径>)`（或 `[文件](...)` / `[视频](...)`；路径含 `)` 用 `[附件](<...>)`）→ 微信应收到对应文件/视频；路径不存在、是目录、超过 `WECHAT_OUTBOUND_FILE_MAX_MB`、命中敏感文件 denylist（`account.json`/`state.json`/`.env`/密钥/`brain-home/.credentials.json`/`.auth/user`/`~/.claude/settings.json` 等），或是 `file://host/...`/UNC 网络路径（含软链接目标）、Windows `account.json::$DATA` 数据流时，回复里应有失败说明而不是静默丢附件。
+- **出站文件/视频（2026-11-09）**：让大脑回复一行 `[附件](file:///<绝对路径>)`（或 `[文件](...)` / `[视频](...)`；路径含 `)` 用 `[附件](<...>)`）→ 微信应收到对应文件/视频；路径不存在、是目录、超过 `WECHAT_OUTBOUND_FILE_MAX_MB`、命中敏感文件 denylist（`account.json`/`state.json`/`.env`/密钥/配置视图或沙箱里的凭据副本（如 `agent-view/brain/deepseek/.credentials.yaml`、`brain-home/.credentials.yaml`）/`.auth/user`/`~/.claude/settings.json` 等），或是 `file://host/...`/UNC 网络路径（含软链接目标）、Windows `account.json::$DATA` 数据流时，回复里应有失败说明而不是静默丢附件。
 - **敏感文件临时放行（2026-11-09）**：先让大脑发 `account.json` → 被拒，回复附注「被敏感文件名单拦下（回复「允许敏感文件」可补发）」；回「允许敏感文件」→ 之前那个附件直接补发（日志 `sent pending attachment (... 敏感文件已临时放行)`），无需大脑重发；也可以先发「允许敏感文件」再让大脑发（日志 `sent attachment (... 敏感文件已临时放行)`）。窗口过期或重启 daemon 后再发 → 恢复 `拒绝发送敏感文件`。窗口内 `file://attacker/...`、`::$DATA`、超 25MB 仍应被拒。
 - **工具进度（2026-11-09）**：让大脑跑一条慢命令（例如连续几次 PowerShell `Start-Sleep`）→ 微信里应看到**文本**「🔧 步骤 N 开始」；只有耗时 ≥10s 的工具才会再出现「✅ 步骤 N 完成」，短命令只有开始一条。结构化 item（`TOOL_CALL_START=11`/`TOOL_CALL_RESULT=12`）默认关闭：官方虽然定义了它，但微信客户端不渲染（服务端 200/空响应/不分配 `message_id`，第三方 SDK 与 galley 均复现）；设 `WECHAT_TOOL_PROGRESS_ITEMS=1` 可提前启用（代码已对齐 `FINISH` + `run_id`，且不占连发额度、不顶替 5s/15s 固定提示；item 发送失败回退的文本仍计一条额度）。
 - **「正在输入」续命（2026-11-10）**：跑一个长回合 → 微信里「正在输入」应持续可见；`index.ts` 的 keepAlive 与 `task-manager.ts` 的每轮续命都是每 5s 一次（1.6.0 曾用 3s，已改回），发消息顶掉 typing 后送达即补一次。**发消息后的瞬时闪烁不可避免**，验收时不要把它当成回归。
@@ -282,7 +282,7 @@ MCP
 
 **⑦ 交接**：在当前大脑聊几轮 → `交接` → `切换大脑 <新 agent>` → 问一个**只有旧上下文能答**的问题。
 
-期望：新大脑答得出；`handoff.json` 被消费（第二条**不再**重复带上）；切**回**来源大脑时摘要不带上（留着下次切走用）。
+期望：新大脑答得出；`handoff.json` 已清除（第二条**不再**重复带上）；切**回**来源大脑时摘要不带上（留着下次切走用）。
 
 **⑧ CLI 热切换**：daemon 在跑时执行 `wemind brain switch <agent 名>`、`wemind brain set <agent 名>`（纯 agent 名，应等价于热切换）、`wemind session new/list/rename/delete`。
 
@@ -368,7 +368,7 @@ send error: [sendMessage] errcode=-2 ... (prepare failed)
 | 5 | **反向请求**：0（不问权限、不用 fs/terminal 委托）。`ACP_TEST_TOOL=1`：3 次工具调用全部执行、`drift-check.txt` 落盘、0 个 `session/request_permission`。 |
 | 6 | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。 |
 | 7 | **MCP**：pi 读 `<PI_CODING_AGENT_DIR>/mcp.json`（kiro 格式 `{mcpServers}`；`pi mcp list` 可识别）；`session/new` 的 `mcpServers` 被 pi-acp 只存不用 → 预设 `mcpViaAcp: false`。 |
-| 8 | **真机 E2E 已过（2026-11-01）**：worker 通道 `wemind task --agent pi` → 回复「2」（删掉 worker-home 里的 settings/models 后由 `acquire` 自动重建）；brain 通道微信单轮 → `session/load` → `prompt ok 9705ms` → 回复送达（启动横幅未混入）；热切换 pi↔codex 双向成功；微信「任务 pi：…」→ 任务 #27 → 回复「3」。**仍未单独复测**：微信侧 `加载 <MCP>`；适配器升级后的回归按 §8 重跑探针。 |
+| 8 | **真机 E2E 已过（2026-11-01）**：worker 通道 `wemind task --agent pi` → 回复「2」（删掉 worker-home 里的 settings/models 后由 `acquire` 自动重建）；brain 通道微信单轮 → `session/load` → `prompt ok 9705ms` → 回复送达（启动信息未混入）；热切换 pi↔codex 双向成功；微信「任务 pi：…」→ 任务 #27 → 回复「3」。**仍未单独复测**：微信侧 `加载 <MCP>`；适配器升级后的回归按 §8 重跑探针。 |
 
 ## 8. 清理 / 回滚
 
@@ -381,7 +381,7 @@ wemind brain set kiro --restart <key>   # 老写法：写入磁盘 + 重启 daem
 
 清空对话记忆（**不是**回滚，是重置）：
 
-- 删 `<数据目录>/brain-sessions.json`（当前会话表，权威）+ `<数据目录>/session-registry.json`（登记表，派生）+ **该 agent 配置目录下的会话库**——目录名是预设的 `configSubdir`（kiro 为空=沙箱根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`、pi 空=沙箱根），不是「agent 名」子目录；DSH 的会话库另在 `<账号目录>/agent-sessions/deepseek/`（`isolateSessions`），要一并删；
+- 删 `<数据目录>/brain-sessions.json`（当前会话表，权威）+ `<数据目录>/session-registry.json`（登记表，派生）+ **该 agent 的真实会话库**：`real`/`mirror` 去预设的 `realHome`；`sandbox` 才在 `<沙箱>/<configSubdir>`（kiro 为空=沙箱根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`、pi 空=沙箱根）。**不要直接删视图里看起来像会话库的目录/文件**——它们可能是指向真实库的 junction / hardlink，会穿透删到终端数据。DSH 的会话库 `real` 下是真实 `~/.dsh`，`sandbox` 下另在 `<账号目录>/agent-sessions/deepseek/`（`isolateSessions`）；要清就按对应模式去真实位置清；
 - 单个会话不用删文件：微信里 `删除会话 <序号>` 即可（只删登记项，agent 侧存档仍在磁盘上）。
 
 清空任务侧：

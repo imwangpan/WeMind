@@ -1,6 +1,6 @@
 # 接入 OpenAI Codex（探针 + 真机 E2E）
 
-> **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+> **2026-11-12 口径**：默认 `homeMode=real`，Codex 的配置目录无法由 WeMind 重定向：微信侧始终使用真实 `~/.codex`，`cwd` 是账号工作区（brain/worker）或任务 `--cwd`；`sandbox` 也不隔离 `~/.codex`。本文涉及 `brain-home` / `worker-home` 的描述仅适用于其他可重定向 Agent 的配置落点。
 
 > **最后核对**：2026-11-12 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / `session/load` 恢复 / 图片 / `set_mode` / `set_config_option(model)` / stdio MCP）；**真机 E2E 已通过**（2026-11-01：worker 通道任务 #21 + brain 通道微信单轮，回复均送达）；**适配器 2.6.0 探针复测通过**（2026-11-12，见 §2.1）。
 >
@@ -111,7 +111,7 @@ codex: {
 ```
 
 - **不在 `AUTO_PROBE_ORDER`**：适配器类一律不参与自动探测（独立安装、各有认证；「装了但没登录」的机器被自动选中会静默换脑）。要用得显式：`wemind brain set|switch codex`、一次性 `WEMIND_BRAIN=codex`，或微信「切换大脑 codex」。
-- 沙箱：适配器不读 `KIRO_HOME` 之类，故无 `homeEnvVar`；WeMind 只把 **cwd** 指到 `BRAIN_HOME`（隔离工作目录），Codex 自己的 `~/.codex` 照常使用（用户日常配置原样生效）。**凭据不同步进沙箱**——Codex 的登录态在 `~/.codex`，适配器直接用（§4.9 的密钥纪律：WeMind 不碰用户的 auth.json）。
+- 配置目录：适配器不读 `KIRO_HOME`/`CLAUDE_CONFIG_DIR` 之类，故无 `homeEnvVar`；WeMind 只控制 **cwd**（始终是 `<账号>/workspace/brain|worker`），Codex 自己的 `~/.codex` 照常使用（用户日常配置原样生效）。**凭据不同步**——Codex 的登录态在 `~/.codex`，适配器直接用（§4.9 的密钥纪律：WeMind 不碰用户的 auth.json）。
 - **免审批的两道保险**：`envDefaults.INITIAL_AGENT_MODE`（适配器建会话时的初始模式）与 `session/set_mode {modeId:"agent-full-access"}`（会话建立/恢复后补切）。`applyAcpSessionMode` 会核对会话回包的 `modes.availableModes`——codex 的回包含 `agent-full-access`（实测），所以会真的切；想关掉设 `WEMIND_ACP_SESSION_MODE=0/false/off/no`。
 
 ---
@@ -126,7 +126,7 @@ codex: {
 2. **不走 WeMind 的凭据沙箱**：Codex 的登录态在 `~/.codex`，适配器直接用；WeMind 不同步、不改写（§4.14）。
 3. **模型/推理档位由 Codex 决定**：WeMind 默认不下发；需要固定时 `wemind brain set codex --model "<modelId>"`（`session/set_config_option`，幂等）。
 4. **真机 E2E 已过一轮**（2026-11-01）：**worker 通道**——`wemind brain switch codex --worker` 后 `wemind task "…"` 由 codex 执行，`prompt ok 4436ms`，回话「2」正常产出（`set_mode agent-full-access` 生效，0 反向请求）；**brain 通道**——微信发「你好，自我介绍一句」，`turn start` → `session/prompt` → `prompt ok 2962ms` → `final send`（3 段），回复送达。**发图 / 冷重启 `session/load` 待复测**；切脑回切已随 pi↔codex 双向热切换验证（2026-11-01，见 `docs/接入方案/接入-pi.md`）。
-5. **没有独立配置目录**：codex 适配器不认 `KIRO_HOME`/`CLAUDE_CONFIG_DIR` 之类，WeMind 只能把 **cwd** 指到角色默认工作区（`<账号>/workspace/{brain,worker}`；`sandbox` 模式才是沙箱根）。所以微信里 codex 看到的「当前目录」是工作区，**不一定是你正在开发的项目**；要它处理某个项目请在消息里点明路径，或把工作区切到该项目（worker 侧也可用 `wemind task --cwd`）。
+5. **没有独立配置目录**：codex 适配器不认 `KIRO_HOME`/`CLAUDE_CONFIG_DIR` 之类，WeMind 只能把 **cwd** 指到角色默认工作区（`<账号>/workspace/{brain,worker}`，`sandbox` 模式也不改 cwd）。所以微信里 codex 看到的「当前目录」是工作区，**不一定是你正在开发的项目**；要它处理某个项目请在消息里点明路径，或把工作区切到该项目（worker 侧也可用 `wemind task --cwd`）。
 6. **版本敏感**：`codex-acp` 的 capabilities 与 mode id 随版本变化；升级后重跑 §2 的探针（本文当前基线 2.6.0）。
 
 ---

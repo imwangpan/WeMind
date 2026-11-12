@@ -35,7 +35,7 @@ describe("core 是 JIT 源码包（source-first）", () => {
     ).toBe(false);
   });
 
-  it("消费方 typecheck 不 emit", () => {
+  it("发布包 typecheck 不 emit", () => {
     expect(readJson("packages/wechat-daemon/tsconfig.json").compilerOptions.noEmit).toBe(true);
     expect(readJson("packages/wechat-mcp/tsconfig.json").compilerOptions.noEmit).toBe(true);
   });

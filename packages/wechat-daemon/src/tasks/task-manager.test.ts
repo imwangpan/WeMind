@@ -268,7 +268,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     ).toBe("额度/余额不足");
   });
 
-  it("running 期间多次回话全部保留（按序累积，下一轮一并消费）", async () => {
+  it("running 期间多次回话全部保留（按序累积，下一轮一并处理）", async () => {
     const r1 = deferred();
     const r2 = deferred();
     acquire.mockImplementationOnce(async () => {

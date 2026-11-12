@@ -6,7 +6,7 @@ import path from "node:path";
 /**
  * pi 沙箱：配置目录就是沙箱根（PI_CODING_AGENT_DIR），MCP 是 <沙箱根>/mcp.json（kiro 格式）。
  * settings.json / auth.json / models*.json 由 credentialFiles 原样同步；预设再补 quietStartup——
- * pi-acp 会把 pi 的启动横幅（## Context / ## Skills …）当 agent_message_chunk 发出来，进微信回复就是噪声。
+ * pi-acp 会把 pi 的启动信息（## Context / ## Skills …）当 agent_message_chunk 发出来，进微信回复就是噪声。
  * 模块级常量在 import 时解析，故先设环境再动态导入（同 sandbox-cline.test.ts）。
  */
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-sandbox-pi-"));

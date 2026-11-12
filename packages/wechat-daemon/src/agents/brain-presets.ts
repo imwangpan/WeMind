@@ -226,7 +226,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   //   否则 session/new 直接 `-32000 Authentication required`（Cline 不会去看 lastUsedProvider）；
   // - MCP：data/settings/cline_mcp_settings.json（{mcpServers}，与 kiro 同格式）；沙箱用 CLINE_MCP_SETTINGS_PATH 指到
   //   <沙箱>/cline/mcp.json，真实文件不动。ACP `session/new.mcpServers` 不被 Cline 使用（它只存不用）→ mcpViaAcp 保持 false；
-  // - 免审批：`--auto-approve true`（Cline 自己文档给的 ACP 启动开关）；宿主应答器仍默认拒绝权限请求；
+  // - 免审批：`--auto-approve true`（Cline 自己文档给的 ACP 启动开关）；WeMind 侧权限应答器仍默认拒绝权限请求；
   // - 能力：loadSession / images 可用，重启后 session/load 能接回上下文；session/close 未实现（-32601，WeMind 不调用）。
   cline: {
     name: "cline",
@@ -284,7 +284,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     inheritFiles: ["AGENTS.md"], // pi 读 <agent-dir>/AGENTS.md 作跨目录全局指令
     // 原样同步：默认模型/供应商（settings.json）、登录态（auth.json）、自定义供应商与模型目录（models*.json，可能含网关地址/密钥）
     credentialFiles: ["settings.json", "auth.json", "models.json", "models-store.json"],
-    // pi-acp 把 pi 的启动横幅（## Context / ## Skills …）当作 agent_message_chunk 发出来，那是给人看的启动信息，进微信回复就是噪声。
+    // pi-acp 把 pi 的启动信息（## Context / ## Skills …）当作 agent_message_chunk 发出来，那是给人看的启动信息，进微信回复就是噪声。
     // pi 自己的 `quietStartup: true` 关掉它（docs/settings.md）；写进沙箱副本，用户显式设过就保留用户的值。
     settingsDefaults: { quietStartup: true },
     // pi 的 MCP 是 <agent-dir>/mcp.json（不是 settings/mcp.json）；kiro 格式与 pi 兼容

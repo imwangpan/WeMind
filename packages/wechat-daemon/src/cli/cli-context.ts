@@ -77,7 +77,7 @@ export function pickKey(sel?: string): string {
   return d;
 }
 
-/** 预检 daemon 存活（本地命令需 daemon 在跑才有人消费收件箱）。 */
+/** 预检 daemon 存活（本地命令需 daemon 在跑才有人处理收件箱）。 */
 export function requireDaemonAlive(key: string): void {
   const pid = readPid(accountDir(key), "daemon.pid");
   const identity = processIdentity(pid);

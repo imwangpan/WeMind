@@ -2,7 +2,7 @@
 
 > **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
 
-> **最后核对**：2026-11-05 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
+> **最后核对**：2026-11-12 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
 >
 > **状态**：✅ 内置预设、ACP 探针全部通过（`initialize` / `session/new` / prompt / 图片 / 工具调用 0 反向请求 / 强杀后 `session/load`）；MCP 与沙箱已实测；`wemind brain check` 握手通过（约 3.0s）；**微信真机 E2E 已通过（2026-11-01：单轮、杀 daemon 后 `session/load`、热切换、worker 任务）**。
 >
@@ -34,7 +34,7 @@ WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / 
 |---|---|---|
 | 启动 | `gemini --acp --approval-mode yolo --skip-trust`，Windows shim 是 `.cmd` → `shell: true` | `--acp` 取代已弃用的 `--experimental-acp`；`--approval-mode yolo` 与 `--yolo` 互斥，二选一 |
 | `--skip-trust` | **必须带** | 未信任的目录不仅把 yolo **静默降回 default**，连 MCP 都不加载（用户级 server 也被抑制）；实测 `gemini mcp list` 在未信任目录直接显示 Disabled |
-| 沙箱 | `homeEnvVar: "GEMINI_CLI_HOME"` 指向沙箱根，`configSubdir: ".gemini"` | Gemini 把 `GEMINI_CLI_HOME` 当「家目录」，配置目录是 `<它>/.gemini`（实测：临时 home 自动生成 `.gemini/projects.json`）；不是指到配置目录本身 |
+| 配置目录 | `homeEnvVar: "GEMINI_CLI_HOME"` 指向配置视图（`real`/`mirror`）或沙箱根（`sandbox`），`configSubdir: ".gemini"` | Gemini 把 `GEMINI_CLI_HOME` 当「家目录」，配置目录是 `<它>/.gemini`（实测：临时 home 自动生成 `.gemini/projects.json`）；不是指到配置目录本身 |
 | 记忆/技能继承 | `inheritDirs: ["skills"]` + `inheritFiles: ["GEMINI.md"]` | 全局技能在 `<配置目录>/skills`，全局记忆是 `<配置目录>/GEMINI.md`（源码 `path.join(geminiDir, "skills")` / `getGlobalMemoryFilePath`） |
 | 设置基底 | `settingsBase: "settings.json"` + `settingsStrip: ["mcpServers"]` | 保留用户自己的 `model.name` / `security` / `ui` / `general`；只剥 `mcpServers`（MCP 必须来自沙箱 curated，防 `wechat` 回环），并强制 `general.enableAutoUpdate=false`（不要让常驻 daemon 自己换版本）。Gemini 自己用 `strip-json-comments` 解析，允许 `//` / `/* */` 注释——沙箱镜像与 MCP 目录也按 JSONC 读 |
 | 凭据同步 | `credentialFiles: [".env", "oauth_creds.json", "google_accounts.json"]` | API key 用户：`GEMINI_API_KEY` / `GOOGLE_GEMINI_BASE_URL` 在 `.env`；Google 登录用户：OAuth token 与账号缓存跟着用户日常配置走（新者胜）。**只镜像 `selectedType=oauth-personal` 却不带 token 时，Gemini 会卡在登录流程，连 ACP `initialize` 都不回** |
@@ -59,7 +59,7 @@ WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / 
 | **load 后的历史回放** | ⚠️ load 返回后约 11ms 起，把历史消息逐条当 `user_message_chunk` / `agent_message_chunk` 发回来（源码不 await `streamHistory`）。若不处理，下一轮答复会以旧回复开头（实测拼出 `STOREDPINEAPPLE`）→ 预设用 `replayOnLoad` 先等安静 |
 | `session/set_config_option` | ❌ `-32601 Method not found`（模型必须走 `--model`） |
 | `session/close` | ❌ `-32601`（WeMind 不调用） |
-| MCP（配置文件） | ✅ 沙箱 `settings.json` 的 `mcpServers` 被加载；模型真实调用 `probe_ping` → `PONG` |
+| MCP（配置文件） | ✅ 配置视图/沙箱 `settings.json` 的 `mcpServers` 被加载；模型真实调用 `probe_ping` → `PONG` |
 | MCP（ACP `session/new.mcpServers`） | ✅ 也能用（同样是 `probe_ping` → `PONG`），但 `initialize` 不声明 acp → 预设仍走配置文件，不依赖未声明的能力 |
 
 升级后要复现上表，直接用下面这段（临时 home，不碰真实 `~/.gemini`）：
@@ -79,11 +79,11 @@ node scripts/acp-probe.mjs
 
 ## 4. 已知限制 / 坑
 
-- **`--skip-trust` 不能省**：未信任目录 = yolo 降级 + MCP 全禁用。大脑 cwd 是沙箱根（每次都是「新目录」），所以必须显式信任。
+- **`--skip-trust` 不能省**：未信任目录 = yolo 降级 + MCP 全禁用。大脑 cwd 是账号默认工作区 `<账号>/workspace/brain`（`sandbox` 模式也不改 cwd），新账号/新工作区仍可能未受信任，所以必须显式信任。
 - **模型名必须能被你的网关解析**：`session/new` 的 `availableModels` 是 Gemini CLI 自己的候选列表，**不等于**网关实际提供的模型。实测在自建网关下 `--model auto` 会路由到 `gemini-3.1-pro-preview`，网关回 `knows no model …`；网关部署要写它认识的 id（如 `auto/hy3`）。`wemind brain set gemini --model …` 原样传给 `gemini --model`。
 - **load 后回放**：这是 Gemini 的 ACP 实现细节，不是 WeMind 的会话记录；`replayOnLoad` 只在恢复后**丢掉**这些帧（不转发给微信用户）。上限 3s 是防它持续发帧把回合卡住；正常历史（几十条）实测 10ms 级回放完。
-- **自动更新关掉**：沙箱 `settings.json` 的 `general.enableAutoUpdate` 由 `settingsBase()` 统一写成 `false`（用户已有的其它 `general` 键保留）；终端日常 `gemini` 的真实配置不动。理由：常驻 daemon 不该在运行中自己换版本。
-- **MCP 视图**：大脑默认空 + 微信里 `加载 <名>` 才写进沙箱；worker 继承真实 `mcpServers` 全量但**永久排除 `wechat`**。真实 `~/.gemini/settings.json` 不动。
+- **自动更新关掉**：配置视图/沙箱 `settings.json` 的 `general.enableAutoUpdate` 由 `settingsBase()` 统一写成 `false`（用户已有的其它 `general` 键保留）；终端日常 `gemini` 的真实配置不动。理由：常驻 daemon 不该在运行中自己换版本。
+- **MCP 视图**：大脑默认空 + 微信里 `加载 <名>` 才写进配置视图/沙箱；worker 继承真实 `mcpServers` 全量但**永久排除 `wechat`**。真实 `~/.gemini/settings.json` 不动。
 - **不支持 `session/set_config_option`**：除模型外，其它想通过 ACP 改的配置项也走不了；优先改 `settings.json`（WeMind 会镜像进沙箱）或启动参数。
 - **`session/close` 未实现**：WeMind 本来就不调用；只是探针会记一条。
 - **`GEMINI_CLI_HOME` 的隔离边界**：配置目录整体重定向（实测临时 home 会生成 `.gemini/`，真实 `~/.gemini` 不被写）。`extensions/` 不在继承清单里（WeMind 不复制、不 junction）；Gemini 是否仍会从真实 home 读到扩展**待实测**——别把「没继承」直接当成「不会加载」。确需共享时按 agent 布局加 `inheritDirs`。

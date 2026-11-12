@@ -29,7 +29,7 @@
   - 未观察到反向请求；stdio `mcpServers` 被 `session/new` 接受；stdout 会混入一行非 JSON 日志（当前客户端会忽略）。
 - **微信 E2E 已通（2026-10-24）**：`spawn deepseek` → 旧 opencode session 不可 resume（`-32602 session is not resumable`）→ 回退 `session/new` → `model set` → `prompt ok` → 用户收到「你好！很高兴见到你 😊」。**后续微信侧 `session/resume ok ... mcp=[test-echo]` 亦已实证**（M3 微信链路测试中）。
 - **Worker E2E 已通（2026-10-24）**：`task` 派发 → `spawn deepseek worker` → `model set` → `session/new` → `prompt ok`（2.3s，含 tool_call）→ `hello.txt`；`task-reply` 第二轮读文件输出 `hello`；`task-stop` 后 idle。
-- **会话目录已隔离（2026-11-03，rc.3）**：此前 DSH 的会话库落在共用沙箱根的 `sessions/`，kiro / pi 也会往同一个目录写；DSH 把别人留下的平铺文件当成自己的会话库，启动/恢复直接报 `unsupported flat-file layout`（`wemind brain check` 与微信侧都能复现）。现在预设 `isolateSessions: true`，启动前由 `prepareAgent()` 落盘 `<数据目录>/agent-sessions/deepseek/session-root-<brain|worker>.patch.yml`，用 DSH 自己的 `--patch` 把 `session-persistence-jsonl.root` 指到 `agent-sessions/deepseek/<role>`；用户 `--args` 里显式给了 `--patch` 就尊重用户、不追加。
+- **`sandbox` 下会话目录已隔离（2026-11-03，rc.3）**：此前 DSH 的会话库落在共用沙箱根的 `sessions/`，kiro / pi 也会往同一个目录写；DSH 把别人留下的平铺文件当成自己的会话库，启动/恢复直接报 `unsupported flat-file layout`（`wemind brain check` 与微信侧都能复现）。现在预设 `isolateSessions: true`，`sandbox` 下启动前由 `prepareAgent()` 落盘 `<数据目录>/agent-sessions/deepseek/session-root-<brain|worker>.patch.yml`，用 DSH 自己的 `--patch` 把 `session-persistence-jsonl.root` 指到 `agent-sessions/deepseek/<role>`；用户 `--args` 里显式给了 `--patch` 就尊重用户、不追加。`real`（默认）不追加 `--patch`，使用真实 `~/.dsh` 会话库。
 - **过期模型提示（2026-11-03，rc.3）**：桌面端升级会重写 `llm-pi-ai` 的 provider 模型目录，而用户自己补的 `- id: acp` 是独立一条、不会被自动迁移；模型不在目录里时 ACP 报 `no configured model`（看起来像 agent 坏了）。`wemind brain` 现在会检查这一条并给出可粘贴的替换片段（优先建议 `agent-default-model` 的值），**只提示、不替用户改真实 profile**（§4.14）。实测把 `- id: acp` 的 model 改成目录里现有的某个 id 后，`session/new` 的 `currentValue` 随之变化，`brain check` 通过。
 - **微信侧动态 MCP + 图片拒绝已实测（2026-10-24）**：`MCP`/`加载 test-echo`/调用（答 `MCP-OK`，调用记录写入磁盘）/`卸载` 全链路通过；发图收到友好拒绝（`image unusable and no text; rejected gracefully`；带文字时按文字回答并注明图片被忽略）。
 - 工作量：**M0 冒烟 0.5 人日；MVP 2–3 人日；含 MCP/worker/记忆继承的完整对齐 5–7 人日**。
@@ -58,7 +58,7 @@
 | 方法 | WeMind 的用法 | 硬依赖 |
 |---|---|---|
 | `initialize` | 握手，`clientCapabilities: {}` | 是 |
-| `session/new` | 每用户一个会话，`cwd = BRAIN_HOME`；`mcpServers` 为空，**`mcpViaAcp` 的 agent（DSH）传当前激活集** | 是 |
+| `session/new` | 每用户一个会话；`cwd` 默认是 `<账号>/workspace/brain`，`mcpServers` 传入当前激活集 | 是 |
 | `session/load` | 进程重建后按 `sessionId` 恢复多轮上下文 | 否（**已不是唯一路径**：`restore: "resume"` 的 agent 直接走 `session/resume`；其余 agent 先 load、失败再 resume，都失败才 `session/new`） |
 | `session/prompt` | 发一轮消息（文本 + 可选图片） | 是 |
 | `session/update` | 拼 `agent_message_chunk`；`tool_call`/`tool_call_update` 进步；`agent_thought_chunk` 标记思考 | 是（弱依赖） |
@@ -69,9 +69,9 @@
 
 - agent 表：`packages/wechat-daemon/src/agents/brain-presets.ts` 的 `ACP_AGENT_PRESETS`。
 - 选择优先级：`WEMIND_BRAIN`（env）> `<数据目录>/brain.json` > `auto`（`opencode → cline → qoder → gemini → deepseek → kiro`）。
-- 沙箱：`BRAIN_HOME`（默认 `<数据目录>/brain-home`），通过 agent 的 `homeEnvVar` 指向 agent 的配置目录；`configSubdir` 决定配置目录在沙箱内的相对位置。
+- 配置目录：默认 `real` / `mirror` 用 `<账号>/agent-view/<role>/deepseek`，通过 `homeEnvVar: DSH_HOME` 指向视图；`sandbox` 才用 `<账号>/brain-home` 或 `<账号>/worker-home`。`configSubdir` 决定配置目录在沙箱内的相对位置。
 - MCP：brain 默认空；微信指令「加载/卸载」改激活集，**只有激活集真变了才重启 ACP 生效**（`daemon-control.ts` 只在 `changed` 时调 `restartForMcpChange()`）；`wechat` 永久禁止（防它把消息发回自己）。**传输方式按 agent 分派**：kiro/opencode 写各自的配置文件；DSH 走 ACP `session/new` 的 `mcpServers`；catalog 也按 agent 各自的约定读取（详见 §5.3 M3）。
-- 记忆继承：`mirrorRealKiro()` 把 `realHome` 下的 `inheritDirs` 目录 junction 进沙箱，`inheritFiles` 单文件拷入。
+- 记忆继承：`real` / `mirror` 下未覆盖目录直接链接真实 home；`sandbox` 下 `mirrorRealKiro()` 才把 `realHome` 下的 `inheritDirs` 目录 junction 进沙箱，`inheritFiles` 单文件拷入。
 
 ### 2.3 现有客户端对「新 agent」的隐含假设
 
@@ -226,11 +226,11 @@
 ```text
 微信 → daemon（长轮询）
         ├─ brain：常驻 `dsh --profile acp`
-        │    cwd=DSH_HOME=<数据目录>/brain-home
+        │    cwd=<账号>/workspace/brain
         │    会话：session/new | session/resume
         │    MCP：session/new 的 mcpServers（按激活集）
         └─ worker：同一个 agent 的独立进程
-             cwd=任务目录，DSH_HOME=<数据目录>/worker-home
+             cwd=任务目录；real 下 DSH_HOME=<账号>/agent-view/worker/deepseek
 ```
 
 ### 5.3 分阶段计划
@@ -294,13 +294,13 @@ deepseek: {
   binWin: "dsh.cmd",             // 桌面端只有 dsh.cmd；经 shell 由 PATHEXT 解析
   args: ["--profile", "acp"],
   shell: true,
-  homeEnvVar: "DSH_HOME",        // 指向 brain 沙箱 → 会话/技能隔离
+  homeEnvVar: "DSH_HOME",        // real 指向配置视图；sandbox 指向账号沙箱
   realHome: path.join(os.homedir(), ".dsh"),
   inheritDirs: ["skills"],
   inheritFiles: ["AGENTS.md"],
   // 新增字段（见 §6）：
   realProfile: "acp",            // 原样同步真实 profiles/acp/cordis.patch.yml（桌面端维护的 provider 目录/默认模型）；缺 `- id: acp` 时只提示用户自己补，不代改
-  isolateSessions: true,         // 启动前 prepareAgent() 落盘 --patch，把会话 root 指到 <数据目录>/agent-sessions/deepseek/<role>
+  isolateSessions: true,         // 仅 sandbox：prepareAgent() 落盘 --patch，把会话 root 指到 <数据目录>/agent-sessions/deepseek/<role>
   model: '["deepseek-account","deepseek-flash"]', // 兜底：真实 profile 里读不到默认模型时才用（读的顺序：优先用户写的 `- id: acp`，否则 agent-default-model）
   restore: "resume",
   firstFrameMs: 60_000,          // 实测 1–4s；60s 只兜底真死/超长静默（≤ idle）
@@ -314,7 +314,7 @@ deepseek: {
 要点：
 
 - **凭据来源二选一**：
-  1. 桌面登录态：`ensureBrainHome()` 会把真实的 `~/.dsh/.credentials.yaml` **新者胜同步**进 `BRAIN_HOME`（本轮实测可行；注意这是敏感文件，Windows 无 600 权限，沙箱目录要收紧）；
+  1. 桌面登录态：`real` 下直接使用真实 `~/.dsh/.credentials.yaml`；`sandbox` 下 `ensureBrainHome()` 才把它**新者胜同步**进配置目录（注意这是敏感文件，Windows 无 600 权限，沙箱目录要收紧）；
   2. API Key：`DEEPSEEK_API_KEY` 由 daemon 环境提供，并把 `model` 设成 `deepseek-official/deepseek-v4-flash`。
 - **模型跟着你的 dsh 走（但由你自己配置）**：桥插件的默认模型写死在它自己的 bundle patch 里（`- id: acp` → `deepseek-official/deepseek-v4-flash`），这项该由**用户**在真实 `profiles/acp/cordis.patch.yml` 里覆盖；WeMind 在 `real` 模式链接整个 `profiles/`、`sandbox` 模式才原样复制这份配置，缺 `- id: acp` 时 `wemind brain` 会给一段可粘贴的 YAML 让你补（补完终端 dsh 与微信大脑才同一个模型）。WeMind 读默认模型的顺序：**优先 `- id: acp`，否则 `agent-default-model`**，会话建立后按这个值发一次 `session/set_config_option`（agent 自己的 ACP 接口；幂等；显式覆盖也走它）；读不到才回退旧兜底 `deepseek-account/deepseek-flash`（rc.3 已失效，只记 WARN）。显式覆盖：`wemind brain set deepseek --model '["<provider>","<model>"]'`（或 `presets.deepseek.model`）；`--model auto` = 跟随真实 profile 的默认（读不到就不下发）。
 - **不要**把 `DEEPSEEK_API_KEY` 写进 agent 的 `env`（会把密钥固化进源码/构建产物）；daemon 继承进程环境即可。
@@ -519,9 +519,9 @@ wemind brain check           # 真起进程跑 initialize + session/new（60s �
 2. 杀 daemon 再启动，追问「上一轮我说了什么」→ 走 `session/resume`，上下文仍在。
 3. 发一个 >30s 的任务 → 不因首帧超时被杀；微信能看到「步骤」进度，且静默期**不会**每 15s 刷一条「还在思考」。
 4. 发「新会话」→ 走 `session/new`，旧上下文清空。
-5. 越界写与权限请求：预设默认 `DSH_PERMISSION_MODE=danger-full-access`，越界写**不再被拒、也不会发 permission 请求**（2026-10-30 起）。想验证应答器，先在 daemon 环境设 `DSH_PERMISSION_MODE=workspace-write`，再让它在 `BRAIN_HOME` 外写文件 → 观察 permission 请求被应答（拒绝或按 `WEMIND_ACP_AUTO_ALLOW` 放行），**不能卡死**。
+5. 越界写与权限请求：预设默认 `DSH_PERMISSION_MODE=danger-full-access`，越界写**不再被拒、也不会发 permission 请求**（2026-10-30 起）。想验证应答器，先在 daemon 环境设 `DSH_PERMISSION_MODE=workspace-write`，再让它在工作区/配置目录外写文件 → 观察 permission 请求被应答（拒绝或按 `WEMIND_ACP_AUTO_ALLOW` 放行），**不能卡死**。
 6. ✅ 发一张图片 → 友好拒绝（「当前大脑暂不支持看图…」；日志 `image unusable and no text; rejected gracefully`，无 `-32602` 重试；已实测 2026-10-24）。带文字时按文字回答并注明图片被忽略。
-7. 两个账号同时跑 → 各自 `brain-home` / `worker-home` 隔离，互不抢会话。
+7. 两个账号同时跑 → WeMind 账号数据与会话指针彼此隔离；`sandbox` 下配置/凭据也各自独立，`real` 下共享真实 Agent 配置但会话指针互不覆盖。
 8. ✅ `加载 <MCP>` → 下一条消息生效（`session/new|resume` 带 `mcpServers`）；`wechat` 仍被禁止；DSH 不读 kiro 的 MCP 文件（M3 已实现，真机验证见附录）。
 9. worker：`task "create hello.txt..." --cwd <临时目录>` → 文件 `hello.txt` 内容 `hello` + 输出 `DONE`；`task-reply "read hello.txt..."` → 输出 `hello`；`task-stop` → idle。日志见 `[wemind/wechat-daemon/worker] spawn deepseek ... → model set → prompt ok`。
 
@@ -531,7 +531,7 @@ wemind brain check           # 真起进程跑 initialize + session/new（60s �
 wemind brain set kiro --restart   # 或 opencode / unset
 ```
 
-DSH 的会话在 `<账号目录>/agent-sessions/deepseek/{brain,worker}`（2026-11-03 起；不再写 `brain-home/sessions`），删除该目录 + `brain-sessions.json` 即清空 DeepSeek 侧记忆；不影响 kiro/opencode 的沙箱。旧版本留下的 `brain-home/sessions` 可以直接删（DSH 已经不会读它）。
+`sandbox` 下 DSH 的会话在 `<账号目录>/agent-sessions/deepseek/{brain,worker}`（2026-11-03 起；不再写 `brain-home/sessions`）；`real` 下 DSH 使用真实 `~/.dsh` 会话库，微信会话与终端共用。删除 `agent-sessions/deepseek/`（仅 sandbox）与 `brain-sessions.json` 才会清空对应侧记忆；旧版本留下的 `brain-home/sessions` 可以直接删（DSH 已经不会读它）。
 
 ### 7.5 会话目录隔离与模型过期（2026-11-03）
 
@@ -544,7 +544,7 @@ DSH 的会话在 `<账号目录>/agent-sessions/deepseek/{brain,worker}`（2026-
 │   └── worker/                         # 任务 worker 的会话库
 ```
 
-- **为什么**：DSH 与 kiro / pi 共用同一个沙箱根（`brain-home` / `worker-home`），而 DSH 的会话持久化插件默认读自己 home 下的 `sessions/`；别的 agent 写进去的平铺文件会让它报 `unsupported flat-file layout`。WeMind 不搬沙箱、也不改 DSH 源码，只用它自己的 `--patch`（profile 用户层同一种机制）把 root 指出去。
+- **为什么**：`sandbox` 下 DSH 与 kiro / pi 共用同一个沙箱根（`brain-home` / `worker-home`），而 DSH 的会话持久化插件默认读自己 home 下的 `sessions/`；别的 agent 写进去的平铺文件会让它报 `unsupported flat-file layout`。WeMind 不搬沙箱、也不改 DSH 源码，只用它自己的 `--patch`（profile 用户层同一种机制）把 root 指出去。
 - **怎么验**：`wemind brain check` 通过；`ls agent-sessions/deepseek` 能看到两份 patch 与两个目录；在微信里聊过的内容在 `agent-sessions/deepseek/brain/` 下；重启 daemon 追问「上一轮说了什么」仍能 `resume`。
 - **用户自己给了 `--patch`**：`wemind brain set deepseek --args "… --patch <你的文件>"` 时 WeMind 不再追加第二个（`resolveAgent()` 只看 args 里有没有 `--patch`）。
 - **模型过期**：`wemind brain` 会读真实 `profiles/acp/cordis.patch.yml` 的 `- id: acp`，并检查它的 model 是否在该 provider 的 `models` 目录里；不在时输出一段可粘贴的替换（优先建议 `agent-default-model` 的值）。按提示改**真实 profile**（不是沙箱里的副本），然后 `wemind brain switch deepseek`（或重启 daemon）让新模型生效。改前建议备份该文件。
@@ -603,7 +603,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 
 | # | 风险 / 未决 | 影响 | 处置 |
 |---|---|---|---|
-| R1 | **凭据来源**：`DSH_HOME` 指向沙箱后，真实 `.credentials.yaml` 不可见 | 桌面登录态用不了，必须 API Key | 实测：把 `.credentials.yaml` 复制进沙箱即可；或用 `DEEPSEEK_API_KEY`。敏感文件，收紧目录权限 |
+| R1 | **凭据来源（仅 `sandbox`）**：`DSH_HOME` 指向沙箱后，真实 `.credentials.yaml` 不可见 | 桌面登录态用不了，必须 API Key | `real`（默认）直接共用真实 `~/.dsh`；`sandbox` 实测把 `.credentials.yaml` 复制进沙箱即可，或用 `DEEPSEEK_API_KEY`。敏感文件，收紧目录权限 |
 | R2 | 当前代码只调 `session/load`，DSH 返回 `-32601` | 自愈后**静默新建会话**，多轮记忆丢失 | 实现 `session/resume` 兜底；**已实测 resume 保留 PINEAPPLE 上下文（含 `taskkill /T /F` 强杀）** |
 | R3 | 官方只发「已提交」正文；纯推理阶段可能无帧 | 首帧误杀 + 心跳刷屏 | 实测首帧 1–2.3s，有 thought/tool/usage 帧；配置里的 `firstFrameMs` 60s、`heartbeatMs` 60s 兜底 |
 | R4 | 反向请求 `session/request_permission` 无人应答 | 整轮卡死到超时 | M2 通用应答器；默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才放行 |
@@ -623,7 +623,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 | R18 | **默认模型路由与凭据不匹配** | 桌面已登录仍报 `no API key for deepseek-official`；或 profile 只写了 `- id: acp` / 只写了 `agent-default-model` 时终端与微信不一致 | 桥插件 bundle patch 写死 `- id: acp`、用户 profile 不覆盖它。在**真实 profile** 里补 `- id: acp`（值取自 `agent-default-model`；`wemind brain` 给片段）；WeMind real 链接、sandbox 复制并读默认模型（优先 `- id: acp`，否则 `agent-default-model`）；会话建立后另发 `set_config_option`（agent 自己的接口）；读不到回退旧 `deepseek-account/*`（rc.3 已失效，只记 WARN）；或改用 `deepseek-official` + API key |
 | R19 | DSH stdout 混入非 JSON 日志行 | 严格解析器可能报错/卡住 | 当前客户端忽略非 JSON；新增解析器要保持容错 |
 | R20 | 社区 `deepseek-acp` 未实测 | 无法确认 image/load/权限行为 | 如选 B，先跑 `scripts/acp-probe.mjs`，不要直接上线 |
-| R21 | **共用沙箱根的 `sessions/` 被别的 agent 写入**（kiro / pi 的平铺文件） | DSH 报 `unsupported flat-file layout`，起不了会话（2026-11-03 真机复现） | `isolateSessions: true` + `prepareAgent()` 落盘 `--patch`，root 指到 `agent-sessions/deepseek/<role>`；用户自带 `--patch` 时尊重用户 |
+| R21 | **`sandbox` 下共用沙箱根的 `sessions/` 被别的 agent 写入**（kiro / pi 的平铺文件） | DSH 报 `unsupported flat-file layout`，起不了会话（2026-11-03 真机复现） | `isolateSessions: true` + `prepareAgent()` 落盘 `--patch`，root 指到 `agent-sessions/deepseek/<role>`；用户自带 `--patch` 时尊重用户。`real` 使用真实 `~/.dsh` 会话库，不受影响 |
 | R22 | **用户 `- id: acp` 的 model 被桌面端模型目录淘汰** | `session/new` 报 `no configured model`，像 agent 坏了 | `profile-model.ts` 的 `acpModelHint` 在 `wemind brain` 给出可粘贴替换（优先 `agent-default-model` 的值），只提示不代改；改真实 profile 后 `brain switch` 生效 |
 
 ---
@@ -672,9 +672,9 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 - 会话：`isolateSessions: true`。
 - 权限：`envDefaults: { DSH_PERMISSION_MODE: "danger-full-access" }`（默认值，父进程同名变量优先）。
 
-**沙箱布局（仅 `homeMode=sandbox`）**（§5.2）：brain 的 `DSH_HOME=<数据目录>/brain-home`、cwd 为沙箱根；worker 的 `DSH_HOME=<数据目录>/worker-home`、cwd 为任务目录；`homeMode=real`（默认）用 `<账号>/agent-view/<role>/deepseek` 链接真实 home。
+**沙箱布局（仅 `homeMode=sandbox`）**（§5.2）：brain 的 `DSH_HOME=<数据目录>/brain-home`，cwd 仍是 `<账号>/workspace/brain`；worker 的 `DSH_HOME=<数据目录>/worker-home`，cwd 是任务目录。`homeMode=real`（默认）用 `<账号>/agent-view/<role>/deepseek` 链接真实 home，cwd 同样不变。
 
-**会话库**（§7.5）：2026-11-03 起在 `<账号目录>/agent-sessions/deepseek/{brain,worker}`；启动前 `prepareAgent()` 落盘 `session-root-<role>.patch.yml`，用 DSH 自己的 `--patch` 把 `session-persistence-jsonl.root` 指过去（用户 `--args` 里自带 `--patch` 时不再追加）。
+**会话库**（§7.5）：`sandbox` 下在 `<账号目录>/agent-sessions/deepseek/{brain,worker}`，启动前 `prepareAgent()` 落盘 `session-root-<role>.patch.yml`，用 DSH 自己的 `--patch` 把 `session-persistence-jsonl.root` 指过去（用户 `--args` 里自带 `--patch` 时不再追加）；`real`（默认）下不追加 `--patch`，使用真实 `~/.dsh` 会话库。
 
 **记忆 / 技能**（§5.3 M4）：`real` / `mirror` 下直接链接真实 `~/.dsh` 的 `skills` 与 `AGENTS.md`；`sandbox` 模式才按 `inheritDirs` / `inheritFiles` 复制。共享根 `~/.agents` 默认不受影响。
 
@@ -738,7 +738,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 | **M3：MCP via ACP** | 假 stdio MCP 经 `toAcpMcpServers()` 转换：`session/new` 挂载 → 模型调用（标记文件记到 `called`）答 `ok`；`session/resume` 再挂 → 再调用答 `okPINEAPPLE`；坏 MCP → `session/new` 回滚（`initial connection or tool synchronization failed`） | — | **M3 通过**（HTTP 未实测） |
 | **M3：微信侧全链路** | 用户实测：`MCP` 列出 test-echo → `加载` → 下一条消息 `session/resume ok ... mcp=[test-echo]`，模型调用工具答 `MCP-OK`（调用记录写入磁盘）→ `卸载` 激活集回空 | — | **微信侧通过**（含微信侧 `resume` 首次实证） |
 | **M4：记忆/技能** | 真实 `~/.dsh` 放测试 skill（KIWANO）+ `AGENTS.md` 规则（MANGO-42）→ brain/worker 沙箱均可读，回答均 `CODEWORD=MANGO-42 SECRET=KIWANO`；现场已还原 | — | **M4 通过** |
-| **M5：多账号机制** | 双数据目录各跑一轮：brain-home/worker-home 凭据各自独立，session id 不同，均答 `OK` | — | **机制通过**（双真机微信待需要时验） |
+| **M5：多账号机制** | 双数据目录各跑一轮（历史记录使用当时的 sandbox 布局）：凭据各自独立，session id 不同，均答 `OK` | — | **机制通过**（双真机微信待需要时验） |
 | **M5：model 失败路径** | 非法 model → `-32602 unknown model option`，随后默认路由明确报 no API key | — | 失败不静默 |
 | **M5：图片友好拒绝（微信侧）** | 纯图片 → 收到「当前大脑暂不支持看图…」；日志 `image unusable and no text; rejected gracefully`；带文字 → 按文字回答并注明图片被忽略 | — | **通过**（无 `-32602` 重试） |
 | **M5：微信派发 worker + 权限请求** | `任务：…` → worker spawn（`mcp=[test-echo]` 全量继承）→ 越界写被沙箱拒 → 2 次 `session/request_permission` 均被应答器拒绝（**不卡死**）→ agent 汇报阻塞 waiting | — | **机制通过**（越界拒绝属沙箱按设计；顺带修复重启后幽灵任务状态） |

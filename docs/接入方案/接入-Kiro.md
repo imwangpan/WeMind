@@ -2,7 +2,7 @@
 
 > **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
 
-> **最后核对**：2026-11-06 ｜ **实测环境**：Windows 11 + kiro-cli 2.37.1（v2）；v3 用临时 `KIRO_HOME` + `acp.agentEngine=v3` 验证
+> **最后核对**：2026-11-12 ｜ **实测环境**：Windows 11 + kiro-cli 2.37.1（v2）；v3 用临时 `KIRO_HOME` + `acp.agentEngine=v3` 验证
 >
 > **状态**：✅ 内置预设。v2（2.37.1）已实测，`wemind brain check` 通过（2026-11-03）；v3 探针级验证过握手（3812ms，2026-11-03）；**v3 的微信真机单轮待复测**。
 >
@@ -18,7 +18,7 @@ kiro-cli acp --help     # 2.37.1 原文：v2 when neither is set
 ```
 
 - 二进制：`kiro-cli`（Windows 上是 `kiro-cli.exe`）。预设默认按这个二进制名解析，安装由用户自己完成。
-- 配置目录：`KIRO_HOME`；WeMind 会把它指向 brain / worker 各自的沙箱，真实 `~/.kiro` 不动。
+- 配置目录：`KIRO_HOME`；`real`（默认）/ `mirror` 下 WeMind 把它指向 brain / worker 各自的 `agent-view` 配置视图，`sandbox` 下指向账号沙箱。真实 `~/.kiro` 不被写入。
 - WeMind 侧用 `wemind brain check` 做真实 ACP 握手：
 
 ```powershell
@@ -34,10 +34,10 @@ wemind brain check          # initialize + session/new
 |---|---|---|
 | 启动（v2） | `kiro-cli acp --trust-all-tools` | 预设 `args` 原样；v3 会被 `kiroEngine` 逻辑改写（见 §3） |
 | 二进制 | `kiro-cli`；Windows `kiro-cli.exe` | 直接起 `.exe`，预设不设 `shell` |
-| 配置目录 | `homeEnvVar: "KIRO_HOME"`，`configSubdir` 为空 | `KIRO_HOME` 指向沙箱后，配置目录就是沙箱根本身 |
+| 配置目录 | `homeEnvVar: "KIRO_HOME"`，`configSubdir` 为空 | `KIRO_HOME` 指向配置视图/沙箱后，配置目录就是该根本身 |
 | 真实配置 | `realHome: ~/.kiro` | 继承清单从这里取；真实文件一律不改 |
 | 记忆 / 技能继承 | `inheritDirs: steering, memories, skills, agents, powers, tasks, extensions` | 与日常 kiro 的这七类目录共享 |
-| 引擎 | `kiroEngine: true` | 启用 v2 / v3 判定、启动参数改写与沙箱 `permissions.yaml` |
+| 引擎 | `kiroEngine: true` | 启用 v2 / v3 判定、启动参数改写与配置视图/沙箱的 `permissions.yaml` |
 | 自动探测 | `AUTO_PROBE_ORDER` 最后一位 | `opencode → cline → qoder → gemini → deepseek → kiro` |
 
 ## 3. v2 / v3 引擎判定与免审批
@@ -53,7 +53,7 @@ wemind brain check          # initialize + session/new
 
 - 剔除 v2 专属的整会话信任参数 `--trust-all-tools` / `-a` / `--trust-tools`（含 `--trust-tools=...`）；v3 拒绝这批参数，带上会连 `initialize` 都不回；
 - 启动参数里没有 `--agent-engine` 时补 `--agent-engine v3`；
-- 在沙箱 `settings/permissions.yaml` 写入 allow-all 规则（文件不存在时）：
+- 在配置视图/沙箱的 `settings/permissions.yaml` 写入 allow-all 规则（文件不存在时）：
 
 ```yaml
 rules:
@@ -93,12 +93,12 @@ wemind brain check
 
 ## 5. 已知限制
 
-- **v2 / v3 的参数不兼容**：v3 拒绝 `--trust-all-tools` / `-a` / `--trust-tools`，带上会连 `initialize` 都不回（表现为握手超时）。不要给 v3 手动补这批参数，免审批交给沙箱 `settings/permissions.yaml`。
+- **v2 / v3 的参数不兼容**：v3 拒绝 `--trust-all-tools` / `-a` / `--trust-tools`，带上会连 `initialize` 都不回（表现为握手超时）。不要给 v3 手动补这批参数，免审批交给配置视图/沙箱的 `settings/permissions.yaml`。
 - **引擎判定看 `acp.agentEngine`，不看 `chat.agentEngine`**：后者只影响交互式 chat，官方文档明确它不影响 `acp`；拿它推断会判错。
 - **「CLI 主版本 ≥3 默认 v3」是假设 / 待实测**：2.37.1 的 `kiro-cli acp --help` 只写了「v2 when neither is set」；这条规则仅作未来版本的兜底。
 - **`--agent-engine v1` 未验证**：WeMind 按 v2 处理，保留 v2 参数。
 - **`_meta.kiro.policyPreset` 是假方案**：多种写法实测都不生效（权限请求照发、写文件仍被拒），v3 免审批的权威位置是 agent 自己的 permissions 策略文件，不是 ACP 元数据。
-- **沙箱 `permissions.yaml` 不覆盖用户规则**：真实设置里已有这份文件时原样同步；WeMind 只在文件缺失时补 allow-all。
+- **`permissions.yaml` 不覆盖用户规则**：真实设置里已有这份文件时原样链接/同步；WeMind 只在文件缺失时补 allow-all。
 
 ## 6. 验证
 
@@ -111,7 +111,7 @@ wemind brain check
 
 1. `wemind brain`：确认 `bin=kiro-cli.exe`；v2 时 `args=[acp --trust-all-tools]`，v3 时 `args` 里没有 v2 信任参数且有 `--agent-engine v3`。
 2. `wemind brain check`：握手成功。
-3. v3 沙箱：`settings/permissions.yaml` 存在 allow-all 规则（真实设置已有则内容与真实文件一致）。
+3. v3 配置视图/沙箱：`settings/permissions.yaml` 存在 allow-all 规则（真实设置已有则内容与真实文件一致）。
 4. v3 微信真机单轮：待复测（见 §7）。
 
 ## 7. 待实测

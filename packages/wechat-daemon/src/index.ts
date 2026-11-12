@@ -351,7 +351,7 @@ function sniffMime(b: Buffer): string {
 
 /**
  * 处理一条发给大脑的消息。返回**是否真的答成了**（`brainErrorMessage` 兜底算没答成）——
- * 交接摘要的消费就靠这个返回值：只有答成了才把摘要删掉（失败留着，下次还能用）。
+ * 交接摘要的清除就靠这个返回值：只有答成了才把摘要删掉（失败留着，下次还能用）。
  */
 async function handleMessage(
   account: AccountData,
@@ -594,7 +594,7 @@ async function handleMessage(
       sends.flushDeferredTaskPushes(to, latestToken ? latestToken() : cx(), sendFailed);
       activeTurn = null;
     }
-    return false; // 没有答成：交接摘要不能被消费掉
+    return false; // 没有答成：交接摘要不能被清除
   };
 
   // 收图后怎么走：全部下载失败/大脑不支持时，有文字（或其它附件）就只按文字答，没内容就直接拒绝。
@@ -1014,7 +1014,7 @@ async function pollerLoop(
           active: hasActiveTask(from),
           interrupted: interruptedTasks(from).length,
         };
-        // 带附件的消息不走快车道：控制/任务指令不消费附件，进快车道会静默丢文件。
+        // 带附件的消息不走快车道：控制/任务指令不处理附件，进快车道会静默丢文件。
         if (isFastLane(text, facts, parts.attachments.length)) fastQueue.push(queued);
         else msgQueue.push(queued);
         enq = true;
@@ -1337,8 +1337,8 @@ async function workerLoop(
         item.createTimeMs,
         latestToken,
       );
-      // 答成才消费：失败/被图片挡下就留着，下次还能用。
-      // 切回来答话（回滚到来源大脑，或切换目标就是它）也不消费——那是它自己写的摘要，留着下次切走时用。
+      // 答成才清除：失败/被图片挡下就留着，下次还能用。
+      // 切回来答话（回滚到来源大脑，或切换目标就是它）也不清除——那是它自己写的摘要，留着下次切走时用。
       const answeredBy = getAgent("brain").name;
       if (htext && answered && answeredBy !== pending?.fromAgent && clearHandoff(DATA_DIR))
         log.info(`handoff consumed by ${answeredBy}`);
@@ -1364,7 +1364,7 @@ function readPidFile(file: string): number | null {
 }
 
 export async function runDaemon(): Promise<void> {
-  // 单实例：同账号只允许一个 daemon 消费同一个 bot token。
+  // 单实例：同账号只允许一个 daemon 占用同一个 bot token。
   // `wimind start` 有 wrapper.pid 守卫；这里挡住直接 `wimind daemon` / `npm run daemon`，以及两套 runner 并存。
   const pidFile = path.join(DATA_DIR, "daemon.pid");
   const recordedPid = readPidFile(pidFile);

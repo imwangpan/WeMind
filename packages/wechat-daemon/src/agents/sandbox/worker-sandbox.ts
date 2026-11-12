@@ -146,7 +146,7 @@ export function ensureWorkerHome(
     mirrorRealKiro(ag, rt); // 链入记忆/steering/skills（sessions 仍隔离）
     syncCredentials(ag, workerConfigDir(ag, rt)); // 凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
   }
-  applySettingsDefaults(ag, workerConfigDir(ag, rt), rt.view); // 预设默认设置项（如 pi 的 quietStartup：关掉 pi-acp 当消息发出来的启动横幅）
+  applySettingsDefaults(ag, workerConfigDir(ag, rt), rt.view); // 预设默认设置项（如 pi 的 quietStartup：关掉 pi-acp 当消息发出来的启动信息）
   // kiro v3 的免审批在 settings/permissions.yaml；real/mirror 下该文件已在
   // config-view 里被强制生成副本，不会穿透 junction 写到真实 ~/.kiro。
   if (ag.kiroV3) ensureKiroV3Permissions(ag, path.join(rt.configDir, "settings"));

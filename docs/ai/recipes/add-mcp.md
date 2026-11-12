@@ -46,7 +46,8 @@ transport（怎么让 agent 看到）
 | `packages/wechat-daemon/src/agents/config/overlay.ts` | 微信独享 `mcp.extra` / `mcp.disable` |
 | `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | brain 视图/沙箱、catalog、激活集、`加载/卸载` |
 | `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | worker 全量继承、排除集 |
-| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts` | 文件式 MCP 格式（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）的读/写/转换 |
+| `packages/wechat-daemon/src/agents/sandbox/mcp-adapters.ts` | 按文件格式的 MCP 适配器：路径、读写、剥离、ACP 转换、原生只读（Codex TOML） |
+| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts` | MCP 格式纯函数（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）与 wechat 判定 |
 | `packages/wechat-daemon/src/cli/subcommands/cli-config.ts` | `wemind config mcp list/enable/disable/add/remove` 的 CLI 入口 |
 | `packages/wechat-daemon/src/index.ts` | 指令拦截；加载/卸载后 `restart()` |
 | `packages/wechat-daemon/src/acp/acp-brain.ts` | 重启 ACP，重建后恢复 session |
@@ -89,7 +90,7 @@ transport（怎么让 agent 看到）
 
 ### DSH
 
-> **状态：已实现并实测（2026-10-29 复核）。** `deepseek` 配置里的 `mcpViaAcp: true`——不写 MCP 配置文件，激活集经 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发；worker 同理继承全量（除排除集）。`addMcp` 会预校验定义（无 command/url 拒绝加载；结构不认识/残缺的条目跳过并记日志，不拖挂整个会话）。**stdio 已真机实测可用；HTTP 由 agent 声明可用（`mcpCapabilities.http:true`）但未单独真机实测；SSE 不被 ACP 支持**（`toAcpMcpServers` 只输出 stdio / `type:"http"`）。claude-code 同样走 `mcpViaAcp`；codex 的适配器声明 `mcpCapabilities.acp=false`，保持 `mcpViaAcp: false`。
+> **状态：已实现并实测（2026-10-29 复核）。** `deepseek` 配置里的 `mcpViaAcp: true`——不写 MCP 配置文件，激活集经 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发；worker 同理继承全量（除排除集）。`addMcp` 会预校验定义（无 command/url 拒绝加载；结构不认识/残缺的条目跳过并记日志，不拖挂整个会话）。**stdio 已真机实测可用；HTTP 由 agent 声明可用（`mcpCapabilities.http:true`）但未单独真机实测；SSE 不被 ACP 支持**（`toAcpMcpServers` 只输出 stdio / `type:"http"`）。claude-code 同样走 `mcpViaAcp`；codex 也走 `mcpViaAcp: true`——`mcpCapabilities.acp=false` 只表示不声明 MCP-over-ACP，客户端传入的 stdio MCP 在 2.5.0 / 2.6.0 实测可用，原生 `~/.codex/config.toml` 仍由 Codex 自己加载且同名优先。
 
 DSH 的 ACP 走 `session/new` 的 `mcpServers`，没有 kiro 式文件。用中立 catalog：
 

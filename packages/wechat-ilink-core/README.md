@@ -1,6 +1,6 @@
 # @wemind/wechat-ilink-core
 
-> 微信 **iLink / ClawBot** Bot 协议的 TypeScript 内核——HTTP 客户端、协议类型、会话守卫、账号/状态持久化、CDN 媒体加解密、错误码。**不含任何「消费方」逻辑**（MCP / daemon），可独立用于自建 iLink bot。
+> 微信 **iLink / ClawBot** Bot 协议的 TypeScript 内核——HTTP 客户端、协议类型、会话守卫、账号/状态持久化、CDN 媒体加解密、错误码。**不含任何 MCP / daemon 业务逻辑**，可独立用于自建 iLink bot。
 
 [WeMind](https://github.com/imwangpan/WeMind) monorepo 的内核包；`@wemind/wechat-mcp`（MCP server）与 `@wemind/cli`（常驻 daemon）都依赖它，自身不依赖任何上层。
 
@@ -23,11 +23,11 @@
 
 ## 安装
 
-> ⚠️ **本包不发布到 npm**（`private: true`，`npm view` 会 404）。它只有两个消费方，且都在本仓库里：
+> ⚠️ **本包不发布到 npm**（`private: true`，`npm view` 会 404）。它只有两个包使用，且都在本仓库里：
 > [`@wemind/wechat-mcp`](../wechat-mcp) 与 [`@wemind/cli`](../wechat-daemon) 用 tsdown 把它**内联**进各自单文件产物。
 > 想用这套 iLink 内核请 clone 仓库：`npm install` 后 workspace 会自动链接本包（`@wemind/wechat-ilink-core: "*"`）。
 >
-> 本包是 **JIT 源码包（source-first）**：`main` / `types` / `exports` 指向 `src/index.ts`，没有构建脚本与 `dist/`。workspace 内 tsc / Vitest / tsdown / tsx 直接消费源码；发布时由两个消费方的 tsdown 内联，`scripts/prepack-guard.mjs` 会拒绝仍带 `@wemind/*` 裸 import 的产物。
+> 本包是 **JIT 源码包（source-first）**：`main` / `types` / `exports` 指向 `src/index.ts`，没有构建脚本与 `dist/`。workspace 内 tsc / Vitest / tsdown / tsx 直接使用源码；发布时由两个发布包的 tsdown 内联，`scripts/prepack-guard.mjs` 会拒绝仍带 `@wemind/*` 裸 import 的产物。
 
 ```bash
 git clone https://github.com/imwangpan/WeMind.git

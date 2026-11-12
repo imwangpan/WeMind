@@ -158,7 +158,7 @@ function hasUnclosed(s: string): boolean {
   return depth > 0 || quote !== null;
 }
 
-/** 解析全文，返回 `{ mcpServers }`（与 kiro 格式对齐，交给 `readMcpServers` 直接消费）。 */
+/** 解析全文，返回 `{ mcpServers }`（与 kiro 格式对齐，交给 `readMcpServers` 直接使用）。 */
 export function parseTomlMcpServers(text: string): { mcpServers: Record<string, unknown> } {
   const root: TomlTable = {};
   let table: TomlTable = root;

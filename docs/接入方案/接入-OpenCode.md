@@ -3,7 +3,7 @@
 > **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
 
 > **状态**：M1–M4 全部落地 ✅ —— `opencode` 是内置预设（见 §3.6）。**brain 通道的真机 E2E 已在 2026-10-29 通过**（微信发消息 → opencode acp → 自动回复，记录见 [CHANGELOG](../发布与变更记录/CHANGELOG.md)），M4 行与此一致。
-> **实测范围**：OpenCode v2.0.29（M1 探针）；2026-10-29 在 2.0.32 上复测 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）｜ **最后核对**：2026-11-05
+> **实测范围**：OpenCode v2.0.29（M1 探针）；2026-10-29 在 2.0.32 上复测 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）｜ **最后核对**：2026-11-12
 > **实测环境**：Windows 11 / Node ≥20 / OpenCode v2.0.29。本文结论基于该版本；其它 agent 的能力（load/image/MCP）可能不同。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md)（ACP 换大脑通用指南）· [repowiki/06-ACP-大脑与沙箱](../repowiki/06-ACP-大脑与沙箱.md)。
 
@@ -11,7 +11,7 @@
 
 ## 0. TL;DR
 
-- WeMind 有**两种接入形态**：① `@wemind/wechat-mcp`（OpenCode 当 MCP 客户端消费微信工具）；② daemon（OpenCode 当**常驻 ACP 大脑**）。
+- WeMind 有**两种接入形态**：① `@wemind/wechat-mcp`（OpenCode 当 MCP 客户端调用微信工具）；② daemon（OpenCode 当**常驻 ACP 大脑**）。
 - 本文重点做 **形态②**：用 `wemind brain set opencode`（或一次性 `WEMIND_BRAIN=opencode`）把 daemon 的大脑换成 `opencode acp`。
 - **M1 已实测**：`initialize` / `session/new` / `session/prompt` / `session/load`（自愈）/ 工具调用全部可用，且 **OpenCode 全程不向客户端发反向请求**（无 `fs/*`、无 `session/request_permission`）——协议层（`acp-connection.ts`）**不需要改动**（帧/超时/模型与模式已统一到该模块，brain 与 worker 共用）。
 - 剩余工作量集中在 **agent + 沙箱**：OpenCode 的配置目录环境变量、配置文件名与 **MCP 配置格式**都与 kiro 不同，需要按 agent 适配。
@@ -282,23 +282,25 @@ npm run build; npm run daemon
 
 `opencode` 是内置预设（`ACP_AGENT_PRESETS`），字段定义见 §3.4 Step 1；落地结果如下：
 
+> 本节表格已按 2026-11-12 的默认 `homeMode=real` 校正；§3 的 Step 1–8 是当时 M2/M3 沙箱阶段的实现记录，其中「沙箱」在默认模式下对应 `<账号>/agent-view/<role>/opencode`，只有显式 `homeMode=sandbox` 才是 `brain-home` / `worker-home`。
+
 | 项目 | 落地结果 | 依据 |
 |---|---|---|
 | 启动 | `opencode acp`；`shell: true`、`binWin: "opencode"` | §3.4 Step 1 / Step 7 |
-| 沙箱配置目录 | `XDG_CONFIG_HOME=<沙箱>` → 配置实到 `<沙箱>/opencode/`；`OPENCODE_CONFIG_DIR` 只「追加」、不替换 global，无法隔离，故不用 | §3.2、§3.3 |
-| MCP 文件 | `<沙箱>/opencode/opencode.json` 的 `mcp.servers`（`mcpFormat: "mcp.servers"`） | §3.4 Step 3 |
+| 配置目录 | `real`/`mirror`：`XDG_CONFIG_HOME=<账号>/agent-view/<role>/opencode`（视图根）→ 配置实到 `<视图根>/opencode/`；`sandbox`：`XDG_CONFIG_HOME=<沙箱>` → `<沙箱>/opencode/`。`OPENCODE_CONFIG_DIR` 只「追加」、不替换 global，无法隔离，故不用 | §3.2、§3.3 |
+| MCP 文件 | 当前配置目录的 `opencode.json` 的 `mcp.servers`（`mcpFormat: "mcp.servers"`；`real`/`mirror` 为 `<账号>/agent-view/<role>/opencode/opencode/opencode.json`——视图根 `/` `configSubdir=opencode` `/` 文件名 `opencode.json`，三层同名不是笔误） | §3.4 Step 3 |
 | MCP 激活 | brain 默认空 MCP；微信 `加载/卸载` 后写激活集，重启 ACP 生效；`mcp.servers` 条目原样透传 | §3.4 Step 3 |
 | MCP 目录（CATALOG） | 默认 `<realHome>/opencode.json`；**不**回退 `opencode.jsonc`——真实配置只有 `.jsonc` 时用 `WEMIND_MCP_CATALOG` 显式指过去 | §3.4 Step 3 |
-| worker | 继承全量 MCP、仅排除 `wechat`；路径同为 `<WORKER_CONFIG_DIR>/opencode.json` | §3.4 Step 5 |
+| worker | 继承全量 MCP、仅排除 `wechat`；路径同为当前 worker 配置目录的 `opencode.json`（`real` 为 `<账号>/agent-view/worker/opencode/opencode/opencode.json`，路径组成同上） | §3.4 Step 5 |
 | 记忆/技能 | `skills` / `agents` / `commands` 目录 junction；`AGENTS.md` 单文件额外拷贝 | §3.4 Step 4 |
-| 模型基底 | 用户真实 `opencode.json`（去掉 `mcp` 段）作基底写入沙箱，继承 `model` 等设置；MCP 仍由沙箱权威 | §3.4 Step 6、§3.5 #3 |
+| 模型基底 | 用户真实 `opencode.json`（去掉 `mcp` 段）作基底写入当前配置目录，继承 `model` 等设置；MCP 仍由 WeMind 生成的配置权威 | §3.4 Step 6、§3.5 #3 |
 | 项目配置发现 | `OPENCODE_DISABLE_PROJECT_CONFIG=1`，不从 cwd 祖先目录发现用户 `opencode.json` | §3.4 Step 2 |
 | 数据/凭证 | `~/.local/share/opencode`，与配置分离；隔离配置不丢登录态，但该目录不按账号隔离 | §3.2 |
 
 补充：
 
 - **隔离与 MCP 端到端已实测**：`XDG_CONFIG_HOME=<dir>` 后 `opencode debug paths config` 输出 `<dir>/opencode`；ACP 的 `session/new` 采用该目录 `opencode.json` 的 `model`；放进 `mcp.servers` 的假 MCP 被实际拉起（标记文件被创建）→ `opencode acp` 完整读取 `<XDG>/opencode/opencode.json`。
-- **沙箱配置是生成物**：沙箱 `opencode.json` 每次启动由真实配置重新生成，手改沙箱那份下次启动即失效——改模型/设置请改真实那份。
+- **生成配置是生成物**：`real`/`mirror` 的视图 `opencode.json` 与 `sandbox` 的那份都由真实配置重新生成，手改生成物下次启动即失效——改模型/设置请改真实那份。
 - **`opencode mcp list` 不代表 ACP 行为**：它连的是共享后台服务，不能用来判断 ACP 进程读了哪个配置目录。
 
 ---

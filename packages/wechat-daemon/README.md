@@ -84,7 +84,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 
 ## 数据与安全
 
-- 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标、`allowFrom.json` 授权清单、`runtime.json`（homeMode）、`agent-view/`（real/mirror 最小视图）、`agent-overrides/`（微信独享配置）、`workspace.json` 与 `workspace/`、`media/inbound/`、`session-cwd.json`、`daemon.log` 等。`brain-home/` / `worker-home/` 只在 `sandbox` 模式使用。
+- 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标、`allowFrom.json` 授权清单、`runtime.json`（homeMode）、`agent-view/`（`real`/`mirror` 下仅用于有 `homeEnvVar` 的 Agent；没有的直接用真实 home）、`agent-overrides/`（微信独享配置）、`workspace.json` 与 `workspace/`、`media/inbound/`、`session-cwd.json`、`daemon.log` 等。`brain-home/` / `worker-home/` 与 DSH 的 `agent-sessions/` 只在 `sandbox` 模式使用。
 - **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：`npm i -g <适配器包>` 后 `wemind brain set <agent 名>`；各适配器的安装命令、认证、配置视图与 MCP 差异见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - ⚠️ **daemon 会让大脑免确认执行工具**：10 个内置预设默认都免审批，能给这个 bot 发消息的人即可让大脑在本机执行工具（shell / 写文件）；Copilot 预设仅使用 `--allow-all-tools`，不启用 `--allow-all`。微信平台限制决定了只有扫码登录这个 bot 的**登录者**能发消息；另有一道**发件人授权（allowFrom）兜底**：登录者自动写入，**勿清空**。想收紧权限见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - `account.json`（bot token）、`state.json`（`context_token`）、`qr_login.json` 在 POSIX 上统一 chmod 600；Windows 上都是明文，请用目录权限或磁盘加密。

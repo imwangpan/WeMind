@@ -2,7 +2,7 @@
 
 > 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md)
 >
-> **最后核对**：2026-11-09
+> **最后核对**：2026-11-12
 
 daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。本章聚焦 daemon 本体（`index.ts`）的运行逻辑；大脑、worker、沙箱在后续章节展开。
 
@@ -50,14 +50,15 @@ packages/wechat-daemon/src/
 │   ├── config/               # homeMode、配置视图、overlay、工作区、环境快照
 │   │   ├── home-mode.ts      # runtime.json：real（默认）/ mirror / sandbox
 │   │   ├── runtime.ts        # 一次启动的 home/configDir/cwd/mediaDir 总装
-│   │   ├── config-view.ts    # agent-view 最小视图（链接真实技能/记忆/会话）
+│   │   ├── config-view.ts    # agent-view 最小视图（仅 homeEnvVar Agent；链接真实技能/记忆/会话）
 │   │   ├── overlay.ts        # agent-overrides/<agent>.json（仅微信侧）
 │   │   ├── workspace.ts      # workspace.json + 默认工作区
 │   │   └── agent-config-writer.ts # 真实配置备份、并发校验、原子写
-│   └── sandbox/              # 仅 sandbox 模式的复制隔离与 MCP
+│   └── sandbox/              # 配置视图/沙箱共用的 MCP 策略与继承（real 也用这里的 MCP 子集）
 │       ├── mcp-sandbox.ts    # brain 视图/沙箱：MCP 隔离（→ 第 6 章）
 │       ├── worker-sandbox.ts # worker 视图/沙箱（全量 MCP 除 wechat）（→ 第 7 章）
-│       ├── agent-mcp.ts      # MCP 激活集与按 agent 的挂载格式
+│       ├── mcp-adapters.ts   # 按文件格式的 MCP 适配器（读写/剥离/ACP 转换/原生只读）
+│       ├── agent-mcp.ts      # MCP 格式纯函数、wechat 判定与 ACP 转换
 │       └── sandbox-inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单）
 ├── tasks/                    # 任务（worker）
 │   ├── worker-acp.ts         # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
@@ -67,11 +68,11 @@ packages/wechat-daemon/src/
 │   └── task-inbox.ts         # 任务收件箱两个通道（task-inbox/ 命令 + task-out/ 答复）
 ├── sessions/                 # 会话
 │   ├── session-manager.ts    # 会话五条指令的实现层（→ 第 6 章）
-│   ├── session-registry.ts   # 会话登记表门面（改名/删除 + re-export store/view）（→ 第 6 章）
+│   ├── session-registry.ts   # 会话登记表统一入口（改名/删除 + re-export store/view）（→ 第 6 章）
 │   ├── registry-store.ts     # 登记表存储层：读写/裁剪/登记刷新
 │   ├── registry-view.ts      # 登记表视图层：引用解析/名字校验/列表渲染
 │   ├── session-map.ts        # 当前会话表 brain-sessions.json / worker-sessions.json（→ 第 6 章）
-│   └── handoff.ts            # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才消费（→ 第 6 章）
+│   └── handoff.ts            # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才清除（→ 第 6 章）
 ├── cli/                      # 本地 CLI
 │   ├── manage.ts             # 参数解析、switch 分派、帮助文本
 │   ├── account-commands.ts   # list / adopt / logout / delete / start（账号维度）
@@ -112,7 +113,7 @@ graph TD
     B2 --> C["loadAccount（未登录则 exit 1）"]
     C --> D["解析登录者 owner（WECHAT_OWNER_ID 或扫码登录者）<br/>→ addAllowFrom(owner) 种入白名单（迁移老账号）"]
     D --> E["写 daemon.pid + 注册 exit/SIGINT/SIGTERM 清理<br/>+ 全局 unhandledRejection / uncaughtException（只记录不退出）"]
-    E --> F["ensureParityAccountDirs() + migrateLegacySandbox()<br/>+ ensureBrainHome() + ensureWorkerHome()<br/>准备 agent-view/工作区；按 TTL/总量清理 media/inbound"]
+    E --> F["ensureParityAccountDirs() + migrateLegacySandbox()<br/>+ ensureBrainHome() + ensureWorkerHome()<br/>准备 real 的 agent-view / sandbox 的 brain-home、worker-home 与工作区；按 TTL/总量清理 media/inbound"]
     F --> G["notifyStart 通知上线"]
     G --> H["接入 setTaskPush / setTaskTyping / setTaskStateSink / setTaskAckSink"]
     H --> I["clearTaskDirs + 启动 task-inbox 扫描定时器(1s)"]
@@ -148,7 +149,7 @@ while true:
         → 按 isFastLane(text, facts, 附件数) 分拣到 fastQueue / msgQueue → 唤醒对应循环
 ```
 
-`message_id` 是 uint64：poller 用字符串比较（`compareMessageIds`/`maxMessageId`），并把最近处理过的 200 个 ID 存进 `state.seenMessageIds`（防同一批/服务端重放时重复处理；**不要**指望它在旧 number 游标刚迁移时补历史——那时环是空的，防重放主防线是持久化的 `updatesBuf`）。**带附件的消息不进快车道**：控制/任务指令不消费附件，放快车道会静默丢文件，所以 `isFastLane` 收到附件数 > 0 时直接返回 false。
+`message_id` 是 uint64：poller 用字符串比较（`compareMessageIds`/`maxMessageId`），并把最近处理过的 200 个 ID 存进 `state.seenMessageIds`（防同一批/服务端重放时重复处理；**不要**指望它在旧 number 游标刚迁移时补历史——那时环是空的，防重放主防线是持久化的 `updatesBuf`）。**带附件的消息不进快车道**：控制/任务指令不处理附件，放快车道会静默丢文件，所以 `isFastLane` 收到附件数 > 0 时直接返回 false。
 
 poller 对每条消息**先鉴权再处理**，并把所有最新 token 实时写进 `state.contextTokens`，这样即使大脑在处理旧消息，新消息的 token 也不会丢。
 
@@ -204,7 +205,7 @@ graph TD
     C4B -->|否| H6["handleMessage → brain（默认）"]
 ```
 
-三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时存在 interrupted）才交给任务侧（`shouldResumeTask()`，2026-11-02 起）；多条可续跑任务时会回编号清单让你指明，不替你选。任务出完结果后不会再接管日常消息。**带任何附件（图片/文件/视频/无转写语音）的消息一律给 brain**：`shouldResumeInBrainQueue()` 与 `isFastLane()` 都把附件数纳入判断——控制/任务指令目前只消费文本，进快车道或任务侧会静默丢掉用户刚发的文件。**有微信转写的语音是纯文本，不算附件**（`extractInbound` 只把无转写语音放进 `attachments`），所以语音版「结束任务」「继续」照常生效。引用消息作为内联前缀进入 brain prompt（`[引用消息] 标题 | 正文`；只有 `svr_id` 时写「引用消息内容未缓存」）。纯未知 item 类型会收到明确提示（列出 type），不静默丢。
+三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时存在 interrupted）才交给任务侧（`shouldResumeTask()`，2026-11-02 起）；多条可续跑任务时会回编号清单让你指明，不替你选。任务出完结果后不会再接管日常消息。**带任何附件（图片/文件/视频/无转写语音）的消息一律给 brain**：`shouldResumeInBrainQueue()` 与 `isFastLane()` 都把附件数纳入判断——控制/任务指令目前只处理文本，进快车道或任务侧会静默丢掉用户刚发的文件。**有微信转写的语音是纯文本，不算附件**（`extractInbound` 只把无转写语音放进 `attachments`），所以语音版「结束任务」「继续」照常生效。引用消息作为内联前缀进入 brain prompt（`[引用消息] 标题 | 正文`；只有 `svr_id` 时写「引用消息内容未缓存」）。纯未知 item 类型会收到明确提示（列出 type），不静默丢。
 
 **命令层（1.2.0 起）**：解析与帮助**同表驱动**（`chat-commands.ts` 的 `COMMAND_SPECS`），中文与斜杠双轨、`/ai` 是统一入口前缀（`/ai` 列可选、`/ai brain X`、`/ai task X`），中文（`切换大脑`、`切换任务大脑`）与旧斜杠（`/brain`、`/worker`）是等价别名。`帮助`/`/help` 按角色裁剪（非登录者看不到「仅登录者」命令）。
 

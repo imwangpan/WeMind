@@ -2,7 +2,7 @@
 
 > 上一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md) ｜ 下一页：[8. 数据存储与多账号](08-数据存储与多账号.md)
 >
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-12
 
 除了「对话大脑」，daemon 还能把**漫长任务**交给**受控的 ACP worker 进程**跑 —— 你在电脑上派发任务后离开，它在「需要你决策」（列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑。这就是**远程 human-in-the-loop（人在回路）**。
 
@@ -50,7 +50,7 @@ graph TD
         TM["task-manager.ts<br/>任务表 + runTask 后台循环"]
         POOL["worker-pool.ts<br/>进程池（复用/回收/上限）"]
         WA["worker-acp.ts<br/>class WorkerConn（每实例一条连接）"]
-        SB["worker-sandbox.ts<br/>WORKER_HOME 沙箱"]
+        SB["worker-sandbox.ts<br/>配置视图 / WORKER_HOME 沙箱"]
     end
     W1["worker agent 进程（任务 1）"]
     W2["worker agent 进程（任务 2）"]
@@ -93,7 +93,7 @@ stateDiagram-v2
 ```
 
 - `running`：正跑一轮。此时该用户来消息 → 按序压入 `pendingInjects`（**一条不丢**，不是只留最近一条），答复「已记下，等这步跑完处理」。
-- `waiting`：等用户回话。收到即转 `running`；若有暂存的 `pendingInjects`，按顺序合并成下一轮前缀一次消费。
+- `waiting`：等用户回话。收到即转 `running`；若有暂存的 `pendingInjects`，按顺序合并成下一轮前缀一次处理。
 - `interrupted`：**不在 liveTasks 里**——daemon 重启后的遗留任务，或一轮失败于模型/账号侧问题（`providerIssue()`：余额/额度、密钥鉴权、计费、模型不存在）。续跑要用户显式回 `#n 继续`（可续跑任务唯一时裸「继续」也行；多条时任务侧回编号清单，见 `shouldResumeTask()`；§7.4「重启后续跑」）。
 - `runTask` 是后台异步循环：`conn.ask()` → 推送 `🤖【任务】<输出>` → typing 保活（每 5s）→ 等用户回话 → 续跑。**绝不在消息循环里 await 它**，否则长任务会阻塞 poller 入队（含用户回话）。
 
@@ -133,7 +133,7 @@ stateDiagram-v2
 | 会话 | 每用户一 session | 每任务一 session（键 `<agent>:task-<编号>@<userId>`） |
 | 持久化 | `brain-sessions.json`（键 `<agent>:userId`） | `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`） |
 | cwd | 账号 `workspace/brain`（或 `session-cwd.json` 记录） | **任务工作目录**：`--cwd` > `WEMIND_WORKER_CWD` > `<账号>/workspace/worker` |
-| 配置 home | `agent-view/brain/<agent>`（`sandbox` 才是 `BRAIN_HOME`；默认空 MCP） | `agent-view/worker/<agent>`（`sandbox` 才是 `WORKER_HOME`；真实全量 MCP 除 wechat） |
+| 配置 home | 有 `homeEnvVar` 的用 `agent-view/brain/<agent>`，没有的直接用真实 home（`sandbox` 才是 `BRAIN_HOME`；默认空 MCP） | 有 `homeEnvVar` 的用 `agent-view/worker/<agent>`，没有的直接用真实 home（`sandbox` 才是 `WORKER_HOME`；真实全量 MCP 除 wechat） |
 | 超时 | idle 120s / cap 15min / 首帧 25s | idle 180s / cap 30min / 首帧 30s（更宽松） |
 
 子进程 cwd 在 spawn 时固定，**且 cwd 是连接身份的一部分**（`connKey = agent 身份 + 实际生效 cwd`）：换 `--cwd` 会起新进程，绝不会复用停在上一个项目里的旧进程。中断恢复靠 `reset()` 后下次 `ensureSession` 走 `session/load`（不支持时 `session/resume`）。
@@ -142,7 +142,7 @@ spawn 失败（cwd 不存在/权限不足）时，`WorkerConn` 把 `error` 事�
 
 ### worker 配置视图
 
-默认 `homeMode=real`，`ensureWorkerHome()` 为 `<账号>/agent-view/worker/<agent>` 构建最小视图；`sandbox` 模式才使用 `WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain **策略相反**：worker 是无人值守的任务执行机，默认加载 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。overlay 的 `mcp.disable` / `mcp.extra` 同样生效。写入磁盘方式按 agent：文件式 MCP 由 `applyWorkerSandbox` 写视图/沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH / Claude Code / Copilot）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。`real`/`mirror` 下未覆盖的 settings、技能与记忆由 config view 链接真实 home；`sandbox` 模式才走 `syncSettings` / `mirrorRealKiro` 的选择性继承。预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`）只补缺失键、用户显式设过就保留。
+默认 `homeMode=real`：有 `homeEnvVar` 的 Agent 由 `ensureWorkerHome()` 为 `<账号>/agent-view/worker/<agent>` 构建最小视图；没有 `homeEnvVar` 的 Agent（`claude-code` / `cline` / `qoder`）直接用真实 home，Codex 始终用 `~/.codex`。`sandbox` 模式才使用 `WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain **策略相反**：worker 是无人值守的任务执行机，默认加载 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。overlay 的 `mcp.disable` / `mcp.extra` 同样生效。写入磁盘方式按 agent：文件式 MCP 由 `applyWorkerSandbox` 写视图/沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH / Claude Code / Copilot / Codex）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。`real`/`mirror` 下未覆盖的 settings、技能与记忆由 config view 链接真实 home；`sandbox` 模式才走 `syncSettings` / `mirrorRealKiro` 的选择性继承。预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`）只补缺失键、用户显式设过就保留。
 
 视图按**这条任务的 agent** 准备：daemon 启动时只按默认任务大脑备一次；`worker-pool.ts` 的 `acquire` 在复用/起进程前会再调 `ensureWorkerHome(ag)`，否则派到别的 agent（如 `--agent pi`）时它自己的 settings/凭据/MCP 还没进视图，agent 会拿空配置跑。
 
@@ -297,7 +297,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 | `WEMIND_WORKER_CAP_MS` | 1800000 | 单轮硬上限（30min） |
 | `WEMIND_WORKER_FIRST_FRAME_MS` | 30000 | 首帧超时 |
 | `WEMIND_WORKER_PROGRESS` | `0` | 是否推全程文字进度 |
-| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | **仅 `sandbox` 模式**的 worker 沙箱目录；`real`/`mirror` 使用 `agent-view/worker/<agent>` |
+| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | **仅 `sandbox` 模式**的 worker 沙箱目录；`real`/`mirror` 下有 `homeEnvVar` 的 Agent 使用 `agent-view/worker/<agent>`，没有的直接用真实 home |
 | `WEMIND_WORKER_MCP_EXCLUDE` | `wechat` | 不继承的 MCP（`wechat` 强制排除） |
 | `WEMIND_TASK_SCAN_MS` | 1000 | daemon 扫描 `task-inbox/` 与 `control-inbox/` 的间隔 |
 | `WEMIND_CONTROL_TIMEOUT_MS` | 30000 | CLI 等 daemon 回话的上限（`brain switch` 自动放大） |

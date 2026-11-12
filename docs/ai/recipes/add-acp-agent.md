@@ -1,6 +1,6 @@
 # 配方：接入一个新的 ACP Agent
 
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-12
 >
 > 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)。
 
@@ -48,7 +48,7 @@ node scripts/acp-probe.mjs
 | 正文非逐 token / 无 activity 帧 | 预设加 `firstFrameMs`（首帧超时）与 `heartbeatMs`（静默期心跳），见 §4 |
 | `session/new` 先要求 `authenticate`（`-32000 Authentication required`） | 先看能否靠**复制凭据**自动恢复（`credentialFiles`；Cline 只自动恢复它自己的 3 种 OAuth provider）；不能就**从 agent 自己的配置派生环境变量**（`credentialEnv`，参考 Cline 的 `clineCredentialEnv()`：只读、显式 env 优先），或要求部署方提供 agent 官方文档里的环境变量。**不要**在 daemon 里实现交互式 `authenticate`——无头环境会卡在浏览器/输入上；把可执行的提示写进 `brain check` 与失败回复（参考 `authHint()`） |
 | 默认模型路由需要 API key / 桌面登录要切 account | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖 |
-| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：沙箱**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在），并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
+| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：`real`/`mirror` 链接真实 `profiles/`，`sandbox` 才**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在），并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
 
 ---
 
@@ -123,14 +123,14 @@ acme: {
   // modelArg: "--model",               // 不支持 session/set_config_option 时模型走启动参数（gemini）
   // replayOnLoad: true,                // load/resume 返回后仍异步回放历史：恢复后先等帧流安静，否则旧历史会拼进本轮答复（gemini）
   // sessionMode: "bypassPermissions",  // 会话建立/恢复后经 session/set_mode 切模式（claude-code / codex）
-  // env: { CLAUDE_CONFIG_DIR: "%HOME%/claude" },                  // 强制注入（值里 %HOME% → 沙箱根）
+  // env: { CLAUDE_CONFIG_DIR: "%HOME%/claude" },                  // 强制注入（值里 %HOME% → 视图根/沙箱根；没有 homeEnvVar 时还要配 realEnv）
   // envDefaults: { DSH_PERMISSION_MODE: "danger-full-access" }, // 审批类默认值：父进程已设同名变量时以父进程为准
   // credentialEnv: (realHome, parentEnv) => ({ ... }),            // 从 agent 凭据文件派生 env（仅父进程未提供时；Cline 的 CLINE_PROVIDER/CLINE_API_KEY）
   // isolateSessions: true,             // 会话持久化 root 用 agent 自己的 --patch 指到账号数据目录（DSH）
   // fallbackBinPaths: [path.join(os.homedir(), ".acme", "bin", "acme-agent")], // 官方安装不在 PATH
   // settingsBase: "settings.json",       // 以真实配置为基底（剥离 MCP/插件/providers/model、关自动更新）
   // settingsStrip: ["mcpServers"],       // settingsBase 里要删的键（默认 DEFAULT_SETTINGS_STRIP；gemini 只剥 mcpServers，保留 model/security）
-  // settingsDefaults: { quietStartup: true }, // 沙箱 settings.json 缺省补键（用户显式设过则保留用户的值；只改沙箱副本）
+  // settingsDefaults: { quietStartup: true }, // 生成副本的 settings.json 缺省补键（用户显式设过则保留用户的值；真实文件不动）
   // credentialFiles: [".auth/user"],     // 登录态（新者胜）
   // identityFiles: [".auth/machine_id"], // 必须与真实目录一致（内容不同即覆盖）
   // realProfile: "acp",                  // 该 agent 的用户层 profile 名——原样复制真实 profiles/<名>/cordis.patch.yml 并从它读默认模型（DSH）
@@ -153,7 +153,7 @@ acme: {
 
 ## 3. 配置视图 / MCP / 记忆
 
-- `homeEnvVar` 指向 `agent-view/<role>/<agent>`（`real`/`mirror`）或 `BRAIN_HOME`/`WORKER_HOME`（`sandbox`）；`configSubdir` 决定配置目录在其中的位置。
+- `homeEnvVar` 指向 `agent-view/<role>/<agent>`（`real`/`mirror`）或 `BRAIN_HOME`/`WORKER_HOME`（`sandbox`）；没有 `homeEnvVar` 的 Agent 在 `real` 下直接用真实 home，只能靠 `env`/`realEnv` 指配置目录。`configSubdir` 决定配置目录在其中的位置。
 - `mcpFormat`：`mcpServers`（顶层）或 `mcp.servers`（嵌套）；DSH 这类走 ACP 的用 `mcpViaAcp`，不要写文件。
 - 记忆/技能：`real`/`mirror` 由 config view 直接链接 `realHome` 的未覆盖目录/文件；`sandbox` 才按 `inheritDirs` / `inheritFiles` 选择性复制。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
 - 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时视图/沙箱。
