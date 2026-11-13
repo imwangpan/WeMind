@@ -143,7 +143,7 @@ cline: {
 
 - **配置目录**：`direct` 下 `CLINE_DIR` 直接用真实 `~/.cline`；`sandbox` 下指到 `<sandbox>/cline`，由 `configSubdir` 决定。brain 的 cwd 始终是 `<账号>/workspace/brain`，不是配置目录；三个 env 必须与 `configSubdir` 一致。
 - `CLINE_DATA_DIR` 显式写成 `<CLINE_DIR>/data`（Cline 的默认值也是它），避免上游改默认值时沙箱漏到真实目录。
-- **MCP 文件**：`CLINE_MCP_SETTINGS_PATH` 在 `sandbox` 下指到 `<sandbox>/cline/mcp.json`；`direct` 下直接指到真实 `~/.cline/mcp.json`。Cline 没有 `homeEnvVar`，`direct` 下 WeMind **不会写**真实 `~/.cline/mcp.json`，`加载`/`卸载` 会直接拒绝并提示去 Agent 真实配置里改；catalog 仍只读 `~/.cline/data/settings/cline_mcp_settings.json`。要由 WeMind 管理 MCP 必须设 `homeMode=sandbox`，此时 `applySandbox()` 写 `<沙箱>/cline/mcp.json` 的 `{ "mcpServers": {…} }`。
+- **MCP 文件**：`CLINE_MCP_SETTINGS_PATH` 在 `sandbox` 下指到 `<sandbox>/cline/mcp.json`；`direct` 下直接指到真实 `~/.cline/mcp.json`。Cline 没有 `homeEnvVar`，`direct` 下 WeMind **不会写**真实 `~/.cline/mcp.json`，`加载`/`卸载` 原样转给 Agent，由它自己改真实配置；catalog 仍只读 `~/.cline/data/settings/cline_mcp_settings.json`。要由 WeMind 管理 MCP 必须设 `homeMode=sandbox`，此时 `applySandbox()` 写 `<沙箱>/cline/mcp.json` 的 `{ "mcpServers": {…} }`。
   - 验证方式（不需要起 daemon）：`cline config mcp --json` 在设置 `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 后能列出**当前配置目录**里的 server。`direct` 下额外断言真实 `~/.cline/mcp.json` **字节不变**；`sandbox` 下 `<沙箱>/cline/mcp.json` 含所选 server。
   - `wechat` 永久禁止；brain 默认空、按需 `加载 <名>`；worker 继承全量但排除 `wechat` 与 `disabled:true`。
 - **登录态与模型目录**：`data/settings/providers.json`（登录态/自定义 provider）与 `data/settings/models.json`（provider 的模型目录缓存）在 `sandbox` 下按「新者胜」同步（与 DSH `.credentials.yaml` 同策略）；`direct` 下直接用真实文件。**`models.json` 不能漏**：缺它时 Cline 的 `session/new` 会回退到 `gpt-4o`，自定义 provider 下第一条 prompt 就报 `knows no model "gpt-4o"`（2026-10-31 真机踩到并修复）。自定义 provider 另由 `credentialEnv: clineCredentialEnv` 在 spawn 前从**真实** `~/.cline/data/settings/providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）。**注意**：`sandbox` 里 OAuth token 刷新不会写回真实文件，长期两条登录态可能漂移；用 API-key provider 或定期在日常环境 `cline auth` 可以规避。
@@ -178,7 +178,7 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 任务 cline：把这个仓库的 README 里过期的版本号找出来
 ```
 
-- **brain**：`direct` 下 `CLINE_DIR=~/.cline`；`sandbox` 下是 `<账号>/brain-home/cline`。默认 MCP 空只在 `sandbox` 成立；`sandbox` 下 `加载 <名>` 写 `<沙箱>/cline/mcp.json`，`direct` 下 `加载`/`卸载` 直接拒绝并提示改真实配置。**激活集真变了才重启 ACP 进程**（`daemon-control.ts` 只在 `changed` 时调 `restartForMcpChange()`；正在生成的回合会排到回合结束）。
+- **brain**：`direct` 下 `CLINE_DIR=~/.cline`；`sandbox` 下是 `<账号>/brain-home/cline`。默认 MCP 空只在 `sandbox` 成立；`sandbox` 下 `加载 <名>` 写 `<沙箱>/cline/mcp.json`，`direct` 下 `加载`/`卸载` 原样转给 Agent。**激活集真变了才重启 ACP 进程**（`daemon-control.ts` 只在 `changed` 时调 `restartForMcpChange()`；正在生成的回合会排到回合结束）。
 - **worker**：`direct` 下 `CLINE_DIR=~/.cline`；`sandbox` 下是 `<账号>/worker-home/cline`。`sandbox` 的 MCP 集 = 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；只有 `sandbox` 写 `<沙箱>/cline/mcp.json`，`direct` 由 Cline 自己加载真实配置。
 - **热切换**：`wemind brain switch cline` 会启动新 ACP 进程并等 `session/new` 成功后才写 `brain.json`；失败退回旧大脑。
 

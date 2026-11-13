@@ -207,7 +207,7 @@
 | 13 | `wemind brain check` 20s | ✅ 实测握手 1–2s；首次冷启动仍建议放宽 | ⚠️ npx 更慢 | 放宽到 60s |
 | 14 | `auto` 探测 | ⚠️ 只有 `dsh.cmd`，`onPath("dsh")` 找不到 | npx 不参与 | 配置里的 `binWin: "dsh.cmd"`，或让 `onPath` 补试 `.cmd` |
 | 15 | 静默期 15s 心跳 | 🟡 有 thought/usage/tool 帧，通常能刷新；极端纯推理仍可能静默 | ✅ 流式帧持续刷新 | **配置里的 `heartbeatMs`（预设 `heartbeatMs: 60_000`）**；`progressMode` 只在本文设计稿里提过，**代码里没有这个字段**（2026-11-05 核对） |
-| 16 | **模型/认证路由** | ⚠️ 桥插件默认 `deepseek-official` 需 API key；rc.3 已移除 `deepseek-account`，其它路由由本机 provider 配置决定 | ✅ `DEEPSEEK_API_KEY` | **`model` 字段 + 真实 profile 里的 `- id: acp` / `agent-default-model`（real 链接、sandbox 复制，跟随用户默认）+ `session/set_config_option`（显式覆盖）** |
+| 16 | **模型/认证路由** | ⚠️ 桥插件默认 `deepseek-official` 需 API key；rc.3 已移除 `deepseek-account`，其它路由由本机 provider 配置决定 | ✅ `DEEPSEEK_API_KEY` | **`model` 字段 + 真实 profile 里的 `- id: acp` / `agent-default-model`（direct 直接用、sandbox 复制，跟随用户默认）+ `session/set_config_option`（显式覆盖）** |
 
 **结论**：官方方案要补 **5 类**：模型路由、`session/resume`、图片（硬缺口）、反向请求、首帧/心跳。前 2 类已实测可行，图片取决于官方后续是否打开 `image`。社区方案只差反向请求/心跳，但引入第三方依赖。**若微信收图是必保功能，短期内只能选 B 或对官方禁用收图。**
 
@@ -615,7 +615,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 | R7 | 版本是 RC，ACP 行为可能变化 | 升级即坏 | 锁 `0.2.1-rc.2`；升级先跑 M0 脚本；文档记录版本 |
 | R8 | Node ≥22（社区包明确；官方以安装包为准），而仓库声明 ≥20 | 旧环境起不来 | 文档标注；`agentProblem` 加 `minNode` 检查；M0 记录 |
 | R9 | DSH 的 Windows ACL 沙箱只限制普通 NTFS 写，不限制读/网络/进程可见性；预设默认 `danger-full-access` 连写限制也放开 | 微信侧提示注入可外带本机文件 | `allowFrom` 登录者白名单；专用 OS 账号；需要时在 daemon 环境设 `DSH_PERMISSION_MODE=workspace-write` 收紧（预设只是默认值）；不要把敏感目录设为 worker cwd |
-| R10 | 模型/路由选择 | 不干预就落到 official 路由，需 API key（默认已由真实 profile 里的 `- id: acp` 跟随用户日常默认，见 R18）；用户自建网关未运行时，prompt 报该网关自己的连接错误 | 配置里的 `model` + 真实 profile 的 `- id: acp` / `agent-default-model`（real 链接、sandbox 复制）+ `session/set_config_option`（显式覆盖/兜底）。**rc.3 起 `deepseek-account/*` 已不在模型目录**；其它路由以本机 provider 配置为准，见 §7.6 |
+| R10 | 模型/路由选择 | 不干预就落到 official 路由，需 API key（默认已由真实 profile 里的 `- id: acp` 跟随用户日常默认，见 R18）；用户自建网关未运行时，prompt 报该网关自己的连接错误 | 配置里的 `model` + 真实 profile 的 `- id: acp` / `agent-default-model`（direct 直接用、sandbox 复制）+ `session/set_config_option`（显式覆盖/兜底）。**rc.3 起 `deepseek-account/*` 已不在模型目录**；其它路由以本机 provider 配置为准，见 §7.6 |
 | R11 | 桌面端 CLI 只有 `dsh.cmd`，无无扩展名 `dsh` | `onPath("dsh")` 找不到，`auto`/agent 判不可用 | 配置里的 `binWin: "dsh.cmd"`；或让 `onPath` 对 `.cmd` 补试；`WEMIND_BRAIN_BIN` 绝对路径兜底 |
 | R12 | 多账号 / pm2 环境变量传递 | key 不生效 | 文档给 pm2 / `Start-Process -Environment` 示例 |
 | R13 | 成本与长上下文 | 账单/延迟 | 限制 `allowFrom`；观察 usage；`WECHAT_BRAIN_CAP_MS` 兜底 |
@@ -623,7 +623,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 | R15 | **官方 `image:false`**，带图 prompt `-32602` | 微信收图/看图功能不可用 | M1 拦截并友好提示；若要保留收图，短期选 B `deepseek-acp` 或等官方 |
 | R16 | 静默期心跳每 15s 一条 | 约 8 条后触发 10 条连发上限，最终答案要等用户回「继续」（**2026-10-24 未适配时的风险分析**；现行 `awaiting` 只挡进度、最终答案仍会发送） | 配置里的 `heartbeatMs` / committed 模式；实测有 thought/usage 帧，触发概率降低 |
 | R17 | `session/resume` 不重放历史更新 | WeMind 不需要回放；只要上下文在即可 | **已实测上下文保留**（PINEAPPLE）；只拼新回合 chunk |
-| R18 | **默认模型路由与凭据不匹配** | 桌面已登录仍报 `no API key for deepseek-official`；或 profile 只写了 `- id: acp` / 只写了 `agent-default-model` 时终端与微信不一致 | 桥插件 bundle patch 写死 `- id: acp`、用户 profile 不覆盖它。在**真实 profile** 里补 `- id: acp`（值取自 `agent-default-model`；`wemind brain` 给片段）；WeMind real 链接、sandbox 复制并读默认模型（优先 `- id: acp`，否则 `agent-default-model`）；会话建立后另发 `set_config_option`（agent 自己的接口）；读不到回退旧 `deepseek-account/*`（rc.3 已失效，只记 WARN）；或改用 `deepseek-official` + API key |
+| R18 | **默认模型路由与凭据不匹配** | 桌面已登录仍报 `no API key for deepseek-official`；或 profile 只写了 `- id: acp` / 只写了 `agent-default-model` 时终端与微信不一致 | 桥插件 bundle patch 写死 `- id: acp`、用户 profile 不覆盖它。在**真实 profile** 里补 `- id: acp`（值取自 `agent-default-model`；`wemind brain` 给片段）；WeMind direct 直接用、sandbox 复制并读默认模型（优先 `- id: acp`，否则 `agent-default-model`）；会话建立后另发 `set_config_option`（agent 自己的接口）；读不到回退旧 `deepseek-account/*`（rc.3 已失效，只记 WARN）；或改用 `deepseek-official` + API key |
 | R19 | DSH stdout 混入非 JSON 日志行 | 严格解析器可能报错/卡住 | 当前客户端忽略非 JSON；新增解析器要保持容错 |
 | R20 | 社区 `deepseek-acp` 未实测 | 无法确认 image/load/权限行为 | 如选 B，先跑 `scripts/acp-probe.mjs`，不要直接上线 |
 | R21 | **`sandbox` 下共用沙箱根的 `sessions/` 被别的 agent 写入**（kiro / pi 的平铺文件） | DSH 报 `unsupported flat-file layout`，起不了会话（2026-11-03 真机复现） | `isolateSessions: true` + `prepareAgent()` 落盘 `--patch`，root 指到 `agent-sessions/deepseek/<role>`；用户自带 `--patch` 时尊重用户。`direct` 使用真实 `~/.dsh` 会话库，不受影响 |

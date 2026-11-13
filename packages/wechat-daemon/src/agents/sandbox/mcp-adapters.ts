@@ -31,8 +31,6 @@ export interface McpAdapter {
   readonly id: "jsonMcpServers" | "jsonMcpNested" | "tomlMcpServers";
   /** Agent 自己会加载、WeMind 改不了的原生 MCP（目前只有 Codex） */
   readonly nativeOwned: boolean;
-  /** 设置基底里要剥离的键（sandbox 重建配置文件时调用） */
-  readonly rebuildSettingsInView: boolean;
   /** 读真实目录文件里的 MCP 定义（只读；缺失/损坏返回空表） */
   readCatalog(file: string): McpCatalog;
   /** 把「当前有效集合」写进沙箱文件，保留同文件的其它键 */
@@ -132,7 +130,6 @@ function readTomlServers(file: string): McpCatalog {
 const jsonMcpServersAdapter: McpAdapter = {
   id: "jsonMcpServers",
   nativeOwned: false,
-  rebuildSettingsInView: false,
   readCatalog: (file) => readJsonServers(file, "mcpServers"),
   writeCatalog: (file, servers) => writeJsonServers(file, servers, "mcpServers"),
   stripSettings: (base) => {
@@ -170,7 +167,6 @@ const jsonMcpServersAdapter: McpAdapter = {
 const jsonMcpNestedAdapter: McpAdapter = {
   id: "jsonMcpNested",
   nativeOwned: false,
-  rebuildSettingsInView: true,
   readCatalog: (file) => readJsonServers(file, "mcp.servers"),
   writeCatalog: (file, servers) =>
     writeJsonServers(file, servers, "mcp.servers", (config) => {
@@ -205,7 +201,6 @@ const jsonMcpNestedAdapter: McpAdapter = {
 const tomlMcpServersAdapter: McpAdapter = {
   id: "tomlMcpServers",
   nativeOwned: true,
-  rebuildSettingsInView: false,
   readCatalog: readTomlServers,
   writeCatalog: () => {
     throw new Error("TOML 形式的 MCP 配置只读：请让 Agent 自己加载，或改用 ACP 下发");

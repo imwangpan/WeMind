@@ -338,6 +338,14 @@ export function isFastLane(text: string, tasks: TaskFacts, attachmentCount = 0):
   return shouldResumeTask(t, tasks);
 }
 
+/**
+ * direct 模式下「加载/卸载 MCP」没有 WeMind 侧可写的激活集：不拦截，原样交给 Agent 自己处理。
+ * `sandbox` 仍由 daemon 维护激活集。
+ */
+export function passMcpToggleToBrain(cmd: ChatCommand | null, direct: boolean): boolean {
+  return direct && !!cmd && (cmd.kind === "add" || cmd.kind === "remove");
+}
+
 /** 大脑队列里的无编号消息是否该交给任务：只有「继续」类短句 + 确实有可续跑任务；带任何媒体的消息永远给大脑。 */
 export function shouldResumeInBrainQueue(
   text: string,

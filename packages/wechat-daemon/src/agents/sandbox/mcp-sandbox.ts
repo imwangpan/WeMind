@@ -375,7 +375,7 @@ export function addMcp(
       changed: false,
       text:
         `当前是 direct 模式：MCP 完全由 ${ag.name} 自己的配置决定，WeMind 不写文件、也不维护激活集。` +
-        `请直接在 Agent 配置里增删；改完重启 daemon 生效。`,
+        `微信里发「加载/卸载」会原样转给 Agent；CLI 没有 Agent 回合，请直接改 Agent 配置（改完重启 daemon 生效）。`,
     };
   const cat = loadCatalog(ag, dir);
   if (forbiddenMcpServer(name, cat[name]))
@@ -432,7 +432,7 @@ export function removeMcp(
       changed: false,
       text:
         `当前是 direct 模式：MCP 完全由 ${ag.name} 自己的配置决定，WeMind 不写文件、也不维护激活集。` +
-        `请直接在 Agent 配置里增删；改完重启 daemon 生效。`,
+        `微信里发「加载/卸载」会原样转给 Agent；CLI 没有 Agent 回合，请直接改 Agent 配置（改完重启 daemon 生效）。`,
     };
   const a = loadActive(ag.name, dir);
   if (!a.includes(name)) return { ok: false, changed: false, text: `「${name}」当前未激活。` };

@@ -7,6 +7,7 @@ import {
   extractText,
   formatQuote,
   isFastLane,
+  passMcpToggleToBrain,
   shouldResumeInBrainQueue,
   PROGRESS_ACK_DELAY_MS,
   PROGRESS_NOTICE_GAP_MS,
@@ -135,6 +136,24 @@ describe("extractInbound（文本 + 附件 + 引用）", () => {
         parts.attachments.length,
       ),
     ).toBe(true);
+  });
+});
+
+describe("passMcpToggleToBrain（direct 下 MCP 增删交给 Agent）", () => {
+  it("direct：加载/卸载都放行给 Agent", () => {
+    expect(passMcpToggleToBrain({ kind: "add", name: "github" }, true)).toBe(true);
+    expect(passMcpToggleToBrain({ kind: "remove", name: "github" }, true)).toBe(true);
+  });
+
+  it("sandbox：仍由 daemon 维护激活集", () => {
+    expect(passMcpToggleToBrain({ kind: "add", name: "github" }, false)).toBe(false);
+    expect(passMcpToggleToBrain({ kind: "remove", name: "github" }, false)).toBe(false);
+  });
+
+  it("其它指令与普通消息不受影响", () => {
+    expect(passMcpToggleToBrain({ kind: "list" }, true)).toBe(false);
+    expect(passMcpToggleToBrain({ kind: "help" }, true)).toBe(false);
+    expect(passMcpToggleToBrain(null, true)).toBe(false);
   });
 });
 

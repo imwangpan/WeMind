@@ -48,6 +48,7 @@ import { CLI_PID_MARKERS, findOtherOurProcess } from "./shared/process/proc-iden
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./cli/watchdog-runner.js";
 import { isOwnerOnly } from "./ipc/chat-commands.js";
 import { ensureBrainHome } from "./agents/sandbox/mcp-sandbox.js";
+import { readHomeMode } from "./agents/config/home-mode.js";
 import { ensureParityAccountDirs } from "./agents/config/account-bootstrap.js";
 import { migrateLegacySandbox } from "./agents/config/migrate-legacy.js";
 import { syncFromPointerMap } from "./sessions/session-registry.js";
@@ -120,6 +121,7 @@ import {
   extractInbound,
   formatQuote,
   isFastLane,
+  passMcpToggleToBrain,
   parseBrainEscape,
   parseControl,
   parseTaskControl,
@@ -1015,7 +1017,12 @@ async function pollerLoop(
           interrupted: interruptedTasks(from).length,
         };
         // 带附件的消息不走快车道：控制/任务指令不处理附件，进快车道会静默丢文件。
-        if (isFastLane(text, facts, parts.attachments.length)) fastQueue.push(queued);
+        const mcpToBrain = passMcpToggleToBrain(
+          parseControl(text),
+          readHomeMode(DATA_DIR) === "direct",
+        );
+        if (!mcpToBrain && isFastLane(text, facts, parts.attachments.length))
+          fastQueue.push(queued);
         else msgQueue.push(queued);
         enq = true;
       }
@@ -1122,7 +1129,10 @@ async function handleFastItem(
 
   // 控制指令：单独处理
   const ctrl = item.text ? parseControl(item.text) : null;
-  if (ctrl) {
+  // direct 下「加载/卸载 MCP」不在 daemon 侧处理：原样交给 Agent，由它决定怎么改自己的配置。
+  if (passMcpToggleToBrain(ctrl, readHomeMode(DATA_DIR) === "direct")) {
+    log.info("control: mcp toggle passed through to agent (direct)", JSON.stringify(ctrl));
+  } else if (ctrl) {
     // owner-only（切脑/交接）：非本人 → 短提示拒绝，**不**转发给大脑（否则大脑可能替用户执行越权动作）
     if (isOwnerOnly(ctrl) && from !== owner) {
       const r = "这条指令仅登录者可用。发送「帮助」看你自己的指令。";

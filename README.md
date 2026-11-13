@@ -322,8 +322,8 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 | 指令 | 说明 |
 |:---|:---|
 | mcp | 列出可选/已激活的 MCP |
-| 加载 <名字> | 加载一个 MCP（下条消息生效） |
-| 卸载 <名字> | 卸载一个 MCP |
+| 加载 <名字> | 加载一个 MCP（sandbox：下条消息生效；direct：原样转给 Agent 处理） |
+| 卸载 <名字> | 卸载一个 MCP（sandbox：下条消息生效；direct：原样转给 Agent 处理） |
 | 新会话 [名字] | 清空上下文重开（可命名） |
 | 会话列表 [页] | 列出本人会话（← 当前 标当前） |
 | 恢复会话 <序号\|名字\|id前缀> | 切回旧会话（失败明确报错，不静默新建） |
@@ -513,7 +513,7 @@ iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 1
 
 **MCP 策略**：
 
-- `direct`：完全由 Agent 自己的配置决定，WeMind 不维护激活集；`加载/卸载` 会直接拒绝并提示去 Agent 配置里改。
+- `direct`：完全由 Agent 自己的配置决定，WeMind 不维护激活集；`加载/卸载` 不拦截，原样当作普通消息交给 Agent 处理。
 - `sandbox`：brain **默认不加载任何 MCP**（保证启动/首帧速度），激活集按 Agent 分键保存在 `<账号>/brain-mcps.json`。用户显式 `加载 <名>` 后，**该 Agent 之后所有由 WeMind 新建的 brain 会话**都会加载；`卸载` 后移除。切换 brain 时，新 Agent 用它自己的激活集（没加载过就是空），切回原 Agent 恢复原集合。worker 默认是全量 curated MCP，但**永久排除 `wechat`**；overlay 的 `mcp.disable` / `mcp.extra` 同时生效。MCP 多会拖慢启动/首帧，当前策略是**只警告，不自动禁用**。
 
 需要某个 MCP 时，直接**在微信里发指令**（daemon 拦截处理，不进 brain）：
@@ -521,11 +521,11 @@ iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 1
 | 指令                        | 作用                                            |
 | --------------------------- | ----------------------------------------------- |
 | `MCP` / `列出 MCP` / `/mcp` / `mcp list` | 列出该 Agent 的可选 MCP 与当前已激活 |
-| `加载 <名>` / `load <名>`   | `sandbox`：加入激活集（`wechat` 永久禁止）；`direct`：提示去 Agent 配置里改 |
+| `加载 <名>` / `load <名>`   | `sandbox`：加入激活集（`wechat` 永久禁止）；`direct`：原样转给 Agent |
 | `卸载 <名>` / `unload <名>` | `sandbox`：从激活集移除；`direct`：同上        |
 | `新会话 [名字]` / `/new`    | 开启新 ACP 会话（清空多轮上下文）；给名字便于在 `会话列表` 里认出来 |
 
-`sandbox` 下加载/卸载 MCP 时，**只有激活集真的变了** daemon 才会重启 ACP 进程以按新配置重载，下一条消息生效（重复加载已激活项、卸载未激活项都不会重启；切脑进行中会先等切换结束；有回复正在生成时排到该回合结束，不打断输出）。`direct` 下改 Agent 自己的配置后，用 `wemind config reload` 或重启 daemon 生效。激活的 MCP 等于对登录者全权开放（内置预设默认免审批），按需加载、用完可卸载。
+`sandbox` 下加载/卸载 MCP 时，**只有激活集真的变了** daemon 才会重启 ACP 进程以按新配置重载，下一条消息生效（重复加载已激活项、卸载未激活项都不会重启；切脑进行中会先等切换结束；有回复正在生成时排到该回合结束，不打断输出）。`direct` 下改 MCP 由 Agent 自己处理（它改完自己的配置后按 Agent 的规则生效）。激活的 MCP 等于对登录者全权开放（内置预设默认免审批），按需加载、用完可卸载。
 
 CLI 管理入口：`wemind config show|home-mode|reload`、`wemind config agent show|get|set|unset|edit`（默认改真实配置）、`wemind config wechat show|edit`（只改微信 overlay）、`wemind workspace show|set|reset`、`wemind mcp list|enable|disable|add|remove`（仅 `sandbox` 的激活集）、`wemind env capture|show|clear`。直接编辑 `<账号>/agent-overrides/<agent>.json` 也可以；改真实配置前会备份并校验 mtime/hash，发现终端侧刚改过就拒绝覆盖。
 

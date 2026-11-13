@@ -289,7 +289,7 @@ npm run build; npm run daemon
 | 启动 | `opencode acp`；`shell: true`、`binWin: "opencode"` | §3.4 Step 1 / Step 7 |
 | 配置目录 | `direct` 不注入、直接用真实 `~/.config/opencode`；`sandbox`：`XDG_CONFIG_HOME=<沙箱>` → `<沙箱>/opencode/`。`OPENCODE_CONFIG_DIR` 只「追加」、不替换 global，无法隔离，故不用 | §3.2、§3.3 |
 | MCP 文件 | 当前配置目录的 `opencode.json` 的 `mcp.servers`（`mcpFormat: "mcp.servers"`；`direct` 为真实 `~/.config/opencode/opencode.json`；`sandbox` 为 `<沙箱>/opencode/opencode.json`） | §3.4 Step 3 |
-| MCP 激活 | `direct` 由 Agent 真实配置决定，`加载/卸载` 直接拒绝；`sandbox` 下 brain 默认空、微信 `加载/卸载` 后写激活集并重启 ACP 生效；`mcp.servers` 条目原样透传 | §3.4 Step 3 |
+| MCP 激活 | `direct` 由 Agent 真实配置决定，`加载/卸载` 原样转给 Agent；`sandbox` 下 brain 默认空、微信 `加载/卸载` 后写激活集并重启 ACP 生效；`mcp.servers` 条目原样透传 | §3.4 Step 3 |
 | MCP 目录（CATALOG） | 默认 `<realHome>/opencode.json`；**不**回退 `opencode.jsonc`——真实配置只有 `.jsonc` 时用 `WEMIND_MCP_CATALOG` 显式指过去 | §3.4 Step 3 |
 | worker | `direct` 由 Agent 自己加载真实全量；`sandbox` 继承全量 MCP、仅排除 `wechat`，路径为 `<沙箱>/opencode/opencode.json` | §3.4 Step 5 |
 | 记忆/技能 | `direct` 直接使用真实目录；`sandbox` 下 `skills` / `agents` / `commands` 目录 junction，`AGENTS.md` 单文件额外拷贝 | §3.4 Step 4 |

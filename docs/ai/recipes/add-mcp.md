@@ -29,7 +29,7 @@ catalog（定义从哪来；一律读 Agent 的**真实**配置目录，不读 s
 
 transport（怎么让 agent 看到）
   └─ brain：`sandbox` 下 applySandbox() 写沙箱的文件式 MCP 配置；mcpViaAcp 走 session/new|resume（DSH / claude-code / copilot / codex），`sandbox` 传激活集、`direct` 原样传真实 catalog
-  └─ `direct`：文件式 MCP 由 Agent 自己读真实配置；WeMind 的 `加载/卸载` 直接拒绝
+  └─ `direct`：文件式 MCP 由 Agent 自己读真实配置；WeMind 的 `加载/卸载` 原样转给 Agent
   └─ worker：`sandbox` 下 applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）；`direct` 由 Agent 自己加载
 
 微信独享增删（不改真实配置）
@@ -38,7 +38,7 @@ transport（怎么让 agent 看到）
   └─ `sandbox` 的 curated 集里 mcp.disable 最后生效；wechat 永远进不了 curated 集
 ```
 
-> 注意「catalog 读真实、transport 写沙箱」：`sandbox` 下 `加载 <名>` 只把定义**写进 WeMind 生成的沙箱配置**（brain 默认空、worker 全量），真实配置文件一律不动；`direct` 下不生成任何副本，`加载/卸载` 只提示去 Agent 配置里改。
+> 注意「catalog 读真实、transport 写沙箱」：`sandbox` 下 `加载 <名>` 只把定义**写进 WeMind 生成的沙箱配置**（brain 默认空、worker 全量），真实配置文件一律不动；`direct` 下不生成任何副本，`加载/卸载` 原样转给 Agent。
 
 关键代码：
 
