@@ -131,7 +131,7 @@ qoder: {
 
 ```text
 syncSettings():
-  mcpViaAcp            → 跳过（不变）
+  acpMcpServers / mcpDelivery → 跳过（该 Agent 走配置文件）
   settingsBase 有值     → syncSettingsBase()      ← 新增（不依赖 inherit）
   mcpFormat=mcp.servers → adapter.inheritSettings()（重建 JSON 基底）
   否则                  → syncKiroSettings()（不变）

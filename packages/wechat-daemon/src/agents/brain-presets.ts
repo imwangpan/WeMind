@@ -26,7 +26,7 @@ export type AcpAgentPreset = {
   inheritFiles?: string[]; // sandbox 下从 realHome 拷进账号沙箱的「单文件」记忆（如 AGENTS.md）；目录式记忆用 inheritDirs。direct 直接读真实文件
   // —— 沙箱约定（不同 agent 的配置目录位置与 MCP 文件格式不同）——
   configSubdir?: string; // agent 配置目录相对 sandbox 根的子路径（kiro 空=根本身；opencode "opencode"）
-  mcpFormat?: "mcpServers" | "mcp.servers"; // MCP 定义的 JSON 键路径（默认 mcpServers）
+  mcpFormat?: "mcpServers" | "mcp.servers" | "dshProfileYaml"; // MCP 定义的文件格式（默认 mcpServers；DSH 是 profile YAML 里的 patch 条目）
   mcpConfigFile?: string; // MCP 配置文件相对「配置目录」的路径（默认 settings/mcp.json）
   catalogFile?: string; // 可选 MCP 目录来源文件相对 realHome 的路径（默认 settings/mcp.json）；WeMind 始终读真实 home 用于列目录/启动前检查
   env?: Record<string, string>; // sandbox 下额外注入的环境变量（强制；值里 %HOME% → sandbox 根）；direct 不注入
@@ -49,7 +49,8 @@ export type AcpAgentPreset = {
   model?: string; // 默认模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）：经 session/set_config_option（agent 自己的 ACP 接口）在会话建立后下发一次；可用 brain.json / `brain set --model` 覆盖，`auto` = 跟随默认；配了 realProfile 时默认值优先从真实 profile 读
   modelArg?: string; // 不支持 session/set_config_option 的 agent：模型改为追加到启动参数（如 gemini 的 "--model"），不再走 ACP 下发
   realProfile?: string; // 真实 home 里该 agent 的 profile 名（`profiles/<名>/cordis.patch.yml` 是用户/桌面端维护的用户层：沙箱**原样复制**、不追加条目，默认模型从它读——优先 `- id: acp`，否则 `agent-default-model`）；如 DSH 的 "acp"
-  mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
+  acpMcpServers?: boolean; // 纯能力：该 Agent 接受 ACP session/new|resume 的 mcpServers（不表示它不读自己的配置）
+  mcpDelivery?: "config" | "acp"; // WeMind 在 sandbox 托管 MCP 时的投递方式：写 Agent 配置文件，或随 ACP 会话下发（默认 config）
   sessionMode?: string; // 会话建立/恢复后经 `session/set_mode` 切到的模式 id（agent 自己的 ACP 接口）；用于「免审批」模式：claude-code 的 bypassPermissions、codex 的 agent-full-access。留空=不调用
   kiroEngine?: boolean; // kiro：`acp` 的 v2 / v3 引擎启动参数与免审批方式不同（v2 `--trust-all-tools`；v3 用沙箱 settings/permissions.yaml 的 allow-all）
   isolateSessions?: boolean; // sandbox 下会话持久化 root 用 agent 自己的 `--patch` 指到账号数据目录（DSH：与同沙箱其他 agent 的会话文件分开，见 docs/接入-DeepSeek.md）；direct 用 agent 自己的会话库
@@ -119,7 +120,8 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     inheritFiles: ["copilot-instructions.md"],
     credentialFiles: ["config.json"],
     catalogFile: "mcp-config.json",
-    mcpViaAcp: true,
+    acpMcpServers: true,
+    mcpDelivery: "acp",
   },
   // OpenCode：原生 ACP（`opencode acp`）。
   // - Windows 上是 npm shim（PATH 只有 opencode.cmd），故 shell:true + 裸名 binWin。
@@ -147,6 +149,9 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // - 桌面端自带 `dsh.cmd`（只有 .cmd，没有无扩展名 dsh），故 binWin 必须写全；
   // - DSH_HOME 只在 sandbox 下指向账号沙箱；`.credentials.yaml` 由账号沙箱同步（direct 直接读真实文件）；
   // - 无 session/load，用 session/resume；image:false（收图需上层拦截）；
+  // - MCP：DSH 自己加载 `profiles/acp/cordis.patch.yml` 里的 `@deepseek-ai/dsh-mcp-client` 条目；
+  //   WeMind 只读解析它用于「列出/指标/微信检测」。sandbox 下副本里的 MCP 条目全部剥离，
+  //   brain 按激活集（默认空）、worker 按全量集经 ACP 注入（acpMcpServers + mcpDelivery=acp）。
   // - **模型：跟着用户自己 dsh 的配置走（WeMind 只读；direct 直接用、sandbox 复制，不替 agent 合成配置）。** 桌面端或用户自己的配置工具把 provider 目录与默认模型写进 `~/.dsh/profiles/<profile>/cordis.patch.yml`。
   //   `dsh --profile acp` 的 ACP 桥插件（`@deepseek-ai/dsh-acp`）默认模型写死在它**自己的 bundle patch**里：`- id: acp` 的
   //   `config: { provider: deepseek-official, model: deepseek-v4-flash }`；profile 用户层只覆盖 `llm-pi-ai` / `agent-default-model` / `web-search-deepseek`，
@@ -177,7 +182,10 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     images: false,
     realProfile: "acp",
     model: '["deepseek-account","deepseek-flash"]',
-    mcpViaAcp: true, // 不写 mcp.json；激活集转成 ACP mcpServers 传给 session/new|resume
+    mcpFormat: "dshProfileYaml",
+    catalogFile: path.join("profiles", "acp", "cordis.patch.yml"),
+    acpMcpServers: true,
+    mcpDelivery: "acp", // sandbox 下 profile 副本里的 MCP 条目全部剥离，由 WeMind 按激活集注入
     isolateSessions: true, // `--patch` 把 session-persistence-jsonl.root 指到账号数据目录（见 docs/接入-DeepSeek.md）
     // 免审批：DSH 没有启动 flag，也没有会话级权限配置项；`DSH_PERMISSION_MODE` 是官方 bundle 读的默认值来源
     // （文档正文未收录，升级后若失效见 docs/接入-DeepSeek.md），取值 danger-full-access = 绕过文件沙箱、不产生提权请求。
@@ -261,7 +269,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // 2026-10-30 探针 + 2026-11-01 复跑（pi-acp 0.0.34 + pi 1.4.0，见 docs/接入-pi.md）：
   // - session/load 原生支持（强杀后上下文接上）；image:true；首帧 0–3ms；有 thought/tool 帧；无反向请求——pi 默认不做逐次工具审批（官方 security.md 明说），无需 yolo flag / sessionMode；
   // - 模型跟随用户 pi 配置（settings.json 的 defaultProvider/defaultModel；sandbox 下随凭据原样同步，direct 直接用真实目录）；覆盖用 `wemind brain set pi --model "<provider>/<model>"`（session/set_config_option 的 configId 就叫 model）；
-  // - MCP：pi 读 <PI_CODING_AGENT_DIR>/mcp.json（`pi mcp list` 实测；不是 settings/mcp.json），格式与 kiro 相同 {mcpServers:{名:{command,args,env}}}；不设 mcpViaAcp（pi-acp 只把 mcpServers 存进会话、从不读取）；
+  // - MCP：pi 读 <PI_CODING_AGENT_DIR>/mcp.json（`pi mcp list` 实测；不是 settings/mcp.json），格式与 kiro 相同 {mcpServers:{名:{command,args,env}}}；不设 acpMcpServers（pi-acp 只把 mcpServers 存进会话、从不读取）；
   // - 适配器只是桥：真正进程是 PATH 上的 pi 本体（requiresBins 会在缺 pi 时提前报错，而不是等 session/new 才炸）。
   // - 适配器的会话映射表固定写在真实 home 的 ~/.pi/pi-acp/session-map.json（不随沙箱走）：跨账号共享的只是 id→会话文件的映射，会话本体仍在各自 home（direct 是真实 ~/.pi/agent/sessions，sandbox 是账号沙箱副本）的 sessions/ 下。
   // - 适配器类不参与 auto 探测（装好适配器 ≠ 已登录/配好模型），用 `wemind brain set|switch pi` 显式选用。
@@ -295,7 +303,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   //   direct 下不覆盖 CLAUDE_CONFIG_DIR，**CLAUDE.md/skills 与 ~/.claude.json 全部直接读真实文件**，与终端完全一致；
   //   CLAUDE.md/skills/agents/commands 与日常使用共享；OAuth 登录态 .credentials.json 在 sandbox 下同步进账号沙箱（direct 直接读真实文件）。
   //   **不复制 settings.json**：它常含网关 token（env），按 §4.9 密钥由 daemon 进程环境提供；需要网关时设 ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL。
-  // - MCP：走 ACP session/new|load 的 mcpServers（mcpViaAcp），不写配置文件；目录取真实 ~/.claude.json 的 mcpServers（`catalogFile` 用 `..` 回到 home）。
+  // - MCP：Agent 自己读 ~/.claude.json；sandbox 下由 WeMind 经 ACP 投递（acpMcpServers + mcpDelivery=acp），不写配置文件。
   //   探针实测 stdio MCP 可用（尽管 initialize 的 mcpCapabilities 只声明 http/sse——能力字段不可信的又一例）。
   // - 2026-10-30 探针实测（claude-agent-acp 0.99.1 / Claude Code 2.1.314，Windows）：
   //   loadSession ✅、sessionCapabilities.resume/close/delete/fork/list ✅、image ✅、stdio MCP ✅、bypassPermissions 下 0 反向请求；
@@ -315,7 +323,8 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     catalogFile: path.join("..", ".claude.json"),
     extraConfigFiles: [path.join(os.homedir(), ".claude.json")],
     credentialFiles: [".credentials.json"],
-    mcpViaAcp: true,
+    acpMcpServers: true,
+    mcpDelivery: "acp",
     sessionMode: "bypassPermissions",
   },
   // Codex：需适配器（Codex CLI 本身不说 ACP）。适配器是 npm 包 `@agentclientprotocol/codex-acp`（bin: codex-acp；
@@ -329,7 +338,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // - 认证走 Codex 自己（ChatGPT 登录或 OPENAI_API_KEY）；已有 ~/.codex/config.toml 直接沿用——适配器不读 WeMind 沙箱，故无 homeEnvVar。
   // - MCP：**支持客户端提供的 stdio MCP server**（2026-11-12 复测 codex-acp 2.5.0 与 2.6.0：session/new 传 stdio mcpServers，
   //   模型实际调用 fake_ping 并返回 FAKE_PONG）。旧结论「mcpCapabilities.acp=false = 不支持 stdio」是误读：
-  //   `acp` 指 MCP-over-ACP 传输，stdio 是 ACP 的基础传输，不靠这个字段声明。故开 mcpViaAcp。
+  //   `acp` 指 MCP-over-ACP 传输，stdio 是 ACP 的基础传输，不靠这个字段声明。故开 acpMcpServers。
   //   Codex 自己的 ~/.codex/config.toml 仍会被 Codex 原生加载；同名 server 由 Codex 自身条目优先，适配器会跳过客户端重复项。
   //   微信侧额外 MCP 可走 overlay 的 mcp.extra；WeMind **只读解析** config.toml 的 `[mcp_servers.*]`（列目录 + 启动前检查 wechat），绝不写回，也无法替它 unload。
   // - 2026-10-30 探针实测（codex-acp 2.5.0 / Codex CLI 0.165，Windows）：
@@ -348,7 +357,8 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     // catalogFile 指向 config.toml：WeMind 只读解析其中的 [mcp_servers.*]（列目录 + 启动前检查 wechat），绝不写回；原生 MCP 由 Codex 自己加载。
     realHome: path.join(os.homedir(), ".codex"),
     catalogFile: "config.toml",
-    mcpViaAcp: true,
+    acpMcpServers: true,
+    mcpDelivery: "acp",
     // 回合可能跑几十秒（实测带图的回合 ~24s），且适配器会发 thought / tool_call / usage 帧；心跳放长，少占微信连发额度（约 10 条/用户）。
     heartbeatMs: 60_000,
   },

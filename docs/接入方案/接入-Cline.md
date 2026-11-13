@@ -188,7 +188,7 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 
 1. **认证**：Cline ACP 只自动恢复 3 种 OAuth 登录；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）；OAuth 条目或文件不可用时才需要手动设置（见 §1.2）。
 2. **`session/close` 不存在**（`-32601`）：WeMind 目前不调用它，杀进程即可；若未来加「优雅关闭」，要对 Cline 跳过。
-3. **MCP 走 ACP 不支持**：`mcpViaAcp` 必须保持 `false`；改用 `CLINE_MCP_SETTINGS_PATH`。
+3. **MCP 走 ACP 不支持**：`acpMcpServers` 必须保持 `false`；改用 `CLINE_MCP_SETTINGS_PATH`。
 4. **OAuth token 单向同步**：沙箱内刷新不会回写真实 `providers.json`（见 §3）。API-key provider 不受影响。
 5. **图片不支持（实测）**：`initialize` 声明 `image:true`，但 3.0.74 ACP `prompt` 的 `de()` 只保留 `text` 块，image 被丢弃；预设显式 `images:false`，daemon 收到纯图片消息会直接回「当前大脑暂不支持看图」，不再让模型猜；带文字的消息只按文字回答并注明图片被忽略。
 6. **同 agent 并发**：`direct` 下多个 worker 共用真实 `~/.cline`；`sandbox` 下共用 `<worker-home>/cline`。**假设/待实测**：Cline 的会话库据其源码是 SQLite，长期并发风险未验证（本轮只跑过单任务与双 agent 并发，没跑同 agent 双 worker 的长时间样本）。

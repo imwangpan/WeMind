@@ -38,7 +38,7 @@ wemind brain switch claude-code
 wemind brain set claude-code --bin npx --args "-y @agentclientprotocol/claude-agent-acp" --shell
 ```
 
-> 这条只是覆盖启动方式；预设里的 `CLAUDE_CONFIG_DIR` 配置落点、`mcpViaAcp`、`sessionMode` 仍然生效。
+> 这条只是覆盖启动方式；预设里的 `CLAUDE_CONFIG_DIR` 配置落点、`acpMcpServers` / `mcpDelivery`、`sessionMode` 仍然生效。
 
 ---
 
@@ -89,7 +89,8 @@ claude-agent-acp --version     # 0.99.1
   // 真实 ~/.claude.json 与 realHome 同级；path.join 后得到 ~/.claude/../.claude.json
   catalogFile: path.join("..", ".claude.json"),
   credentialFiles: [".credentials.json"],
-  mcpViaAcp: true,
+  acpMcpServers: true,
+  mcpDelivery: "acp",
   sessionMode: "bypassPermissions",
 }
 ```
@@ -99,7 +100,7 @@ claude-agent-acp --version     # 0.99.1
 - **`bin` 不再写 `npx`**：全局适配器本体就是 ACP server，`args` 为空。`shell: true` 是因为 Windows 上 npm 产出的是 `.cmd` shim。
 - **配置目录**：默认 `direct` 下 `CLAUDE_CONFIG_DIR=~/.claude`，直接使用终端同一份配置；`sandbox` 下才指到 `<沙箱>/claude`。实测（Claude Code 2.1.314）在隔离目录里它会连 `~/.claude.json` 一起搬进去，用户级 MCP 不会漏进大脑。
 - **记忆/技能**：`direct` 下 `CLAUDE.md`、`skills/`、`agents/`、`commands/` 直接来自真实 `~/.claude`；`sandbox` 下 `CLAUDE.md` 复制、目录用 junction/symlink 共享。`settings.json`、`plugins/` 不继承（插件可自带 MCP）。
-- **MCP 走 ACP**：`mcpViaAcp: true`；`direct` 下真实 catalog 全量、`sandbox` 下激活集随 `session/new|load` 的 `mcpServers` 下发，不写配置文件。目录取真实 `~/.claude.json` 的 `mcpServers`（`catalogFile` 用 `..` 回到 home）；`wechat` 永久禁止。
+- **MCP**：Claude Code 原生读 `~/.claude.json` 的 `mcpServers`，`direct` 下 WeMind **不重发** catalog；`sandbox` 下才由 WeMind 把激活集随 `session/new|load` 的 `mcpServers` 下发（`mcpDelivery: "acp"`），不写配置文件。目录取真实 `~/.claude.json`（`catalogFile` 用 `..` 回到 home）；`wechat` 永久禁止。
 - **免审批**：`sessionMode: "bypassPermissions"`。适配器**不解析** `--dangerously-skip-permissions` 之类的 CLI flag；WeMind 在 `session/new|load|resume` 之后调用 `session/set_mode`。实测该模式下 MCP 工具调用**不再发** `session/request_permission`。
 - **图片**：预设不设 `images: false`，即按支持图片处理；适配器 `initialize` 的 `promptCapabilities.image = true`。
 - **恢复**：预设不设 `restore`，即先 `session/load`，失败再 `session/resume`，最后 `session/new`。实测 `loadSession: true`。
@@ -122,7 +123,7 @@ claude-agent-acp --version     # 0.99.1
 | 图片 | 能力声明为 true；本机用网关时 1×1 PNG 被上游以 `400 WorkBuddy: … replace the image` 拒绝——**不是适配器/WeMind 的问题**，换正常模型/网关再验 |
 | `session/delete` | 能力声明有；WeMind 仍按「只删登记项、不动 agent 侧存档」设计（与其它 agent 保持一致） |
 
-> **能力字段不可信**：`mcpCapabilities` 没写 `stdio`，实测却能连 stdio MCP。`image` / `restore` / `mcpViaAcp` 全部来自 agent 配置字段，**不来自 `initialize` 自动解析**——升级适配器后必须重新探针（§8）。
+> **能力字段不可信**：`mcpCapabilities` 没写 `stdio`，实测却能连 stdio MCP。`image` / `restore` / `acpMcpServers` / `mcpDelivery` 全部来自 agent 配置字段，**不来自 `initialize` 自动解析**——升级适配器后必须重新探针（§8）。
 
 ---
 

@@ -12,6 +12,7 @@ import {
   type AcpMcpHttpServer,
   type AcpMcpServer,
 } from "./agent-mcp.js";
+import { parseDshMcpServers } from "./dsh-mcp.js";
 import { parseTomlMcpServers } from "./toml-mcp.js";
 
 export type McpCatalog = Record<string, unknown>;
@@ -26,10 +27,11 @@ export type AcpConversion = { servers: AcpMcpDeclaration[]; skipped: string[] };
  * - `jsonMcpServers`：顶层 `{ "mcpServers": { 名: {...} } }`
  * - `jsonMcpNested`：嵌套 `{ "mcp": { "servers": { 名: {...} } } }`（与 model 等同文件，默认补 permission:allow）
  * - `tomlMcpServers`：Codex `config.toml` 的 `[mcp_servers.*]`，只读；写入一律视为配置错误
+ * - `dshProfileYaml`：DSH `profiles/<profile>/cordis.patch.yml` 里的 `@deepseek-ai/dsh-mcp-client` 条目，只读
  */
 export interface McpAdapter {
-  readonly id: "jsonMcpServers" | "jsonMcpNested" | "tomlMcpServers";
-  /** Agent 自己会加载、WeMind 改不了的原生 MCP（目前只有 Codex） */
+  readonly id: "jsonMcpServers" | "jsonMcpNested" | "tomlMcpServers" | "dshProfileYaml";
+  /** Agent 自己会加载、WeMind 改不了的真实配置文件（Codex TOML、DSH profile YAML） */
   readonly nativeOwned: boolean;
   /** 读真实目录文件里的 MCP 定义（只读；缺失/损坏返回空表） */
   readCatalog(file: string): McpCatalog;
@@ -47,13 +49,19 @@ export interface McpAdapter {
 
 /** 可选 MCP 的定义来源文件；`WEMIND_MCP_CATALOG` / `WECHAT_MCP_CATALOG` 可覆盖为任意路径。 */
 export function mcpCatalogPath(ag: ResolvedAgent): string {
-  return (
-    process.env.WEMIND_MCP_CATALOG?.trim() ||
-    process.env.WECHAT_MCP_CATALOG?.trim() ||
-    path.join(
-      ag.realHome || path.join(os.homedir(), ".kiro"),
-      ag.catalogFile || "settings/mcp.json",
-    )
+  const override = process.env.WEMIND_MCP_CATALOG?.trim() || process.env.WECHAT_MCP_CATALOG?.trim();
+  if (override) return override;
+  if (ag.mcpFormat === "dshProfileYaml") {
+    return path.join(
+      ag.realHome || path.join(os.homedir(), ".dsh"),
+      "profiles",
+      ag.realProfile || "acp",
+      "cordis.patch.yml",
+    );
+  }
+  return path.join(
+    ag.realHome || path.join(os.homedir(), ".kiro"),
+    ag.catalogFile || "settings/mcp.json",
   );
 }
 
@@ -212,15 +220,42 @@ const tomlMcpServersAdapter: McpAdapter = {
   nativeCatalog: readTomlServers,
 };
 
+/** DSH profile YAML：MCP 是 patch 列表里的 `@deepseek-ai/dsh-mcp-client` 条目。只读。 */
+const dshProfileYamlAdapter: McpAdapter = {
+  id: "dshProfileYaml",
+  nativeOwned: true,
+  readCatalog: (file) => {
+    try {
+      return parseDshMcpServers(fs.readFileSync(file, "utf-8"));
+    } catch {
+      return {};
+    }
+  },
+  writeCatalog: () => {
+    throw new Error(
+      "DSH 的 MCP 写在 profile YAML 里，WeMind 只读：请让 Agent 自己处理，或改用 ACP 下发",
+    );
+  },
+  stripSettings: () => {
+    /* profile YAML 不是 settingsBase */
+  },
+  toAcp: (servers, exclude) => toAcpMcpServers(servers, { exclude }),
+  nativeCatalog: (file) => dshProfileYamlAdapter.readCatalog(file),
+};
+
 export const MCP_ADAPTERS = {
   jsonMcpServers: jsonMcpServersAdapter,
   jsonMcpNested: jsonMcpNestedAdapter,
   tomlMcpServers: tomlMcpServersAdapter,
+  dshProfileYaml: dshProfileYamlAdapter,
 } as const;
 
-/** 按 Agent 的配置格式选写入/设置继承适配器；TOML 且走 ACP 的 Agent 用只读适配器。 */
+/** 按 Agent 的配置格式选写入/设置继承适配器；原生只读格式（TOML / DSH profile）不参与写回。 */
 export function mcpAdapterFor(ag: ResolvedAgent): McpAdapter {
-  if (ag.mcpViaAcp && path.extname(ag.catalogFile ?? "").toLowerCase() === ".toml") {
+  if (ag.mcpFormat === "dshProfileYaml") {
+    return dshProfileYamlAdapter;
+  }
+  if (path.extname(ag.catalogFile ?? "").toLowerCase() === ".toml") {
     return tomlMcpServersAdapter;
   }
   return ag.mcpFormat === "mcp.servers" ? jsonMcpNestedAdapter : jsonMcpServersAdapter;
@@ -228,5 +263,8 @@ export function mcpAdapterFor(ag: ResolvedAgent): McpAdapter {
 
 /** 按实际目录文件后缀读定义（`WEMIND_MCP_CATALOG` 可把目录指到 TOML）。 */
 export function mcpAdapterForFile(ag: ResolvedAgent, file: string): McpAdapter {
+  if (ag.mcpFormat === "dshProfileYaml") {
+    return /\.ya?ml$/i.test(file) ? dshProfileYamlAdapter : jsonMcpServersAdapter;
+  }
   return path.extname(file).toLowerCase() === ".toml" ? tomlMcpServersAdapter : mcpAdapterFor(ag);
 }

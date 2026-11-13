@@ -145,7 +145,7 @@ export function writeSettingsBase(ag: ResolvedAgent, configDir: string): boolean
 
 /**
  * 把沙箱副本里由真实 home 复制来的 MCP 文件再清一遍：
- *  - DSH：`profiles/<realProfile>/cordis.patch.yml`（mcpViaAcp，不会走 curated 写入）；
+ *  - DSH：`profiles/<realProfile>/cordis.patch.yml`（mcpDelivery=acp，MCP 条目在复制时已剥离）；
  *  - Copilot 这类「catalog 文件在配置目录」的 agent：JSON 里的微信条目逐条剔除。
  *  只改沙箱副本，不碰真实文件。
  */
@@ -170,11 +170,11 @@ export function stripWechatFromConfigCopy(ag: ResolvedAgent, rt: AgentRuntime): 
       }
     }
   }
-  if (!ag.mcpViaAcp || !ag.catalogFile || ag.catalogFile.includes("..")) return;
+  if (!ag.catalogFile || ag.catalogFile.includes("..")) return;
   const file = path.join(base, ag.catalogFile);
   if (!isRegularFile(file)) return;
   const adapter = mcpAdapterForFile(ag, file);
-  if (adapter.id === "tomlMcpServers") return;
+  if (adapter.nativeOwned) return;
   try {
     const servers = adapter.readCatalog(file);
     const kept = Object.fromEntries(
@@ -214,10 +214,14 @@ export function syncProfilePatch(ag: ResolvedAgent, targetHome: string, label: s
   const src = path.join(ag.realHome, "profiles", ag.realProfile, "cordis.patch.yml");
   try {
     if (!fs.existsSync(src)) return;
-    const removed = copyProfilePatch(ag.realHome, ag.realProfile, targetHome);
+    const removed = copyProfilePatch(ag.realHome, ag.realProfile, targetHome, {
+      stripAllMcp: ag.mcpDelivery === "acp",
+    });
     if (removed.length) {
       log.warn(
-        `真实 profile 里的微信 MCP 已从${label}沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
+        ag.mcpDelivery === "acp"
+          ? `${label}沙箱副本里的 MCP 条目已剥离（由 WeMind 按${label === "大脑" ? "激活集" : "全量集"}经 ACP 注入，真实文件未改）：${removed.join(", ")}`
+          : `真实 profile 里的微信 MCP 已从${label}沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
       );
     }
   } catch {

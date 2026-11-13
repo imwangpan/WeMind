@@ -83,7 +83,8 @@ async function agentOf(name: string, overrides: Record<string, unknown>): Promis
     settingsBase: p.settingsBase,
     settingsStrip: p.settingsStrip ?? [],
     settingsDefaults: p.settingsDefaults ?? {},
-    mcpViaAcp: !!p.mcpViaAcp,
+    acpMcpServers: !!p.acpMcpServers,
+    mcpDelivery: p.mcpDelivery ?? "config",
     requestedKey: name,
     source: "file",
     known: true,
@@ -117,6 +118,30 @@ describe("direct（默认）", () => {
       expect(warn.mock.calls.flat().join(" ")).toMatch(/微信 MCP/);
     } finally {
       warn.mockRestore();
+    }
+  });
+
+  it("direct 不把 Agent 已原生加载的 catalog 再经 ACP 下发；只发微信独享 extra", async () => {
+    const { activeMcpServers } = await import("./mcp-sandbox.js");
+    const { overlayPath, writeOverlay } = await import("../config/overlay.js");
+    const ag = await agentOf("copilot", { realHome: copilotHome });
+    const rt = agentRuntime("brain", ag, account);
+    expect(activeMcpServers(ag, rt, account)).toEqual([]); // ok 由 Copilot 自己读 mcp-config.json
+
+    try {
+      writeOverlay(
+        "copilot",
+        {
+          version: 1,
+          mcp: { extra: { wxonly: { command: "node", args: ["wx-only.js"] } } },
+        },
+        account,
+      );
+      expect(activeMcpServers(ag, rt, account)).toEqual([
+        { name: "wxonly", command: "node", args: ["wx-only.js"], env: [] },
+      ]);
+    } finally {
+      fs.rmSync(overlayPath("copilot", account), { force: true });
     }
   });
 });

@@ -13,7 +13,7 @@
 
 - Codex CLI **本身不实现 ACP**，必须经适配器 `@agentclientprotocol/codex-acp`（npm 包，bin = `codex-acp`）桥接。
 - **能力完整，协议层零改动**：`initialize` 报 `loadSession:true`、`promptCapabilities.image:true`、`sessionCapabilities` 含 `resume/close/fork/list/delete/additionalDirectories/subagents/systemPrompt`；`session/load`、`session/set_mode`、`session/set_config_option(model)` 全部实测通过；图片能进模型；工具调用**不发反向请求**。
-- **MCP（2026-11-12 复测修正，2.5.0 与 2.6.0 均通过）**：`mcpCapabilities: { acp:false, http:true, sse:false }` 里的 `acp` 指 **MCP-over-ACP 传输**，**不表示 stdio 不支持**。实测 `codex-acp 2.5.0` / `2.6.0` 都能接收 `session/new` 的 stdio `mcpServers`：模型实际调用了探针的 `fake_ping` 并返回 `FAKE_PONG`。因此 WeMind 的 `codex` 预设已开 `mcpViaAcp: true`。Codex 自己的 `~/.codex/config.toml` 仍由 Codex 原生加载；同名 server 由 Codex 条目优先，适配器会跳过客户端重复项。
+- **MCP（2026-11-12 复测修正，2.5.0 与 2.6.0 均通过）**：`mcpCapabilities: { acp:false, http:true, sse:false }` 里的 `acp` 指 **MCP-over-ACP 传输**，**不表示 stdio 不支持**。实测 `codex-acp 2.5.0` / `2.6.0` 都能接收 `session/new` 的 stdio `mcpServers`：模型实际调用了探针的 `fake_ping` 并返回 `FAKE_PONG`。因此 WeMind 的 `codex` 预设标注 `acpMcpServers: true`，并在 sandbox 托管 MCP 时用 `mcpDelivery: "acp"`。Codex 自己的 `~/.codex/config.toml` 始终由 Codex 原生加载；`direct` 下 WeMind 不重发 catalog，同名 server 由 Codex 条目优先。
 - 免审批：预设注入 `INITIAL_AGENT_MODE=agent-full-access`，并在会话建立/恢复后调 `session/set_mode {modeId:"agent-full-access"}`（适配器的 mode = 审批策略 + 文件沙箱的合成档；`agent-full-access` = 全放行）。
 - **模型不预设**：适配器把 Codex 自己的 `model` 作为 `configOption` 暴露（`session/set_config_option` 可用），但 WeMind **不下发**——让微信大脑跟着用户 `~/.codex` 的日常配置走（§4.14「用 agent，不改造它」）。要固定就用 `wemind brain set codex --model "<modelId>"`。
 
@@ -104,7 +104,8 @@ codex: {
   heartbeatMs: 60_000,         // 回合可能几十秒；少占微信连发额度
   realHome: path.join(os.homedir(), ".codex"), // 只用于配置指纹/危险路径；不传给适配器
   catalogFile: "config.toml",  // 原生 MCP 由 Codex 自己加载；WeMind 只读解析它用于列出/指标（不写回、无法 unload）
-  mcpViaAcp: true,             // 支持客户端经 ACP 传入 stdio MCP（2026-11-12 实测）
+  acpMcpServers: true,         // 支持客户端经 ACP 传入 stdio MCP（2026-11-12 实测）
+  mcpDelivery: "acp",          // 仅 sandbox 托管 MCP 时经 ACP 投递
   // 不设 model：跟随用户 ~/.codex 的默认（要用就 `wemind brain set codex --model …`）
   // 不设 homeEnvVar：适配器不读 WeMind 沙箱，凭据/配置全用 Codex 自己的
 }
@@ -120,7 +121,7 @@ codex: {
 
 1. **MCP 有两条来源，别混为一谈**（C7）：
    - **Codex 原生 MCP**：`~/.codex/config.toml` 里定义的 server 由 Codex 自己加载；WeMind 只读解析 `[mcp_servers.*]` 用于 `列出`/指标，**不会写回、也无法 unload**。终端 Codex 能用的原生 MCP，微信侧 codex 也能用；因此即使 `sandbox` 下 brain 默认空 MCP，也管不住这部分。原生条目里出现 `wechat`（或任何会跑 `wemind-mcp` 的定义）时**只告警、不阻止启动**（`warnForbiddenNativeMcp`），由用户自行删除；同时启动第二个 poller 会有回环风险。
-   - **WeMind 动态 MCP**：`mcpViaAcp: true` 后，微信侧 `加载/卸载` 通过 ACP `session/new|load|resume` 的 `mcpServers` 下发给 codex；只对 WeMind catalog / overlay `mcp.extra` 里的定义有效。原生 config.toml 里的名字不会出现在 `加载` 的候选列表里。
+   - **WeMind 动态 MCP**：`sandbox` 下 `mcpDelivery: "acp"` 时，微信侧 `加载/卸载` 通过 ACP `session/new|load|resume` 的 `mcpServers` 下发给 codex；`direct` 下 WeMind 不重发 catalog，`加载/卸载` 原样转给 Codex 自己处理。原生 config.toml 里的名字不会出现在 `加载` 的候选列表里。
    - **同名冲突**：Codex 原生条目优先，适配器会跳过同名的客户端条目（并记日志）；不会出现两个同名 server。
    - **`sandbox` 下 brain 默认空** 只控制 WeMind 下发的 ACP 集合；`direct` 下 WeMind 按真实 catalog 全量下发。两种模式下 Codex 原生 `config.toml` 的 MCP 都仍会被 Codex 加载。这是 codex 没有独立配置目录带来的边界，不是 WeMind 静默忽略。
 2. **不走 WeMind 的凭据沙箱**：Codex 的登录态在 `~/.codex`，适配器直接用；WeMind 不同步、不改写（§4.14）。

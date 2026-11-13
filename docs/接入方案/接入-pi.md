@@ -34,7 +34,7 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 | 模型 | 预设不带 `model` → 跟随用户 pi 的默认（`settings.json` 的 `defaultProvider`/`defaultModel`） | 覆盖：`wemind brain set pi --model "<provider>/<model>"`（走 `session/set_config_option`，pi-acp 的 configId 就叫 `model`） |
 | 恢复 | 默认 `load`（pi-acp `loadSession: true`） | 会话映射表在**真实 home** 的 `~/.pi/pi-acp/session-map.json`（适配器写死 `homedir()`，不随沙箱走）；会话文件本体仍在各自沙箱的 `sessions/` 下 |
 | 自动探测 | **不在 `AUTO_PROBE_ORDER`** | 适配器类不参与 auto（装好适配器 ≠ 已登录/配好模型）；用 `wemind brain set\|switch pi`、一次性 `WEMIND_BRAIN=pi`，或微信「切换大脑 pi」显式选用 |
-| MCP | `direct`：真实 `~/.pi/agent/mcp.json`；`sandbox`：`<沙箱根>/mcp.json`（kiro 格式 `{mcpServers:{名:{command,args,env}}}`），`mcpViaAcp: false` | `pi mcp list` 实测读 `<PI_CODING_AGENT_DIR>/mcp.json`（不是 `settings/mcp.json`）；pi-acp 只把 `session/new` 的 `mcpServers` 存进会话、从不读取，所以 `sandbox` 的动态 MCP 走配置文件 |
+| MCP | `direct`：真实 `~/.pi/agent/mcp.json`；`sandbox`：`<沙箱根>/mcp.json`（kiro 格式 `{mcpServers:{名:{command,args,env}}}`），`acpMcpServers: false` | `pi mcp list` 实测读 `<PI_CODING_AGENT_DIR>/mcp.json`（不是 `settings/mcp.json`）；pi-acp 只把 `session/new` 的 `mcpServers` 存进会话、从不读取，所以 `sandbox` 的动态 MCP 走配置文件 |
 
 ## 3. 探针实测结论（`scripts/acp-probe.mjs`，2026-10-30）
 

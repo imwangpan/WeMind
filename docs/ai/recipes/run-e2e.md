@@ -369,7 +369,7 @@ send error: [sendMessage] errcode=-2 ... (prepare failed)
 | 4 | **图片**：接受（`end_turn`）。 |
 | 5 | **反向请求**：0（不问权限、不用 fs/terminal 委托）。`ACP_TEST_TOOL=1`：3 次工具调用全部执行、`drift-check.txt` 落盘、0 个 `session/request_permission`。 |
 | 6 | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。 |
-| 7 | **MCP**：pi 读 `<PI_CODING_AGENT_DIR>/mcp.json`（kiro 格式 `{mcpServers}`；`pi mcp list` 可识别）；`session/new` 的 `mcpServers` 被 pi-acp 只存不用 → 预设 `mcpViaAcp: false`。 |
+| 7 | **MCP**：pi 读 `<PI_CODING_AGENT_DIR>/mcp.json`（kiro 格式 `{mcpServers}`；`pi mcp list` 可识别）；`session/new` 的 `mcpServers` 被 pi-acp 只存不用 → 预设 `acpMcpServers: false`。 |
 | 8 | **真机 E2E 已过（2026-11-01）**：worker 通道 `wemind task --agent pi` → 回复「2」（删掉 worker-home 里的 settings/models 后由 `acquire` 自动重建）；brain 通道微信单轮 → `session/load` → `prompt ok 9705ms` → 回复送达（启动信息未混入）；热切换 pi↔codex 双向成功；微信「任务 pi：…」→ 任务 #27 → 回复「3」。**仍未单独复测**：微信侧 `加载 <MCP>`；适配器升级后的回归按 §8 重跑探针。 |
 
 ## 8. 清理 / 回滚

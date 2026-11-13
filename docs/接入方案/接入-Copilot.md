@@ -35,13 +35,14 @@ copilot: {
   inheritFiles: ["copilot-instructions.md"],
   credentialFiles: ["config.json"],
   catalogFile: "mcp-config.json",
-  mcpViaAcp: true,
+  acpMcpServers: true,
+  mcpDelivery: "acp",
 }
 ```
 
 `--allow-all-tools` 让 daemon 无需交互即可批准工具调用；它不等于 `--allow-all`，不会主动放宽路径或 URL 检查。Copilot 不参与 `auto` 探测：二进制存在不代表该运行账号已完成认证，使用 `copilot` 名称显式选择。
 
-大脑从 `~/.copilot/mcp-config.json` 读取 MCP 目录，默认不激活；worker 使用同一目录里的可用 MCP。两者都通过 ACP `mcpServers` 传递，WeMind 按名称和定义排除 `wechat`。Copilot CLI 登录配置在 `config.json`，而 MCP 配置单独存放；WeMind 只同步/生成登录配置，不复制 MCP/插件/hooks。
+`direct` 下 Copilot 自己从 `~/.copilot/mcp-config.json` 加载 MCP，WeMind 不重发 catalog；`sandbox` 下才由 WeMind 把激活集/全量集经 ACP `mcpServers` 传递，按名称和定义排除 `wechat`。Copilot CLI 登录配置在 `config.json`，而 MCP 配置单独存放；WeMind 只同步/生成登录配置，不复制 MCP/插件/hooks。
 
 ## 3. 探针实测
 

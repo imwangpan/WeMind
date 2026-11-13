@@ -508,7 +508,7 @@ iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 1
 
 默认 `homeMode = direct`。两种模式：
 
-- `direct`（默认）：**终端等效**。WeMind 不写任何 Agent 配置文件、不注入 `homeEnvVar` / 预设 env；Agent 像在终端直接启动一样读取完整真实配置（技能、记忆、模型、权限、MCP、会话库都与终端共用）。`mcpViaAcp` 的 Agent 由 WeMind 把真实 catalog 原样交给 ACP（等价于 Agent 自己加载，不做筛选）；文件型 MCP 的 Agent 自己读真实配置。真实配置里若有微信 MCP，只告警、不阻止启动。
+- `direct`（默认）：**终端等效**。WeMind 不写任何 Agent 配置文件、不注入 `homeEnvVar` / 预设 env；Agent 像在终端直接启动一样读取完整真实配置（技能、记忆、模型、权限、MCP、会话库都与终端共用）。WeMind **不会**把 Agent 已原生加载的 MCP catalog 再经 ACP 重发；只有用户显式配置微信独享的 `overlay.mcp.extra` 时，才把它补进会话。真实配置里若有微信 MCP，只告警、不阻止启动。
 - `sandbox`：把配置完整复制到 `<账号>/brain-home` / `worker-home`，与真实配置隔离；MCP 激活、overlay、凭据同步都在沙箱内执行。适合需要 WeMind 托管 MCP、或希望微信侧与终端互不影响的场景。
 
 `direct` 下终端改模型、加技能、写记忆，微信侧读到的是同一份。`sandbox` 下 WeMind 才按预设的 `inheritDirs` / `inheritFiles` 选择性继承真实配置里的技能/记忆；Windows 没有 symlink 权限时会回退到复制，副本**不保证双向同步**，日志会告警。可用 `WEMIND_BRAIN_REAL_HOME` / `WEMIND_BRAIN_INHERIT_DIRS` 覆盖继承来源，`WEMIND_BRAIN_INHERIT=0` 关闭 sandbox 继承。

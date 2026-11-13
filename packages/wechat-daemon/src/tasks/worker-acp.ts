@@ -3,7 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 
 import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
-import { ensureWorkerHome, workerMcpServers } from "../agents/sandbox/worker-sandbox.js";
+import { ensureWorkerHome, workerSessionMcpServers } from "../agents/sandbox/worker-sandbox.js";
 import { nativeMcpServers, warnForbiddenNativeMcp } from "../agents/sandbox/mcp-sandbox.js";
 import { configFingerprint } from "../agents/config/config-fingerprint.js";
 import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
@@ -348,10 +348,9 @@ export class WorkerConn {
   private async ensureSession(key: string, strictResume = false): Promise<string> {
     const existing = this.sessions.get(key);
     if (existing) return existing;
-    // 配了 mcpViaAcp 的 agent（DSH / Claude Code / Copilot / Codex）：worker 继承全量 MCP（除排除集），随 session 下发；其余 agent 传空
-    // direct 由 Agent 自己完整加载真实配置，WeMind 不下发任何额外 MCP。
-    const mcpServers =
-      this.agent.mcpViaAcp && this.runtime?.mode !== "direct" ? workerMcpServers(this.agent) : [];
+    // direct：Agent 自己加载真实配置，只补 overlay.mcp.extra；
+    // sandbox：mcpDelivery=acp 的 Agent 拿全量集（除 wechat），其余 Agent 自己读沙箱配置文件。
+    const mcpServers = workerSessionMcpServers(this.agent, this.runtime);
     const mapKey = sessionKey(this.agent.name, key);
     const map = loadSessionMap(this.agent);
     const saved = map[mapKey];

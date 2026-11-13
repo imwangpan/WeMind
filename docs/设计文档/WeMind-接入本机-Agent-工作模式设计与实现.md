@@ -112,9 +112,9 @@ Phase 1 已落地（本分支）：
 - 账号默认 `homeMode = direct`（`agents/config/home-mode.ts`），读取 `<账号>/runtime.json`；缺失/损坏/历史遗留值一律回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖。
 - `agentRuntime("brain"|"worker", ag)` 在 `direct` 下直接返回 Agent 的真实配置目录，`configDir === home`；WeMind 不生成任何配置副本、不注入 `homeEnvVar`、不写 settings / MCP / 权限文件。`sandbox` 才使用 `brain-home` / `worker-home`，由 adapter 生成副本并按 `inheritDirs` / `inheritFiles` 继承。
 - brain 与 worker 的启动/会话 `cwd` 改为账号级默认工作区（`<账号>/workspace/brain`、`<账号>/workspace/worker`，`agents/config/workspace.ts`）；`session-cwd.json` 记录 `<agent>:<sessionId> → cwd`，恢复旧会话时优先使用它。`WEMIND_WORKER_CWD` 与 `task --cwd` 仍是一次性覆盖。
-- `direct` 的 MCP 完全由 Agent 真实配置决定：文件式 Agent 自己读配置；brain 的 ACP 型 Agent 由 WeMind 把真实 catalog 全量下发，叠加 overlay 的 `mcp.extra`、减去 `mcp.disable`。worker 在 `direct` 下不额外下发 MCP，由 Agent 自己加载真实配置；若某个 Agent 只接受 ACP 下发（例如 DSH），worker 侧能否拿到真实 MCP 取决于它自己的能力，这是 Phase 2 要逐家核实的 parity 缺口。`加载/卸载 MCP` 在 direct 下原样转给 Agent（由它自己改配置）。`sandbox` 才是 brain 默认空（激活集按 agent 分键持久化在 `<账号>/brain-mcps.json`，`version: 2`）、worker 真实全量减 `wechat`。
-- MCP/首帧指标已落到日志：`session/new|load|resume ok … mcpCount= sessionNewMs= mcpStartupMs=`、`prompt ok … firstFrameMs=`（`agents/config/mcp-perf.ts`）；`scripts/doctor.ps1` 读最近 `daemon.log`，数量/耗时超阈值只提示，**不自动禁用**。Agent 自己配置文件里的 MCP 单独记 `nativeMcpCount`（目前只有 Codex 的 `config.toml`）。
-- Codex 的 `~/.codex/config.toml` 已做**只读**解析（`agents/sandbox/toml-mcp.ts`）：`[mcp_servers.*]` 的名字/`command`/`args`/`env`/`url` 会进 `列出` 与指标；WeMind 不写 TOML、也无法替 Codex unload 原生项。原生配置里若有 `wechat`（或任何会跑 `wemind-mcp` 的定义），brain/worker **只告警、不阻止启动**（`warnForbiddenNativeMcp`），由用户自行删除。
+- `direct` 的 MCP 完全由 Agent 真实配置决定：文件式 Agent 自己读配置，DSH 读 profile YAML 的 `dsh-mcp-client` 条目，Claude Code / Copilot / Codex 读各自的 `.claude.json` / `mcp-config.json` / `config.toml`。WeMind **不重发 catalog**；只有用户显式配置的微信独享 `overlay.mcp.extra` 会通过 ACP 补进会话（仅 `acpMcpServers` 的 Agent）。`加载/卸载 MCP` 在 direct 下原样转给 Agent（由它自己改配置）。`sandbox` 才是 brain 默认空（激活集按 agent 分键持久化在 `<账号>/brain-mcps.json`，`version: 2`）、worker 真实全量减 `wechat`；`mcpDelivery: "acp"` 的 Agent 由 WeMind 经 ACP 投递，文件式 Agent 写沙箱配置。
+- MCP/首帧指标已落到日志：`session/new|load|resume ok … mcpCount= sessionNewMs= mcpStartupMs=`、`prompt ok … firstFrameMs=`（`agents/config/mcp-perf.ts`）；`scripts/doctor.ps1` 读最近 `daemon.log`，数量/耗时超阈值只提示，**不自动禁用**。Agent 自己配置文件里的 MCP 单独记 `nativeMcpCount`：Codex 的 `config.toml`、DSH 的 `cordis.patch.yml`、Claude Code 的 `.claude.json`、Copilot 的 `mcp-config.json` 都算。
+- Codex 的 `~/.codex/config.toml` 与 DSH 的 profile YAML 都做**只读**解析（`agents/sandbox/toml-mcp.ts` / `dsh-mcp.ts`）：名字/`command`/`args`/`env`/`url` 会进 `列出` 与指标；WeMind 不写回、也无法替 Agent unload 原生项。原生配置里若有 `wechat`（或任何会跑 `wemind-mcp` 的定义），brain/worker **只告警、不阻止启动**（`warnForbiddenNativeMcp`），由用户自行删除。
 - 微信 overlay 位于 `<账号>/agent-overrides/<agent>.json`；CLI 为 `wemind config wechat ...`，微信侧为 `微信配置 ...` 确定性指令。
 - 真实配置写入走 `agents/config/agent-config-writer.ts`：备份、mtime + size + sha256 并发校验、同目录原子写；含注释 JSONC、YAML/TOML 第一期拒绝写入。
 - 入站媒体在 `direct` 下写到 `<账号>/media/inbound`；`sandbox` 仍是 `<sandbox>/media/inbound`。
@@ -218,7 +218,7 @@ AgentHomeResolver ──► Agent 进程
 | `claude-code` | `CLAUDE_CONFIG_DIR` | `~/.claude` | `claude/` | ACP `mcpServers` | `claude/` | `session/set_mode bypassPermissions` | `direct`；`sandbox` 可选 | 预设未声明 `homeEnvVar`，direct 直接用真实配置；`~/.claude.json` 混状态 |
 | `codex` | 无 home env | `~/.codex` | 真实 `~/.codex` | **stdio MCP 支持**（2026-11-12 复测；`mcpCapabilities.acp=false` 只指 MCP-over-ACP） | `~/.codex` | `INITIAL_AGENT_MODE=agent-full-access` + `set_mode` | `direct`（没有 `homeEnvVar`，`sandbox` 也无法真正隔离 `~/.codex`） | 无独立配置目录；原生 `config.toml` 由 Codex 自己加载 |
 
-**结论（2026-11-13 按实现修正）**：默认 `direct`，10 个预设都直接使用真实配置。WeMind **不写任何 Agent 文件**；`sandbox` 才复制配置并生成 MCP/settings/权限副本。`claude-code` / `codex` 的 MCP 走 ACP；`direct` 下 brain 由 WeMind 把真实 catalog 全量下发（同名原生优先），worker 不额外下发，但仍不写真实配置。
+**结论（2026-11-13 按实现修正）**：默认 `direct`，10 个预设都直接使用真实配置。WeMind **不写任何 Agent 文件**，也**不重发 Agent 已原生加载的 MCP catalog**；`sandbox` 才复制配置并生成 MCP/settings/权限副本。`acpMcpServers` 只描述能力，`mcpDelivery: "acp"` 只在 sandbox 托管 MCP 时使用（DSH / Claude Code / Copilot / Codex）；`direct` 下只有用户显式配置的 `overlay.mcp.extra` 会通过 ACP 补进会话。
 
 > **`direct` 的明确语义**：真实配置里有什么 MCP，Agent 就加载什么；WeMind 不保证 brain 默认空 MCP。这是用户显式选择“完全交给 Agent”的代价，不是缺陷。
 
@@ -245,8 +245,8 @@ AgentHomeResolver ──► Agent 进程
 
 - 启动路径不生成任何配置副本，不写 MCP / settings / 权限文件，不注入 `homeEnvVar`、预设 `env`；仍保留 `envDefaults`（yolo 等免审批默认值，父进程显式设置优先）与只读凭据桥接。
 - 文件式 Agent（kiro / opencode / qoder / cline / gemini / pi）完全由 Agent 自己读真实配置；WeMind 不写、不删。
-- Brain 的 ACP 型 Agent（DSH / Claude Code / Copilot / Codex）由 WeMind 把真实 catalog **全量**转成 `mcpServers` 随 `session/new|resume|load` 下发，再叠加 overlay 的 `mcp.extra`、减去 `mcp.disable`。这是“让 ACP 型 Agent 也能用上 WeMind 的 catalog”的唯一方式，不改变真实配置文件。
-- Worker 在 `direct` 下不额外下发 MCP，由 Agent 自己加载真实配置；若某个 Agent 只接受 ACP 下发（例如 DSH），其 worker 侧 MCP 是否可用取决于 Agent 自身，这是 Phase 2 要逐家核实的 parity 缺口。
+- DSH 读 profile YAML 的 `dsh-mcp-client` 条目；Claude Code 读 `~/.claude.json`；Copilot 读 `~/.copilot/mcp-config.json`；Codex 读 `~/.codex/config.toml`。**WeMind 不把真实 catalog 再经 ACP 重发**，只在用户显式配置 `overlay.mcp.extra` 时补这一小集合（仅 `acpMcpServers` 的 Agent）。
+- Worker 在 `direct` 下同样不额外下发 catalog，由 Agent 自己加载真实配置；这消除了“Worker 与终端读到不同 MCP”的 parity 缺口。
 - 真实配置里存在 `wechat` MCP（或会跑 `wemind-mcp` 的定义）时**只告警、不阻止启动**；用户需要自己从 Agent 配置里移除，否则可能出现第二个 poller / 回环。
 - 微信里的 `加载 / 卸载 MCP` 不拦截，原样作为消息交给 Agent；它能不能改、怎么改由 Agent 自己的能力决定。
 - 不改写任何真实配置；`wemind config agent set` 这类写入口在此模式下仍会写真实文件（用户显式操作），但启动路径不做任何生成/同步。
@@ -343,7 +343,7 @@ ACP 的 client（WeMind）能处理的反向请求是固定的：`session/reques
 
 #### 怎么注入
 
-- **支持 ACP MCP 的 agent**（`mcpViaAcp`，如 DSH / Claude Code / Copilot）：在 `session/new`、`session/load`、`session/resume` 的 `mcpServers` 数组里追加一个 `wemind_admin` 条目。例如 stdio：
+- **支持 ACP MCP 的 agent**（`acpMcpServers`，如 DSH / Claude Code / Copilot / Codex）：在 `session/new`、`session/load`、`session/resume` 的 `mcpServers` 数组里追加一个 `wemind_admin` 条目。例如 stdio：
 
   ```json
   {
@@ -362,7 +362,7 @@ ACP 的 client（WeMind）能处理的反向请求是固定的：`session/reques
   如果 agent 支持 HTTP MCP，则优先由 daemon 起一个只监听 `127.0.0.1` 的 HTTP MCP，`mcpServers` 里只放 URL + `Authorization` header。这样不会每个会话多一个 Node 子进程，启动成本更低。
 
 - **只从配置文件读 MCP 的 agent**：`direct` 下 WeMind 不写 Agent 文件，无法注入 `wemind_admin`；只有显式 `sandbox` 才能把它写进沙箱副本。终端自己开的会话看不到这个工具，只有微信侧沙箱能看到。
-- **不注入 Admin MCP 的 agent**（文件式 direct、Codex 原生 `config.toml`）：退回“模型通过 shell 调 `wemind config ...`”的 CLI 路径。Codex 的客户端 stdio MCP 自 2026-11-12 复测可用（`mcpViaAcp`），但 direct 下 WeMind 只下发 MCP catalog，不额外写 `config.toml`。
+- **不注入 Admin MCP 的 agent**（文件式 direct、Codex 原生 `config.toml`）：退回“模型通过 shell 调 `wemind config ...`”的 CLI 路径。Codex 的客户端 stdio MCP 自 2026-11-12 复测可用，但 `direct` 下 WeMind 不重发 MCP catalog，也不额外写 `config.toml`。
 
 #### 一次调用的完整链路
 
@@ -437,14 +437,14 @@ ACP 的 client（WeMind）能处理的反向请求是固定的：`session/reques
 
 | 角色 | `direct`（默认） | `sandbox` |
 |---|---|---|
-| brain | Agent 真实配置全量：文件式 Agent 自己读；ACP 型由 WeMind 全量下发，`extra` 增、`disable` 减 | **空**；用户显式 `加载` 后持久到 `<账号>/brain-mcps.json`（按 agent 分键），`卸载` 后移除 |
-| worker | 由 Agent 自己加载真实配置，WeMind 不额外下发；`mcpViaAcp` 型 Agent 是否拿到真实 MCP 取决于 Agent 自身 | （真实配置中的全部 MCP ∪ `extra`）− `wechat` − `disable` |
+| brain | Agent 真实配置全量，由 Agent 自己读；WeMind 只补 `overlay.mcp.extra`（仅 `acpMcpServers` 的 Agent） | **空**；用户显式 `加载` 后持久到 `<账号>/brain-mcps.json`（按 agent 分键），`卸载` 后移除 |
+| worker | 由 Agent 自己加载真实配置，WeMind 只补 `overlay.mcp.extra`（仅 `acpMcpServers` 的 Agent） | （真实配置中的全部 MCP ∪ `extra`）− `wechat` − `disable` |
 
 `sandbox` 的 brain 默认空是为了保证最佳首帧/启动速度；这不是“真实配置里没有”，而是“微信侧不自动加载”。用户显式加载后，激活集持久化到磁盘，跨会话、跨 daemon 重启保留（按 agent 命名空间隔离）。这里的“所有会话”指 WeMind 新建的 brain 会话；终端自己开的会话不受 WeMind 的激活集影响。
 
 “显式加载”与“显式禁用”的优先级（仅 `sandbox`）：`brain-mcps.json` 记录用户主动加载的集合；overlay 的 `mcp.disable` 永远最后生效。即使某个 MCP 曾经被加载过，只要用户明确 disable，它就不会再出现在 brain 的有效集里；重新 `加载` 会把它从 disable 中移除并写回激活集。
 
-**`direct` 的语义**：Agent 真实配置里有什么 MCP 就加载什么，WeMind 不维护激活集；微信里的 `加载 / 卸载 MCP` 原样转给 Agent 处理。ACP 型 Agent 仍会收到 WeMind 全量下发的 `mcpServers`（否则它看不到 catalog），叠加 `extra`、减去 `disable`。真实配置里若有 `wechat`，只告警不阻止启动，用户需自行移除。
+**`direct` 的语义**：Agent 真实配置里有什么 MCP 就加载什么，WeMind 不维护激活集、也不重发 catalog；微信里的 `加载 / 卸载 MCP` 原样转给 Agent 处理。只有 `overlay.mcp.extra` 这一小集合会通过 ACP 补进会话（仅 `acpMcpServers` 的 Agent）。真实配置里若有 `wechat`，只告警不阻止启动，用户需自行移除。
 
 ### 8.1.1 切换 brain 时的激活集（`sandbox`）
 
@@ -464,8 +464,8 @@ ACP 的 client（WeMind）能处理的反向请求是固定的：`session/reques
 
 ```text
 direct brain:
-  Agent 自己加载真实配置；ACP 型额外收到
-  (Agent 真实配置已启用 MCP ∪ overlay.mcp.extra) − overlay.mcp.disable
+  Agent 自己加载真实配置；WeMind 只额外补
+  overlay.mcp.extra（仅 acpMcpServers 的 Agent）
 
 direct worker:
   Agent 自己加载真实配置；WeMind 不额外下发
@@ -504,10 +504,11 @@ sandbox worker:
 | opencode | `opencode.json` 的 `mcp.servers` |
 | cline | `mcp.json`（`CLINE_MCP_SETTINGS_PATH`） |
 | pi | `<agent-dir>/mcp.json` |
-| DSH / Claude Code / Copilot | ACP `session/new|resume` 的 `mcpServers` |
-| codex | 支持客户端 stdio MCP；`direct` 下 WeMind 全量下发 catalog + overlay 额外项，`sandbox` 下按激活集下发；原生 `~/.codex/config.toml` 由 Codex 自己加载，同名原生优先。WeMind 只读解析 TOML 用于列出/指标，不写回，也无法 unload 原生项；原生含 `wechat` 时只告警 |
+| DSH | `profiles/<profile>/cordis.patch.yml` 的 `@deepseek-ai/dsh-mcp-client`（WeMind 只读解析） |
+| Claude Code / Copilot | `~/.claude.json` / `~/.copilot/mcp-config.json`（Agent 自己读取；sandbox 才由 WeMind 经 ACP 投递） |
+| codex | `~/.codex/config.toml` 由 Codex 自己加载，同名原生优先；`direct` 不重发 catalog，`sandbox` 才按激活集经 ACP 下发。WeMind 只读解析 TOML 用于列出/指标，不写回，也无法 unload 原生项；原生含 `wechat` 时只告警 |
 
-**“通过 ACP 传 MCP”不等于“覆盖真实配置”。** 有些 Agent 会把 ACP `mcpServers` 与自己的配置文件合并；`sandbox` 的 brain 默认空集要求最终有效集为空，所以每个 Agent 都必须实测“传空列表是否真的不加载”，不能假设 ACP 参数会替换。若 Agent 只做增量合并，则 sandbox 必须生成剔除 MCP 的副本，或提供明确的 disable 参数；两者都没有时，该 Agent 不能承诺“brain 默认空 MCP”，必须在能力矩阵中标注。`direct` 不承诺空集，因此不受此限制。
+**“通过 ACP 传 MCP”不等于“覆盖真实配置”。** 实测确认 DSH 会把 ACP `mcpServers` 与 profile 里的 MCP **合并**、Claude Code 也会读 `~/.claude.json`；所以 `sandbox` 的 brain 默认空集不能只靠“传空列表”。DSH 的做法是复制 profile 时**剥离全部 `dsh-mcp-client` 条目**，再按激活集经 ACP 注入；文件式 Agent 则写沙箱配置。新增 Agent 必须实测“传空列表是否真的不加载”，不能假设 ACP 参数会替换；做不到时必须在能力矩阵里标注，不能承诺“brain 默认空 MCP”。
 
 ### 8.4 性能与观测
 

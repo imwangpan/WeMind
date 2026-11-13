@@ -165,7 +165,7 @@ export type ResolvedAgent = {
   inheritDirs: string[];
   inheritFiles: string[];
   configSubdir: string;
-  mcpFormat: "mcpServers" | "mcp.servers";
+  mcpFormat: "mcpServers" | "mcp.servers" | "dshProfileYaml";
   mcpConfigFile: string;
   catalogFile: string;
   env: Record<string, string>;
@@ -194,7 +194,10 @@ export type ResolvedAgent = {
   /** 模型改为追加到启动参数（agent 不支持 session/set_config_option 时；如 gemini 的 "--model"）。 */
   modelArg?: string;
   realProfile?: string;
-  mcpViaAcp: boolean;
+  /** 纯能力：Agent 接受 ACP `session/new|resume` 的 `mcpServers`（不代表它不读自己的配置）。 */
+  acpMcpServers: boolean;
+  /** WeMind 在 sandbox 托管 MCP 时的投递方式：写 Agent 配置文件，或随 ACP 会话下发。 */
+  mcpDelivery: "config" | "acp";
   /** 会话建立/恢复后切到的模式 id（`session/set_mode`）；「免审批」用，留空=不调用。 */
   sessionMode?: string;
   /** kiro 是否跑在 v3 引擎（决定启动参数与能否用 v3 的 permissions.yaml 免审批）。 */
@@ -543,7 +546,8 @@ function resolveAgentCore(
     model,
     modelArg: preset.modelArg,
     realProfile: preset.realProfile,
-    mcpViaAcp: preset.mcpViaAcp ?? false,
+    acpMcpServers: preset.acpMcpServers ?? false,
+    mcpDelivery: preset.mcpDelivery ?? "config",
     sessionMode,
     kiroV3,
     sessionPatch,

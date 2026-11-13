@@ -14,7 +14,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 
 | 方法 | 作用 | 注意 |
 |------|------|------|
-| `initialize` | 握手 | **WeMind 只置 `initialized = true`，从不解析回包里的 `agentCapabilities`**——`load`/`resume`、图片、`mcpViaAcp` 全部取自 `brain-presets.ts` 的预设字段（见下条） |
+| `initialize` | 握手 | **WeMind 只置 `initialized = true`，从不解析回包里的 `agentCapabilities`**——`load`/`resume`、图片、`acpMcpServers`/`mcpDelivery` 全部取自 `brain-presets.ts` 的预设字段（见下条） |
 | `session/new` | 新建会话 | 绝对 `cwd`；可传 `mcpServers` |
 | `session/load` | 按 sessionId 恢复会话 | **不是所有 agent 都实现**（DSH 返回 `-32601`） |
 | `session/resume` | 恢复持久会话 | DSH 用这个；恢复日志但不回放旧更新 |
@@ -22,7 +22,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 | `session/update`（通知） | 流式回包：`agent_message_chunk`（正文）、`agent_thought_chunk`（思考）、`tool_call`/`tool_call_update`（工具进度） | committed-only agent 可能整段提交；`tool_call` 首帧报 start、终态 `tool_call_update` 报 end，同一 `toolCallId` 的终态只报一次 |
 | `session/request_permission`（反向请求） | agent 请求权限 | 客户端内置应答器：**默认 yolo**，自动选择 `allow_once` / `allow_always`；设 `WEMIND_ACP_AUTO_ALLOW=0` 恢复逐次拒绝（`cancelled`）；接入前仍建议验证 |
 
-> ⚠️ **能力来自预设字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`mcpViaAcp` 都写在 `brain-presets.ts` 的 `ACP_AGENT_PRESETS` 里，来源是接入时的**探针实测**。因此接新 agent 必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进预设——代码不会自动适配（详见 [AGENTS.md §4.2](../../AGENTS.md)）。
+> ⚠️ **能力来自预设字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`acpMcpServers`、`mcpDelivery` 都写在 `brain-presets.ts` 的 `ACP_AGENT_PRESETS` 里，来源是接入时的**探针实测**。因此接新 agent 必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进预设——代码不会自动适配（详见 [AGENTS.md §4.2](../../AGENTS.md)）。
 
 「接入一个新 agent」主要是告诉 WeMind「怎么把它以 ACP 模式启动」；协议层能复用，但**能力差异要按 agent 补**（见 §6.6）。
 
@@ -197,7 +197,7 @@ MCP **文件格式**知识集中在 `agents/sandbox/mcp-adapters.ts` 的 `McpAda
 
 ### settings 处理
 
-`direct` 下 WeMind **不碰任何 settings 文件**：Agent 用自己完整的真实设置。只有为「微信侧免逐次审批」下发的 `envDefaults`（如 `DSH_PERMISSION_MODE=danger-full-access`）和从 Agent 凭据文件派生的凭证环境变量仍会注入；父进程显式设置的同名变量优先。配了 `mcpViaAcp` 的 Agent 由 `activeMcpServers(ag, rt)` 把真实 catalog 全量转成 ACP 声明随 `session/new|resume|load` 下发——**必须传正在启动的那个 agent 与 runtime**。
+`direct` 下 WeMind **不碰任何 settings 文件**：Agent 用自己完整的真实设置。只有为「微信侧免逐次审批」下发的 `envDefaults`（如 `DSH_PERMISSION_MODE=danger-full-access`）和从 Agent 凭据文件派生的凭证环境变量仍会注入；父进程显式设置的同名变量优先。MCP 也完全由 Agent 自己加载（DSH 读 profile YAML、Claude Code 读 `~/.claude.json`、Copilot 读 `mcp-config.json`、Codex 读 `config.toml`）；`activeMcpServers(ag, rt)` 在 direct 只返回 `overlay.mcp.extra`，**不会重发真实 catalog**。sandbox 下 `mcpDelivery: "acp"` 的 Agent 才按 brain 激活集下发——**必须传正在启动的那个 agent 与 runtime**。
 
 `sandbox` 才生成副本：`settingsBase` 型 Agent（如 gemini）按 `settingsStrip` 剥离必须由 WeMind 控制的键（默认 `mcpServers` / `enabledPlugins` / `providers` / `model`；gemini 只剥 `mcpServers`，保留用户 `model` / `security`），再由 adapter 的 `stripSettings()` 剥掉该格式的 MCP 段，并强制 `general.enableAutoUpdate=false`；MCP 由 adapter 的 `writeCatalog()` 权威覆盖同一文件里的 MCP 段。
 
@@ -211,7 +211,7 @@ MCP **文件格式**知识集中在 `agents/sandbox/mcp-adapters.ts` 的 `McpAda
 
 ### AcpAgentPreset 与解析
 
-`AcpAgentPreset` 描述一个 agent：`bin`/`binWin`（二进制名）、`requiresBins`（除 bin 外还必须在 PATH 上解析到的运行时，如 `pi-acp` 需要 `pi` 本体；缺失时 `agentProblem()` 直接报安装提示，不等 `session/new` 才炸）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名，**仅 sandbox** 注入）、`shell`（是否经 shell 启动）、`env`（**仅 sandbox** 强制注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批开关；direct 也注入）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——`sandbox` 模式**原样复制**真实的 `profiles/<名>/cordis.patch.yml`，并从它读默认模型（DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`），目前只有 DSH 用：`"acp"`）、`realHome`（真实配置目录；catalog、指纹与 sandbox 继承的来源）、`inheritDirs`/`inheritFiles`（**仅 sandbox** 的记忆/技能继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`configSubdir`（agent 配置目录相对沙箱根的子路径：kiro 空=根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`）、`settingsBase`（**仅 sandbox**：以真实设置为基底并剥离 MCP/插件/providers）、`credentialFiles`/`identityFiles`（**仅 sandbox** 的登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`；direct 也生效）、`kiroEngine`（kiro：按 `--agent-engine` / `acp.agentEngine` / CLI 主版本判 v2/v3——`acp --help` 说两者都没设时默认 v2，CLI ≥3 默认 v3 为假设/待实测；v3 剔 v2 参数并写沙箱的 `settings/permissions.yaml`）、`isolateSessions`（DSH：**仅 `sandbox`** 用 `--patch` 把会话 root 指到账号数据目录；`direct` 下使用真实会话库）。此外还有 `restore` / `images` / `mcpViaAcp` / `modelArg` / `replayOnLoad` / `firstFrameMs`（首帧超时覆盖）/ `heartbeatMs`（静默期心跳间隔覆盖）/ `settingsStrip` / `settingsDefaults` / `mcpFormat` / `mcpConfigFile` / `catalogFile` 等字段（按 agent 覆盖协议能力与沙箱约定）；完整字段表见 [接入其它-ACP-Agent.md](../接入方案/接入其它-ACP-Agent.md) §4。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量（`direct` 时保留父进程 env、`envDefaults` 与只读凭据桥接，但不注入 `homeEnvVar` / 预设 `env`），并在起进程前调 `prepareAgent(ag)` 落盘派生配置（目前是 DSH 在 `sandbox` 下的 `--patch` 文件）。
+`AcpAgentPreset` 描述一个 agent：`bin`/`binWin`（二进制名）、`requiresBins`（除 bin 外还必须在 PATH 上解析到的运行时，如 `pi-acp` 需要 `pi` 本体；缺失时 `agentProblem()` 直接报安装提示，不等 `session/new` 才炸）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名，**仅 sandbox** 注入）、`shell`（是否经 shell 启动）、`env`（**仅 sandbox** 强制注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批开关；direct 也注入）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——`sandbox` 模式复制真实的 `profiles/<名>/cordis.patch.yml` 并剥离其中的 MCP 条目，其余 provider/模型条目原样；DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`，目前只有 DSH 用：`"acp"`）、`realHome`（真实配置目录；catalog、指纹与 sandbox 继承的来源）、`inheritDirs`/`inheritFiles`（**仅 sandbox** 的记忆/技能继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`configSubdir`（agent 配置目录相对沙箱根的子路径：kiro 空=根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`）、`settingsBase`（**仅 sandbox**：以真实设置为基底并剥离 MCP/插件/providers）、`credentialFiles`/`identityFiles`（**仅 sandbox** 的登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`；direct 也生效）、`kiroEngine`（kiro：按 `--agent-engine` / `acp.agentEngine` / CLI 主版本判 v2/v3——`acp --help` 说两者都没设时默认 v2，CLI ≥3 默认 v3 为假设/待实测；v3 剔 v2 参数并写沙箱的 `settings/permissions.yaml`）、`isolateSessions`（DSH：**仅 `sandbox`** 用 `--patch` 把会话 root 指到账号数据目录；`direct` 下使用真实会话库）。此外还有 `restore` / `images` / `acpMcpServers`（纯能力）/ `mcpDelivery`（sandbox 托管投递方式）/ `modelArg` / `replayOnLoad` / `firstFrameMs`（首帧超时覆盖）/ `heartbeatMs`（静默期心跳间隔覆盖）/ `settingsStrip` / `settingsDefaults` / `mcpFormat` / `mcpConfigFile` / `catalogFile` 等字段（按 agent 覆盖协议能力与沙箱约定）；完整字段表见 [接入其它-ACP-Agent.md](../接入方案/接入其它-ACP-Agent.md) §4。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量（`direct` 时保留父进程 env、`envDefaults` 与只读凭据桥接，但不注入 `homeEnvVar` / 预设 `env`），并在起进程前调 `prepareAgent(ag)` 落盘派生配置（目前是 DSH 在 `sandbox` 下的 `--patch` 文件）。
 
 内置 agent：
 
@@ -307,7 +307,7 @@ worker 沙箱详见 [7. 远程任务 Worker](07-远程任务-Worker.md#worker-�
 | `session/load` | 探针实测（`scripts/acp-probe.mjs`）；回包里的 `agentCapabilities` 代码不读 | 不支持 → `-32601` → 当前代码新建会话，**丢多轮上下文** | 预设写 `restore: "resume"` 用 `session/resume` 兜底，再失败才 `new` |
 | `session/resume` | 同上：实测 + 预设字段 | 也没有 → 无法自愈恢复 | 接受「重启即新会话」，或换 agent |
 | `image` | 探针带图跑一次 prompt；结论写进预设的 `images` | 预设 `images: false` → `planImageTurn()` 按「有文字只按文字答、无文字才拒绝」处理；即便漏到 `askBrainTurn`，也只会附一句「当前大脑不支持图片」而不带图 | 友好拒绝，或换 agent |
-| MCP 传输 | 探针传非空 `mcpServers` 实测；结论写进预设的 `mcpViaAcp` | 不支持 ACP MCP → 动态 MCP 不可用 | 走 agent 自己配置文件，或先不做 |
+| MCP 传输 | 探针传非空 `mcpServers` 实测；结论写进预设的 `acpMcpServers`，sandbox 托管时再配 `mcpDelivery: "acp"` | 不支持 ACP MCP → 动态 MCP 不可用 | 走 agent 自己配置文件，或先不做 |
 | 反向请求 | 跑一次 prompt，记录 `method`+`id` | 不应答 → 挂到超时 | 应答器已在 `acp-reverse.ts` 统一（brain/worker/`brain check` 共用），一般无需再写 |
 | 正文粒度 | 看 `agent_message_chunk` 数量 | committed-only → 心跳刷屏、首帧慢 | 调 `firstFrameMs` + `heartbeatMs`（静默期心跳间隔） |
 | Windows 入口 | `Get-Command` / 实际文件 | `.cmd` 未经 shell → 启动失败 | 用 `spawnAgent()`（内部经 shell），`binWin` 写实际文件名 |

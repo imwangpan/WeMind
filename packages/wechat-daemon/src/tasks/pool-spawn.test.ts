@@ -94,7 +94,8 @@ const agent = (name: string): ResolvedAgent =>
     credentialFiles: [],
     identityFiles: [],
     settingsDefaults: {},
-    mcpViaAcp: false,
+    acpMcpServers: false,
+    mcpDelivery: "config",
     requiresBins: [],
     binOverridden: false,
   }) as unknown as ResolvedAgent;

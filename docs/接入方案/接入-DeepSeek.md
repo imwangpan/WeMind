@@ -80,10 +80,10 @@
 1. **agent 不发反向请求**（`session/request_permission`、`fs/*`、`terminal/*`）。**这是接入 DSH 时的历史假设，现已不成立**：三处入口（brain / worker / `brain check`）共用 `acp-reverse.ts` 的应答器——权限请求默认 yolo 放行（`WEMIND_ACP_AUTO_ALLOW=0` 恢复拒绝）、未知 method 回 `-32601`，对端不会挂起。但应答器只覆盖 ACP 权限请求；要让 DSH 自己不产生提权请求，仍依赖它的自有开关（`DSH_PERMISSION_MODE`）。
 2. **`session/load` 可用**。DSH 官方 ACP 明确没有 `session/load`（只有 `session/resume`）。
 3. **首帧来得快**。`FIRST_FRAME_MS` 默认 25s；DSH 官方 ACP 以「已提交消息」为单位发正文，纯推理阶段可能长时间没有 `agent_message_chunk`。
-4. **MCP 走 agent 配置文件**。DSH 的 MCP 通过 ACP `session/new` 的 `mcpServers` 挂载，不读 kiro 的 `settings/mcp.json`——每个 agent 只读自己的配置。
+4. **MCP 走 agent 自己的配置**。DSH 的 MCP 写在 `profiles/acp/cordis.patch.yml` 的 `@deepseek-ai/dsh-mcp-client` 条目里，不读 kiro 的 `settings/mcp.json`；它也接受 ACP `session/new` 的 `mcpServers`（与 profile 条目合并）。WeMind 只读解析前者，sandbox 才用后者投递托管集合。
 5. **静默期靠 activity 帧刷新心跳**。`index.ts` 每 15s 检查 `lastProgressAt`，只有 `session/update` 帧会刷新它；committed-only 的 DSH 会被当成「一直静默」，从而每 15s 发一条进度，烧掉微信的 10 条连发额度。
 
-> 结论（2026-10 初稿）：**协议层不是「完全不用改」**。这 5 条后来都做成了通用能力（应答器 `acp-reverse.ts`、`restore: resume`、`heartbeatMs` 覆盖、`mcpViaAcp`、`committed-only` 心跳处理），不只服务 DeepSeek。
+> 结论（2026-10 初稿）：**协议层不是「完全不用改」**。这 5 条后来都做成了通用能力（应答器 `acp-reverse.ts`、`restore: resume`、`heartbeatMs` 覆盖、`acpMcpServers`/`mcpDelivery`、`committed-only` 心跳处理），不只服务 DeepSeek。
 
 ### 2.4 不在本文范围：DSH 作为 MCP 客户端
 
@@ -200,7 +200,7 @@
 | 6 | `agent_thought_chunk` 思考态 | ✅（实测） | ✅ | 可复用 |
 | 7 | `session/load` 自愈恢复 | ❌ `-32601`（有 `session/resume`） | ✅ | **新增 `session/resume` 兜底；实测 resume 后上下文保留** |
 | 8 | 反向请求不应答 | 🟡 本轮未观察到；权限请求可能存在 | ⚠️ 可能发 permission | **仍建议新增通用应答器** |
-| 9 | MCP 配置来源 | 无 kiro 式文件；走 ACP `mcpServers`（stdio 实测接受，`http:true`） | 走 ACP `mcpServers` | **按 agent 自己的 catalog；DSH 用中立 catalog + `mcpViaAcp`** |
+| 9 | MCP 配置来源 | profile YAML 的 `dsh-mcp-client`；也接受 ACP `mcpServers`（stdio 实测接受，`http:true`） | 走 ACP `mcpServers` | **按 agent 自己的 catalog；DSH 只读解析 profile，sandbox 才经 ACP 投递** |
 | 10 | 首帧 25s | ✅ 实测 1.0–2.3s（简单/工具）；纯推理仍可能静默 | ✅ | **配置里的 `firstFrameMs` 60s 兜底（≤ idle）** |
 | 11 | Windows 启动 | `dsh.cmd` → shell | `npx.cmd` → shell | 配置里的 `shell: true` |
 | 12 | 进程树清理 | `taskkill /T` 已有 | 同 | 直接复用 |
@@ -307,7 +307,10 @@ deepseek: {
   heartbeatMs: 60_000,           // 有 thought/usage 帧时通常不触发；极端静默兜底
   images: false,                 // 当前 DSH ACP 不接受图片
   credentialFiles: [".credentials.yaml"], // 从 ~/.dsh 新者胜同步进沙箱
-  mcpViaAcp: true,               // MCP 不写文件，随 session/new|resume 的 mcpServers 下发
+  mcpFormat: "dshProfileYaml",   // MCP 定义在 profiles/acp/cordis.patch.yml
+  catalogFile: "profiles/acp/cordis.patch.yml",
+  acpMcpServers: true,           // 纯能力：接受 ACP mcpServers
+  mcpDelivery: "acp",            // sandbox 下由 WeMind 按激活集/全量集投递
 },
 ```
 
@@ -316,10 +319,10 @@ deepseek: {
 - **凭据来源二选一**：
   1. 桌面登录态：`direct` 下直接使用真实 `~/.dsh/.credentials.yaml`；`sandbox` 下 `ensureBrainHome()` 才把它**新者胜同步**进配置目录（注意这是敏感文件，Windows 无 600 权限，沙箱目录要收紧）；
   2. API Key：`DEEPSEEK_API_KEY` 由 daemon 环境提供，并把 `model` 设成 `deepseek-official/deepseek-v4-flash`。
-- **模型跟着你的 dsh 走（但由你自己配置）**：桥插件的默认模型写死在它自己的 bundle patch 里（`- id: acp` → `deepseek-official/deepseek-v4-flash`），这项该由**用户**在真实 `profiles/acp/cordis.patch.yml` 里覆盖；WeMind 在 `direct` 下直接使用真实配置、`sandbox` 模式才原样复制这份配置，缺 `- id: acp` 时 `wemind brain` 会给一段可粘贴的 YAML 让你补（补完终端 dsh 与微信大脑才同一个模型）。WeMind 读默认模型的顺序：**优先 `- id: acp`，否则 `agent-default-model`**，会话建立后按这个值发一次 `session/set_config_option`（agent 自己的 ACP 接口；幂等；显式覆盖也走它）；读不到才回退旧兜底 `deepseek-account/deepseek-flash`（rc.3 已失效，只记 WARN）。显式覆盖：`wemind brain set deepseek --model '["<provider>","<model>"]'`（或 `presets.deepseek.model`）；`--model auto` = 跟随真实 profile 的默认（读不到就不下发）。
+- **模型跟着你的 dsh 走（但由你自己配置）**：桥插件的默认模型写死在它自己的 bundle patch 里（`- id: acp` → `deepseek-official/deepseek-v4-flash`），这项该由**用户**在真实 `profiles/acp/cordis.patch.yml` 里覆盖；WeMind 在 `direct` 下直接使用真实配置，`sandbox` 模式复制这份配置并剥离 MCP 条目（provider/模型条目原样），缺 `- id: acp` 时 `wemind brain` 会给一段可粘贴的 YAML 让你补（补完终端 dsh 与微信大脑才同一个模型）。WeMind 读默认模型的顺序：**优先 `- id: acp`，否则 `agent-default-model`**，会话建立后按这个值发一次 `session/set_config_option`（agent 自己的 ACP 接口；幂等；显式覆盖也走它）；读不到才回退旧兜底 `deepseek-account/deepseek-flash`（rc.3 已失效，只记 WARN）。显式覆盖：`wemind brain set deepseek --model '["<provider>","<model>"]'`（或 `presets.deepseek.model`）；`--model auto` = 跟随真实 profile 的默认（读不到就不下发）。
 - **不要**把 `DEEPSEEK_API_KEY` 写进 agent 的 `env`（会把密钥固化进源码/构建产物）；daemon 继承进程环境即可。
 - `configSubdir` 留空：`DSH_HOME` 本身就是 home。
-- MCP 走 `mcpViaAcp: true`：**不写任何 MCP 配置文件**，激活集由 `toAcpMcpServers()` 转成 `session/new|resume` 的 `mcpServers` 下发（见 M3）。每个 agent 只读自己的 MCP 配置；DSH 的 catalog 用 `WEMIND_MCP_CATALOG` 指向中立文件。
+- MCP：`direct` 下 DSH 自己读 profile 里的 `dsh-mcp-client` 条目，WeMind 不重发；`sandbox` 下副本先剥离全部 MCP 条目，brain 的激活集（默认空）/ worker 的全量集由 `toAcpMcpServers()` 转成 `session/new|resume` 的 `mcpServers` 下发（见 M3）。`WEMIND_MCP_CATALOG` 仍可覆盖「微信侧可选目录」的来源。
 - `AUTO_PROBE_ORDER` 末尾追加 `"deepseek"`（不要插到 kiro/opencode 前面，避免老用户装了就悄悄换大脑）；`auto` 仍优先 kiro/opencode。（**当时的计划**；当前顺序为 `opencode → cline → qoder → gemini → deepseek → kiro`，deepseek 第 5 位、kiro 末位——按实测启动耗时排。）
 - 文档标注 **Node ≥22**；`agentProblem` 对 deepseek 找不到二进制时提示 `--bin`。
 - **图片**：`image:false`，`index.ts` 在 `askBrain` 前拦截微信图片，不会以 `-32602` 失败重试。纯图片消息回一句「当前大脑暂不支持看图……」；**带文字的消息只按文字回答**，答复前注明图片被忽略（不会连文字一起丢）。
@@ -419,8 +422,8 @@ DSH 不读 kiro/opencode 的 MCP 配置文件；它自己的 MCP 通过 ACP `ses
    - opencode `{ type:"local", command:[...], environment }` → 拆 `command[0]` / `args` / `env`；
    - `{ url }` → `{ name, type:"http", url, headers }`；
    - 始终排除 `wechat`；**坏条目进 `skipped` 并记日志**（`isConvertibleToAcp` 供 `addMcp` 预校验）。
-2. 配置里的 `mcpViaAcp: true`：`applySandbox`/`syncSettings` 跳过文件写入；`ensureSession` 把激活集（`activeMcpServers()`）/ worker 全量（`workerMcpServers()`）转成 `mcpServers` 传给 `session/new` / `session/resume`。
-3. **catalog 按 agent 各自的约定读取，不跨 agent 借文件**：DSH 用 `WEMIND_MCP_CATALOG` 指向中立 kiro 格式文件（默认 `~/.dsh/settings/mcp.json` 不存在 → 未设 catalog 时为空）。
+2. 配置里的 `mcpDelivery: "acp"`：`applySandbox`/`syncSettings` 跳过文件写入；`ensureSession` 把激活集（`activeMcpServers()`）/ worker 全量（`workerMcpServers()`）转成 `mcpServers` 传给 `session/new` / `session/resume`。`direct` 下只下发 `overlay.mcp.extra`，不重发 catalog。
+3. **catalog 按 agent 各自的约定读取，不跨 agent 借文件**：DSH 默认读 `~/.dsh/profiles/acp/cordis.patch.yml` 的 `dsh-mcp-client` 条目；`WEMIND_MCP_CATALOG` 可覆盖为中立 kiro/JSON 格式文件。
 4. **坏条目防护**：官方 `session/new` 遇到起不来的 MCP 会回滚整个会话（实测 `mcp-client: initial connection or tool synchronization failed`）——`addMcp` 预校验拒绝无法转换的定义。
 
 **真机验证（假 stdio MCP，echo 工具写标记文件）**：`session/new` 挂载 → 模型调用工具（标记文件记到 `called`）回答 `ok`；`session/resume` 带同一声明 → 再次调用（标记文件第 2 次）回答 `okPINEAPPLE`。HTTP MCP 未真机实测（能力已声明）。
@@ -437,7 +440,7 @@ agent 用 `realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGEN
 
 #### M5 · 验证与文档 ✅（除图片/双真机账号外完成）
 
-- `brain-agents.test.ts`：deepseek agent 断言（含 `mcpViaAcp`）；`agent-mcp.test.ts`：`toAcpMcpServers` 转换/跳过/预校验。
+- `brain-agents.test.ts`：deepseek agent 断言（含 `acpMcpServers` / `mcpDelivery` / `dshProfileYaml`）；`agent-mcp.test.ts`：`toAcpMcpServers` 转换/跳过/预校验；`dsh-mcp.test.ts`：profile 解析与剥离。
 - 全量 136 tests 通过；`set_config_option` 失败路径真机验证（非法 model → `-32602 unknown model option` → 默认路由明确报 no API key）。
 - `scripts/doctor.ps1` 升级守卫：dsh 版本 ≠ `0.2.1-rc.2` 时提示先跑 `scripts/acp-probe.mjs` 回归（**注意：守卫里锁的是 rc.2，而 2026-11-03 的复测是在 rc.3 上做的——用 rc.3 时这条警告属预期**）。
 - 多账号机制验证：双数据目录各自沙箱/凭据/session 独立；双真机微信账号待需要时再验。
@@ -462,7 +465,7 @@ agent 用 `realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGEN
 
 | 文件 | 改动 | 阶段 |
 |---|---|---|
-| `packages/wechat-daemon/src/agents/brain-presets.ts` | 新增 `deepseek` agent（`binWin: "dsh.cmd"`）；`AcpAgentPreset` 增 `model?` / `restore?` / `firstFrameMs?` / `heartbeatMs?` / `images?` / `credentialFiles?` / `identityFiles?` / `mcpViaAcp?` / `isolateSessions?`；解析侧 `ResolvedAgent` 透传与 `prepareAgent()` 落盘在 `agents/brain-agents.ts`；`AUTO_PROBE_ORDER` 末尾加 `deepseek` | M1 / 2026-11-03 |
+| `packages/wechat-daemon/src/agents/brain-presets.ts` | 新增 `deepseek` agent（`binWin: "dsh.cmd"`）；`AcpAgentPreset` 增 `model?` / `restore?` / `firstFrameMs?` / `heartbeatMs?` / `images?` / `credentialFiles?` / `identityFiles?` / `acpMcpServers?` / `mcpDelivery?` / `isolateSessions?`；解析侧 `ResolvedAgent` 透传与 `prepareAgent()` 落盘在 `agents/brain-agents.ts`；`AUTO_PROBE_ORDER` 末尾加 `deepseek` | M1 / 2026-11-03 |
 | `packages/wechat-daemon/src/agents/profile-model.ts` | `acpModelHint()`：`- id: acp` 的 model 不在 provider 目录时给替换提示（`wemind brain` 输出） | 2026-11-03 |
 | `packages/wechat-daemon/src/acp/acp-brain.ts` / `tasks/worker-acp.ts` / `acp/brain-check.ts` | 起进程前调 `prepareAgent(ag)`（DSH 的 `--patch` 文件必须先存在） | 2026-11-03 |
 | `packages/wechat-daemon/src/acp/acp-brain.ts` | `session/set_config_option` 选 model；`session/resume` 兜底；反向请求应答器；首帧按配置覆盖；图片能力拦截；导出 `supportsImages`/`heartbeatMs` | M2 |
@@ -470,7 +473,8 @@ agent 用 `realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGEN
 | `packages/wechat-daemon/src/index.ts` | 静默心跳按 agent 配置放宽（`heartbeatMs`；`progressMode` 未实现）；收到图片但 agent `images: false` 时友好提示 | M2 |
 | `packages/wechat-daemon/src/acp/brain-check.ts` | 默认超时 20s → 60s（**无可用的 env 覆盖**，只能改代码） | M2 |
 | `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts` | `toAcpMcpServers()` 三种格式转换 | M3 |
-| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | `mcpViaAcp` 时跳过文件写入/`syncKiroSettings`；暴露 `activeMcpServers()` | M3 |
+| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | `mcpDelivery: "acp"` 时跳过文件写入/`syncKiroSettings`；暴露 `activeMcpServers()`、`overlayExtraAcpServers()` | M3 / 2026-11-13 |
+| `packages/wechat-daemon/src/agents/sandbox/dsh-mcp.ts` | 只读解析 `cordis.patch.yml` 的 `dsh-mcp-client`；sandbox 复制时剥离全部 MCP 条目 | 2026-11-13 |
 | `packages/wechat-daemon/src/agents/brain-agents.test.ts` | agent 断言 | M5 |
 | `packages/wechat-daemon/src/agents/sandbox/agent-mcp.test.ts` | 转换单测 | M5 |
 | `docs/接入方案/接入-DeepSeek.md` | 本文（已补真机实测附录） | M0/M5 |
@@ -610,7 +614,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 | R2 | 当前代码只调 `session/load`，DSH 返回 `-32601` | 自愈后**静默新建会话**，多轮记忆丢失 | 实现 `session/resume` 兜底；**已实测 resume 保留 PINEAPPLE 上下文（含 `taskkill /T /F` 强杀）** |
 | R3 | 官方只发「已提交」正文；纯推理阶段可能无帧 | 首帧误杀 + 心跳刷屏 | 实测首帧 1–2.3s，有 thought/tool/usage 帧；配置里的 `firstFrameMs` 60s、`heartbeatMs` 60s 兜底 |
 | R4 | 反向请求 `session/request_permission` 无人应答 | 整轮卡死到超时 | M2 通用应答器；默认 yolo 放行，`WEMIND_ACP_AUTO_ALLOW=0` 恢复拒绝 |
-| R5 | DSH 不读 kiro 式 MCP 文件；catalog 来源不同 | 动态 MCP 不可用/配错 | M3 按 agent 各自的 catalog；DSH 用 `WEMIND_MCP_CATALOG` 或 `mcpViaAcp`；stdio 已实测接受 |
+| R5 | DSH 不读 kiro 式 MCP 文件；catalog 来源不同 | 动态 MCP 不可用/配错 | 只读解析 profile YAML；sandbox 经 ACP 投递；`WEMIND_MCP_CATALOG` 可覆盖目录；stdio 已实测接受 |
 | R6 | 第三方 `deepseek-acp` 供应链 / 维护 | 长期不可控 | 只作冒烟/回退；锁版本；不默认启用 |
 | R7 | 版本是 RC，ACP 行为可能变化 | 升级即坏 | 锁 `0.2.1-rc.2`；升级先跑 M0 脚本；文档记录版本 |
 | R8 | Node ≥22（社区包明确；官方以安装包为准），而仓库声明 ≥20 | 旧环境起不来 | 文档标注；`agentProblem` 加 `minNode` 检查；M0 记录 |
@@ -637,7 +641,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 - **M0 已真机验证**：`initialize` / `session/new` / prompt / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 图片（-32602）/ stdio MCP 均已验；代码级集成测试 `A1=STORED`、`A2=PINEAPPLE` 通过；**微信 E2E 已通过**（`spawn deepseek` → `model set` → `prompt ok` → 收到回复）。
 - **B 暂不采用**：按你的要求先只走官方 DSH；社区 `deepseek-acp` 仅保留在文档里备查。
 - **若「微信收图」是必保功能**：官方当前 `image:false`，当前实现会友好拒绝；把「官方打开 image」作为跟进项，再讨论是否值得引入 B。
-- **M3（MCP）已完成**：`mcpViaAcp` 已实现并真机验证（见 §5.3 M3）；HTTP MCP 实测与 resource/prompt 范围留待后续。
+- **M3（MCP）已完成**：`acpMcpServers` / `mcpDelivery` 已实现并真机验证（见 §5.3 M3）；HTTP MCP 实测与 resource/prompt 范围留待后续。
 
 ---
 
@@ -670,8 +674,8 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 
 - 启动：`bin: "dsh"`、`binWin: "dsh.cmd"`、`args: ["--profile", "acp"]`、`shell: true`。
 - 沙箱：`homeEnvVar: "DSH_HOME"`、`realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGENTS.md"]`、`credentialFiles: [".credentials.yaml"]`；`configSubdir` 留空（`DSH_HOME` 本身就是 home）。
-- 协议：`restore: "resume"`、`firstFrameMs: 60_000`、`heartbeatMs: 60_000`、`images: false`、`mcpViaAcp: true`。
-- 模型：`realProfile: "acp"`（`direct` 直接使用真实 `profiles/acp/cordis.patch.yml`；`sandbox` 原样复制；缺 `- id: acp` 只提示不代改）、`model: '["deepseek-account","deepseek-flash"]'`（rc.2 旧兜底；rc.3 已失效，真被用到时只记 WARN）。
+- 协议：`restore: "resume"`、`firstFrameMs: 60_000`、`heartbeatMs: 60_000`、`images: false`、`acpMcpServers: true`、`mcpDelivery: "acp"`。
+- 模型：`realProfile: "acp"`（`direct` 直接使用真实 `profiles/acp/cordis.patch.yml`；`sandbox` 复制并剥离 MCP 条目；缺 `- id: acp` 只提示不代改）、`model: '["deepseek-account","deepseek-flash"]'`（rc.2 旧兜底；rc.3 已失效，真被用到时只记 WARN）。
 - 会话：`isolateSessions: true`。
 - 权限：`envDefaults: { DSH_PERMISSION_MODE: "danger-full-access" }`（默认值，父进程同名变量优先）。
 
@@ -702,7 +706,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 - **构建与自检**（§7.2）：`npm run build` → `wemind brain set deepseek --bin <dsh.cmd 绝对路径> --restart` → `wemind brain`（应显示 `name=deepseek`、`bin=...dsh.cmd`、`home_env=DSH_HOME`）→ `wemind brain check`（真起进程跑 `initialize` + `session/new`，默认 60s 超时）。
 - **ACP 探针回归**（M0 / 附录 A）：`scripts/acp-probe.mjs`（`ACP_BIN` / `ACP_ARGS` 指到 dsh，`ACP_MODEL` + 两次 prompt）逐项记录 `initialize` 能力、`session/new` 的 `configOptions`、首帧与 `session/update` 类型、kill 后 `resume` 的上下文、反向请求、非空 `mcpServers`、图片 prompt。
 - **微信端到端**（§7.3）：发消息 → 日志 `spawn deepseek ... → initialized → session/new|resume → prompt ok` → 收到非空回复；杀 daemon 后追问仍走 `resume`；>30s 任务不被首帧超时杀掉且静默期不刷「还在思考」；「新会话」走 `session/new`；图片友好拒绝；`加载 <MCP>` 下一条生效且 `wechat` 仍被禁止；worker 派发 / `task-reply` / `task-stop` 正常。
-- **单测**（§5.3 M5）：`brain-agents.test.ts`（deepseek agent 断言，含 `mcpViaAcp`）、`agent-mcp.test.ts`（`toAcpMcpServers` 转换/跳过/预校验）；M5 全量 136 tests 通过。
+- **单测**（§5.3 M5）：`brain-agents.test.ts`（deepseek agent 断言，含 `acpMcpServers` / `mcpDelivery`）、`agent-mcp.test.ts`（`toAcpMcpServers` 转换/跳过/预校验）、`dsh-mcp.test.ts`（profile 解析/剥离）；M5 全量 136 tests 通过。
 - **已验清单**：M0 探针、微信 brain E2E、worker E2E、M3 MCP、M4 记忆/技能、M5 多账号机制与失败路径，见附录 A。
 
 ## 待实测

@@ -7,7 +7,7 @@ import type { ResolvedAgent } from "../brain-agents.js";
 
 /**
  * Claude Code 沙箱：配置目录在 <沙箱>/claude（预设用 CLAUDE_CONFIG_DIR 指到目录本身），
- * MCP 走 ACP session/new|load 的 mcpServers（mcpViaAcp=true）——**不写** settings.json / mcp.json；
+ * MCP 走 ACP session/new|load 的 mcpServers（mcpDelivery=acp）——**不写** settings.json / mcp.json；
  * 目录取真实 ~/.claude.json（与 realHome 同级，预设 catalogFile="../.claude.json"）。
  * 模块级常量在 import 时解析，故先设环境再动态导入（同 sandbox-cline.test.ts）。
  */
@@ -77,7 +77,7 @@ describe("brain 沙箱（Claude Code）", () => {
     fs.rmSync(path.join(realHome, "skills", "written-by-brain.md"), { force: true });
   });
 
-  it("mcpViaAcp：不写 settings.json / mcp.json；catalog 来自真实 ~/.claude.json，wechat 被拒", async () => {
+  it("ACP MCP 投递：不写 settings.json / mcp.json；catalog 来自真实 ~/.claude.json，wechat 被拒", async () => {
     const { ensureBrainHome, addMcp, catalogNames, activeMcpServers } =
       await import("./mcp-sandbox.js");
     ensureBrainHome();
@@ -121,6 +121,8 @@ describe("brain 沙箱（Claude Code）", () => {
       realHome: otherHome,
       catalogFile: ".claude.json",
       mcpFormat: "mcpServers",
+      acpMcpServers: true,
+      mcpDelivery: "acp",
     } as ResolvedAgent;
     expect(activeMcpServers(other)).toEqual([
       { name: "demo", command: "other-server", args: [], env: [] },

@@ -299,9 +299,9 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
   const existing = userSessions.get(userId);
   if (existing) return existing;
   const rt = agentRuntime("brain", ag);
-  // 配了 mcpViaAcp 的 agent（DSH / Claude Code / Copilot / Codex）：MCP 随 session 下发；
-  // direct 下发真实 catalog 全量（parity）+ overlay，sandbox 下发 curated 激活集；其余 agent 传空（走各自配置文件）。
-  const mcpServers = ag.mcpViaAcp ? activeMcpServers(ag, rt) : [];
+  // direct：Agent 自己加载真实配置，只补 overlay.mcp.extra；
+  // sandbox：mcpDelivery=acp 的 Agent 拿 curated 激活集，其余 Agent 自己读沙箱配置文件。
+  const mcpServers = activeMcpServers(ag, rt);
   const map = loadSessionMap(ag);
   const saved = map[keyOf(ag, userId)];
   if (saved) {
@@ -507,7 +507,7 @@ export async function resumeSession(
     const short = sessionId.slice(0, 8);
     await ensureProcess(ag);
     const rt = agentRuntime("brain", ag);
-    const mcpServers = ag.mcpViaAcp && rt.mode !== "direct" ? activeMcpServers(ag) : [];
+    const mcpServers = activeMcpServers(ag, rt);
     const savedCwd = getSessionCwd(ag.name, sessionId);
     const cwd = savedCwd ?? rt.cwd;
     const methods: Array<"load" | "resume"> =

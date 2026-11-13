@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { stripAllDshMcpEntries, stripDshEntries } from "./sandbox/dsh-mcp.js";
+
 /**
  * 真实 profile 用户层（`<realHome>/profiles/<profile>/cordis.patch.yml`）的三件事：
  * ① 读默认模型（`readProfileDefaultModel`）；② 缺 `- id: acp` 时给用户提示（`acpOverrideHint`）；
@@ -42,27 +44,12 @@ export function readProfileDefaultModel(realHome: string, profile: string): stri
  * 没有命中时返回**原文**（逐字节复制不受影响）。
  */
 export function stripWechatMcpEntries(text: string): { text: string; removed: string[] } {
-  const lines = text.split(/\r?\n/);
-  const starts: number[] = [];
-  for (let i = 0; i < lines.length; i++) if (/^-\s/.test(lines[i])) starts.push(i);
-  const removed: string[] = [];
-  const drop = new Set<number>();
-  for (let b = 0; b < starts.length; b++) {
-    const start = starts[b];
-    const end = b + 1 < starts.length ? starts[b + 1] : lines.length;
-    const body = lines
-      .slice(start, end)
-      .filter((l) => !/^\s*#/.test(l))
-      .join("\n");
-    if (!isWechatMcpEntry(body)) continue;
-    removed.push(lines[start].trim().replace(/^-\s+/, "").split(/\s+#/)[0]);
-    for (let i = start; i < end; i++) drop.add(i);
-  }
-  if (!removed.length) return { text, removed };
-  const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  let out = lines.filter((_, i) => !drop.has(i)).join(eol);
-  if (/(\r\n|\n)$/.test(text) && !out.endsWith(eol)) out += eol; // 剔掉的若是最后一条，别把文件末尾的换行也带走
-  return { text: out, removed };
+  return stripDshEntries(text, (body) => {
+    const visible = body.filter((l) => !/^\s*#/.test(l)).join("\n");
+    if (!isWechatMcpEntry(visible)) return null;
+    const id = /^\s*-\s+(id:\s*.+)$/m.exec(visible);
+    return id ? id[1].trim().replace(/\s+#.*$/, "") : "wechat";
+  });
 }
 
 /** 一条 patch 条目是不是「微信 MCP」：跑 wemind-mcp 的，或 serverName 为 wechat 的 mcp-client。 */
@@ -76,11 +63,18 @@ function isWechatMcpEntry(body: string): boolean {
 
 /** 把真实 profile 用户层复制进某个沙箱 home（复制前剔除微信 MCP 条目；没有命中时逐字节原样）——调用方共用同一段路径与剔除逻辑。
  *  `src` 不存在时抛错，调用方按 best-effort 包 try/catch。返回被剔除的条目（供调用方记日志）。 */
-export function copyProfilePatch(realHome: string, profile: string, destHome: string): string[] {
+export function copyProfilePatch(
+  realHome: string,
+  profile: string,
+  destHome: string,
+  opts: { stripAllMcp?: boolean } = {},
+): string[] {
   const src = path.join(realHome, "profiles", profile, "cordis.patch.yml");
   const dst = path.join(destHome, "profiles", profile, "cordis.patch.yml");
   const raw = fs.readFileSync(src);
-  const { text, removed } = stripWechatMcpEntries(raw.toString("utf-8"));
+  const { text, removed } = opts.stripAllMcp
+    ? stripAllDshMcpEntries(raw.toString("utf-8"))
+    : stripWechatMcpEntries(raw.toString("utf-8"));
   const out = removed.length ? Buffer.from(text, "utf-8") : raw;
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   const same = fs.existsSync(dst) && fs.readFileSync(dst).equals(out);

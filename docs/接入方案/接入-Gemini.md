@@ -38,7 +38,7 @@ WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / 
 | 记忆/技能继承 | `inheritDirs: ["skills"]` + `inheritFiles: ["GEMINI.md"]` | 全局技能在 `<配置目录>/skills`，全局记忆是 `<配置目录>/GEMINI.md`（源码 `path.join(geminiDir, "skills")` / `getGlobalMemoryFilePath`） |
 | 设置基底 | `settingsBase: "settings.json"` + `settingsStrip: ["mcpServers"]` | 保留用户自己的 `model.name` / `security` / `ui` / `general`；只剥 `mcpServers`（MCP 必须来自沙箱 curated，防 `wechat` 回环），并强制 `general.enableAutoUpdate=false`（不要让常驻 daemon 自己换版本）。Gemini 自己用 `strip-json-comments` 解析，允许 `//` / `/* */` 注释——沙箱镜像与 MCP 目录也按 JSONC 读 |
 | 凭据同步 | `credentialFiles: [".env", "oauth_creds.json", "google_accounts.json"]` | API key 用户：`GEMINI_API_KEY` / `GOOGLE_GEMINI_BASE_URL` 在 `.env`；Google 登录用户：OAuth token 与账号缓存跟着用户日常配置走（新者胜）。**只镜像 `selectedType=oauth-personal` 却不带 token 时，Gemini 会卡在登录流程，连 ACP `initialize` 都不回** |
-| MCP | 配置目录 `settings.json` 的 `mcpServers`（kiro 格式），`mcpViaAcp: false` | `--skip-trust` 后实测可被调用（探针 MCP server 的 `probe_ping` 返回 `PONG`）；`initialize` 的 `mcpCapabilities` 只声明 http/sse、不声明 acp |
+| MCP | 配置目录 `settings.json` 的 `mcpServers`（kiro 格式），`acpMcpServers: false` | `--skip-trust` 后实测可被调用（探针 MCP server 的 `probe_ping` 返回 `PONG`）；`initialize` 的 `mcpCapabilities` 只声明 http/sse、不声明 acp |
 | 模型 | 预设不带 `model` → 跟随 `settings.json` 的 `model.name`；覆盖走 `modelArg: "--model"` | Gemini 0.66 **不支持** `session/set_config_option`（`-32601`），所以 `wemind brain set gemini --model …` 会追加成 `gemini … --model <值>`，不再走 ACP 下发 |
 | 历史回放 | `replayOnLoad: true` | `loadSession` 返回后它还会**异步回放历史**（源码 `session.streamHistory(messages)` 不 await）；恢复会话后先等帧流安静（`acp-quiet.ts`：200ms 静默窗口、最多 3s）再提问，否则旧回复会被拼进本轮答复 |
 | 免审批 | `--approval-mode yolo`（会话模式）；不设 `sessionMode` | `session/new` 回包的 `modes` 里 `currentModeId` 就是 `yolo`；`session/set_mode` 不是必需 |

@@ -93,7 +93,7 @@ describe("parseJsonc", () => {
   });
 });
 
-describe("toAcpMcpServers（mcpViaAcp 传输转换）", () => {
+describe("toAcpMcpServers（ACP MCP 传输转换）", () => {
   it("字符串 command/args/env(map) → stdio 声明（env 转 {name,value}[]）", () => {
     const { servers, skipped } = toAcpMcpServers({
       a: { command: "node", args: ["s.js"], env: { T: "1", U: 2 } },

@@ -15,6 +15,7 @@ import {
   writeSettingsBase,
 } from "./sandbox-common.js";
 import { syncInherited } from "./sandbox-inherit.js";
+import { overlayExtraAcpServers } from "./mcp-sandbox.js";
 import { agentRuntime, type AgentRuntime } from "../config/runtime.js";
 import { overlayDisableSet, overlayExtraServers, readOverlay } from "../config/overlay.js";
 const log = createLogger("wechat-daemon/mcp");
@@ -62,7 +63,7 @@ function loadCatalog(ag: ResolvedAgent, dir: string = DATA_DIR): Record<string, 
 
 /** worker 继承全量 MCP：复制 catalog 全部 server，去掉排除集与 disabled:true 的（sandbox 写文件）。 */
 function applyWorkerSandbox(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = DATA_DIR): void {
-  if (ag.mcpViaAcp) return;
+  if (ag.mcpDelivery === "acp") return;
   const target = rt ?? agentRuntime("worker", ag, dir);
   if (!canWriteAgentConfig(ag, target)) {
     warnUnwritableRealHome(ag, "worker MCP 配置");
@@ -83,7 +84,7 @@ function applyWorkerSandbox(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = 
   mcpAdapterForFile(ag, file).writeCatalog(file, servers);
 }
 
-/** worker 当前应挂载的 ACP mcpServers（配了 mcpViaAcp 的 agent 用）：全量 catalog（除排除集/disabled/坏条目）→ ACP 声明。 */
+/** worker 当前应挂载的 ACP mcpServers（mcpDelivery=acp 的 agent 用）：全量 catalog（除排除集/disabled/坏条目）→ ACP 声明。 */
 export function workerMcpServers(forAgent?: ResolvedAgent, dir: string = DATA_DIR) {
   const ag = forAgent ?? getAgent("worker");
   const cat = loadCatalog(ag, dir);
@@ -102,6 +103,21 @@ export function workerMcpServers(forAgent?: ResolvedAgent, dir: string = DATA_DI
   return servers;
 }
 
+/**
+ * worker 建立/恢复会话时应随 ACP 下发的集合。
+ * - `direct`：Agent 自己加载真实配置，只补 overlay.mcp.extra（微信独享项）；
+ * - `sandbox`：mcpDelivery=acp 的 Agent 拿全量集（除 wechat），其余 Agent 自己读沙箱配置文件。
+ */
+export function workerSessionMcpServers(
+  ag: ResolvedAgent = getAgent("worker"),
+  rt?: AgentRuntime,
+  dir: string = DATA_DIR,
+) {
+  if (!rt || rt.mode === "direct") return overlayExtraAcpServers(ag, dir);
+  if (ag.mcpDelivery !== "acp") return [];
+  return workerMcpServers(ag, dir);
+}
+
 /** 按适配器继承该 Agent 的「非 MCP」设置（kiro 的 settings/*；opencode 的 model 等同文件设置）。 */
 function syncFormatSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
   const adapter = mcpAdapterFor(ag);
@@ -112,7 +128,7 @@ function syncFormatSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
 
 function syncSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
   syncProfilePatch(ag, rt.home, "worker"); // DSH 等：继承真实 profile 用户层（provider 目录 / 默认模型）；MCP 仍走 ACP 注入
-  if (ag.mcpViaAcp) return; // 无「配置文件式」的 MCP/settings 可继承（模型走 set_config_option）
+  if (ag.mcpDelivery === "acp") return; // 无「配置文件式」的 MCP/settings 可继承（模型走 set_config_option）
   if (ag.settingsBase && ag.realHome) {
     if (!canWriteAgentConfig(ag, rt)) {
       warnUnwritableRealHome(ag, "worker 基础设置（settings）");

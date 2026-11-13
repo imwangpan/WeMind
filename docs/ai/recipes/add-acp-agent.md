@@ -28,12 +28,12 @@ $env:ACP_HOME = "$env:TEMP\dsh-probe-home"   # 测试用；真实凭据见下
 $env:ACP_MODEL = '["<provider>","<model>"]'  # 可选覆盖；DSH 的真实默认请用 profile 里的 - id: acp（rc.3 已无 deepseek-account）
 $env:ACP_PROMPT = "Reply with exactly: OK"
 $env:ACP_TEST_IMAGE = "1"   # 第 6 问（带图 prompt 能否接受）→ 决定预设 images
-$env:ACP_TEST_MCP = '[{"name":"fake","command":"node","args":["-e","0"],"env":[]}]'  # 第 6 问（mcpServers 能否被接受）→ 决定 mcpViaAcp
+$env:ACP_TEST_MCP = '[{"name":"fake","command":"node","args":["-e","0"],"env":[]}]'  # 第 6 问（mcpServers 能否被接受）→ 决定 acpMcpServers / mcpDelivery
 $env:ACP_HARD_KILL = "1"   # 模拟 WeMind 自愈：不 close，直接杀进程再 resume
 node scripts/acp-probe.mjs
 ```
 
-> **第 6 问的两个开关必须显式打开**：不设 `ACP_TEST_IMAGE` / `ACP_TEST_MCP`，探针不会带图、也不会传 `mcpServers`，你就永远答不出「`images` 该不该关」「`mcpViaAcp` 该不该开」——而这两项正是接新 agent 时最容易踩的两个坑。
+> **第 6 问的两个开关必须显式打开**：不设 `ACP_TEST_IMAGE` / `ACP_TEST_MCP`，探针不会带图、也不会传 `mcpServers`，你就永远答不出「`images` 该不该关」「`acpMcpServers` 该不该开」——而这两项正是接新 agent 时最容易踩的两个坑。
 
 > 真实凭据：把 `~/.dsh/.credentials.yaml` 复制到 `ACP_HOME`（不要打印内容），或用 `DEEPSEEK_API_KEY`。
 
@@ -75,7 +75,7 @@ node scripts/acp-probe.mjs
 
 - `loadSession`：\_\_\_\_（探针观测 / 源码核实 / 文档转述）
 - `image`：\_\_\_\_
-- `mcpViaAcp`：\_\_\_\_
+- `acpMcpServers` / `mcpDelivery`：\_\_\_\_
 - `session/set_mode`：\_\_\_\_
 - `replayOnLoad`：\_\_\_\_
 - 会话恢复方式（load / resume / 无）：\_\_\_\_
@@ -119,7 +119,8 @@ acme: {
   // images: false,                     // 图片输入不支持（DSH 靠它关掉）
   // firstFrameMs: 90_000,
   // heartbeatMs: 60_000,
-  // mcpViaAcp: true,
+  // acpMcpServers: true,
+  // mcpDelivery: "acp",
   // modelArg: "--model",               // 不支持 session/set_config_option 时模型走启动参数（gemini）
   // replayOnLoad: true,                // load/resume 返回后仍异步回放历史：恢复后先等帧流安静，否则旧历史会拼进本轮答复（gemini）
   // sessionMode: "bypassPermissions",  // 会话建立/恢复后经 session/set_mode 切模式（claude-code / codex）
@@ -154,7 +155,7 @@ acme: {
 ## 3. 配置目录 / MCP / 记忆
 
 - `homeEnvVar` 仅在 `sandbox` 下指向 `BRAIN_HOME`/`WORKER_HOME`；`direct` 不注入，Agent 直接用真实 home。`env` 同样只在 `sandbox` 注入。`configSubdir` 决定配置目录在沙箱根中的位置。
-- `mcpFormat`：`mcpServers`（顶层）或 `mcp.servers`（嵌套）；DSH 这类走 ACP 的用 `mcpViaAcp`，不要写文件。
+- `mcpFormat`：`mcpServers`（顶层）、`mcp.servers`（嵌套）或 `dshProfileYaml`（DSH profile patch）；`acpMcpServers` 只声明能力，`mcpDelivery: "acp"` 才表示 sandbox 下由 WeMind 经 ACP 投递。
 - 记忆/技能：`direct` 完全使用真实目录；`sandbox` 才按 `inheritDirs`（junction/symlink）与 `inheritFiles`（复制）选择性继承。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
 - 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时沙箱。
 - 设置继承：`settingsBase` 只在 `sandbox` 下生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）；`settingsStrip` 可改剥离键（gemini 只剥 `mcpServers`，保留用户的 `model`/`security`），`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。
@@ -182,7 +183,7 @@ wemind brain check
 | `image:false`                                  | 预设加 `images: false`（`planImageTurn()` / `askBrainTurn` 据此友好拒绝，不会 `-32602` 重试）；**别只改 daemon 侧的拦截**——能力来自预设字段             |
 | `session/set_config_option` 不支持（`-32601`） | 预设加 `modelArg`（如 gemini 的 `"--model"`）：模型改为拼到启动参数，不再走 ACP 下发；`wemind brain set <名> --model …` 仍是入口                        |
 | `session/load\|resume` 返回后仍异步回放历史    | 预设加 `replayOnLoad: true`：恢复后先等帧流安静（`acp-quiet.ts`，200ms 静默窗口、最多 3s）再提问，否则旧历史会被拼进本轮答复                            |
-| MCP 走 ACP                                     | `session/new` / `session/resume` 传 `mcpServers`（`mcpViaAcp`）；catalog 按 agent 自己的来源                                                            |
+| MCP 走 ACP                                     | `session/new` / `session/resume` 传 `mcpServers`（`acpMcpServers` + `mcpDelivery: "acp"`）；catalog 按 agent 自己的来源                                      |
 
 > `acp-brain.ts` 与 `worker-acp.ts` 的协议层统一在 `acp-connection.ts`，改一处 brain 与 worker 两边生效；进程生命周期与会话持久化仍各自实现。
 
@@ -220,7 +221,7 @@ wemind brain check
 - **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。三处入口（brain / worker / `brain check`）共用 `acp-reverse.ts`，别在某一处另写一份。
 - **committed-only + 15s 心跳 = 烧连发额度**：先调心跳，再考虑首帧。
 - **密钥不要写进 agent**：daemon 进程环境提供。
-- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-presets.ts`。
+- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`acpMcpServers`/`mcpDelivery` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-presets.ts`。
 - **冷启动耗时（2026-10-29 已量）**：DSH `initialize` **5.8s** / `session/new` 50ms；opencode ~650ms / ~800ms；qoder 1.7s / 1.5s——均远小于 `REQ_TIMEOUT=30s`，**暂不需要** `reqTimeoutMs`（见 `run-e2e.md` §7.3）。新接入的 agent 仍要先量；若超过 30s，再在 agent 里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
 - **适配器不要用 npx 当默认**：全局安装后 `bin` 写 `claude-agent-acp`（Windows `claude-agent-acp.cmd`）+ `shell: true`；npx 只做兜底。没装时用 `ADAPTER_INSTALL_HINT` 给提示，别只回一句「找不到」。适配器另有运行时依赖（`pi-acp` → `pi`）时用 `requiresBins`；`onPathAny()` 会补试 `.cmd`/`.exe`。
 - **「免审批」要用漂移检测兜住**：`ACP_TEST_TOOL=1` 跑探针——强制一次工具调用（写标记文件），断言「0 个 `session/request_permission` + 文件真的落盘」。只看 stopReason 分不出「被拒绝」和「没执行」；上游改成逐次审批时探针会先红，而不是微信第一条消息卡 30s 超时。
@@ -232,7 +233,7 @@ wemind brain check
 
 - [`docs/接入方案/接入-OpenCode.md`](../../接入方案/接入-OpenCode.md) — 原生 ACP 的实测样板
 - [`docs/接入方案/接入-DeepSeek.md`](../../接入方案/接入-DeepSeek.md) — 缺 load、`image:false`、committed-only 的反例
-- [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) — 需适配器的样板（全局安装、`CLAUDE_CONFIG_DIR` 沙箱、`mcpViaAcp`、`sessionMode`）
+- [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) — 需适配器的样板（全局安装、`CLAUDE_CONFIG_DIR` 沙箱、ACP MCP 投递、`sessionMode`）
 - [`docs/接入方案/接入-pi.md`](../../接入方案/接入-pi.md) — 适配器 + 运行时依赖（`requiresBins`）、文件式 MCP（`mcp.json`）、无审批开关的样板
 - [`docs/接入方案/接入其它-ACP-Agent.md`](../../接入方案/接入其它-ACP-Agent.md) — 通用 ACP 指南
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md) — worker 侧（进程池、任务表）对新 agent 的要求

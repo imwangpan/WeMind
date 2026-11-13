@@ -113,15 +113,8 @@ function jsonMcpFromFile(file: string): Record<string, unknown> {
 export function nativeMcpServers(ag: ResolvedAgent): Record<string, unknown> {
   if (!ag.realHome || !ag.catalogFile) return {};
   const file = path.resolve(ag.realHome, ag.catalogFile);
-  if (path.extname(file).toLowerCase() === ".toml") {
-    try {
-      return parseTomlMcpServers(fs.readFileSync(file, "utf-8")).mcpServers;
-    } catch {
-      return {};
-    }
-  }
   try {
-    return jsonMcpFromFile(file);
+    return mcpAdapterFor(ag).readCatalog(file);
   } catch {
     return {};
   }
@@ -139,8 +132,8 @@ function nativeScanFiles(ag: ResolvedAgent, rt?: AgentRuntime): string[] {
   if (ag.catalogFile && base) {
     out.add(path.resolve(base, ag.catalogFile));
   }
-  if (!ag.mcpViaAcp && ag.realHome) out.add(mcpCatalogPath(ag));
-  if (!ag.mcpViaAcp && ag.settingsBase && base) {
+  if (ag.mcpDelivery !== "acp" && ag.realHome) out.add(mcpCatalogPath(ag));
+  if (ag.mcpDelivery !== "acp" && ag.settingsBase && base) {
     out.add(path.join(base, ag.settingsBase));
   }
   for (const extra of ag.extraConfigFiles ?? []) out.add(extra);
@@ -180,8 +173,15 @@ export function warnForbiddenNativeMcp(ag: ResolvedAgent, rt?: AgentRuntime): vo
     }
     if (/\.ya?ml$/i.test(file)) {
       try {
-        const { removed } = stripWechatMcpEntries(fs.readFileSync(file, "utf-8"));
-        for (const name of removed) bad.push(`${name}（${file}）`);
+        const text = fs.readFileSync(file, "utf-8");
+        if (ag.mcpFormat === "dshProfileYaml") {
+          for (const [name, def] of Object.entries(mcpAdapterFor(ag).readCatalog(file))) {
+            if (forbiddenMcpServer(name, def)) bad.push(`${name}（${file}）`);
+          }
+        } else {
+          const { removed } = stripWechatMcpEntries(text);
+          for (const name of removed) bad.push(`${name}（${file}）`);
+        }
       } catch (e) {
         problems.push(`无法读取 ${file}：${(e as Error)?.message ?? String(e)}`);
       }
@@ -266,7 +266,7 @@ function saveActive(
 
 /** 按激活集从 catalog 取定义，写入沙箱 MCP 配置（默认空）。保留配置里其它键（如 opencode 的 model）。 */
 function applySandbox(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = DATA_DIR): void {
-  if (ag.mcpViaAcp) return;
+  if (ag.mcpDelivery === "acp") return;
   const target = rt ?? agentRuntime("brain", ag, dir);
   if (!canWriteAgentConfig(ag, target)) {
     warnUnwritableRealHome(ag, "MCP 激活集");
@@ -283,10 +283,30 @@ function applySandbox(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = DATA_D
   mcpAdapterForFile(ag, file).writeCatalog(file, servers);
 }
 
+/** overlay 里「微信独享」的额外 MCP（direct 下唯一由 WeMind 下发的集合）。 */
+export function overlayExtraAcpServers(
+  ag: ResolvedAgent = getAgent("brain"),
+  dir: string = DATA_DIR,
+) {
+  if (!ag.acpMcpServers) return [];
+  const overlay = readOverlay(ag.name, dir).overlay;
+  const extra = overlayExtraServers(overlay);
+  const disabled = overlayDisableSet(overlay);
+  const picked: Record<string, unknown> = {};
+  for (const [name, def] of Object.entries(extra)) {
+    if (disabled.has(normalizeMcpName(name)) || forbiddenMcpServer(name, def)) continue;
+    picked[name] = def;
+  }
+  if (!Object.keys(picked).length) return [];
+  const { servers, skipped } = mcpAdapterFor(ag).toAcp(picked);
+  if (skipped.length) log.warn(`跳过无法转换的 MCP：${skipped.join(", ")}`);
+  return servers;
+}
+
 /**
- * brain 当前应挂载的 ACP mcpServers（配了 mcpViaAcp 的 agent 用）。
- * - `direct`：真实 catalog 全量（parity）+ overlay.mcp.extra，减去 overlay.mcp.disable；
- * - `sandbox`：curated 激活集，并排除微信 MCP（WeMind 自己下发的集合必须防回环）。
+ * brain 当前应挂载的 ACP mcpServers。
+ * - `direct`：**不重发** Agent 已经原生加载的 catalog，只下发 overlay.mcp.extra（微信独享项）；
+ * - `sandbox`：curated 激活集（默认空），并排除微信 MCP。
  * 跳过不可转换的坏条目并记日志——官方 DSH 的 session/new 遇到起不来的 MCP 会回滚整个会话。
  */
 export function activeMcpServers(
@@ -294,15 +314,14 @@ export function activeMcpServers(
   rt?: AgentRuntime,
   dir: string = DATA_DIR,
 ) {
+  if (rt?.mode === "direct") return overlayExtraAcpServers(ag, dir);
+  if (ag.mcpDelivery !== "acp") return [];
   const cat = loadCatalog(ag, dir);
   const disabled = overlayDisableSet(readOverlay(ag.name, dir).overlay);
-  // 没有 runtime（旧调用/纯函数测试）时按沙箱口径：只返回激活集，绝不把真实配置全量下发给 ACP。
-  const curated = !rt || rt.mode === "sandbox";
-  const names = curated ? loadActive(ag.name, dir) : Object.keys(cat);
   const picked: Record<string, unknown> = {};
-  for (const n of names) {
+  for (const n of loadActive(ag.name, dir)) {
     if (!cat[n] || disabled.has(normalizeMcpName(n))) continue;
-    if (curated && forbiddenMcpServer(n, cat[n])) continue;
+    if (forbiddenMcpServer(n, cat[n])) continue;
     picked[n] = cat[n];
   }
   const { servers, skipped } = mcpAdapterFor(ag).toAcp(picked);
@@ -320,7 +339,7 @@ function syncFormatSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
 /** 继承真实配置目录的「非 MCP」设置（模型/免确认等）；MCP 段保持沙箱权威。 */
 function syncSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
   if (rt.mode === "sandbox") syncProfilePatch(ag, rt.home, "大脑");
-  if (ag.mcpViaAcp) return;
+  if (ag.mcpDelivery === "acp") return;
   if (ag.settingsBase && ag.realHome) {
     if (!canWriteAgentConfig(ag, rt)) {
       warnUnwritableRealHome(ag, "基础设置（settings）");
@@ -387,7 +406,7 @@ export function addMcp(
       text: `未找到 MCP「${name}」。可选：${catalogNames(ag, dir).join(", ") || "（无）"}`,
     };
   // 预校验：坏条目不进激活集（官方 DSH 的 session/new 会因起不来的 MCP 回滚整会话）
-  if (ag.mcpViaAcp && !mcpAdapterFor(ag).toAcp({ [name]: cat[name] }).servers.length)
+  if (ag.mcpDelivery === "acp" && !mcpAdapterFor(ag).toAcp({ [name]: cat[name] }).servers.length)
     return {
       ok: false,
       changed: false,

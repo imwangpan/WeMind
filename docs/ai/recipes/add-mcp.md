@@ -17,10 +17,10 @@ catalog（定义从哪来；一律读 Agent 的**真实**配置目录，不读 s
        cline    ~/.cline/data/settings/cline_mcp_settings.json   { "mcpServers": { ... } }
        gemini   ~/.gemini/settings.json                   { "mcpServers": { ... } }（JSONC）
        pi       ~/.pi/agent/mcp.json                      { "mcpServers": { ... } }
-       DSH               ACP session/new 的 mcpServers   （无文件式 catalog 时用 WEMIND_MCP_CATALOG）
+       DSH               ~/.dsh/profiles/acp/cordis.patch.yml 的 @deepseek-ai/dsh-mcp-client 条目（只读）
        claude-code       ~/.claude.json 的 mcpServers     （catalogFile 写成 `../.claude.json`，回到 realHome 上一层）
-       copilot           ~/.copilot/mcp-config.json        （经 ACP session/new 传递）
-       codex             ~/.codex/config.toml（原生，只读）；客户端 stdio MCP ✅（2026-11-12 复测，走 mcpViaAcp）
+       copilot           ~/.copilot/mcp-config.json        （Agent 原生读取）
+       codex             ~/.codex/config.toml（原生，只读）
   └─ 可用 WEMIND_MCP_CATALOG / WECHAT_MCP_CATALOG 覆盖
 
 激活集（哪些允许给 brain）
@@ -28,13 +28,13 @@ catalog（定义从哪来；一律读 Agent 的**真实**配置目录，不读 s
   └─ 微信指令「加载 <名>」/「卸载 <名>」修改；按 agent 分键，wechat 永久禁止
 
 transport（怎么让 agent 看到）
-  └─ brain：`sandbox` 下 applySandbox() 写沙箱的文件式 MCP 配置；mcpViaAcp 走 session/new|resume（DSH / claude-code / copilot / codex），`sandbox` 传激活集、`direct` 原样传真实 catalog
-  └─ `direct`：文件式 MCP 由 Agent 自己读真实配置；WeMind 的 `加载/卸载` 原样转给 Agent
+  └─ brain：`sandbox` 下文件式 Agent 由 applySandbox() 写沙箱配置；mcpDelivery=acp 的 Agent（DSH / claude-code / copilot / codex）走 session/new|resume，传激活集
+  └─ `direct`：所有 MCP 都由 Agent 自己读真实配置；WeMind 不重发 catalog，只补 overlay.mcp.extra；`加载/卸载` 原样转给 Agent
   └─ worker：`sandbox` 下 applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）；`direct` 由 Agent 自己加载
 
 微信独享增删（不改真实配置）
   └─ <账号>/agent-overrides/<agent>.json 的 mcp.extra / mcp.disable
-  └─ `sandbox` 全量生效；`direct` 只对 mcpViaAcp 的 Agent 生效（文件式 MCP 仍由 Agent 自己的配置决定）
+  └─ `sandbox` 全量生效；`direct` 只有 acpMcpServers 的 Agent 能收到 extra（其余仍由 Agent 自己的配置决定）
   └─ `sandbox` 的 curated 集里 mcp.disable 最后生效；wechat 永远进不了 curated 集
 ```
 
@@ -91,9 +91,9 @@ transport（怎么让 agent 看到）
 
 ### DSH
 
-> **状态：已实现并实测（2026-10-29 复核）。** `deepseek` 配置里的 `mcpViaAcp: true`——不写 MCP 配置文件，激活集经 `toAcpMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发；worker 同理继承全量（除排除集）。`addMcp` 会预校验定义（无 command/url 拒绝加载；结构不认识/残缺的条目跳过并记日志，不拖挂整个会话）。**stdio 已真机实测可用；HTTP 由 agent 声明可用（`mcpCapabilities.http:true`）但未单独真机实测；SSE 不被 ACP 支持**（`toAcpMcpServers` 只输出 stdio / `type:"http"`）。claude-code 同样走 `mcpViaAcp`；codex 也走 `mcpViaAcp: true`——`mcpCapabilities.acp=false` 只表示不声明 MCP-over-ACP，客户端传入的 stdio MCP 在 2.5.0 / 2.6.0 实测可用，原生 `~/.codex/config.toml` 仍由 Codex 自己加载且同名优先。
+> **状态：已实现并实测（2026-10-29 复核，2026-11-13 校正）。** DSH 自己读 profile YAML 里的 `@deepseek-ai/dsh-mcp-client` 条目；WeMind 只读解析用于列出/指标/微信检测。`sandbox` 下副本里的 MCP 条目全部剥离，再按 brain 激活集 / worker 全量集经 `session/new|resume` 下发（`acpMcpServers: true` + `mcpDelivery: "acp"`）。`addMcp` 会预校验定义（无 command/url 拒绝加载；结构不认识/残缺的条目跳过并记日志，不拖挂整个会话）。**stdio 已真机实测可用；HTTP 由 agent 声明可用（`mcpCapabilities.http:true`）但未单独真机实测；SSE 不被 ACP 支持**（`toAcpMcpServers` 只输出 stdio / `type:"http"`）。claude-code / copilot / codex 同样走 ACP 投递；Codex 原生 `~/.codex/config.toml` 仍由 Codex 自己加载且同名优先，`direct` 不重发。
 
-DSH 的 ACP 走 `session/new` 的 `mcpServers`，没有 kiro 式文件。用中立 catalog：
+DSH 的 MCP 写在 profile 用户层；`WEMIND_MCP_CATALOG` 仍可覆盖「微信侧可选目录」的来源（JSON 格式会按 JSON 解析）：
 
 ```powershell
 $env:WEMIND_MCP_CATALOG = "D:\wemind-data\mcp-catalog.json"
@@ -160,13 +160,14 @@ MCP                 # 列出可选与已激活
 
 ---
 
-## 5. DSH 的 `mcpViaAcp`（已实现，2026-11-02 核对）
+## 5. DSH 的 ACP MCP 投递（已实现，2026-11-13 校正）
 
-- `mcpViaAcp`：把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入（`deepseek`、`claude-code` 预设为 `true`）；
+- `acpMcpServers` 是纯能力；`mcpDelivery: "acp"` 表示 `sandbox` 下由 WeMind 把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入（`deepseek`、`claude-code`、`copilot`、`codex`）；
+- `direct` 不重发真实 catalog：Agent 自己加载的 MCP 不会被 WeMind 再传一遍；
 - `toAcpMcpServers()`：两种 JSON 键路径 → `{ name, command, args, env }` / `{ name, type:"http", url, headers }`；
 - 官方不支持 SSE；HTTP 已声明（未单独真机实测）；stdio 已真机实测；
 - 坏条目预校验：无 command/url 的条目拒绝加载，结构残缺的条目跳过并记日志——官方 `session/new` 失败会回滚整个会话，所以不能让一条坏定义拖挂全部；
-- 能力字段不自动适配：`initialize` 回包目前不被解析，`mcpViaAcp` 是**人工写进预设**的结论；接新 agent 时用探针实测 stdio/HTTP，不要只按 capabilities 声明推断。
+- 能力字段不自动适配：`initialize` 回包目前不被解析，`acpMcpServers` / `mcpDelivery` 是**人工写进预设**的结论；接新 agent 时用探针实测 stdio/HTTP，不要只按 capabilities 声明推断。
 
 ---
 

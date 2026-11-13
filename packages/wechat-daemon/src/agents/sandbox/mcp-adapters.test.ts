@@ -28,7 +28,8 @@ function agent(over: Partial<ResolvedAgent> = {}): ResolvedAgent {
     catalogFile: "settings/mcp.json",
     mcpConfigFile: "settings/mcp.json",
     mcpFormat: "mcpServers",
-    mcpViaAcp: false,
+    acpMcpServers: false,
+    mcpDelivery: "config",
     ...over,
   } as ResolvedAgent;
 }
@@ -143,12 +144,15 @@ describe("TOML [mcp_servers.*] adapter", () => {
 });
 
 describe("adapter 选择与路径", () => {
-  it("按 mcpFormat / mcpViaAcp+TOML 选择；按实际文件后缀覆盖", () => {
+  it("按 mcpFormat / 文件后缀选择；DSH profile 走 YAML 适配器", () => {
     expect(mcpAdapterFor(agent())).toBe(MCP_ADAPTERS.jsonMcpServers);
     expect(mcpAdapterFor(agent({ mcpFormat: "mcp.servers" }))).toBe(MCP_ADAPTERS.jsonMcpNested);
     expect(
-      mcpAdapterFor(agent({ name: "codex", mcpViaAcp: true, catalogFile: "config.toml" })),
+      mcpAdapterFor(agent({ name: "codex", acpMcpServers: true, catalogFile: "config.toml" })),
     ).toBe(MCP_ADAPTERS.tomlMcpServers);
+    expect(mcpAdapterFor(agent({ name: "deepseek", mcpFormat: "dshProfileYaml" }))).toBe(
+      MCP_ADAPTERS.dshProfileYaml,
+    );
     expect(
       mcpAdapterForFile(agent({ name: "custom", catalogFile: "config.toml" }), "x/config.toml"),
     ).toBe(MCP_ADAPTERS.tomlMcpServers);
