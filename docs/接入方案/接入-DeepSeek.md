@@ -58,7 +58,7 @@
 | 方法 | WeMind 的用法 | 硬依赖 |
 |---|---|---|
 | `initialize` | 握手，`clientCapabilities: {}` | 是 |
-| `session/new` | 每用户一个会话；`cwd` 默认是 `<账号>/workspace/brain`，`mcpServers` 传入当前激活集 | 是 |
+| `session/new` | 每用户一个会话；`cwd` 默认是 `<账号>/workspace/brain`；`direct` 下发真实 catalog 全量，`sandbox` 下发激活集 | 是 |
 | `session/load` | 进程重建后按 `sessionId` 恢复多轮上下文 | 否（**已不是唯一路径**：`restore: "resume"` 的 agent 直接走 `session/resume`；其余 agent 先 load、失败再 resume，都失败才 `session/new`） |
 | `session/prompt` | 发一轮消息（文本 + 可选图片） | 是 |
 | `session/update` | 拼 `agent_message_chunk`；`tool_call`/`tool_call_update` 进步；`agent_thought_chunk` 标记思考 | 是（弱依赖） |
@@ -70,7 +70,7 @@
 - agent 表：`packages/wechat-daemon/src/agents/brain-presets.ts` 的 `ACP_AGENT_PRESETS`。
 - 选择优先级：`WEMIND_BRAIN`（env）> `<数据目录>/brain.json` > `auto`（`opencode → cline → qoder → gemini → deepseek → kiro`）。
 - 配置目录：默认 `direct` 不注入 `DSH_HOME`，直接用真实 `~/.dsh`；`sandbox` 才用 `<账号>/brain-home` 或 `<账号>/worker-home`。`configSubdir` 决定配置目录在沙箱内的相对位置。
-- MCP：brain 默认空；微信指令「加载/卸载」改激活集，**只有激活集真变了才重启 ACP 生效**（`daemon-control.ts` 只在 `changed` 时调 `restartForMcpChange()`）；`wechat` 永久禁止（防它把消息发回自己）。**传输方式按 agent 分派**：kiro/opencode 写各自的配置文件；DSH 走 ACP `session/new` 的 `mcpServers`；catalog 也按 agent 各自的约定读取（详见 §5.3 M3）。
+- MCP：`direct` 由真实配置决定（DSH 走 ACP，WeMind 把真实 catalog 全量下发）；`sandbox` 下 brain 默认空，微信指令「加载/卸载」改激活集，**只有激活集真变了才重启 ACP 生效**（`daemon-control.ts` 只在 `changed` 时调 `restartForMcpChange()`）；`wechat` 永久禁止（防它把消息发回自己）。**传输方式按 agent 分派**：kiro/opencode 写各自的配置文件；DSH 走 ACP `session/new` 的 `mcpServers`；catalog 也按 agent 各自的约定读取（详见 §5.3 M3）。
 - 记忆继承：`direct` 下直接使用真实 home；`sandbox` 下 `linkRealKnowledge()` 才把 `realHome` 下的 `inheritDirs` 目录 junction 进沙箱，`inheritFiles` 单文件拷入。
 
 ### 2.3 现有客户端对「新 agent」的隐含假设
@@ -681,7 +681,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 
 **记忆 / 技能**（§5.3 M4）：`direct` 直接使用真实 `~/.dsh` 的 `skills` 与 `AGENTS.md`；`sandbox` 才按 `inheritDirs` / `inheritFiles` 复制。共享根 `~/.agents` 默认不受影响。
 
-**MCP**（§5.3 M3）：不写任何 MCP 配置文件，激活集由 `toAcpMcpServers()` 转成 `session/new|resume` 的 `mcpServers`；catalog 用 `WEMIND_MCP_CATALOG` 指向中立 kiro 格式文件；`wechat` 永久排除。
+**MCP**（§5.3 M3）：不写任何 MCP 配置文件；`direct` 下发真实 catalog 全量，`sandbox` 下发激活集，均由 `toAcpMcpServers()` 转成 `session/new|resume` 的 `mcpServers`；catalog 用 `WEMIND_MCP_CATALOG` 指向中立 kiro 格式文件；`wechat` 永久排除。
 
 ## 13. 限制
 

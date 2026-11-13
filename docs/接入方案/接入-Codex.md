@@ -119,10 +119,10 @@ codex: {
 ## 4. 已知限制
 
 1. **MCP 有两条来源，别混为一谈**（C7）：
-   - **Codex 原生 MCP**：`~/.codex/config.toml` 里定义的 server 由 Codex 自己加载；WeMind 只读解析 `[mcp_servers.*]` 用于 `列出`/指标，**不会写回、也无法 unload**。终端 Codex 能用的原生 MCP，微信侧 codex 也能用；因此 brain 的“默认空 MCP”管不住这部分。原生条目里出现 `wechat`（或任何会跑 `wemind-mcp` 的定义）时**只告警、不阻止启动**（`warnForbiddenNativeMcp`），由用户自行删除；同时启动第二个 poller 会有回环风险。
+   - **Codex 原生 MCP**：`~/.codex/config.toml` 里定义的 server 由 Codex 自己加载；WeMind 只读解析 `[mcp_servers.*]` 用于 `列出`/指标，**不会写回、也无法 unload**。终端 Codex 能用的原生 MCP，微信侧 codex 也能用；因此即使 `sandbox` 下 brain 默认空 MCP，也管不住这部分。原生条目里出现 `wechat`（或任何会跑 `wemind-mcp` 的定义）时**只告警、不阻止启动**（`warnForbiddenNativeMcp`），由用户自行删除；同时启动第二个 poller 会有回环风险。
    - **WeMind 动态 MCP**：`mcpViaAcp: true` 后，微信侧 `加载/卸载` 通过 ACP `session/new|load|resume` 的 `mcpServers` 下发给 codex；只对 WeMind catalog / overlay `mcp.extra` 里的定义有效。原生 config.toml 里的名字不会出现在 `加载` 的候选列表里。
    - **同名冲突**：Codex 原生条目优先，适配器会跳过同名的客户端条目（并记日志）；不会出现两个同名 server。
-   - **brain 默认空** 只控制 WeMind 下发的 ACP 集合；Codex 原生 `config.toml` 的 MCP 仍会被 Codex 加载。这是 codex 没有独立配置目录带来的边界，不是 WeMind 静默忽略。
+   - **`sandbox` 下 brain 默认空** 只控制 WeMind 下发的 ACP 集合；`direct` 下 WeMind 按真实 catalog 全量下发。两种模式下 Codex 原生 `config.toml` 的 MCP 都仍会被 Codex 加载。这是 codex 没有独立配置目录带来的边界，不是 WeMind 静默忽略。
 2. **不走 WeMind 的凭据沙箱**：Codex 的登录态在 `~/.codex`，适配器直接用；WeMind 不同步、不改写（§4.14）。
 3. **模型/推理档位由 Codex 决定**：WeMind 默认不下发；需要固定时 `wemind brain set codex --model "<modelId>"`（`session/set_config_option`，幂等）。
 4. **真机 E2E 已过一轮**（2026-11-01）：**worker 通道**——`wemind brain switch codex --worker` 后 `wemind task "…"` 由 codex 执行，`prompt ok 4436ms`，回话「2」正常产出（`set_mode agent-full-access` 生效，0 反向请求）；**brain 通道**——微信发「你好，自我介绍一句」，`turn start` → `session/prompt` → `prompt ok 2962ms` → `final send`（3 段），回复送达。**发图 / 冷重启 `session/load` 待复测**；切脑回切已随 pi↔codex 双向热切换验证（2026-11-01，见 `docs/接入方案/接入-pi.md`）。

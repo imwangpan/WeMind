@@ -24,7 +24,7 @@ catalog（定义从哪来；一律读 Agent 的**真实**配置目录，不读 s
   └─ 可用 WEMIND_MCP_CATALOG / WECHAT_MCP_CATALOG 覆盖
 
 激活集（哪些允许给 brain）
-  └─ <数据目录>/brain-mcps.json  { "version": 2, "active": { "<agent>": ["name", ...] } }
+  └─ <数据目录>/brain-mcps.json  { "version": 2, "active": { "<agent>": ["name", ...] } }（仅 sandbox）
   └─ 微信指令「加载 <名>」/「卸载 <名>」修改；按 agent 分键，wechat 永久禁止
 
 transport（怎么让 agent 看到）

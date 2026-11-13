@@ -126,7 +126,8 @@ graph TD
 | 数据 | `direct` | `sandbox` |
 | --- | --- | --- |
 | Agent 配置、技能、记忆、会话库 | 同一 OS 用户共享真实 home | 按账号复制/选择性继承 |
-| token、state、会话指针、tasks、overlay、workspace、MCP 激活集、日志 | 按账号隔离 | 按账号隔离 |
+| token、state、会话指针、tasks、overlay、workspace、日志 | 按账号隔离 | 按账号隔离 |
+| `brain-mcps.json`（MCP 激活集） | 不存在；MCP 由 Agent 真实配置决定 | 按账号隔离 |
 | `codex` / `pi` / `qoder` 仍读真实路径的部分 | 与终端一致，接受 | 只能尽量减少，不能假装完全隔离 |
 
 **同一台机器、多个账号由不同的人使用**时，不能用 `direct` 共享同一 OS 用户；应使用不同 OS 用户/VM，或显式 `sandbox`。同一个人自用多账号不受影响。
@@ -147,7 +148,7 @@ graph TD
 
 ## 6.3 brain 的工作模式与 MCP（runtime.ts / mcp-sandbox.ts / mcp-adapters.ts）
 
-默认 `homeMode=direct`：`agentRuntime("brain", ag)` 直接返回 Agent 真实 home，WeMind 不写任何配置、不注入 `homeEnvVar`/预设 env。技能、记忆、模型、权限、MCP、会话库都与终端共用；真实配置里的微信 MCP 只告警、不阻止启动（`warnForbiddenNativeMcp`）。
+默认 `homeMode=direct`：`agentRuntime("brain", ag)` 直接返回 Agent 的真实配置目录，WeMind 不写任何配置、不注入 `homeEnvVar`/预设 env。技能、记忆、模型、权限、MCP、会话库都与终端共用；真实配置里的微信 MCP 只告警、不阻止启动（`warnForbiddenNativeMcp`）。
 
 `sandbox` 是显式隔离选项：使用 `BRAIN_HOME` / `<账号>/brain-home`，由 adapter 复制设置基底，并按 `inheritDirs` / `inheritFiles` 选择性继承技能/记忆。WeMind 自己生成的 sandbox MCP 集永久排除 `wechat`（否则 bot 用同一 token 长轮询、与 daemon 抢消息）。`direct` 下 `加载/卸载 MCP` 原样转给 Agent，由它自己改配置。
 

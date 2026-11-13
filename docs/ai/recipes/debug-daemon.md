@@ -84,9 +84,9 @@ wemind session list <key|label>
 | `task-state.json` | 任务状态记录（顶层字段复制最近一条，供旧 CLI 读） |
 | `handoff.json` | 交接摘要（切脑后带上一次；24h TTL） |
 | `control-inbox/` / `control-out/` | CLI ↔ daemon 控制桥；`control-out/.bridge` = daemon 自己的 pid（认桥凭据） |
-| `brain-mcps.json` | 当前激活的 MCP（按 agent 分键） |
+| `brain-mcps.json` | **仅 `sandbox`**：当前激活的 MCP（按 agent 分键） |
 | `runtime.json` | 账号级 `homeMode`（缺省 `direct`） |
-| `agent-overrides/` | 微信独享配置 patch |
+| `agent-overrides/` | 微信侧 overlay：仅 `mcp.disable` / `mcp.extra`（文件按需生成） |
 | `workspace/` / `workspace.json` | brain/worker 默认工作区 |
 | `media/inbound/` | `direct` 的入站媒体（`sandbox` 才在 `<sandbox>/media/inbound`） |
 | `brain-home/` / `worker-home/` | **仅 `sandbox` 模式**的配置沙箱 |

@@ -112,7 +112,7 @@ graph TD
     B2 --> C["loadAccount（未登录则 exit 1）"]
     C --> D["解析登录者 owner（WECHAT_OWNER_ID 或扫码登录者）<br/>→ addAllowFrom(owner) 种入白名单（迁移老账号）"]
     D --> E["写 daemon.pid + 注册 exit/SIGINT/SIGTERM 清理<br/>+ 全局 unhandledRejection / uncaughtException（只记录不退出）"]
-    E --> F["ensureParityAccountDirs() + migrateLegacySandbox()<br/>+ ensureBrainHome() + ensureWorkerHome()<br/>direct 直接返回；sandbox 才准备 brain-home/worker-home 与工作区；按 TTL/总量清理 media/inbound"]
+    E --> F["ensureParityAccountDirs() + migrateLegacySandbox()<br/>+ ensureBrainHome() + ensureWorkerHome()<br/>两种模式都准备 workspace/{brain,worker}；direct 的 ensure*Home() 直接返回；sandbox 才准备 brain-home/worker-home 配置副本；按 TTL/总量清理 media/inbound"]
     F --> G["notifyStart 通知上线"]
     G --> H["接入 setTaskPush / setTaskTyping / setTaskStateSink / setTaskAckSink"]
     H --> I["clearTaskDirs + 启动 task-inbox 扫描定时器(1s)"]

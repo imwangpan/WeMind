@@ -99,7 +99,7 @@ claude-agent-acp --version     # 0.99.1
 - **`bin` 不再写 `npx`**：全局适配器本体就是 ACP server，`args` 为空。`shell: true` 是因为 Windows 上 npm 产出的是 `.cmd` shim。
 - **配置目录**：默认 `direct` 下 `CLAUDE_CONFIG_DIR=~/.claude`，直接使用终端同一份配置；`sandbox` 下才指到 `<沙箱>/claude`。实测（Claude Code 2.1.314）在隔离目录里它会连 `~/.claude.json` 一起搬进去，用户级 MCP 不会漏进大脑。
 - **记忆/技能**：`direct` 下 `CLAUDE.md`、`skills/`、`agents/`、`commands/` 直接来自真实 `~/.claude`；`sandbox` 下 `CLAUDE.md` 复制、目录用 junction/symlink 共享。`settings.json`、`plugins/` 不继承（插件可自带 MCP）。
-- **MCP 走 ACP**：`mcpViaAcp: true`，激活集随 `session/new|load` 的 `mcpServers` 下发，不写配置文件。目录取真实 `~/.claude.json` 的 `mcpServers`（`catalogFile` 用 `..` 回到 home）；`wechat` 永久禁止。
+- **MCP 走 ACP**：`mcpViaAcp: true`；`direct` 下真实 catalog 全量、`sandbox` 下激活集随 `session/new|load` 的 `mcpServers` 下发，不写配置文件。目录取真实 `~/.claude.json` 的 `mcpServers`（`catalogFile` 用 `..` 回到 home）；`wechat` 永久禁止。
 - **免审批**：`sessionMode: "bypassPermissions"`。适配器**不解析** `--dangerously-skip-permissions` 之类的 CLI flag；WeMind 在 `session/new|load|resume` 之后调用 `session/set_mode`。实测该模式下 MCP 工具调用**不再发** `session/request_permission`。
 - **图片**：预设不设 `images: false`，即按支持图片处理；适配器 `initialize` 的 `promptCapabilities.image = true`。
 - **恢复**：预设不设 `restore`，即先 `session/load`，失败再 `session/resume`，最后 `session/new`。实测 `loadSession: true`。

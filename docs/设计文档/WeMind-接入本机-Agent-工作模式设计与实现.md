@@ -23,8 +23,8 @@
 1. **配置同源**：模型、供应商、技能、记忆、规则、插件、MCP 等以本机 Agent 的真实配置为唯一基线。
 2. **终端等效**：同一个 Agent、同一份配置、同一套技能/记忆、尽量相同的工作目录与环境变量。
 3. **微信可覆盖**：账号级 overlay 可以只影响微信侧，不污染真实配置。
-4. **可观测、可回滚**：能看出当前用的是哪份配置、哪个工作区、哪些 MCP、是否已 reload；迁移失败可回滚。
-5. **不破坏既有硬约束**：同一 bot token 只能有一个收消息实例；`wechat` MCP 永远不能被 Agent 加载。
+4. **可观测、可恢复**：能看出当前用的是哪份配置、哪个工作区、哪些 MCP、是否已 reload；迁移保留 `.bak-*` 备份，可人工恢复，但不承诺自动回滚。
+5. **不破坏既有硬约束**：同一 bot token 只能有一个收消息实例；WeMind 自己生成/下发的 MCP 集永不包含 `wechat`。Agent 真实配置里的微信 MCP 在 `direct` 下只告警，`sandbox` 复制配置时剔除，真实文件不动。
 
 ### 1.3 已确认决策（2026-11-13）
 
@@ -34,15 +34,15 @@
 | 默认配置模式 | `direct`（终端完全等效）；`sandbox` 为显式隔离选项；接受 yolo + 真实 HOME 的完整权限代价 |
 | Agent 覆盖 | 10 个内置预设全部覆盖 |
 | 配置修改 | 默认改真实 Agent 配置；明确说“微信侧/仅微信”时改 overlay |
-| brain MCP | 默认空；显式加载后持久到所有由 WeMind 新建的 brain 会话，直到显式卸载 / 禁用 |
-| worker MCP | 默认加载真实全量 MCP，永久排除 `wechat` |
+| brain MCP | `direct`：真实配置全量，WeMind 不维护激活集；`sandbox`：默认空，显式加载后按 agent 持久到所有由 WeMind 新建的 brain 会话，直到卸载 / 禁用 |
+| worker MCP | `direct`：由 Agent 自己加载真实配置，WeMind 不额外下发；`sandbox`：真实全量减 `wechat`（WeMind 下发集） |
 | 启动变慢 | 只警告，不自动禁用成功的 MCP |
 | 工作区 | brain / worker 各一个默认工作区；可指定外部项目目录 |
 | 环境 | 默认继承；可选非敏感快照（覆盖版本管理器/PATH/代理），API key 不落盘 |
 | 会话 | `direct` 与终端共用 Agent 会话库；终端能看到微信会话 |
 | 并发 | 按 Agent 支持并发设计，后续用测试矩阵验证 |
-| 迁移 | 老账号尽力迁移，失败可接受数据丢失，必须保留备份与回滚 |
-| 安全护栏 | 危险路径确认、`wechat` 排除、出站敏感文件 denylist 保留 |
+| 迁移 | 老账号只搬入站媒体并重命名旧沙箱目录为 `.bak-*`；不迁移旧会话/激活集/overlay；回滚靠人工恢复备份 |
+| 安全护栏 | 危险路径确认、WeMind 下发集 `wechat` 排除、出站敏感文件 denylist 保留 |
 
 ### 1.4 非目标
 
@@ -79,7 +79,7 @@
 
 | 模式 | 行为 | 适用场景 |
 |---|---|---|
-| `direct` | 完全不生成副本；Agent 直接读取完整真实配置。WeMind 只保留 `envDefaults`（yolo 默认值）与只读凭据桥接，不写 MCP / settings / 权限 / overlay | **默认**；单机单人；要求“终端怎么配，微信就怎么跑” |
+| `direct` | 启动路径不生成副本、不注入 `homeEnvVar` / 预设 `env`；Agent 直接读取完整真实配置。WeMind 只保留 `envDefaults`（yolo 默认值）与只读凭据桥接。只有用户显式执行 `wemind config agent ...` 才写真实配置；微信侧 overlay 只由显式 `wemind config wechat ...` 写入，且文件式 Agent 不消费 | **默认**；单机单人；要求“终端怎么配，微信就怎么跑” |
 | `sandbox` | 完整复制到账号目录，Agent 与真实配置隔离；技能/记忆按 `inheritDirs` / `inheritFiles` 选择性继承 | 多账号不同人、不可信任务、Agent 不支持共享 home、需要回滚 |
 
 **默认：`direct`。** 现有账号迁移后也进入 `direct`；`sandbox` 保留为显式选项。历史遗留的其他 `homeMode` 值读取时一律按 `direct` 处理，新写入只写 `direct / sandbox`。
@@ -112,7 +112,7 @@ Phase 1 已落地（本分支）：
 - 账号默认 `homeMode = direct`（`agents/config/home-mode.ts`），读取 `<账号>/runtime.json`；缺失/损坏/历史遗留值一律回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖。
 - `agentRuntime("brain"|"worker", ag)` 在 `direct` 下直接返回 Agent 的真实配置目录，`configDir === home`；WeMind 不生成任何配置副本、不注入 `homeEnvVar`、不写 settings / MCP / 权限文件。`sandbox` 才使用 `brain-home` / `worker-home`，由 adapter 生成副本并按 `inheritDirs` / `inheritFiles` 继承。
 - brain 与 worker 的启动/会话 `cwd` 改为账号级默认工作区（`<账号>/workspace/brain`、`<账号>/workspace/worker`，`agents/config/workspace.ts`）；`session-cwd.json` 记录 `<agent>:<sessionId> → cwd`，恢复旧会话时优先使用它。`WEMIND_WORKER_CWD` 与 `task --cwd` 仍是一次性覆盖。
-- `direct` 的 MCP 完全由 Agent 真实配置决定：文件式 Agent 自己读配置；走 ACP 的 Agent 由 WeMind 把真实 catalog 全量下发，叠加 overlay 的 `mcp.extra`、减去 `mcp.disable`。`加载/卸载 MCP` 在 direct 下原样转给 Agent（由它自己改配置）。`sandbox` 才是 brain 默认空（激活集按 agent 分键持久化在 `<账号>/brain-mcps.json`，`version: 2`）、worker 真实全量减 `wechat`。
+- `direct` 的 MCP 完全由 Agent 真实配置决定：文件式 Agent 自己读配置；brain 的 ACP 型 Agent 由 WeMind 把真实 catalog 全量下发，叠加 overlay 的 `mcp.extra`、减去 `mcp.disable`。worker 在 `direct` 下不额外下发 MCP，由 Agent 自己加载真实配置；若某个 Agent 只接受 ACP 下发（例如 DSH），worker 侧能否拿到真实 MCP 取决于它自己的能力，这是 Phase 2 要逐家核实的 parity 缺口。`加载/卸载 MCP` 在 direct 下原样转给 Agent（由它自己改配置）。`sandbox` 才是 brain 默认空（激活集按 agent 分键持久化在 `<账号>/brain-mcps.json`，`version: 2`）、worker 真实全量减 `wechat`。
 - MCP/首帧指标已落到日志：`session/new|load|resume ok … mcpCount= sessionNewMs= mcpStartupMs=`、`prompt ok … firstFrameMs=`（`agents/config/mcp-perf.ts`）；`scripts/doctor.ps1` 读最近 `daemon.log`，数量/耗时超阈值只提示，**不自动禁用**。Agent 自己配置文件里的 MCP 单独记 `nativeMcpCount`（目前只有 Codex 的 `config.toml`）。
 - Codex 的 `~/.codex/config.toml` 已做**只读**解析（`agents/sandbox/toml-mcp.ts`）：`[mcp_servers.*]` 的名字/`command`/`args`/`env`/`url` 会进 `列出` 与指标；WeMind 不写 TOML、也无法替 Codex unload 原生项。原生配置里若有 `wechat`（或任何会跑 `wemind-mcp` 的定义），brain/worker **只告警、不阻止启动**（`warnForbiddenNativeMcp`），由用户自行删除。
 - 微信 overlay 位于 `<账号>/agent-overrides/<agent>.json`；CLI 为 `wemind config wechat ...`，微信侧为 `微信配置 ...` 确定性指令。
@@ -131,7 +131,7 @@ Phase 1 已落地（本分支）：
 | 配置 | 默认 `direct`，完全使用真实配置；WeMind 不写任何 Agent 文件 | 仍需各 Agent 实测“哪些设置无需新会话”，Phase 2 补矩阵 |
 | 配置回写 | 默认改真实配置；overlay 只写微信侧 | 已实现；JSONC 注释/YAML/TOML 的保留格式编辑留到 Phase 2 |
 | 技能/记忆 | `direct` 共享真实目录；`sandbox` 复制回退不保证双向 | 需要在无 symlink 权限的平台记录“副本漂移”告警 |
-| MCP | `direct` 全量真实配置；`sandbox` 才默认空 / 全量减 `wechat`；日志有 `mcpCount/sessionNewMs/firstFrameMs`，doctor 超阈值只警告；Codex 原生 TOML 只读可见、含 `wechat` 只告警 | 已实现；各 Agent 的耗时基线数值仍要在真机上收集后写进接入文档 |
+| MCP | `direct` 下 brain 用真实全量、worker 不额外下发；`sandbox` 才 brain 默认空 / worker 全量减 `wechat`；日志有 `mcpCount/sessionNewMs/firstFrameMs`，doctor 超阈值只警告；Codex 原生 TOML 只读可见、含 `wechat` 只告警 | 主体已实现；MCP 预检/跳过坏条目留 Phase 2；各 Agent 的耗时基线数值仍要在真机上收集后写进接入文档 |
 | cwd | brain/worker 各有账号级默认工作区；旧会话按 `session-cwd.json` 恢复 | 已实现；各 Agent 对“恢复时改 cwd”的接受度待逐家实测 |
 | 环境 | 默认继承 daemon；可选非敏感快照 | 已实现；不绑定 fnm/nvm/Volta/asdf/mise |
 | 权限 | 预设 yolo + 宿主默认放行（`WEMIND_ACP_AUTO_ALLOW=0` 可恢复拒绝） | 已保留；真正隔离仍需独立 OS 用户/VM |
@@ -167,7 +167,7 @@ AgentHomeResolver ──► Agent 进程
    ├── direct：Agent 真实配置目录（配置/技能/记忆/会话）
    └── sandbox：账号副本 + 继承 + 生成的 MCP 文件
    │
-   ├── McpPolicy（direct 全量 / sandbox brain 默认空 / sandbox worker 全量）
+   ├── McpPolicy（direct brain 真实全量、worker 不额外下发 / sandbox brain 默认空 / sandbox worker 全量）
    ├── WorkspaceManager（brain / worker 默认工作区）
    ├── EnvProvider（继承或非敏感快照）
    ├── SessionBinder（sessionId ↔ cwd）
@@ -181,7 +181,7 @@ AgentHomeResolver ──► Agent 进程
 | `AgentHomeResolver`（`agents/config/runtime.ts`） | 根据 Agent 预设、账号配置与角色（brain/worker）决定 `homeMode`、真实配置目录 / 沙箱根、`cwd`、媒体目录 |
 | `OverlayStore`（`agents/config/overlay.ts`） | 读写 `<账号>/agent-overrides/<agent>.json` 的 `mcp.disable` / `mcp.extra` |
 | `McpAdapter`（`agents/sandbox/mcp-adapters.ts`） | 每种 MCP **文件格式**的路径/读写/剥离/ACP 转换/原生只读/设置继承；Agent 只是选择其中一种，新增格式才加 adapter |
-| `McpPolicy`（`agents/sandbox/mcp-sandbox.ts`、`worker-sandbox.ts`） | `direct` 用真实全量；`sandbox` 算激活集/全量集；处理 disable/extra 与 `wechat` 排除 |
+| `McpPolicy`（`agents/sandbox/mcp-sandbox.ts`、`worker-sandbox.ts`） | `direct` 下 brain 用真实全量、worker 不额外下发；`sandbox` 算激活集/全量集；处理 disable/extra 与 `wechat` 排除 |
 | `WorkspaceManager`（`agents/config/workspace.ts`） | 校验、创建、读取 brain/worker 默认工作区；区分 managed/external |
 | `EnvProvider`（`agents/config/env-snapshot.ts` + `brain-agents.ts`） | 继承 daemon 环境，或加载非敏感快照（PATH/代理/locale）；解析顺序不绑定某个版本管理器 |
 | `SessionBinder`（`agents/config/session-cwd.ts`） | 保存 `<agent>:<sessionId> → cwd`；恢复时使用并校验 cwd |
@@ -194,7 +194,7 @@ AgentHomeResolver ──► Agent 进程
 |---|---|---|
 | 配置来源 | `direct`（默认，真实配置）/ `sandbox`（账号副本） | 同左 |
 | 默认工作区 | `<账号>/workspace/brain` | `<账号>/workspace/worker` |
-| MCP 默认 | `direct`：真实配置全量；`sandbox`：**空**，显式加载后持久到所有新会话 | `direct`：真实配置全量；`sandbox`：真实全量减 `wechat` |
+| MCP 默认 | `direct`：真实配置全量；`sandbox`：**空**，显式加载后持久到所有新会话 | `direct`：由 Agent 自己加载真实配置，WeMind 不额外下发；`sandbox`：真实全量减 `wechat` |
 | 会话 | 每个用户一条当前 session | 每个任务一条 session |
 | 进程 | 1 个常驻 ACP 进程 | N 个进程池 |
 | 重载 | 空闲时 reload / 新会话 | 每次 `acquire` 重新解析配置；任务中不热切换 |
@@ -216,9 +216,9 @@ AgentHomeResolver ──► Agent 进程
 | `cline` | `CLINE_DIR` / `CLINE_DATA_DIR` / `CLINE_MCP_SETTINGS_PATH` | `~/.cline` | `cline/` | `mcp.json`（`CLINE_MCP_SETTINGS_PATH`） | `cline/data/`（SQLite，假设/待实测） | `--auto-approve true` | `direct`；`sandbox` 可选 | 没有 `homeEnvVar`：direct 直接用真实配置；sandbox 靠预设 env 指到副本 |
 | `pi` | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | 根 | `mcp.json` | `sessions/` | 无（默认不逐次审批） | `direct`；`sandbox` 可选 | sandbox 下 `pi-acp` 仍读真实 `~/.pi/pi-acp/session-map.json`、`~/.agents/skills` |
 | `claude-code` | `CLAUDE_CONFIG_DIR` | `~/.claude` | `claude/` | ACP `mcpServers` | `claude/` | `session/set_mode bypassPermissions` | `direct`；`sandbox` 可选 | 预设未声明 `homeEnvVar`，direct 直接用真实配置；`~/.claude.json` 混状态 |
-| `codex` | 无 home env | `~/.codex` | 真实 `~/.codex` | **stdio MCP 支持**（2026-11-12 复测；`mcpCapabilities.acp=false` 只指 MCP-over-ACP） | `~/.codex` | `INITIAL_AGENT_MODE=agent-full-access` + `set_mode` | 仅 `direct`（无法重定向） | 无独立配置目录；原生 `config.toml` 由 Codex 自己加载 |
+| `codex` | 无 home env | `~/.codex` | 真实 `~/.codex` | **stdio MCP 支持**（2026-11-12 复测；`mcpCapabilities.acp=false` 只指 MCP-over-ACP） | `~/.codex` | `INITIAL_AGENT_MODE=agent-full-access` + `set_mode` | `direct`（没有 `homeEnvVar`，`sandbox` 也无法真正隔离 `~/.codex`） | 无独立配置目录；原生 `config.toml` 由 Codex 自己加载 |
 
-**结论（2026-11-13 按实现修正）**：默认 `direct`，10 个预设都直接使用真实配置。WeMind **不写任何 Agent 文件**；`sandbox` 才复制配置并生成 MCP/settings/权限副本。`claude-code` / `codex` 的 MCP 走 ACP，direct 下由 WeMind 把真实 catalog 全量下发（同名原生优先），但仍不写真实配置。
+**结论（2026-11-13 按实现修正）**：默认 `direct`，10 个预设都直接使用真实配置。WeMind **不写任何 Agent 文件**；`sandbox` 才复制配置并生成 MCP/settings/权限副本。`claude-code` / `codex` 的 MCP 走 ACP；`direct` 下 brain 由 WeMind 把真实 catalog 全量下发（同名原生优先），worker 不额外下发，但仍不写真实配置。
 
 > **`direct` 的明确语义**：真实配置里有什么 MCP，Agent 就加载什么；WeMind 不保证 brain 默认空 MCP。这是用户显式选择“完全交给 Agent”的代价，不是缺陷。
 
@@ -230,8 +230,8 @@ AgentHomeResolver ──► Agent 进程
 
 ```text
 1. Agent 真实配置基底（模型/供应商/技能/记忆/设置）
-2. overlay            微信独享的 mcp.disable / mcp.extra（只对 ACP 下发或 sandbox 生效）
-3. MCP policy         direct 真实全量；sandbox 才 brain 默认空 / worker 全量减 wechat
+2. overlay            微信独享的 mcp.disable / mcp.extra（只对 brain 的 ACP 下发或 sandbox 生效）
+3. MCP policy         direct brain 真实全量、worker 不额外下发；sandbox 才 brain 默认空 / worker 全量减 wechat
 4. role policy        yolo envDefaults、路径、会话目录
 5. validation         解析、必填项、wechat 告警、危险路径
 6. materialize        direct 不生成；sandbox 完整复制
@@ -241,11 +241,12 @@ AgentHomeResolver ──► Agent 进程
 
 ### 7.2 direct 模式（默认）
 
-`direct` 是“WeMind 不介入 Agent 配置”的模式，用于希望微信侧与终端**完全一致**、且接受自己维护配置的用户：
+`direct` 是“WeMind 不介入 Agent 启动配置”的模式，用于希望微信侧与终端**完全一致**、且接受自己维护配置的用户：
 
-- 不生成任何配置副本，不写 MCP / settings / 权限 / overlay 文件，不注入 `homeEnvVar`、预设 `env`；仍保留 `envDefaults`（yolo 等免审批默认值，父进程显式设置优先）与只读凭据桥接。
+- 启动路径不生成任何配置副本，不写 MCP / settings / 权限文件，不注入 `homeEnvVar`、预设 `env`；仍保留 `envDefaults`（yolo 等免审批默认值，父进程显式设置优先）与只读凭据桥接。
 - 文件式 Agent（kiro / opencode / qoder / cline / gemini / pi）完全由 Agent 自己读真实配置；WeMind 不写、不删。
-- 走 ACP 下发的 Agent（DSH / Claude Code / Copilot / Codex）由 WeMind 把真实 catalog **全量**转成 `mcpServers` 随 `session/new|resume|load` 下发，再叠加 overlay 的 `mcp.extra`、减去 `mcp.disable`。这是“让 ACP 型 Agent 也能用上 WeMind 的 catalog”的唯一方式，不改变真实配置文件。
+- Brain 的 ACP 型 Agent（DSH / Claude Code / Copilot / Codex）由 WeMind 把真实 catalog **全量**转成 `mcpServers` 随 `session/new|resume|load` 下发，再叠加 overlay 的 `mcp.extra`、减去 `mcp.disable`。这是“让 ACP 型 Agent 也能用上 WeMind 的 catalog”的唯一方式，不改变真实配置文件。
+- Worker 在 `direct` 下不额外下发 MCP，由 Agent 自己加载真实配置；若某个 Agent 只接受 ACP 下发（例如 DSH），其 worker 侧 MCP 是否可用取决于 Agent 自身，这是 Phase 2 要逐家核实的 parity 缺口。
 - 真实配置里存在 `wechat` MCP（或会跑 `wemind-mcp` 的定义）时**只告警、不阻止启动**；用户需要自己从 Agent 配置里移除，否则可能出现第二个 poller / 回环。
 - 微信里的 `加载 / 卸载 MCP` 不拦截，原样作为消息交给 Agent；它能不能改、怎么改由 Agent 自己的能力决定。
 - 不改写任何真实配置；`wemind config agent set` 这类写入口在此模式下仍会写真实文件（用户显式操作），但启动路径不做任何生成/同步。
@@ -254,7 +255,7 @@ AgentHomeResolver ──► Agent 进程
 
 ### 7.3 sandbox 模式
 
-使用 `brain-home` / `worker-home`，WeMind 生成副本，用于：
+使用 `<账号>/brain-home` / `<账号>/worker-home`，WeMind 生成副本；实际 Agent 配置目录还要叠加预设的 `configSubdir`（例如 Gemini 是 `<沙箱>/.gemini`、OpenCode 是 `<沙箱>/opencode`）。只有 `sandbox` 会复制配置、同步凭据、按 `inheritDirs` / `inheritFiles` 继承技能/记忆、并按角色生成 MCP/settings/权限文件；`direct` 不进入这条路径。适用场景：
 
 - 多账号由不同人使用；
 - 不可信任务；
@@ -285,7 +286,7 @@ AgentHomeResolver ──► Agent 进程
 
 - 只支持 `mcp.disable`（从有效集移除）与 `mcp.extra`（增加真实配置没有的 MCP）。其它键（如 `config`、`replyStyle`）会被忽略并告警；Agent 的模型/权限/settings 修改请直接改真实配置，不走 overlay。
 - `mcp.extra` 使用中性描述（`type: stdio|http` + `command/args/env` 或 `url/headers`），由各 Agent 适配器转成原生格式；不支持的类型明确拒绝，不猜测。
-- 生效范围：`sandbox` 的 brain 与 worker 都生效；`direct` 只对走 ACP 下发的 Agent（DSH / Claude Code / Copilot / Codex）生效。`direct` 的文件式 Agent 由 Agent 自己读配置，overlay 不参与，WeMind 会提示“改 Agent 配置”。
+- 生效范围：`sandbox` 的 brain 与 worker 都生效；`direct` 只对 brain 的 ACP 下发集合（DSH / Claude Code / Copilot / Codex）生效。`direct` 的文件式 Agent 由 Agent 自己读配置，overlay 不参与，WeMind 会提示“改 Agent 配置”；`direct` 的 worker 不额外下发，overlay 也不参与。
 - overlay **不保存密钥**：`mcp.extra` 的认证信息通过环境变量/密钥链注入；发现 `*_KEY`、`*_TOKEN`、`*_SECRET`、`*_PASSWORD`、`*_CREDENTIAL*` 字面值要告警并拒绝写入。
 - `sandbox` 的 brain 是否自动加载 `extra` 仍由激活集决定；worker 的 `extra` 默认生效。`mcp.disable` 永远最后生效。
 - **工作区不放进 agent overlay**：它是“账号 + 角色（brain/worker）”级配置，放在 `<账号>/workspace.json`（见第 9 章）。把工作区塞进 per-agent overlay 会导致切换 Agent 时工作区跟着变，不符合“brain / worker 各一个默认工作区”的目标。
@@ -304,7 +305,7 @@ AgentHomeResolver ──► Agent 进程
 }
 ```
 
-第一期只创建空文件与读取入口，不定义具体字段语义；等真正需要时再补。这样既不会把“微信独享配置”做成一个大杂烩，也不会限制未来扩展。
+第一期只创建空文件，当前不读取其中字段，也不定义具体语义；等真正需要时再补。这样既不会把“微信独享配置”做成一个大杂烩，也不会限制未来扩展。
 
 ### 7.6 修改入口
 
@@ -372,7 +373,7 @@ ACP 的 client（WeMind）能处理的反向请求是固定的：`session/reques
 5. Admin MCP 校验 `WEMIND_ADMIN_TOKEN`，并核对 token 绑定的账号 / agent / 角色与当前进程一致；不匹配直接拒绝。
 6. ConfigService 解析目标文件：
    - `scope=agent`：按 agent preset 解析真实配置路径（只允许该 agent 的已知配置根内）；
-   - `scope=wechat`：`<账号>/agent-overrides/<agent>.json`，只允许 `mcp.disable` / `mcp.extra`（会话级、不落盘）。
+   - `scope=wechat`：`<账号>/agent-overrides/<agent>.json`，只允许 `mcp.disable` / `mcp.extra`（不写入 Agent 真实配置）。
 7. 读取当前文件，比对调用方带来的 `expectedRevision`（或服务端刚生成的 mtime/size/hash）；发现终端侧刚改过就返回冲突，不覆盖。
 8. 应用修改：`scope=agent` 接受路径 `set` / `unset`；`scope=wechat` 只接受 `mcp.enable` / `mcp.disable` / `mcp.add` / `mcp.remove`。拒绝疑似密钥键、`..` 越界、指向真实配置之外的路径。
 9. 备份原文件（最多保留 5 份）→ 同目录临时文件 → `rename` 原子替换 → 追加审计记录（谁、什么时间、哪个文件、改了哪些键、备份在哪）。
@@ -437,7 +438,7 @@ ACP 的 client（WeMind）能处理的反向请求是固定的：`session/reques
 | 角色 | `direct`（默认） | `sandbox` |
 |---|---|---|
 | brain | Agent 真实配置全量：文件式 Agent 自己读；ACP 型由 WeMind 全量下发，`extra` 增、`disable` 减 | **空**；用户显式 `加载` 后持久到 `<账号>/brain-mcps.json`（按 agent 分键），`卸载` 后移除 |
-| worker | Agent 真实配置全量 | （真实配置中的全部 MCP ∪ `extra`）− `wechat` − `disable` |
+| worker | 由 Agent 自己加载真实配置，WeMind 不额外下发；`mcpViaAcp` 型 Agent 是否拿到真实 MCP 取决于 Agent 自身 | （真实配置中的全部 MCP ∪ `extra`）− `wechat` − `disable` |
 
 `sandbox` 的 brain 默认空是为了保证最佳首帧/启动速度；这不是“真实配置里没有”，而是“微信侧不自动加载”。用户显式加载后，激活集持久化到磁盘，跨会话、跨 daemon 重启保留（按 agent 命名空间隔离）。这里的“所有会话”指 WeMind 新建的 brain 会话；终端自己开的会话不受 WeMind 的激活集影响。
 
@@ -462,9 +463,12 @@ ACP 的 client（WeMind）能处理的反向请求是固定的：`session/reques
 ### 8.2 有效集计算
 
 ```text
-direct（brain / worker）:
+direct brain:
   Agent 自己加载真实配置；ACP 型额外收到
   (Agent 真实配置已启用 MCP ∪ overlay.mcp.extra) − overlay.mcp.disable
+
+direct worker:
+  Agent 自己加载真实配置；WeMind 不额外下发
 
 sandbox brain:
   catalog = Agent 真实配置已启用 MCP ∪ overlay.mcp.extra
@@ -478,7 +482,7 @@ sandbox worker:
   − overlay.mcp.disable
 ```
 
-`sandbox` 的 brain 不会因为 `mcp.extra` 里“存在”某个 MCP 就自动加载；它只有在用户显式 `加载` 后才进入激活集。`sandbox` 的 worker 则按“无人值守任务需要开箱即用”的语义，直接使用真实全量加 extra。`direct` 完全由 Agent 真实配置决定；overlay 只对 ACP 下发集合生效。
+`sandbox` 的 brain 不会因为 `mcp.extra` 里“存在”某个 MCP 就自动加载；它只有在用户显式 `加载` 后才进入激活集。`sandbox` 的 worker 则按“无人值守任务需要开箱即用”的语义，直接使用真实全量加 extra。`direct` 完全由 Agent 真实配置决定；overlay 只对 brain 的 ACP 下发集合生效。
 
 如果 `brain-mcps.json` 里的某个名字在 catalog 中已经不存在（真实配置删了、extra 也删了），不要静默丢弃：保留记录、在 `wemind mcp list` / `doctor` 里标记 `missing`，等用户确认后再清理。
 
@@ -489,6 +493,8 @@ sandbox worker:
 - `sandbox` 副本里的微信 MCP 会被剔除（`stripWechatFromConfigCopy`），真实文件不动；`direct` 下 Agent 真实配置里的微信 MCP 只告警，由用户自行删除。
 
 ### 8.3 传输方式
+
+下表是 **`sandbox` 的写入位置**。`direct` 下 WeMind 不写任何 Agent 配置文件：文件式 Agent 自己读真实配置；走 ACP 的 Agent 通过 `session/new|load|resume` 的 `mcpServers` 下发，不落盘。
 
 | Agent | 写入位置 |
 |---|---|
@@ -515,7 +521,7 @@ MCP 数量会同时影响：
 
 - 不自动禁用“成功但慢”的 MCP；只警告，避免微信侧行为悄悄偏离终端。
 - 记录 `mcpCount`、`mcpStartupMs`、`sessionNewMs`、`firstFrameMs`（已实现，`agents/config/mcp-perf.ts`）；`scripts/doctor.ps1` 在数量/耗时异常时提示（阈值与代码里的常量保持一致）。
-- 启动前做轻量 preflight；坏条目跳过并告警。
+- MCP 预检/跳过坏条目尚未实现（Phase 2）：当前只在“定义无法转成 ACP”时跳过并告警；起不来的 MCP 由 Agent 自己报错，WeMind 不替它探测或剔除。
 - DSH 这类“坏 MCP 会回滚整个 session”的 Agent 要在日志与文档里明确提示风险；WeMind 不因此阻止启动，由用户决定是否保留该 MCP。
 - 用户可用 `mcp.disable` 显式关闭重型 MCP；微信侧额外 MCP 用 `mcp.extra`。brain 的 `mcp.extra` 只是“可加载目录”，仍需显式 `加载`；worker 的 `mcp.extra` 默认生效。
 
@@ -528,7 +534,7 @@ MCP 数量会同时影响：
 - 绝对路径、已存在、是目录；显式指定时不自动创建任意路径。
 - 本地磁盘，realpath 可解析；Windows 拒绝 UNC（`\\server\share` / `//server/share`），所有平台都拒绝显式网络挂载语义（例如 `file://host/...`）。
 - 当前用户可读写；POSIX 默认目录 0700、文件 0600，Windows 用数据目录自身的 ACL（`chmod` 是 no-op，不能假装等价）。
-- 不能是账号根目录（`<账号>/` 本身）、`brain-home`、`worker-home`、Agent 真实配置目录、系统目录或家目录根。
+- 不能是账号根目录（`<账号>/` 本身）、`DATA_DIR` 根、`brain-home`、`worker-home`、`agent-overrides`、`media`、`agent-sessions`、Agent 真实配置目录、系统目录或家目录根；也不能位于这些目录内部、包含 `DATA_DIR` 根，或落在其它账号的数据目录内。
 - 路径稳定；`session/new` 的 `cwd` 是会话身份的一部分。
 - 项目级技能/规则需要项目根时，用户应把工作区指到项目根。
 - `external` 工作区不随账号删除；`managed` 工作区随账号清理。
@@ -540,7 +546,7 @@ MCP 数量会同时影响：
 ├── workspace/
 │   ├── brain/       # brain 默认 managed 工作区
 │   └── worker/      # worker 默认 managed 工作区
-└── workspace.json   # 覆盖配置
+└── workspace.json   # 可选；首次 workspace set 时创建
 ```
 
 `workspace.json`：
@@ -571,12 +577,12 @@ MCP 数量会同时影响：
 
 | 路径 | 生效模式 | 作用 |
 |---|---|---|
-| `workspace/{brain,worker}/` | 全部 | 默认 managed 工作区；首次启动创建，0700 |
-| `workspace.json` | 全部 | brain / worker 的默认工作区覆盖；唯一权威 |
-| `session-cwd.json` | 全部 | `<agent>:<sessionId> → cwd`；恢复会话时校验 |
-| `agent-overrides/<agent>.json` | 全部 | 微信独享的 Agent 配置 patch 与 MCP 增删 |
-| `wechat-settings.json` | 全部 | 预留的账号级微信行为设置（回复风格等），第一期空 |
-| `env.json` | 可选 | 非敏感环境快照（PATH/代理/locale），不含密钥 |
+| `workspace/{brain,worker}/` | 全部 | 默认 managed 工作区；账号启动时自动创建，0700 |
+| `workspace.json` | 全部（按需） | brain / worker 的默认工作区覆盖；唯一权威；只在 `workspace set` 时创建 |
+| `session-cwd.json` | 全部（按需） | `<agent>:<sessionId> → cwd`；恢复会话时校验；首次记录会话 cwd 时创建 |
+| `agent-overrides/<agent>.json` | 全部（按需） | 微信侧 overlay，只支持 `mcp.disable` / `mcp.extra`；目录随账号创建，文件首次写入时生成 |
+| `wechat-settings.json` | 全部 | 预留的账号级微信行为设置（回复风格等）；daemon 启动时若无则创建空 `{version:1}` |
+| `env.json` | 可选（按需） | 非敏感环境快照（PATH/代理/locale），不含密钥 |
 | `brain-mcps.json` | 仅 `sandbox` | brain 显式激活的 MCP 集；按 agent 分键；`direct` 不读 |
 | `media/inbound/` | `direct` | 入站文件/视频/无转写语音；`sandbox` 仍放各自 home 下 |
 | `brain-home/`、`worker-home/` | 仅 `sandbox` | 账号副本；`direct` 不创建 |
@@ -591,7 +597,7 @@ MCP 数量会同时影响：
 - 已有 session 保持原 cwd；改默认工作区只影响下一条新会话。
 - 设置/重置工作区时，微信与 CLI 都提示“需要新会话才能生效”。
 - 恢复旧会话时使用该 session 记录的 cwd；如果 Agent 不接受新 cwd，则明确报错或新建，不静默搬家。
-- 新增 `<账号>/session-cwd.json`（建议）或在 `session-registry.json` 记录 cwd；`brain-sessions.json` 的 string→string 格式保持兼容。
+- 已新增 `<账号>/session-cwd.json` 记录 cwd；`brain-sessions.json` 的 string→string 格式保持兼容。
 - 旧会话没有 cwd 记录时，优先用 Agent 自己保存的会话 cwd；两者都没有才回落到当前默认工作区，并在日志/回复里标注“旧会话 cwd 未知”。
 
 ### 9.4 worker 工作区
@@ -604,7 +610,7 @@ MCP 数量会同时影响：
 
 以下路径拒绝或要求二次确认：
 
-- 账号根、`brain-home`、`worker-home`；
+- 账号根、`DATA_DIR` 根、`brain-home`、`worker-home`、`agent-overrides`、`media`、`agent-sessions`；
 - Agent 真实配置目录（如 `~/.kiro`、`~/.claude`）；
 - 家目录根、系统目录、磁盘根；
 - 解析后指向上述位置的 symlink/junction；
@@ -684,7 +690,7 @@ wemind env capture [--key <key>] [--dry-run]
 - brain：`<agent>:<userId> → sessionId`。
 - worker：`<agent>:task-<编号>@<userId> → sessionId`。
 - 切换 Agent 不覆盖其他 Agent 的会话。
-- 新增 cwd 记录：建议 `session-cwd.json`，键 `<agent>:<sessionId>`；`session-registry.json` 增加 `cwd` 仅用于展示。
+- 已实现 cwd 记录：`session-cwd.json`，键 `<agent>:<sessionId>`；`session-registry.json` 的 `cwd` 仅用于展示。
 
 ### 11.3 DSH 的处理
 
@@ -732,7 +738,7 @@ wemind env capture [--key <key>] [--dry-run]
 
 - WeMind 账号数据继续按 `<账号>/` 隔离：token、state、session 指针、tasks、overlay、workspace、日志。
 - Agent 真实配置、技能、记忆、会话库默认共享。
-- 每个账号可有独立的 `agent-overrides/<agent>.json`、`workspace.json`、`brain-mcps.json`。
+- 每个账号可有独立的 `agent-overrides/<agent>.json`、`workspace.json`，以及 **仅 `sandbox` 使用**的 `brain-mcps.json`。
 - 多个 daemon 可同时运行；每个 daemon 各自拉起 Agent 进程。
 
 ### 13.2 并发假设
@@ -755,7 +761,7 @@ wemind env capture [--key <key>] [--dry-run]
 如果某个 Agent 被实测不支持共享 Agent 真实配置目录：
 
 1. 标记 `sharedHome: unsupported`；
-2. 该 Agent 默认 `sandbox`（`direct` 仍共用 Agent 真实配置目录，解决不了共享冲突，只适合用户明确要求“完全不介入”的场景）；
+2. 提示用户显式选择 `sandbox`（或使用独立 OS 用户/虚拟机），**不悄悄改变账号的默认 `direct`**；
 3. `wemind doctor` 与文档明确说明；
 4. 不因为单个 Agent 影响其他 Agent 的 parity 默认。
 
@@ -765,7 +771,7 @@ wemind env capture [--key <key>] [--dry-run]
 
 必须保留：
 
-- `wechat` MCP 按名字和定义双重排除，真实配置中的微信 MCP 也不加载。
+- WeMind 自己生成/下发的 MCP 集按名字和定义双重排除 `wechat`；Agent 真实配置里的微信 MCP 在 `direct` 下只告警、不阻止启动，由用户自行删除；`sandbox` 复制配置时剔除，真实文件不动。
 - 出站附件敏感文件 denylist、UNC/网络路径拒绝、NTFS 数据流拒绝、大小上限。
 - 工作区不能是账号根、Agent 真实配置目录、系统目录；危险路径二次确认。
 - 不把 API key/token 写入 overlay、env 快照；`sandbox` 若必须复制含密钥文件，按 0600 + 敏感文件 denylist + 告警处理，且不得进入 overlay。
@@ -785,20 +791,22 @@ wemind env capture [--key <key>] [--dry-run]
 ### 15.1 新账号
 
 - 默认 `homeMode = direct`。
-- 创建 `<账号>/workspace/{brain,worker}`、`media/inbound`、`agent-overrides/` 目录与空的 `wechat-settings.json`；不主动写 `workspace.json` / `runtime.json`（缺省分别就是 managed / direct，账号目录搬家后不会留下失效绝对路径）。某个 Agent 第一次被使用时再创建它的空 overlay。
+- 创建 `<账号>/workspace/{brain,worker}`、`media/inbound`、`agent-overrides/` 目录与空的 `wechat-settings.json`；不主动写 `workspace.json` / `runtime.json`（缺省分别就是 managed / direct，账号目录搬家后不会留下失效绝对路径）。per-agent 的 `agent-overrides/<agent>.json` 只在首次执行 `wemind config wechat ...` 写入时按需生成，不预创建空文件。
 - 不创建 `brain-home` / `worker-home`，除非用户选择 `sandbox`。
 
 ### 15.2 老账号
 
-用户接受“迁移不了可以丢数据”，因此采用“尽力迁移、必须备份”：
+用户接受“迁移不了可以丢数据”，因此采用“尽力迁移、必须备份”。当前实现只有下面两步：
 
-1. 先把 `brain-home/media/inbound/` 搬到 `<账号>/media/inbound/`；失败则保留原目录并告警。
-2. 检测到 `brain-home` / `worker-home` 时，重命名为 `brain-home.bak-<时间>` / `worker-home.bak-<时间>`，保留回滚。
-3. 尝试把旧会话文件复制到对应 Agent 真实配置目录的会话目录；布局不兼容就跳过并记录。
-4. 生成新的 `workspace.json`、空 overlay、空 `wechat-settings.json`、`session-cwd.json`。
-5. 迁移 `brain-mcps.json`：旧全局激活集只归到迁移时的当前 agent，其他 agent 初始为空；无法映射的 MCP 记录告警。
-6. 启动后微信通知登录者“已切换到 direct 模式；旧数据备份在 …”。
-7. `wemind config migrate --rollback` 可恢复旧沙箱目录与模式；已搬走的入站媒体按记录搬回，搬不回的留在新位置并提示。
+1. 先把 `brain-home/media/inbound/` 搬到 `<账号>/media/inbound/`；冲突文件跳过，失败则保留原目录并告警。
+2. 检测到 `brain-home` / `worker-home` 时，重命名为 `brain-home.bak-<时间>` / `worker-home.bak-<时间>`，保留人工恢复点。
+
+明确未实现、不要按旧方案理解：
+
+- 不复制/迁移旧 Agent 会话文件，也不改写 `brain-sessions.json` / `worker-sessions.json`。旧沙箱会话在 `direct` 下可能无法 `load/resume`，此时如实报错，用户在微信发 `新会话` 即可。
+- 不迁移 `brain-mcps.json`；该文件只在 `sandbox` 下有语义。
+- 不生成 `workspace.json` / `session-cwd.json` / per-agent overlay；这些文件都按需创建。
+- 没有 `wemind config migrate --rollback` 命令，也没有启动后的微信迁移通知；回滚只能人工把 `.bak-<时间>` 目录改回原名。
 
 不自动删除备份；由用户确认后清理。
 
@@ -810,19 +818,19 @@ wemind env capture [--key <key>] [--dry-run]
 
 | 命令 | 作用 |
 |---|---|
-| `wemind config show [--key <key|label>]` | 显示 homeMode、真实配置目录、overlay 目录、workspace、env 快照键与 MCP 激活集文件 |
+| `wemind config show [--key <key|label>]` | 显示 homeMode、真实配置目录、overlay 目录、workspace、env 快照键与 `sandbox` 的 MCP 激活集文件 |
 | `wemind config home-mode [direct|sandbox]` | 查看/写入 `<账号>/runtime.json`；重启 daemon 后生效 |
 | `wemind config reload [--key <key|label>]` | 经控制桥让常驻 brain 重建进程，空闲时执行 |
 | `wemind config agent show|get|set|unset|edit <agent> [<键路径>] [值] [--file <相对路径>]` | 默认修改真实 Agent 配置；写入前备份并做并发校验 |
-| `wemind config wechat show|get|set|unset|edit <agent> [<file#键路径>] [值]` | 只读写微信独享 overlay，不碰真实文件 |
+| `wemind config wechat show|edit <agent>` | 只读写微信侧 overlay 的 `mcp.disable` / `mcp.extra`，不碰真实文件 |
 | `wemind workspace show|set <绝对路径>|reset [--role brain|worker] [--key <key|label>]` | 查看/设置/重置工作区；提示新会话生效 |
-| `wemind mcp list|enable|disable|add|remove [--key <key|label>]` | 管理 brain 的 MCP 激活集与 overlay `disable`/`extra`；worker 不通过该命令单独配置 |
+| `wemind mcp list|enable|disable|add|remove [--key <key|label>]` | 管理 **`sandbox` 下** brain 的 MCP 激活集与 overlay `disable`/`extra`；`direct` 下不维护激活集；worker 不通过该命令单独配置 |
 | `wemind env capture|show|clear [--dry-run] [--key <key|label>]` | 捕获/查看/清除非敏感环境快照；`--dry-run` 只预览 |
 | `wemind config promote` / `wemind doctor` | **Phase 2/3 预留**，当前未实现；不要写进用户说明当作现成命令 |
 
 ### 16.2 微信
 
-- `加载 <MCP>` / `卸载 <MCP>`：brain 激活集；只影响新建的 brain 会话，当前会话不变，需要新会话生效。
+- `加载 <MCP>` / `卸载 <MCP>`：`sandbox` 下操作 brain 激活集，只影响新建的 brain 会话，当前会话不变；`direct` 下原样作为消息交给 Agent，由 Agent 自己决定能否修改配置。
 - 真实配置里没有的额外 MCP：先通过 `微信配置` / `wechat_config` 工具写入 `mcp.extra`，再 `加载`（brain）或直接生效（worker）；不在聊天里让模型手写 JSON。
 - `工作区` / `设置工作区 <路径>` / `重置工作区`：仅登录者；回复“需要新会话生效”。
 - `微信配置 ...`：确定性入口，避免自然语言歧义。
@@ -847,12 +855,12 @@ wemind env capture [--key <key>] [--dry-run]
 - `env capture`（通用 PATH / 版本管理器 / 代理；不含密钥，不绑定 fnm）。
 - 会话共享与终端可见（先验 kiro / opencode / qoder / gemini / claude-code）。
 - 配置 reload / hash 检测 / 冲突备份。
-- 老账号迁移：已实现尽力迁移（搬入站媒体、旧 `brain-home`/`worker-home` 重命名备份）；会话布局迁移只做能识别的部分，失败不阻塞启动。`config migrate --rollback` 尚未实现，回滚依靠 `.bak-*` 目录人工恢复。
+- 老账号迁移：只实现搬入站媒体与旧 `brain-home`/`worker-home` 重命名备份；不迁移旧会话、`brain-mcps.json` 或 overlay。`config migrate --rollback` 尚未实现，回滚依靠 `.bak-*` 目录人工恢复。
 
 ### Phase 2：剩余 Agent 与体验补全（未开始）
 
 - ✅ 已完成：MCP/首帧观测 + doctor 告警；Codex `config.toml` 只读 MCP 解析与 `wechat` 告警；`codex-acp 2.6.0` 全套探针复测。
-- ✅ 已完成（握手级）：10 个预设里 8 个已装 Agent 的 `brain check` 矩阵通过（kiro / qoder 本机未安装）。
+- ✅ 已完成（握手级）：10 个预设全部通过 `brain check`（kiro / qoder 修复 PATH 后补跑）。
 - ✅ 已完成（prompt 级）：早期临时配置下 9/10 跑通两轮真实对话（opencode / gemini / cline / pi / copilot / codex / kiro / claude-code / qoder，见 §18.2.1）；deepseek 已确认 `session/new` 跟随真实 profile 的 `- id: acp`，但其 provider 依赖（用户自己的模型网关）未就绪，prompt 未补跑。
 - 待做：等用户自己把 DSH 的 provider 依赖准备好后补跑 deepseek；再扩到技能/记忆共享与会话可见性，并在 `direct` / `sandbox` 两种模式下各跑一遍。
 - 待做：混合配置文件的三路合并；JSONC 注释与 YAML 的保留格式编辑（引入 `jsonc-parser` / `yaml` Document API 后开放）。
@@ -884,21 +892,21 @@ wemind env capture [--key <key>] [--dry-run]
 ### 18.2 每个 Agent 的 E2E
 
 1. 终端改模型/设置 → 新微信会话使用新值。
-2. 微信侧 overlay 改模型/设置 → 微信生效，真实配置不变。
+2. 微信侧明确说“微信侧/仅微信”时改 overlay 的 MCP 增删 → 微信生效，真实配置不变；模型/权限/settings 不走 overlay。
 3. 终端新增 skill/memory → 微信可用；微信写 memory → 终端可见。
 4. yolo：常见工具无逐次询问；宿主边缘请求自动放行。
-5. brain 默认无 MCP；显式加载一个 → 所有新会话都有；卸载 → 消失。
-6. worker 默认全量 MCP 减 `wechat`；坏 MCP 跳过/告警。
+5. `sandbox` 下 brain 默认无 MCP；显式加载一个 → 所有新会话都有；卸载 → 消失。`direct` 下由真实配置决定。
+6. `sandbox` 下 worker 默认全量 MCP 减 `wechat`；坏 MCP 只告警，由 Agent 自己处理。`direct` 下 worker 不额外下发，由 Agent 自己加载。
 7. 工作区切到项目根 → 新会话看到项目 `AGENTS.md`/skills；旧会话不变。
 8. 微信会话在终端 Agent 会话列表中可见。
 9. daemon 重启后 session resume/load，cwd 正确。
 10. 两个账号不同 overlay/workspace，同时运行不串数据。
 11. 终端 + 微信 + 多 worker 并发，配置/会话库不损坏（按 Agent）。
-12. 真实配置包含 `wechat` 时，微信侧不加载，且不形成第二个 poller。
-13. 老账号迁移、备份、回滚。
+12. 真实配置包含 `wechat` 时：`direct` 只告警、不阻止启动；`sandbox` 副本剔除、真实文件不动；WeMind 下发集永不包含 `wechat`。
+13. 老账号迁移、备份与人工恢复（没有自动回滚命令）。
 14. `direct` 入站文件/视频落到 `<账号>/media/inbound/`，prompt 中的绝对路径可读，30 天/1GB 清理仍生效。
 15. 直接编辑 overlay 与微信自然语言修改都能触发 idle reload；改真实配置也能在下一条新会话生效。
-16. 对 ACP 传 MCP 的 Agent，实测“传空列表”确实不加载真实配置里的 MCP；若只是增量合并，说明该 Agent 的原生 MCP 不受 WeMind 控制，只做提示。
+16. `sandbox` 下对 ACP 传 MCP 的 Agent，实测“传空列表”确实不加载真实配置里的 MCP；若只是增量合并，说明该 Agent 的原生 MCP 不受 WeMind 控制，只做提示。`direct` 不承诺空集。
 
 ### 18.2.1 2026-11-12 握手矩阵（本机实测）
 
@@ -947,7 +955,7 @@ wemind env capture [--key <key>] [--dry-run]
 
 ### 18.3 性能验收
 
-- brain 默认空 MCP，启动/首帧不应比现状明显变慢。
+- `sandbox` 下 brain 默认空 MCP，启动/首帧不应比现状明显变慢；`direct` 由真实配置决定，不承诺空集。
 - worker 全量 MCP 允许变慢，但必须记录 `mcpCount` / `mcpStartupMs` / `sessionNewMs` / `firstFrameMs`（已实现）；异常只警告，不自动禁用。
 - 具体阈值按 Agent 实测后写入接入文档，本文不预设硬指标。
 
@@ -958,7 +966,7 @@ wemind env capture [--key <key>] [--dry-run]
 | 风险 / 问题 | 处理 |
 |---|---|
 | 终端与微信同时写同一配置文件 | `direct` 下 WeMind 不写 Agent 文件（只有显式 `config agent` 写入口会备份并做并发校验）；需要隔离时用 `sandbox` |
-| Agent 有全局锁/单实例限制 | 实测后标 `sharedHome: unsupported`，回退 `sandbox` |
+| Agent 有全局锁/单实例限制 | 实测后标 `sharedHome: unsupported`，提示用户显式改用 `sandbox` |
 | 会话库 SQLite/多进程并发 | 按 Agent 实测；必要时限制并发或隔离会话目录 |
 | MCP 多导致启动/首帧变慢 | 记录指标、警告、允许 disable；不自动改变行为 |
 | JSONC/YAML/TOML 格式与注释 | 第一期：JSON/无注释 JSONC 可写；含注释 JSONC 拒绝；YAML/TOML 只读。Phase 2 再接保留格式编辑器 |
@@ -966,7 +974,7 @@ wemind env capture [--key <key>] [--dry-run]
 | codex 无独立配置目录、原生 MCP 与 ACP MCP 双来源 | 原生 `config.toml` 由 Codex 加载；WeMind 只读解析用于列出/指标，只管理 ACP 下发的额外项，同名原生优先。原生含 `wechat` → 只告警（无法替它 unload），由用户自行删除 |
 | Claude Code `settings.json` 含网关 token | `direct` 不复制该文件，Agent 自己读；`sandbox` 才复制，按 0600 + 敏感文件 denylist + 告警处理 |
 | Copilot `--allow-all-tools` 仍可能触发路径/URL 审批 | 实测；若频繁则仅对该账号显式启用 `--allow-all`，默认不悄悄放宽网络访问 |
-| DSH 坏 MCP 回滚 session | 启动前预检；跳过坏 MCP |
+| DSH 坏 MCP 回滚 session | 当前不预检；坏 MCP 由 Agent 自己报错，日志提示风险，由用户决定是否保留 |
 | 多账号共享真实配置 | 单机单人可接受；不同人用不同 OS 用户/VM |
 | yolo + 真实 HOME 的提示注入风险 | 明确安全前提；建议独立 OS 用户/VM；保留出站 denylist |
 | 老账号会话迁移失败 | 备份后接受丢失；不阻塞启动 |

@@ -10,7 +10,7 @@ import { findForbiddenMcpEntries, normalizeMcpName } from "../sandbox/agent-mcp.
 /**
  * 微信侧独享配置：`<账号>/agent-overrides/<agent>.json`。
  *
- * WeMind 不改写 Agent 配置，所以这里**只支持会话级 MCP 调整**：
+ * WeMind 不改写 Agent 配置，所以这里**只支持微信侧 MCP 调整**：
  * - `mcp.disable`：不把同名 MCP 交给 ACP（仅对走 ACP 下发 MCP 的 agent 有效）；
  * - `mcp.extra`：额外追加的 MCP 定义（对象即定义，不落盘）。
  *

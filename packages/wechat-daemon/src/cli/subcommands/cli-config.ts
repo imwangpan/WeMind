@@ -127,7 +127,7 @@ async function cmdOverlay(rest: string[], opts: Opts, dir: string, agent: string
       `agent：${agent}`,
       `overlay：${overlayPath(agent, dir)}`,
       jsonText(read.overlay),
-      "提示：微信侧 overlay 只支持 mcp.disable / mcp.extra（会话级、不落盘）。修改 Agent 真实配置用 `wemind config agent ...`；默认改真实配置，只有明确说“微信侧/仅微信”时才用 overlay。",
+      "提示：微信侧 overlay 只支持 mcp.disable / mcp.extra（不写回 Agent 真实配置）。修改 Agent 真实配置用 `wemind config agent ...`；默认改真实配置，只有明确说“微信侧/仅微信”时才用 overlay。",
     ].join("\n");
   }
   if (sub === "edit") {

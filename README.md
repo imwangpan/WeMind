@@ -219,16 +219,16 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `state.json`                                  | 长轮询游标（记录读到哪条了；`updatesBuf`）、各会话 `context_token`、`lastMessageId`（去重；POSIX 下权限 600） |
 | `qr_login.json` / `qrcode.png` / `qrcode.txt` | 扫码登录临时态与二维码（登录后即失效；`qr_login.json` POSIX 下权限 600）                                    |
 | `brain-sessions.json`                         | `<agent>:<userId> → ACP sessionId` 映射（按大脑分开存，切换 agent 互不覆盖）；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建） |
-| `brain-mcps.json`                             | brain 当前激活的 MCP 集（默认空）                                                                           |
-| `runtime.json`                                | 账号级 `homeMode`：默认 `direct`；可显式设 `sandbox`。缺失/损坏/旧值一律回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖 |
-| `agent-overrides/<agent>.json`                | 微信侧 overlay：只支持 `mcp.disable` / `mcp.extra`（会话级，不写 Agent 配置）；默认改 Agent 真实配置，只有明确说“微信侧/仅微信”时才用它 |
-| `workspace.json` / `workspace/{brain,worker}/` | brain / worker 默认工作区配置与 managed 目录；改默认值只影响新会话 |
-| `session-cwd.json`                            | `<agent>:<sessionId> → cwd`；恢复旧会话时使用，避免把旧会话搬到新工作区 |
-| `env.json`                                    | 可选的非敏感环境快照（PATH/代理/locale）；API key/token 不落盘 |
+| `worker-sessions.json`                        | worker（远程任务）`ACP sessionId` 映射（键 `<agent>:task-<编号>@<userId>`），任务中断后据此 `load`/`resume` 续跑 |
+| `brain-mcps.json`                             | **仅 `sandbox`**：brain 当前激活的 MCP 集（按 agent 分键，默认空）；`direct` 不读，MCP 完全由 Agent 真实配置决定 |
+| `runtime.json`                                | 账号级 `homeMode`：默认 `direct`；可显式设 `sandbox`。缺失/损坏/旧值一律回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖；按需创建 |
+| `agent-overrides/<agent>.json`                | 微信侧 overlay：只支持 `mcp.disable` / `mcp.extra`（不写 Agent 真实配置）；目录随账号创建，文件在首次写入时生成。默认改 Agent 真实配置，只有明确说“微信侧/仅微信”时才用它 |
+| `workspace.json` / `workspace/{brain,worker}/` | brain / worker 默认工作区配置与 managed 目录；`workspace/{brain,worker}/` 随账号创建，`workspace.json` 按需创建；改默认值只影响新会话 |
+| `session-cwd.json`                            | `<agent>:<sessionId> → cwd`；恢复旧会话时使用，避免把旧会话搬到新工作区；按需创建 |
+| `env.json`                                    | 可选的非敏感环境快照（PATH/代理/locale）；API key/token 不落盘；按需创建 |
 | `wechat-settings.json`                        | 预留的账号级微信行为设置（回复风格等），第一期为空 |
 | `media/inbound/`                              | `direct` 的入站文件/视频/无转写语音；`sandbox` 放当前角色沙箱下的 `media/inbound`（brain 为 `brain-home/media/inbound`，worker 为 `worker-home/media/inbound`） |
 | `brain-home/`                                 | **仅 `sandbox` 模式**的 brain 配置沙箱；`direct` 模式不使用（迁移时重命名为 `.bak-<时间>`） |
-| `worker-sessions.json`                        | worker（远程任务）`ACP sessionId` 映射（键 `<agent>:task-<编号>@<userId>`），任务中断后据此 `load`/`resume` 续跑 |
 | `worker-home/`                                | **仅 `sandbox` 模式**的 worker 配置沙箱；`direct` 模式不使用                       |
 | `agent-sessions/`                             | **仅 `sandbox`**：DSH 的派生会话配置（`deepseek/{brain,worker}/` 与 `session-root-*.patch.yml`，由 `isolateSessions` + `--patch` 指过来，避免把别的 agent 写的 `sessions/` 当成自己的库）；`direct` 不生成，DSH 使用真实会话库 |
 | `daemon.log`                                  | daemon 日志（stdout/stderr 合并；运行中按 `WEMIND_LOG_MAX_MB`（默认 10MB）轮转、保留 `WEMIND_LOG_KEEP`（默认 3）份） |
@@ -243,6 +243,8 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain.pid` / `daemon.pid`                    | 进程身份的 JSON 记录（含起进程时**真实用的** bin/args）/ 裸整数 pid（供 `wemind list/stop` 精确识别与清理） |
 | `brain-runtime.json`                          | daemon 实际生效的大脑（agent/source/bin/args；启动/热切换写入，stop 清掉）——`wemind list` 在运行时据此显示真实 agent |
 | `pm2.app.json`                                | **仅 `--runner pm2`**：pm2 的 app 声明（5s 重拉 / 最多 50 次 / 退出码 78（大脑配置错误）与 75（同账号已有实例）停手 / 日志合并到 `daemon.log`）    |
+
+**新账号骨架**：daemon 启动时只自动创建 `agent-overrides/`、`media/inbound/`、`workspace/{brain,worker}/` 与空的 `wechat-settings.json`。`runtime.json`、`workspace.json`、`session-cwd.json`、`env.json`、`brain-mcps.json`、`brain-home/`、`worker-home/`、`agent-sessions/` 都是按需生成；per-agent 的 `agent-overrides/<agent>.json` 也只在首次写入微信侧配置时生成。
 
 **多账号**：每个微信账号一份独立子目录。用 `WECHAT_ACCOUNT=<key>` 切换（→ `~/.wemind/<key>/`），或用 `WECHAT_DATA_DIR=<完整路径>` 指定任意目录（**仅 `wemind daemon` 直跑生效**；`wemind start` 按 key 寻址、会忽略它）。不同账号 = 不同目录 = 完全隔离，可各自登录、各跑一个 daemon。**`<key>` 不能随手起名**：它由 `wemind login` 从 botId 派生并登记进 `~/.wemind/accounts.json`（`wemind list` 可查）；写一个没登记过的名字，daemon 会去一个不存在的目录找凭证。日常用 `wemind start <key|label>` 选账号即可，不必手设这个变量。
 

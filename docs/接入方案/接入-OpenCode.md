@@ -172,7 +172,7 @@ opencode agent 附带 `OPENCODE_DISABLE_PROJECT_CONFIG: "1"`（防御性：不�
 | 隔离项 | 保持 `wechat` 在 `FORBIDDEN` | 同左 |
 
 要点：
-- brain 仍**默认空 MCP**；微信指令 `加载/卸载` 后写激活集 → 重启 ACP 生效。
+- `sandbox` 下 brain 仍**默认空 MCP**（`direct` 由真实配置决定）；微信指令 `加载/卸载` 后写激活集 → 重启 ACP 生效。
 - opencode 的 `mcp.servers` 对象**原样透传**（CATALOG 若来自用户 OpenCode 配置，格式已正确）。
 - CATALOG 默认路径按 agent 的 `catalogFile` 取**单一文件名**（opencode 预设是 `<realHome>/opencode.json`；**不**自动回退到 `opencode.jsonc`——你的真实配置若只有 `.jsonc`，需要 `WEMIND_MCP_CATALOG` 显式指过去）。
 

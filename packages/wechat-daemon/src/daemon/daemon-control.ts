@@ -263,7 +263,7 @@ export async function handleControl(
       return `微信侧 overlay（${overlayPath(ag, DATA_DIR)}）：\n${JSON.stringify(read.overlay, null, 2)}`;
     }
     return (
-      "微信侧 overlay 只支持 mcp.disable / mcp.extra（会话级、不落盘）。" +
+      "微信侧 overlay 只支持 mcp.disable / mcp.extra（不写回 Agent 真实配置）。" +
       `请直接编辑 ${overlayPath(ag, DATA_DIR)}，或用 CLI：wemind config wechat edit ${ag}。` +
       "要改 Agent 配置请说「修改 <agent> 配置」（默认改真实配置）。"
     );
