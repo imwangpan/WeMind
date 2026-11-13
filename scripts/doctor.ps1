@@ -222,7 +222,8 @@ $FirstFrameWarnMs = 15000
 Section "MCP / 首帧耗时（最近日志）"
 $logFiles = @()
 Get-ChildItem -Path $DataRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-  foreach ($name in @("daemon.log", "daemon.log.1")) {
+  # 旧→新：读完 daemon.log.1 再读 daemon.log，数组末尾才是“最近一次”。
+  foreach ($name in @("daemon.log.1", "daemon.log")) {
     $f = Join-Path $_.FullName $name
     if (Test-Path -LiteralPath $f) { $logFiles += $f }
   }

@@ -122,7 +122,7 @@ describe("overlay", () => {
 });
 
 describe("env snapshot", () => {
-  it("只保留白名单，密钥类键丢弃；合并时快照覆盖父环境", () => {
+  it("只保留白名单，密钥类键丢弃；合并时当前环境优先、快照兜底", () => {
     const snap = captureEnvSnapshot({
       PATH: "/bin",
       LANG: "zh_CN.UTF-8",
@@ -131,9 +131,13 @@ describe("env snapshot", () => {
     });
     expect(snap.keys).toEqual({ PATH: "/bin", LANG: "zh_CN.UTF-8", HTTPS_PROXY: "http://proxy" });
     expect(mergeEnvSnapshot({ PATH: "/old", HOME: "/home" }, snap.keys)).toMatchObject({
-      PATH: "/bin",
+      PATH: "/old",
       HOME: "/home",
+      LANG: "zh_CN.UTF-8",
+      HTTPS_PROXY: "http://proxy",
     });
+    // 当前环境没定义的键才用快照（autostart 拉起时 PATH 不完整的场景）
+    expect(mergeEnvSnapshot({ HOME: "/home" }, snap.keys)).toMatchObject({ PATH: "/bin" });
   });
 
   it("读回时再次过滤未知/密钥键", () => {

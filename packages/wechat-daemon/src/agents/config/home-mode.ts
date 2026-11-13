@@ -46,6 +46,7 @@ export function writeHomeMode(mode: HomeMode, dir: string = DATA_DIR): void {
 
 export function homeModeDescription(mode: HomeMode): string {
   if (mode === "sandbox") return "sandbox（完整复制到账号目录，与真实配置隔离）";
-  if (mode === "mirror") return "mirror（以真实配置为基线，生成必要视图并做合并）";
+  if (mode === "mirror")
+    return "mirror（当前与 real 等效：同样以真实配置为基线生成视图；保留给后续合并策略）";
   return "real（真实配置/技能/记忆/会话为主，必要时生成最小视图）";
 }

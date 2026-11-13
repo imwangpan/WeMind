@@ -56,7 +56,7 @@ packages/wechat-daemon/src/
 │   │   └── agent-config-writer.ts # 真实配置备份、并发校验、原子写
 │   └── sandbox/              # 配置视图/沙箱共用的 MCP 策略与继承（real 也用这里的 MCP 子集）
 │       ├── mcp-sandbox.ts    # brain 视图/沙箱：MCP 隔离（→ 第 6 章）
-│       ├── worker-sandbox.ts # worker 视图/沙箱（全量 MCP 除 wechat）（→ 第 7 章）
+│       ├── worker-sandbox.ts # worker 视图/沙箱（真实 − wechat − EXCLUDE − disabled + overlay）（→ 第 7 章）
 │       ├── mcp-adapters.ts   # 按文件格式的 MCP 适配器（读写/剥离/ACP 转换/原生只读）
 │       ├── agent-mcp.ts      # MCP 格式纯函数、wechat 判定与 ACP 转换
 │       └── sandbox-inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单）

@@ -247,6 +247,8 @@ MCP
 | 27 | 终端等效 | 在终端改真实 Agent 配置/技能/记忆后，下一条微信消息可见；会话历史与终端共用（`homeMode=real`） |
 | 28 | 微信独享 overlay | `wemind config wechat set <agent> <path> <value>` 只改 `<账号>/agent-overrides/<agent>.json`，真实配置不变；新会话生效 |
 | 29 | 默认工作区 | brain/worker 分别使用 `<账号>/workspace/{brain,worker}`；`wemind config workspace set` 后已有会话 cwd 不变、新会话用新目录 |
+| 30 | worker MCP 有效集 | 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；`real`/`mirror` 无视图的 agent 不写真实 `mcp.json`，日志告警 |
+| 31 | 配置热重载 | `wemind config reload` 立即重建视图；brain 有回合在跑时日志记「等当前回合结束再重启」，回复不中断；daemon 未运行时命令返回非零 |
 
 ### 7.1 控制面九项（1.2.0 新增，手工）
 

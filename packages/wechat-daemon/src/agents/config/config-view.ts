@@ -7,6 +7,8 @@ import type { AgentRole } from "../brain-config.js";
 import type { ResolvedAgent } from "../brain-agents.js";
 import { applyPatch, readJsonConfig, resolveOverlayTarget, type AgentOverlay } from "./overlay.js";
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
+import { copyFileIndependent } from "../sandbox/mcp-adapters.js";
+import type { HomeMode } from "./home-mode.js";
 
 const log = createLogger("wechat-daemon/config-view");
 
@@ -28,6 +30,8 @@ type ViewManifest = {
   agent: string;
   links: string[];
   generated: string[];
+  /** 由 overlay 补丁生成的文件（view root 相对路径）；overlay 键被移除时要还原成真实文件的链接。 */
+  overlaid: string[];
 };
 
 export function viewRoot(role: AgentRole, agent: string, dir: string): string {
@@ -50,9 +54,12 @@ function readManifest(root: string): ViewManifest {
       generated: Array.isArray(j.generated)
         ? j.generated.filter((x): x is string => typeof x === "string")
         : [],
+      overlaid: Array.isArray(j.overlaid)
+        ? j.overlaid.filter((x): x is string => typeof x === "string")
+        : [],
     };
   } catch {
-    return { version: 1, agent: "", links: [], generated: [] };
+    return { version: 1, agent: "", links: [], generated: [], overlaid: [] };
   }
 }
 
@@ -99,7 +106,7 @@ function removeLink(p: string): void {
  * 直接写 `target.view` 会穿透父链接改到真实文件。写前把最近的链接父目录换成真实目录，
  * 再用 linkTree 把除目标文件之外的兄弟重新链接回真实目录。
  */
-function materializeLinkedParent(view: ConfigView, target: string): void {
+function materializeLinkedParent(view: ConfigView, target: string, overrides: Set<string>): void {
   const relParent = path.relative(view.configDir, path.dirname(target));
   if (relParent === "" || relParent.startsWith("..")) return;
   let cur = view.configDir;
@@ -110,7 +117,6 @@ function materializeLinkedParent(view: ConfigView, target: string): void {
 
     const realDir = fs.realpathSync(cur);
     const relRoot = path.relative(view.root, cur);
-    const relTarget = path.relative(view.configDir, target);
     removeLink(cur);
     fs.mkdirSync(cur, { recursive: true });
 
@@ -121,7 +127,7 @@ function materializeLinkedParent(view: ConfigView, target: string): void {
       if (r === relRoot || r.startsWith(`${relRoot}${path.sep}`)) desired.delete(r);
     }
     // 目标文件本身不链接，留给 applyOverlayToView 写真实副本。
-    linkTree(realDir, cur, new Set([relTarget]), prevLinks, desired, view.root, view.configDir);
+    linkTree(realDir, cur, overrides, prevLinks, desired, view.root, view.configDir);
     writeManifest(view.root, { ...prev, links: [...desired] });
     log.warn(`overlay 目标位于链接目录内，已断开父链接并重建真实目录：${cur}`);
     return;
@@ -202,8 +208,9 @@ function ensureFileLink(
       desired.add(rel);
       return;
     } else if (prevLinks.has(rel)) {
-      // 之前由 WeMind 建过链接，但目标变了：重建；不删 Agent 自己写的非清单文件。
-      removePath(dst);
+      // 链接位置被外部换成了真实文件（原子保存）：保留用户改动，本次不重建、也不再登记为链接。
+      // 清理阶段会告警并把它从 manifest.links 里去掉。
+      return;
     } else {
       return;
     }
@@ -263,9 +270,10 @@ function linkTree(
     const relConfig = path.relative(configDir, dst);
     const relRoot = path.relative(root, dst);
     if (overrides.has(relConfig)) {
-      // 上一次构建可能把整个文件链接到真实 home；现在它要由 WeMind 生成，
-      // 必须先断开链接，否则后续写副本会穿透到真实配置。
-      if (lstat(dst)?.isSymbolicLink()) removeLink(dst);
+      // 上一次构建可能把整个文件链接到真实 home（或 Windows 上退化成 hardlink/副本）；
+      // 现在它要由 WeMind 生成，必须先断开，否则后续写副本会穿透到真实配置。
+      const st = lstat(dst);
+      if (st && !st.isDirectory()) removePath(dst);
       continue;
     }
     let st: fs.Stats;
@@ -314,19 +322,24 @@ export function overrideRelPaths(ag: ResolvedAgent, overlay: AgentOverlay): stri
   return [...out];
 }
 
-/** 把真实文件先复制一份作为 patch 基底；只在视图目标不存在时复制，避免覆盖上一轮生成结果。 */
+/** 把真实文件复制成独立副本（断开旧链接/hardlink，避免写入穿透）；每次构建都刷新，
+ *  否则终端对真实配置的修改永远进不了视图（只有首次 seed 过）。 */
 function seedOverrideFiles(ag: ResolvedAgent, configDir: string, overrides: string[]): void {
   if (!ag.realHome) return;
   for (const rel of overrides) {
     const src = path.resolve(ag.realHome, rel);
     const dst = path.resolve(configDir, rel);
-    if (!isInside(src, path.resolve(ag.realHome)) || !fs.existsSync(src) || fs.existsSync(dst))
-      continue;
+    if (!isInside(src, path.resolve(ag.realHome))) continue;
+    let srcOk = false;
     try {
-      const st = fs.statSync(src);
-      if (!st.isFile()) continue;
+      srcOk = fs.statSync(src).isFile();
+    } catch {
+      srcOk = false;
+    }
+    if (!srcOk) continue;
+    try {
       fs.mkdirSync(path.dirname(dst), { recursive: true });
-      fs.copyFileSync(src, dst);
+      copyFileIndependent(src, dst);
       try {
         fs.chmodSync(dst, 0o600);
       } catch {
@@ -375,6 +388,24 @@ export function buildConfigView(
   seedOverrideFiles(ag, configDir, overrides);
   linkExtraFiles(ag, root, prevLinks, desired);
 
+  // overlay 键被移除：删掉上一轮的 patch 副本，并恢复成真实文件的链接（设计语义：回到继承值）。
+  const currentOverlay = new Set(
+    Object.keys(overlay.config ?? {})
+      .filter((k) => !path.isAbsolute(k))
+      .map((k) => path.normalize(k)),
+  );
+  for (const rel of prev.overlaid) {
+    if (currentOverlay.has(rel)) continue;
+    const viewFile = path.join(configDir, rel);
+    const st = lstat(viewFile);
+    if (st && !st.isDirectory()) removePath(viewFile);
+    if (!ag.realHome) continue;
+    const realFile = path.resolve(ag.realHome, rel);
+    if (isInside(realFile, path.resolve(ag.realHome)) && fs.existsSync(realFile)) {
+      ensureFileLink(realFile, viewFile, prevLinks, desired, path.relative(root, viewFile));
+    }
+  }
+
   // Claude 这类 agent 的 catalog 可能在配置目录的上一级；只补这一个已知外部文件，不递归猜。
   if (source) {
     const catalogSrc = path.resolve(source, ag.catalogFile);
@@ -392,15 +423,32 @@ export function buildConfigView(
     if (desired.has(rel)) continue;
     const p = path.join(root, rel);
     const st = lstat(p);
-    // 只清理链接/文件；如果 Agent 把某个链接位置换成了真实目录，保留它的数据。
+    // 只清理链接与 WeMind 生成的副本；如果 Agent 把某个链接位置换成了真实文件（原子保存），
+    // 直接删会丢掉用户的修改，保留它并停止管理（下次不再写 manifest.links）。
     if (!st) continue;
-    if (st.isSymbolicLink() || st.isFile()) removePath(p);
+    if (st.isSymbolicLink()) {
+      removePath(p);
+      continue;
+    }
+    if (prev.generated.includes(rel)) {
+      removePath(p);
+      continue;
+    }
+    if (st.isFile()) {
+      // 真实源已消失：这是过期的托管链接（hardlink 副本），清掉；
+      // 真实源仍在、文件却被换成普通文件，说明是 Agent 原子保存，保留用户改动。
+      const relConfig = path.relative(configDir, p);
+      const realFile = source ? path.resolve(source, relConfig) : "";
+      if (overrides.includes(relConfig) || !realFile || !fs.existsSync(realFile)) removePath(p);
+      else log.warn(`视图文件被外部替换，保留并停止管理：${p}`);
+    }
   }
   writeManifest(root, {
     version: 1,
     agent: ag.name,
     links: [...desired],
     generated: prev.generated,
+    overlaid: prev.overlaid.filter((rel) => currentOverlay.has(rel)),
   });
   return { root, configDir, overrides };
 }
@@ -413,17 +461,31 @@ export function markGenerated(view: ConfigView, file: string): void {
   writeManifest(view.root, m);
 }
 
+/** 标记 overlay 打补丁过的文件（view root 相对）；overlay 键被移除时据此还原链接。 */
+function markOverlaid(view: ConfigView, file: string): void {
+  const rel = path.relative(view.root, file);
+  const m = readManifest(view.root);
+  if (!m.overlaid.includes(rel)) m.overlaid.push(rel);
+  writeManifest(view.root, m);
+}
+
 /** 把 overlay 的 config patch 落到视图副本；不穿透链接。 */
 export function applyOverlayToView(
   view: ConfigView,
   ag: ResolvedAgent,
   overlay: AgentOverlay,
+  mode: HomeMode = "real",
 ): string[] {
   const problems: string[] = [];
   if (!ag.realHome || !overlay.config) return problems;
+  const overrides = new Set(
+    Object.keys(overlay.config)
+      .filter((k) => !path.isAbsolute(k))
+      .map((k) => path.normalize(k)),
+  );
   for (const [key, patch] of Object.entries(overlay.config)) {
     const ext = path.extname(key).toLowerCase();
-    if (ext && ext !== ".json" && ext !== ".jsonc") {
+    if (ext !== ".json" && ext !== ".jsonc") {
       problems.push(`overlay.config.${key} 的格式暂不支持（当前只支持 .json / .jsonc）`);
       continue;
     }
@@ -437,18 +499,27 @@ export function applyOverlayToView(
       problems.push(`overlay.config.${key} 指向了不允许的路径`);
       continue;
     }
-    // 优先读视图：real/mirror 的视图已包含 WeMind 生成内容，sandbox 的视图才是沙箱副本；
-    // 直接读 real 会把沙箱里已剥离的 MCP/密钥重新带回来。
-    const baseFile = fs.existsSync(target.view) ? target.view : target.real;
-    const base = readJsonConfig(baseFile) ?? {};
+    // real/mirror 用真实文件做基底，每次重建都重新 patch（终端修改才能进来）；
+    // sandbox 是账号隔离副本，只能用沙箱里已剥离的视图，否则会把真实 wechat MCP/密钥带回来。
+    const baseFile = mode === "sandbox" && fs.existsSync(target.view) ? target.view : target.real;
+    let base: Record<string, unknown> = {};
+    if (fs.existsSync(baseFile)) {
+      const parsed = readJsonConfig(baseFile);
+      if (!parsed) {
+        problems.push(`overlay.config.${key} 的基底 ${baseFile} 无法解析，本次跳过（不改坏配置）`);
+        continue;
+      }
+      base = parsed;
+    }
     const next = applyPatch(base, patch);
-    materializeLinkedParent(view, target.view);
+    materializeLinkedParent(view, target.view, overrides);
     const st = lstat(target.view);
     if (st?.isSymbolicLink()) removePath(target.view);
     try {
       fs.mkdirSync(path.dirname(target.view), { recursive: true });
       writeJsonAtomic(target.view, next);
       markGenerated(view, target.view);
+      markOverlaid(view, target.view);
     } catch (e) {
       problems.push(`overlay.config.${key} 写入失败：${String(e)}`);
     }

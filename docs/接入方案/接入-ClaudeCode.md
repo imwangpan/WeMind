@@ -65,7 +65,7 @@ claude-agent-acp --version     # 0.99.1
 
 适配器把认证交给 Claude Code，支持：
 
-- `claude` 登录（OAuth）：登录态在 `~/.claude/.credentials.json`（macOS 可能在 Keychain）；`real`（默认）直接共用真实 `~/.claude`，`sandbox` 下才把 `.credentials.json` 同步进沙箱。
+- `claude` 登录（OAuth）：登录态在 `~/.claude/.credentials.json`（macOS 可能在 Keychain）；`real`（默认）直接共用真实 `~/.claude`（WeMind 只读，不改写真实配置；没有 `homeEnvVar`，微信侧 MCP/overlay 不生效），`sandbox` 下才把 `.credentials.json` 同步进沙箱。
 - 环境变量：`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`；自定义网关再加 `ANTHROPIC_BASE_URL`。这些变量要对 **daemon 进程**生效（§4.9：密钥不写进 agent 配置）。
 
 **WeMind 不复制 `settings.json`**：这份文件经常把网关 token 放在 `env` 里；按仓库纪律，凭据由 daemon 环境提供，不写进 agent 配置。因此你在 Claude Code 里设的 `hooks` / `permissions` 也不会带进微信大脑——权限由 `sessionMode`（见 §3）负责。**模型不由 WeMind 下发**（预设没有 `model` 字段，`applyAcpModel()` 见 `!ag.model` 就直接返回），跟随 Claude Code 自身配置与 daemon 环境；要固定就 `wemind brain set claude-code --model "…"` 再 `wemind brain switch claude-code` 应用。

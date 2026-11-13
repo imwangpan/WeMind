@@ -1,6 +1,6 @@
 /**
  * MCP 配置的「格式」适配：不同 ACP agent 把 MCP server 定义放在不同文件、不同键路径里。
- * 本模块只做纯数据的组织/解析（无文件 IO），便于单测；沙箱模块负责写入磁盘。
+ * 本模块只做纯数据的组织/解析（无文件 IO），便于单测；沙箱/视图层（mcp-sandbox.ts、worker-sandbox.ts）负责写入磁盘。
  *
  * 取值是 JSON 里的**键路径**，与 agent 名无关：
  * - `mcpServers`：`{ "mcpServers": { 名: {command,args,env} } }`
@@ -12,9 +12,20 @@ function isObj(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-/** 从配置对象读出 server 定义表（按格式）；缺失/异常一律返回空表。 */
+/** 永久禁用的 MCP 名字（规范化后比较：大小写、前后空白不算差异）。 */
+export const FORBIDDEN_MCP_NAMES: ReadonlySet<string> = new Set(["wechat"]);
+
+/** 名字规范化：` " Wechat "` 与 `wechat` 是同一个条目。 */
+export function normalizeMcpName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+export function isForbiddenMcpName(name: string): boolean {
+  return FORBIDDEN_MCP_NAMES.has(normalizeMcpName(name));
+}
+
 /**
- * 一条 MCP 定义是不是微信 MCP：名字之外再看命令/参数/URL。
+ * 一条 MCP 定义是不是微信 MCP：名字之外再看命令/参数/URL/env。
  * 只按名字（`wechat`）拦不住改名后的同一条目——它仍会启动 `wemind-mcp`、拿同一个 bot token 长轮询，与 daemon 抢消息。
  * brain 与 worker 共用（worker 的排除集同样是「按名字 + 按定义」两道）。
  */
@@ -23,13 +34,78 @@ export function isWechatMcpServer(entry: unknown): boolean {
   const e = entry as Record<string, unknown>;
   const parts: string[] = [];
   const push = (v: unknown): void => {
-    if (typeof v === "string") parts.push(v);
+    if (typeof v === "string") parts.push(v.trim().toLowerCase());
   };
   push(e.command);
   if (Array.isArray(e.command)) for (const x of e.command) push(x);
   if (Array.isArray(e.args)) for (const x of e.args) push(x);
   push(e.url);
-  return parts.some((p) => /wemind-mcp|@wemind\/wechat-mcp/i.test(p));
+  // 远程桥：`http://127.0.0.1:8787/wechat` 也是同一个入口（按路径段匹配，不匹配查询串）
+  if (typeof e.url === "string") {
+    try {
+      const pathname = new URL(e.url).pathname.toLowerCase();
+      if (pathname.split("/").some((seg) => seg === "wechat" || seg === "wemind-mcp")) {
+        return true;
+      }
+    } catch {
+      /* 不是合法 URL：前面已按整串匹配过 */
+    }
+  }
+  // 通过 env 间接指定二进制（`BIN=wemind-mcp`）：定义本身看不出来，但同样会起第二个 poller
+  const env = e.env ?? e.environment;
+  if (env && typeof env === "object" && !Array.isArray(env)) {
+    for (const v of Object.values(env as Record<string, unknown>)) push(v);
+  }
+  return parts.some((p) => /wemind-mcp|@wemind\/wechat-mcp/.test(p));
+}
+
+/** 名字 + 定义两道合一（brain/worker/overlay 共用同一个判定）。 */
+export function forbiddenMcpServer(name: string, entry: unknown): boolean {
+  return isForbiddenMcpName(name) || isWechatMcpServer(entry);
+}
+
+/**
+ * 从任意配置片段里找微信 MCP（overlay 写入前的校验用）：
+ * 既看 `mcpServers`/`mcp.servers` 里的名字，也看任何位置出现的可识别定义（含数组里的定义）。
+ * 返回人类可读的路径列表，空数组表示干净。
+ */
+export function findForbiddenMcpEntries(value: unknown): string[] {
+  const hits: string[] = [];
+  const containers = new Set(["mcpservers", "servers"]);
+  const walk = (node: unknown, at: string, inServers: boolean): void => {
+    if (Array.isArray(node)) {
+      node.forEach((item, i) => walk(item, `${at}[${i}]`, inServers));
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const obj = node as Record<string, unknown>;
+    if (isWechatMcpServer(obj)) {
+      hits.push(at || "(root)");
+      return;
+    }
+    for (const [key, child] of Object.entries(obj)) {
+      const norm = normalizeMcpName(key);
+      const path2 = at ? `${at}.${key}` : key;
+      if (norm === "mcp") {
+        walk(child, path2, false);
+        continue;
+      }
+      if (containers.has(norm) && child && typeof child === "object" && !Array.isArray(child)) {
+        for (const [name, def] of Object.entries(child as Record<string, unknown>)) {
+          if (forbiddenMcpServer(name, def)) hits.push(`${path2}.${name}`);
+          else walk(def, `${path2}.${name}`, true);
+        }
+        continue;
+      }
+      if (inServers && child && typeof child === "object" && forbiddenMcpServer(key, child)) {
+        hits.push(path2);
+        continue;
+      }
+      walk(child, path2, inServers);
+    }
+  };
+  walk(value, "", false);
+  return [...new Set(hits)];
 }
 
 export function readMcpServers(obj: unknown, format: McpFormat): Record<string, unknown> {

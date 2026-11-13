@@ -158,9 +158,15 @@ function hasUnclosed(s: string): boolean {
   return depth > 0 || quote !== null;
 }
 
-/** 解析全文，返回 `{ mcpServers }`（与 kiro 格式对齐，交给 `readMcpServers` 直接使用）。 */
-export function parseTomlMcpServers(text: string): { mcpServers: Record<string, unknown> } {
+/** 解析全文，返回 `{ mcpServers, problems }`（与 kiro 格式对齐，交给 `readMcpServers` 直接使用）。
+ *  `problems` 非空表示文件有「解析器没吃透」的内容（多行值未闭合、表头损坏等）：
+ *  这类文件不能当成「没有微信 MCP」，启动检查会拒绝。 */
+export function parseTomlMcpServers(text: string): {
+  mcpServers: Record<string, unknown>;
+  problems: string[];
+} {
   const root: TomlTable = {};
+  const problems: string[] = [];
   let table: TomlTable = root;
   let pending = "";
   for (const raw of text.split(/\r?\n/)) {
@@ -173,11 +179,17 @@ export function parseTomlMcpServers(text: string): { mcpServers: Record<string, 
       pending = joined;
       continue;
     }
-    if (line.startsWith("[[") || line.startsWith("[")) {
-      // 数组表（[[x]]）MCP 定义用不到；普通表切当前写入位置
-      if (line.startsWith("[[")) continue;
+    if (line.startsWith("[[")) {
+      // 数组表（[[x]]）与 MCP 无关：必须重置当前表，否则后续键会污染上一个 [mcp_servers.*]。
+      table = root;
+      continue;
+    }
+    if (line.startsWith("[")) {
       const close = line.lastIndexOf("]");
-      if (close < 0) continue;
+      if (close < 0) {
+        problems.push(`表头未闭合：${line}`);
+        continue;
+      }
       table = ensureTable(root, splitDotted(line.slice(1, close).trim()));
       continue;
     }
@@ -189,6 +201,9 @@ export function parseTomlMcpServers(text: string): { mcpServers: Record<string, 
     const parent = ensureTable(table, parts.slice(0, -1));
     parent[parts[parts.length - 1]] = value;
   }
+  if (pending.trim()) {
+    problems.push("文件末尾仍有多行值未闭合（可能被截断），无法确认其中的 MCP 定义");
+  }
   const servers = root.mcp_servers;
-  return { mcpServers: isObj(servers) ? servers : {} };
+  return { mcpServers: isObj(servers) ? servers : {}, problems };
 }

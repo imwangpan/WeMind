@@ -14,6 +14,10 @@
 - **MCP 性能观测 + Codex 原生 MCP 只读解析（2026-11-12）**：`session/new|load|resume ok` 与 `prompt ok` 日志新增 `mcpCount` / `nativeMcpCount` / `sessionNewMs` / `mcpStartupMs` / `firstFrameMs`（`agents/config/mcp-perf.ts`），`scripts/doctor.ps1` 读最近日志，数量/耗时超阈值只提示、不自动禁用；新增 `agents/sandbox/toml-mcp.ts` 只读解析 Codex `config.toml` 的 `[mcp_servers.*]`（不写回、无法 unload），原生条目含 `wechat` 或任何会跑 `wemind-mcp` 的定义时 brain/worker 拒绝启动。守卫：`mcp-perf.test.ts`、`toml-mcp.test.ts`、`acp-connection.test.ts`。
 - **`codex-acp` 2.6.0 复测（2026-11-12）**：`loadSession`/图片/`set_mode`/`set_config_option(model)`/stdio MCP 全部保持；工具漂移检测 10 次调用 0 权限请求；文档基线从 2.5.0 升到 2.6.0。
 
+### Fixed
+
+- **本机 Agent 工作模式审查修复（2026-11-13）**：① `real`/`mirror` 下没有配置视图的 Agent（qoder / cline / claude-code / codex）不再把 `settingsBase` / `mcp.json` 写进真实 home——此前会把 `~/.qoder/settings.json` 重写成只有 `mcpServers` + `general`，删掉 providers/model/enabledPlugins；现在 `canWriteAgentConfig()` 判定不可写则告警跳过（要 MCP/overlay 生效用 sandbox；mirror 对这类 agent 与 real 等价）。② brain/worker 在写 MCP 前剔除视图副本里的微信 MCP（Copilot `mcp-config.json`、DSH `cordis.patch.yml`）；overlay 写入时拒绝微信 MCP 定义、字面量密钥（含数组值）、绝对/`..` 路径与非法 agent 名，坏 overlay 只告警忽略，不再让 daemon 启动失败进入 watchdog 循环。③ 配置指纹改为按显式配置文件内容哈希，agent 自己写 `history.jsonl`/`todos.json` 不再每回合重启大脑；qoder/cline 写入后指纹稳定。④ `config reload` 在回合进行中排队到回合结束，不再打断正在生成的回复；`wemind config reload` 在 daemon 未运行时返回非零。⑤ `writeJsonServers` 改原子写且解析失败拒绝覆盖；Codex TOML 解析修正 `[[…]]` 串表、截断检测后 fail-closed；worker 配置准备失败不再吞掉；工作区拒绝 `DATA_DIR` 根/包含数据根；`env.json` 快照不再覆盖当前进程的 PATH 等活值；`doctor.ps1` 最近指标改读最新日志。守卫：`parity-real.test.ts`、`toml-mcp.test.ts`、`config.test.ts`。
+
 ### Changed
 
 - **文档全局校正 Agent 工作模式目录口径（2026-11-12）**：统一说明默认 `homeMode=real`、`agent-view` 仅适用于声明 `homeEnvVar` 的 Agent、没有 `homeEnvVar` 的 Agent / Codex 直接使用真实配置目录、`brain-home` / `worker-home` / `agent-sessions` 仅 `sandbox` 模式、`cwd` 与配置 home 分离、入站媒体在 `real`/`mirror` 落 `<账号>/media/inbound`。重点修正账号目录树、Codex 的 sandbox cwd、Cline/Qoder 的 real 配置落点、OpenCode 视图路径、DSH 会话库清理步骤与验收清单。行为无变化。

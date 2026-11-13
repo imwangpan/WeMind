@@ -3,13 +3,16 @@ import path from "node:path";
 import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 import { ensureKiroV3Permissions, type ResolvedAgent } from "../brain-agents.js";
 import { getAgent } from "../agent-slot.js";
-import { isWechatMcpServer } from "./agent-mcp.js";
+import { isWechatMcpServer, normalizeMcpName } from "./agent-mcp.js";
 import { mcpAdapterFor, mcpAdapterForFile, mcpCatalogPath, mcpConfigPath } from "./mcp-adapters.js";
 import {
   applySettingsDefaults,
+  canWriteAgentConfig,
+  sanitizeView,
   syncCredentials,
   syncProfilePatch,
   warnOverlayProblems,
+  warnUnwritableRealHome,
   writeSettingsBase,
 } from "./sandbox-common.js";
 import { syncInherited } from "./sandbox-inherit.js";
@@ -50,7 +53,7 @@ function excludeSet(): Set<string> {
   const s = new Set(
     raw
       .split(/[,\s]+/)
-      .map((x) => x.trim())
+      .map((x) => normalizeMcpName(x))
       .filter(Boolean),
   );
   s.add("wechat"); // 强制：worker 加载 wechat 会用同一 bot token 长轮询、与 daemon 抢消息（坑①回环）
@@ -68,12 +71,19 @@ function loadCatalog(ag: ResolvedAgent, dir: string = DATA_DIR): Record<string, 
  *  配了 `mcpViaAcp` 的 agent（DSH）不写文件——全量集合经 workerMcpServers() 转成 ACP mcpServers 随 session 下发。 */
 function applyWorkerSandbox(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = DATA_DIR): void {
   if (ag.mcpViaAcp) return;
+  // 复用调用方的 rt：重算会重建视图，把刚应用的 overlay 覆盖回真实值。
+  const target = rt ?? agentRuntime("worker", ag, dir);
+  if (!canWriteAgentConfig(ag, target)) {
+    warnUnwritableRealHome(ag, "worker MCP 配置");
+    return;
+  }
   const cat = loadCatalog(ag, dir);
   const ex = excludeSet();
-  const disabled = overlayDisableSet(readOverlay(ag.name, dir).overlay);
+  const disabledSet = overlayDisableSet(readOverlay(ag.name, dir).overlay);
   const servers: Record<string, unknown> = {};
   for (const [name, def] of Object.entries(cat)) {
-    if (ex.has(name) || disabled.has(name) || isWechatMcpServer(def)) continue; // 名字或定义命中微信 MCP 都排除（防改名绕开）
+    const norm = normalizeMcpName(name);
+    if (ex.has(norm) || disabledSet.has(norm) || isWechatMcpServer(def)) continue; // 名字或定义命中微信 MCP 都排除（防改名绕开）
     if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true)
       continue; // 跳过用户已禁用的
     servers[name] = def;
@@ -91,12 +101,13 @@ export function workerMcpServers(forAgent?: ResolvedAgent, dir: string = DATA_DI
   const disabled = overlayDisableSet(readOverlay(ag.name, dir).overlay);
   const picked: Record<string, unknown> = {};
   for (const [name, def] of Object.entries(cat)) {
-    if (ex.has(name) || disabled.has(name) || isWechatMcpServer(def)) continue;
+    const norm = normalizeMcpName(name);
+    if (ex.has(norm) || disabled.has(norm) || isWechatMcpServer(def)) continue;
     if (def && typeof def === "object" && (def as { disabled?: unknown }).disabled === true)
       continue;
     picked[name] = def;
   }
-  const { servers, skipped } = mcpAdapterFor(ag).toAcp(picked, ex);
+  const { servers, skipped } = mcpAdapterFor(ag).toAcp(picked, new Set<string>());
   if (skipped.length) log.warn(`worker 跳过无法转换的 MCP：${skipped.join(", ")}`);
   return servers;
 }
@@ -105,6 +116,7 @@ export function workerMcpServers(forAgent?: ResolvedAgent, dir: string = DATA_DI
 function syncFormatSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
   const adapter = mcpAdapterFor(ag);
   if (!adapter.inheritSettings || !ag.realHome) return;
+  if (!canWriteAgentConfig(ag, rt)) return;
   adapter.inheritSettings(ag, ag.realHome, workerConfigDir(ag, rt));
   if (adapter.rebuildSettingsInView && rt.view) markGenerated(rt.view, workerMcpJson(ag, rt));
 }
@@ -113,10 +125,15 @@ function syncSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
   if (rt.mode === "sandbox") syncProfilePatch(ag, rt.home, "worker"); // DSH 等：继承真实 profile 用户层（provider 目录 / 默认模型）；MCP 仍走 ACP 注入
   if (ag.mcpViaAcp) return; // 无「配置文件式」的 MCP/settings 可继承（模型走 set_config_option）
   if (ag.settingsBase && ag.realHome) {
-    writeSettingsBase(ag, workerConfigDir(ag, rt), rt.view); // 不依赖 inherit：沙箱硬化（关自动更新）与隔离始终生效
+    if (!canWriteAgentConfig(ag, rt)) {
+      warnUnwritableRealHome(ag, "worker 基础设置（settings）");
+      return;
+    }
+    writeSettingsBase(ag, workerConfigDir(ag, rt), rt.view); // 不依赖 inherit：视图/沙箱硬化（关自动更新）与隔离始终生效
     return;
   }
   if (!ag.inherit || !ag.realHome) return;
+  if (!canWriteAgentConfig(ag, rt)) return;
   if (rt.mode !== "sandbox" && !mcpAdapterFor(ag).rebuildSettingsInView) return; // real/mirror 的普通设置由 config view 链接真实文件
   syncFormatSettings(ag, rt);
 }
@@ -127,20 +144,21 @@ function mirrorRealKiro(ag: ResolvedAgent, rt: AgentRuntime): void {
 }
 
 /**
- * 确保 worker 沙箱就绪：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 链入记忆/技能 → 凭据 → 预设默认设置项。
+ * 确保 worker 配置视图/沙箱就绪：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 预设默认设置项；链入记忆/技能与凭据同步仅 sandbox 执行（real/mirror 的视图整目录链接真实配置）。
  * daemon 启动时按默认任务大脑调用一次；**每次派发新 worker 前**（`worker-pool.ts` 的 `acquire`）再按**这条任务的 agent** 调一次——
- * 否则派到非默认 agent（如 `--agent pi`）时，它自己的 settings/凭据/MCP 还没进沙箱，agent 会拿空配置跑。
+ * 否则派到非默认 agent（如 `--agent pi`）时，它自己的 settings/凭据/MCP 还没进视图/沙箱，agent 会拿空配置跑。
  * `forAgent` 可显式指定 agent（此刻槽位可能指着别的默认）。
  */
 export function ensureWorkerHome(
   forAgent?: ResolvedAgent,
   dir: string = DATA_DIR,
   opts: { cwd?: string } = {},
-): void {
+): AgentRuntime {
   const ag = forAgent ?? getAgent("worker");
   const rt = agentRuntime("worker", ag, dir, opts);
   syncSettings(ag, rt); // 先同步「非 MCP」设置（模型/免确认等）
   warnOverlayProblems(ag, rt);
+  sanitizeView(ag, rt); // 视图副本里剔除微信 MCP（DSH profile / Copilot 原生配置等）
   applyWorkerSandbox(ag, rt, dir); // 再写全量 MCP（除 wechat 等排除集）
   if (rt.mode === "sandbox") {
     mirrorRealKiro(ag, rt); // 链入记忆/steering/skills（sessions 仍隔离）
@@ -149,5 +167,7 @@ export function ensureWorkerHome(
   applySettingsDefaults(ag, workerConfigDir(ag, rt), rt.view); // 预设默认设置项（如 pi 的 quietStartup：关掉 pi-acp 当消息发出来的启动信息）
   // kiro v3 的免审批在 settings/permissions.yaml；real/mirror 下该文件已在
   // config-view 里被强制生成副本，不会穿透 junction 写到真实 ~/.kiro。
-  if (ag.kiroV3) ensureKiroV3Permissions(ag, path.join(rt.configDir, "settings"));
+  if (ag.kiroV3 && canWriteAgentConfig(ag, rt))
+    ensureKiroV3Permissions(ag, path.join(rt.configDir, "settings"));
+  return rt;
 }

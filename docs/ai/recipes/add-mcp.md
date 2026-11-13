@@ -20,7 +20,7 @@ catalog（定义从哪来；一律读**真实**配置目录，不读配置视图
        DSH               ACP session/new 的 mcpServers   （无文件式 catalog 时用 WEMIND_MCP_CATALOG）
        claude-code       ~/.claude.json 的 mcpServers     （catalogFile 写成 `../.claude.json`，回到 realHome 上一层）
        copilot           ~/.copilot/mcp-config.json        （经 ACP session/new 传递）
-       codex             ❌ 适配器 mcpCapabilities.acp=false，stdio MCP 不可用
+       codex             ~/.codex/config.toml（原生，只读）；客户端 stdio MCP ✅（2026-11-12 复测，走 mcpViaAcp）
   └─ 可用 WEMIND_MCP_CATALOG / WECHAT_MCP_CATALOG 覆盖
 
 激活集（哪些允许给 brain）
@@ -28,7 +28,7 @@ catalog（定义从哪来；一律读**真实**配置目录，不读配置视图
   └─ 微信指令「加载 <名>」/「卸载 <名>」修改；按 agent 分键，wechat 永久禁止
 
 transport（怎么让 agent 看到）
-  └─ brain：applySandbox() 写配置视图（`real`/`mirror`）或沙箱（`sandbox`）的文件式 MCP 配置，或 mcpViaAcp 传 session/new|resume（DSH / claude-code / copilot）
+  └─ brain：applySandbox() 写配置视图（`real`/`mirror`，仅 `homeEnvVar` agent）或沙箱（`sandbox`）的文件式 MCP 配置，或 mcpViaAcp 传 session/new|resume（DSH / claude-code / copilot / codex）；无 `homeEnvVar` 时跳过并告警，激活不生效
   └─ worker：applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）
 
 微信独享增删（不改真实配置）
@@ -36,21 +36,21 @@ transport（怎么让 agent 看到）
   └─ mcp.disable 最后生效；wechat 任何路径都进不了有效集
 ```
 
-> 注意「catalog 读真实、transport 写视图/沙箱」：`加载 <名>` 只把定义**写进 WeMind 生成的配置视图**（brain 默认空、worker 全量），真实配置文件一律不动。
+> 注意「catalog 读真实、transport 写视图/沙箱」：`加载 <名>` 只把定义**写进 WeMind 生成的配置视图**（brain 默认空、worker 全量），真实配置文件一律不动；没有视图时连视图文件也不生成，`加载` 只改激活集并告警。
 
 关键代码：
 
-| 文件 | 作用 |
-|---|---|
-| `packages/wechat-daemon/src/agents/config/config-view.ts` | 最小配置视图；MCP 目标文件生成副本，其余链接真实 home |
-| `packages/wechat-daemon/src/agents/config/overlay.ts` | 微信独享 `mcp.extra` / `mcp.disable` |
-| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts` | brain 视图/沙箱、catalog、激活集、`加载/卸载` |
-| `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | worker 全量继承、排除集 |
-| `packages/wechat-daemon/src/agents/sandbox/mcp-adapters.ts` | 按文件格式的 MCP 适配器：路径、读写、剥离、ACP 转换、原生只读（Codex TOML） |
-| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts` | MCP 格式纯函数（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）与 wechat 判定 |
-| `packages/wechat-daemon/src/cli/subcommands/cli-config.ts` | `wemind config mcp list/enable/disable/add/remove` 的 CLI 入口 |
-| `packages/wechat-daemon/src/index.ts` | 指令拦截；加载/卸载后 `restart()` |
-| `packages/wechat-daemon/src/acp/acp-brain.ts` | 重启 ACP，重建后恢复 session |
+| 文件                                                          | 作用                                                                          |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `packages/wechat-daemon/src/agents/config/config-view.ts`     | 最小配置视图；MCP 目标文件生成副本，其余链接真实 home                         |
+| `packages/wechat-daemon/src/agents/config/overlay.ts`         | 微信独享 `mcp.extra` / `mcp.disable`                                          |
+| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts`    | brain 视图/沙箱、catalog、激活集、`加载/卸载`                                 |
+| `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | worker 全量继承、排除集                                                       |
+| `packages/wechat-daemon/src/agents/sandbox/mcp-adapters.ts`   | 按文件格式的 MCP 适配器：路径、读写、剥离、ACP 转换、原生只读（Codex TOML）   |
+| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts`      | MCP 格式纯函数（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）与 wechat 判定 |
+| `packages/wechat-daemon/src/cli/subcommands/cli-config.ts`    | `wemind config mcp list/enable/disable/add/remove` 的 CLI 入口                |
+| `packages/wechat-daemon/src/index.ts`                         | 指令拦截；加载/卸载后 `restart()`                                             |
+| `packages/wechat-daemon/src/acp/acp-brain.ts`                 | 重启 ACP，重建后恢复 session                                                  |
 
 ---
 
@@ -65,9 +65,9 @@ transport（怎么让 agent 看到）
     "my-tool": {
       "command": "node",
       "args": ["D:/tools/my-tool/server.js"],
-      "env": { "TOKEN": "..." }
-    }
-  }
+      "env": { "TOKEN": "..." },
+    },
+  },
 }
 ```
 
@@ -81,10 +81,10 @@ transport（怎么让 agent 看到）
       "my-tool": {
         "type": "local",
         "command": ["node", "D:/tools/my-tool/server.js"],
-        "environment": { "TOKEN": "..." }
-      }
-    }
-  }
+        "environment": { "TOKEN": "..." },
+      },
+    },
+  },
 }
 ```
 
@@ -103,8 +103,8 @@ $env:WEMIND_MCP_CATALOG = "D:\wemind-data\mcp-catalog.json"
 ```jsonc
 {
   "mcpServers": {
-    "my-tool": { "command": "node", "args": ["D:/tools/my-tool/server.js"] }
-  }
+    "my-tool": { "command": "node", "args": ["D:/tools/my-tool/server.js"] },
+  },
 }
 ```
 
@@ -138,14 +138,14 @@ MCP                 # 列出可选与已激活
 
 ## 3. 排错
 
-| 现象 | 检查 |
-|---|---|
-| `MCP` 列表为空 | `catalog` 路径是否存在；`WEMIND_MCP_CATALOG` 是否指对；格式是否是该 agent 的格式 |
-| 加载后工具不出现 | 是否 `restart()`；会话是否 `load/resume` 成功；agent 是否需要「新会话」 |
-| 加载 `wechat` 被拒 | 预期行为（防它把消息发回自己）；不要绕过 |
-| worker 没有工具 | worker 是「全量继承除排除集」，看 `WEMIND_WORKER_MCP_EXCLUDE`；`disabled:true` 会被跳过 |
-| DSH 报 `-32602`/会话创建失败 | MCP 定义不合法或起不来；官方 `session/new` 会回滚整会话，先删坏条目 |
-| Windows 起不来 | `.cmd`/`npx` 要 `shell:true`；命令/参数要按 `spawnAgent` 规则引号 |
+| 现象                         | 检查                                                                                    |
+| ---------------------------- | --------------------------------------------------------------------------------------- |
+| `MCP` 列表为空               | `catalog` 路径是否存在；`WEMIND_MCP_CATALOG` 是否指对；格式是否是该 agent 的格式        |
+| 加载后工具不出现             | 是否 `restart()`；会话是否 `load/resume` 成功；agent 是否需要「新会话」                 |
+| 加载 `wechat` 被拒           | 预期行为（防它把消息发回自己）；不要绕过                                                |
+| worker 没有工具              | worker 是「全量继承除排除集」，看 `WEMIND_WORKER_MCP_EXCLUDE`；`disabled:true` 会被跳过 |
+| DSH 报 `-32602`/会话创建失败 | MCP 定义不合法或起不来；官方 `session/new` 会回滚整会话，先删坏条目                     |
+| Windows 起不来               | `.cmd`/`npx` 要 `shell:true`；命令/参数要按 `spawnAgent` 规则引号                       |
 
 ---
 

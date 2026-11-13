@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { ResolvedAgent } from "../brain-agents.js";
+import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
 import {
   parseJsonc,
   readMcpServers,
@@ -19,7 +20,7 @@ export type AcpConversion = { servers: AcpMcpDeclaration[]; skipped: string[] };
 
 /**
  * 一种 MCP **文件格式**的适配器：把「这种格式的 MCP 放在哪、长什么样、怎么写、怎么交给 ACP」
- * 集中到一处。brain/worker 沙箱只负责算激活集/排除集，不再按 agent 名或格式分支。
+ * 集中到一处。brain/worker 的视图/沙箱层只负责算激活集/排除集，不再按 agent 名或格式分支。
  *
  * 实现按**文件格式**划分，与 agent 名无关（多个 agent 可以共用同一种格式）：
  * - `jsonMcpServers`：顶层 `{ "mcpServers": { 名: {...} } }`
@@ -63,12 +64,33 @@ export function mcpConfigPath(ag: ResolvedAgent, configDir: string): string {
   return path.join(configDir, ag.mcpConfigFile || "settings/mcp.json");
 }
 
+function readJsonRaw(file: string): string | null {
+  try {
+    return fs.readFileSync(file, "utf-8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    throw new Error(`无法读取 ${file}：${(e as Error)?.message ?? String(e)}`);
+  }
+}
+
 function readJsonc(file: string): McpCatalog | null {
   try {
-    return parseJsonc(fs.readFileSync(file, "utf-8"));
+    const raw = readJsonRaw(file);
+    return raw === null || !raw.trim() ? {} : parseJsonc(raw);
   } catch {
     return null;
   }
+}
+
+/** 写入前的严格读取：文件不存在/为空 → `{}`；存在但解析失败 → 抛错（不能拿 `{}` 覆盖掉用户的其它键）。 */
+function readJsoncStrict(file: string): McpCatalog {
+  const raw = readJsonRaw(file);
+  if (raw === null || !raw.trim()) return {};
+  const parsed = parseJsonc(raw);
+  if (!parsed) {
+    throw new Error(`无法解析 ${file}（JSON/JSONC 语法错误）；为避免丢掉其它配置键，本次不写入`);
+  }
+  return parsed;
 }
 
 function readJsonServers(file: string, format: "mcpServers" | "mcp.servers"): McpCatalog {
@@ -81,10 +103,21 @@ function writeJsonServers(
   format: "mcpServers" | "mcp.servers",
   finalize?: (config: McpCatalog) => void,
 ): void {
-  const next = withMcpServers(readJsonc(file) ?? {}, servers, format);
+  const next = withMcpServers(readJsoncStrict(file), servers, format);
   finalize?.(next);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(next, null, 2), "utf-8");
+  writeJsonAtomic(file, next);
+}
+
+/** 复制到目标文件时先断开硬链接（否则 copyFileSync 会写穿到真实配置）。 */
+export function copyFileIndependent(src: string, dst: string): void {
+  try {
+    const st = fs.lstatSync(dst);
+    if (st.isSymbolicLink() || st.nlink > 1) fs.rmSync(dst, { force: true });
+  } catch {
+    /* 目标不存在 */
+  }
+  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  fs.copyFileSync(src, dst);
 }
 
 function readTomlServers(file: string): McpCatalog {
@@ -125,7 +158,7 @@ const jsonMcpServersAdapter: McpAdapter = {
       if (name === "mcp.json") continue; // MCP 必须由激活集/全量集权威生成
       try {
         const src = path.join(realSettings, name);
-        if (fs.statSync(src).isFile()) fs.copyFileSync(src, path.join(targetSettings, name));
+        if (fs.statSync(src).isFile()) copyFileIndependent(src, path.join(targetSettings, name));
       } catch {
         /* best-effort */
       }
@@ -164,8 +197,7 @@ const jsonMcpNestedAdapter: McpAdapter = {
     if (!parsed) return;
     delete parsed.mcp; // MCP 由激活集/全量集权威覆盖
     const file = mcpConfigPath(ag, targetConfigDir);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(parsed, null, 2), "utf-8");
+    writeJsonAtomic(file, parsed);
   },
 };
 

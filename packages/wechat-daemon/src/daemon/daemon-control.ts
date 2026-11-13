@@ -1,7 +1,14 @@
 import { createLogger, DATA_DIR, clearSessionPause, loadAccount } from "@wemind/wechat-ilink-core";
-import { askBrainTurn, newSession, restartForMcpChange, resumeSession } from "../acp/acp-brain.js";
+import {
+  askBrainTurn,
+  isTurnInFlight,
+  newSession,
+  restartForMcpChange,
+  resumeSession,
+} from "../acp/acp-brain.js";
 import { agentConfigFor, loadBrainConfig } from "../agents/brain-config.js";
 import {
+  ACP_AGENT_PRESETS,
   presetAvailable,
   presetNames,
   resolvePresetByName,
@@ -259,6 +266,10 @@ export async function handleControl(
   }
   if (c.kind === "wechatConfig") {
     const ag = c.agent.toLowerCase();
+    if (!presetNames().includes(ag))
+      return `❌ 未知 agent「${ag}」。可用：${presetNames().join(", ")}`;
+    const preset = ACP_AGENT_PRESETS[ag];
+    const inertReal = !preset.homeEnvVar;
     const read = readOverlay(ag, DATA_DIR);
     if (read.problems.length) return `❌ ${read.problems.join("；")}`;
     if (c.action === "show") {
@@ -292,8 +303,15 @@ export async function handleControl(
         [file]: mergeOverlayPatch(overlay.config?.[file] ?? {}, patchWithDelete(keyPath)),
       };
     }
-    writeOverlay(ag, overlay, DATA_DIR);
-    return `✅ 已写入微信侧 overlay：${file} → ${keyPath}\n只影响微信侧；下一条新会话生效。真实配置未改。`;
+    try {
+      writeOverlay(ag, overlay, DATA_DIR);
+    } catch (e) {
+      return `❌ ${e instanceof Error ? e.message : String(e)}`;
+    }
+    const note = inertReal
+      ? "\n⚠️ 这个 agent 没有配置目录环境变量，real 模式下 overlay 不会生效（真实配置也没被改）；要生效请设 homeMode=sandbox（mirror 与 real 等价）。"
+      : "";
+    return `✅ 已写入微信侧 overlay：${file} → ${keyPath}\n只影响微信侧；下一条新会话生效。真实配置未改。${note}`;
   }
   if (c.kind === "handoff") return await runHandoff(userId, ctx);
   // 兜底：指令表新增了 kind 但这里还没接通时（正常情况下 TS 会先把这里判成不可达），别静默吞掉
@@ -329,6 +347,8 @@ export async function handleControlRequest(req: ControlRequest, owner: string): 
       killIdleConns();
       if (!(await restartForMcpChange()))
         return "配置视图已重建，但大脑正在切换中，这次没有重启；切换完成后用 `wemind config reload` 再试一次。";
+      if (isTurnInFlight())
+        return "配置视图已重建，重启已排队：当前回合结束后生效（不打断正在生成的回复）。";
       return "配置视图已重建，常驻大脑已重启；下一条消息使用新配置。已有会话会在重启后自动 session/load 恢复。";
     }
     case "session.new":

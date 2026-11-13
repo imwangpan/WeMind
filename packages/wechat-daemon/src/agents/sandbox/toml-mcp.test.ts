@@ -66,8 +66,32 @@ args = [
     expect((parsed.mcpServers.ok as any).args).toEqual(["a.js", "b.js"]);
   });
 
+  it("[[…]] 表数组不会把 name 混进上一个 server", () => {
+    const parsed = parseTomlMcpServers(`
+[mcp_servers.ok]
+command = "node"
+
+[[profiles]]
+name = "work"
+`);
+    expect(parsed.problems).toEqual([]);
+    expect(parsed.mcpServers.ok).toEqual({ command: "node" });
+  });
+
+  it("未闭合的多行数组/字符串要报问题，而不是静默吞掉后面的 server", () => {
+    const parsed = parseTomlMcpServers(`
+[mcp_servers.a]
+args = [
+  "x",
+
+[mcp_servers.wechat]
+command = "wemind-mcp"
+`);
+    expect(parsed.problems.length).toBeGreaterThan(0);
+  });
+
   it("没有 mcp_servers 时返回空表", () => {
-    expect(parseTomlMcpServers('model = "x"\n')).toEqual({ mcpServers: {} });
+    expect(parseTomlMcpServers('model = "x"\n')).toEqual({ mcpServers: {}, problems: [] });
   });
 
   it("只对 Codex（.toml 目录）读原生 MCP；含 wechat 时拒绝启动", () => {

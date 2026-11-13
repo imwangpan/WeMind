@@ -1,14 +1,47 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { DATA_DIR, createLogger } from "@wemind/wechat-ilink-core";
 
 import type { AgentRole } from "../brain-config.js";
 import type { ResolvedAgent } from "../brain-agents.js";
 import { buildConfigView, type ConfigView } from "./config-view.js";
 import { readHomeMode, type HomeMode } from "./home-mode.js";
-import { overlayPathProblems, readOverlay, type AgentOverlay } from "./overlay.js";
+import {
+  overlayKeyProblems,
+  overlayPathProblems,
+  readOverlay,
+  type AgentOverlay,
+} from "./overlay.js";
 import { ensureWorkspace } from "./workspace.js";
+
+const log = createLogger("wechat-daemon/config");
+
+/** 读 overlay 并剔除「会让 daemon 起不来」的键：坏键只告警 + 忽略，不让一个手滑的 overlay 变成 watchdog 重启循环。 */
+function loadOverlay(
+  ag: ResolvedAgent,
+  dir: string,
+): { overlay: AgentOverlay; problems: string[] } {
+  const read = readOverlay(ag.name, dir);
+  const problems = [...read.problems];
+  const config = { ...read.overlay.config };
+  const extras = (ag.extraConfigFiles ?? []).map((x) => x.source);
+  for (const key of Object.keys(config)) {
+    const bad = overlayKeyProblems(
+      ag.realHome,
+      { version: 1, config: { [key]: config[key] } },
+      extras,
+    );
+    if (!bad.length) continue;
+    delete config[key];
+    problems.push(...bad);
+  }
+  problems.push(...overlayPathProblems(ag.realHome, read.overlay, extras));
+  const overlay: AgentOverlay = { ...read.overlay };
+  if (Object.keys(config).length) overlay.config = config;
+  else delete overlay.config;
+  return { overlay, problems };
+}
 
 /**
  * 一次 Agent 启动所需的全部路径。
@@ -66,16 +99,9 @@ export function agentRuntime(
   }
   if (mode === "sandbox") {
     const home = sandboxRoot(role, dir);
-    const { overlay, problems } = readOverlay(ag.name, dir);
-    problems.push(
-      ...overlayPathProblems(
-        ag.realHome,
-        overlay,
-        (ag.extraConfigFiles ?? []).map((x) => x.source),
-      ),
-    );
+    const { overlay, problems } = loadOverlay(ag, dir);
     if (problems.length)
-      throw new Error(`微信侧 overlay 无效（${ag.name}）：${problems.join("；")}`);
+      log.warn(`微信侧 overlay 无效（${ag.name}）：${problems.join("；")}（坏键已忽略）`);
     return {
       role,
       mode,
@@ -86,17 +112,10 @@ export function agentRuntime(
       overlay,
     };
   }
-  const { overlay, problems } = readOverlay(ag.name, dir);
-  problems.push(
-    ...overlayPathProblems(
-      ag.realHome,
-      overlay,
-      (ag.extraConfigFiles ?? []).map((x) => x.source),
-    ),
-  );
+  const { overlay, problems } = loadOverlay(ag, dir);
   if (problems.length) {
-    // 不静默忽略：坏 overlay 会让用户以为“微信侧配置生效了”，其实没有。
-    throw new Error(`微信侧 overlay 无效（${ag.name}）：${problems.join("；")}`);
+    // 不静默忽略：坏 overlay 会让用户以为“微信侧配置生效了”，其实没有；但也绝不因此让 daemon 起不来。
+    log.warn(`微信侧 overlay 无效（${ag.name}）：${problems.join("；")}（坏键已忽略）`);
   }
   // 没有 homeEnvVar 的 agent（如 codex）无法把配置目录指到视图：直接用真实目录。
   // 这类 agent 的 overlay 配置不生效，但真实配置修改仍然有效；不要假装已经隔离。

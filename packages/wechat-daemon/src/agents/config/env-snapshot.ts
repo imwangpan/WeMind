@@ -98,10 +98,12 @@ export function clearEnvSnapshot(dir: string = DATA_DIR): boolean {
   }
 }
 
-/** 合并顺序：父进程 → 快照白名单覆盖。预设 env/envDefaults 在 brain-agents.agentEnv 里继续叠加。 */
+/** 合并顺序：快照（上次 daemon 的环境）作为兜底，**当前进程环境优先**。
+ *  快照只是「daemon 由 autostart 拉起、PATH/代理不完整」时的补丁，不能反过来覆盖用户此刻导出的 PATH/COMSPEC/SYSTEMROOT。
+ *  预设 env/envDefaults 在 brain-agents.agentEnv 里继续叠加。 */
 export function mergeEnvSnapshot(
   parent: NodeJS.ProcessEnv,
   snapshot: Record<string, string>,
 ): NodeJS.ProcessEnv {
-  return { ...parent, ...snapshot };
+  return { ...snapshot, ...parent };
 }

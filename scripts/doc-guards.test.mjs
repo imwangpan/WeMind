@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  GIT_MAX_BUFFER,
   docPathOf,
   matchRules,
   normalizeDocName,
@@ -30,6 +31,10 @@ import {
 } from "./gen-docs-tables.mjs";
 
 describe("doc-impact 解析", () => {
+  it("git diff 缓冲大于 Node 默认 1MB（大分支不再 ENOBUFS）", () => {
+    expect(GIT_MAX_BUFFER).toBeGreaterThan(1024 * 1024);
+  });
+
   it("解析 name-status：普通状态与重命名", () => {
     const files = parseNameStatus(
       ["M\tpackages/a.ts", "R100\tpackages/old.ts\tpackages/new.ts", "A\tREADME.md"].join("\n"),
@@ -42,7 +47,8 @@ describe("doc-impact 解析", () => {
   });
 
   it("中文路径即使被 git 加引号也能还原，规则才能对上", () => {
-    const quoted = '"docs/repowiki/06-ACP-\\345\\244\\247\\350\\204\\221\\344\\270\\216\\346\\262\\231\\347\\256\\261.md"';
+    const quoted =
+      '"docs/repowiki/06-ACP-\\345\\244\\247\\350\\204\\221\\344\\270\\216\\346\\262\\231\\347\\256\\261.md"';
     expect(unquoteGitPath(quoted)).toBe("docs/repowiki/06-ACP-大脑与沙箱.md");
     expect(parseNameStatus(`M\t${quoted}`)).toEqual([
       { status: "M", path: "docs/repowiki/06-ACP-大脑与沙箱.md" },
@@ -68,7 +74,9 @@ describe("doc-impact 解析", () => {
   });
 
   it("从文档条目取路径，忽略章节说明", () => {
-    expect(docPathOf("docs/repowiki/05-daemon.md（会话管理章节）")).toBe("docs/repowiki/05-daemon.md");
+    expect(docPathOf("docs/repowiki/05-daemon.md（会话管理章节）")).toBe(
+      "docs/repowiki/05-daemon.md",
+    );
     expect(docPathOf("AGENTS.md §4.11 控制桥")).toBe("AGENTS.md");
     expect(docPathOf("docs/ai/已知坑.md 会话四件套")).toBe("docs/ai/已知坑.md");
     expect(docPathOf("llms.txt")).toBe("llms.txt");
@@ -98,7 +106,12 @@ describe("doc-impact 解析", () => {
 });
 
 describe("doc-impact 规则匹配", () => {
-  const match = (lines) => matchRules(RULES, lines, lines.filter((l) => l.startsWith("+")));
+  const match = (lines) =>
+    matchRules(
+      RULES,
+      lines,
+      lines.filter((l) => l.startsWith("+")),
+    );
 
   it("环境变量只在包源码里触发", () => {
     expect(match(["+packages/wechat-daemon/src/a.ts\tprocess.env.NEW_FLAG"])).toHaveLength(1);
@@ -108,7 +121,9 @@ describe("doc-impact 规则匹配", () => {
   it("规则声明 files 时只看这些目录", () => {
     const outside = match(["M packages/wechat-mcp/src/foo-store.ts"]).map((h) => h.rule.id);
     expect(outside).not.toContain("data-file");
-    const inside = match(["M packages/wechat-daemon/src/tasks/task-store.ts"]).map((h) => h.rule.id);
+    const inside = match(["M packages/wechat-daemon/src/tasks/task-store.ts"]).map(
+      (h) => h.rule.id,
+    );
     expect(inside).toContain("data-file");
   });
 
@@ -140,7 +155,7 @@ describe("doc-impact 规则匹配", () => {
     const hit = match([
       '+packages/wechat-ilink-core/package.json\t  "exports": {',
       '+packages/wechat-daemon/tsconfig.json\t  "noEmit": true,',
-      '+packages/wechat-daemon/tsdown.config.ts\t  failOnWarn: true,',
+      "+packages/wechat-daemon/tsdown.config.ts\t  failOnWarn: true,",
     ]);
     expect(hit.map((h) => h.rule.id)).toContain("build-config");
   });
@@ -249,7 +264,9 @@ describe("gen-docs-tables", () => {
       "  },",
       "};",
     ].join("\n");
-    expect(parsePresetRows(source)).toEqual([{ name: "acme", bin: "acme-cli", args: "acp --yolo" }]);
+    expect(parsePresetRows(source)).toEqual([
+      { name: "acme", bin: "acme-cli", args: "acp --yolo" },
+    ]);
   });
 
   it("标记块替换与提取可往返", () => {

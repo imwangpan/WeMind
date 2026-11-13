@@ -136,9 +136,11 @@ export function validateWorkspacePath(
   }
   if (!st.isDirectory()) return "工作区不是目录";
   const account = path.resolve(dir);
+  const dataRoot = path.resolve(DATA_DIR);
   const forbiddenExact = new Set(
     [
       path.resolve(account),
+      dataRoot,
       path.join(account, "brain-home"),
       path.join(account, "worker-home"),
       path.join(account, "agent-view"),
@@ -152,6 +154,7 @@ export function validateWorkspacePath(
   const forbiddenRoots = new Set(
     [
       path.resolve(account),
+      dataRoot,
       path.join(account, "brain-home"),
       path.join(account, "worker-home"),
       path.join(account, "agent-view"),
@@ -176,6 +179,10 @@ export function validateWorkspacePath(
       return "工作区不能位于账号数据、Agent 真实配置目录或系统目录内";
     }
   }
+  // 工作区不能「包含」数据根（否则 brain 的 cwd 能读到所有账号的 account.json/state.json），也不能是别的账号目录。
+  if (isInside(dataRoot, real)) return "工作区不能包含账号数据目录";
+  if (isInside(real, dataRoot) && !isInside(real, account))
+    return "工作区不能位于其它账号的数据目录内";
   return null;
 }
 

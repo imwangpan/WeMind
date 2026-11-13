@@ -5,6 +5,7 @@ import type { ResolvedAgent } from "../brain-agents.js";
 
 /**
  * 把 agent 真实配置目录里的「记忆/规则/技能」链入沙箱配置目录，并在**换 agent** 时清掉上一个 agent 留下的条目。
+ * 仅在 `sandbox` 模式调用；`real`/`mirror` 的配置视图整目录链接真实配置，不走本模块（见 config-view.ts）。
  *
  * 为什么需要清单：kiro / deepseek / pi 的 `configSubdir` 都是空（配置目录就是沙箱根），共用同一个目录。
  * 热切换后若只做「不存在才建」，新 agent 会继续读到上一个 agent 的 `skills` 链接与 `AGENTS.md`——

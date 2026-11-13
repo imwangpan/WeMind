@@ -16,19 +16,19 @@ export type AcpAgentPreset = {
   fallbackBinPaths?: string[]; // PATH 上找不到时的已知安装位置（如官方安装器的固定目录）
   requiresBins?: string[]; // 除 bin 外还必须在 PATH 上解析到的运行时（如 pi-acp 内部 spawn `pi`；只装适配器不够）
   args: string[]; // 进入 ACP 模式的启动参数
-  homeEnvVar?: string; // agent 读取其配置/数据目录的环境变量名；指向 brain 沙箱。留空=不设置
+  homeEnvVar?: string; // agent 读取其配置/数据目录的环境变量名；指向配置视图（real/mirror）或账号沙箱（sandbox）。留空=不设置（real/mirror 直接用真实 home，WeMind 只读不写）
   /** 配置目录之外、但属于该 agent 的文件（如 Claude Code 的 ~/.claude.json）；target 相对视图根。 */
   extraConfigFiles?: Array<{ source: string; target: string }>;
   shell?: boolean; // 是否经 shell 启动（npx/.cmd/.bat 类适配器在 Windows 需要 true）
   // —— 继承「记忆/规则/技能」配置（让微信大脑与日常使用读到同样内容）——
-  realHome?: string; // 该 agent 真实配置目录（被继承的来源）。不同 agent 布局不同，故下沉到 agent
-  inheritDirs?: string[]; // 从 realHome junction 进沙箱的「知识/记忆」类子目录（不含 MCP/会话目录）
-  inheritFiles?: string[]; // 从 realHome 拷进沙箱配置目录的「单文件」记忆（如 AGENTS.md；目录式记忆用 inheritDirs）
+  realHome?: string; // 该 agent 真实配置目录（生成视图/沙箱继承/配置指纹的来源）。不同 agent 布局不同，故下沉到 agent
+  inheritDirs?: string[]; // sandbox 下从 realHome junction 进账号沙箱的「知识/记忆」类子目录（不含 MCP/会话目录）；real/mirror 的视图直接链接整个真实配置目录，不依赖此字段
+  inheritFiles?: string[]; // sandbox 下从 realHome 拷进账号沙箱的「单文件」记忆（如 AGENTS.md）；目录式记忆用 inheritDirs。real/mirror 同上不依赖此字段
   // —— 沙箱约定（不同 agent 的配置目录位置与 MCP 文件格式不同）——
   configSubdir?: string; // agent 配置目录相对 home（配置视图根 / sandbox 根）的子路径（kiro 空=根本身；opencode "opencode"）
   mcpFormat?: "mcpServers" | "mcp.servers"; // MCP 定义的 JSON 键路径（默认 mcpServers）
   mcpConfigFile?: string; // MCP 配置文件相对「配置目录」的路径（默认 settings/mcp.json）
-  catalogFile?: string; // 可选 MCP 目录来源文件相对 realHome 的路径（默认 settings/mcp.json）
+  catalogFile?: string; // 可选 MCP 目录来源文件相对 realHome 的路径（默认 settings/mcp.json）；WeMind 始终读真实 home 用于列目录/启动前检查，视图里的副本只给 agent 自己加载
   env?: Record<string, string>; // 额外注入的环境变量（强制；值里 %HOME% → home 目录（视图根 / sandbox 根））
   realEnv?: Record<string, string>; // 没有 homeEnvVar 的 agent 在 real/mirror 下直接用真实 home 时，覆盖 env 里按 %HOME% 拼出来的错误路径（如 CLAUDE_CONFIG_DIR / CLINE_DIR / QODER_CONFIG_DIR）
   envDefaults?: Record<string, string>; // 默认值：父进程已设同名变量时不覆盖。审批类开关（DSH_PERMISSION_MODE / INITIAL_AGENT_MODE）用它，部署方可用环境变量收紧权限
@@ -42,21 +42,21 @@ export type AcpAgentPreset = {
   firstFrameMs?: number; // 首帧超时覆盖（默认 25s；慢启动/committed-only agent 可放宽）
   heartbeatMs?: number; // 静默期心跳间隔覆盖（默认 15s；有 thought/tool/usage 帧的 agent 通常不需要）
   images?: boolean; // 是否接受图片输入（默认 true；DSH 官方 0.2.1-rc.2 为 false）
-  credentialFiles?: string[]; // 需要从 realHome 同步进沙箱的凭据文件（相对配置目录；新者胜）
-  identityFiles?: string[]; // 必须与 realHome 保持一致的标识文件（相对配置目录；内容不同即覆盖）
-  settingsBase?: string; // 以 realHome 下该文件为基底生成沙箱设置（剥离 MCP/插件/自定义供应商并关自动更新）
+  credentialFiles?: string[]; // sandbox 下需要从 realHome 同步进账号沙箱的凭据文件（相对配置目录；新者胜）；real/mirror 直接链接真实文件
+  identityFiles?: string[]; // sandbox 下必须与 realHome 保持一致的标识文件（相对配置目录；内容不同即覆盖）
+  settingsBase?: string; // 以 realHome 下该文件为基底生成视图/沙箱副本（剥离 MCP/插件/自定义供应商并关自动更新）；绝不写真实文件
   settingsStrip?: string[]; // settingsBase 基底里要删掉的键（默认见 DEFAULT_SETTINGS_STRIP；gemini 只删 mcpServers，保留 model/security）
-  settingsDefaults?: Record<string, unknown>; // 沙箱 settings.json 的默认键：真实配置里没有该键时补上（用户显式设过则保留用户的值；只改沙箱副本）
+  settingsDefaults?: Record<string, unknown>; // 视图/沙箱 settings.json 的默认键：副本里没有该键时补上（用户显式设过则保留用户的值；只改副本）
   model?: string; // 默认模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）：经 session/set_config_option（agent 自己的 ACP 接口）在会话建立后下发一次；可用 brain.json / `brain set --model` 覆盖，`auto` = 跟随默认；配了 realProfile 时默认值优先从真实 profile 读
   modelArg?: string; // 不支持 session/set_config_option 的 agent：模型改为追加到启动参数（如 gemini 的 "--model"），不再走 ACP 下发
   realProfile?: string; // 真实 home 里该 agent 的 profile 名（`profiles/<名>/cordis.patch.yml` 是用户/桌面端维护的用户层：沙箱**原样复制**、不追加条目，默认模型从它读——优先 `- id: acp`，否则 `agent-default-model`）；如 DSH 的 "acp"
   mcpViaAcp?: boolean; // MCP 走 ACP session/new|resume 的 mcpServers（不写配置文件；如 DSH）
   sessionMode?: string; // 会话建立/恢复后经 `session/set_mode` 切到的模式 id（agent 自己的 ACP 接口）；用于「免审批」模式：claude-code 的 bypassPermissions、codex 的 agent-full-access。留空=不调用
   kiroEngine?: boolean; // kiro：`acp` 的 v2 / v3 引擎启动参数与免审批方式不同（v2 `--trust-all-tools`；v3 用沙箱 settings/permissions.yaml 的 allow-all）
-  isolateSessions?: boolean; // 会话持久化 root 用 agent 自己的 `--patch` 指到账号数据目录下（DSH：与同沙箱其他 agent 的会话文件分开，见 docs/接入-DeepSeek.md）
+  isolateSessions?: boolean; // sandbox 下会话持久化 root 用 agent 自己的 `--patch` 指到账号数据目录（DSH：与同沙箱其他 agent 的会话文件分开，见 docs/接入-DeepSeek.md）；real/mirror 用 agent 自己的会话库
 };
 
-/** settingsBase 的默认剥离清单：MCP 必须由沙箱权威决定（防 wechat 回环）；插件/自定义供应商可能自带 MCP 或明文密钥；model 可能指向已剥离的供应商。 */
+/** settingsBase 的默认剥离清单：MCP 必须由视图/沙箱的 curated 激活集权威决定（防 wechat 回环）；插件/自定义供应商可能自带 MCP 或明文密钥；model 可能指向已剥离的供应商。 */
 export const DEFAULT_SETTINGS_STRIP = ["mcpServers", "enabledPlugins", "providers", "model"];
 
 /**
@@ -78,9 +78,9 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     kiroEngine: true,
   },
   // Gemini CLI（原生 ACP，0.66.0 已实测）。`--acp` 取代已弃用的 `--experimental-acp`；`--approval-mode yolo` 自动批准所有工具调用（与 `--yolo` 互斥，二选一）；`--skip-trust` 信任当前工作区——**未信任的目录会把 yolo 静默降回 default，并且连 MCP 都不加载**（用户级 server 也被抑制），所以必须带上（或用 GEMINI_CLI_TRUST_WORKSPACE=true）。
-  // - 沙箱：`GEMINI_CLI_HOME` 指向沙箱根，但 Gemini 的配置目录是 `<它>/.gemini`（实测），故 configSubdir=".gemini"；`~/.gemini` 的 skills/ 与 GEMINI.md 是它的全局技能与记忆。
+  // - 视图/沙箱：`GEMINI_CLI_HOME` 指向视图根/沙箱根，Gemini 的配置目录是 `<它>/.gemini`（实测），故 configSubdir=".gemini"；`~/.gemini` 的 skills/ 与 GEMINI.md 是它的全局技能与记忆。
   // - MCP：读配置目录 settings.json 的 `mcpServers`（kiro 格式）。ACP `session/new` 的 mcpServers 实测也能用，但 `initialize` 只声明 http/sse、不声明 acp——走它自己的配置文件更稳。
-  // - 设置：以真实 settings.json 为基底（保留 model / security / ui），只剥 `mcpServers`（MCP 必须来自沙箱 curated，防 wechat 回环），并关自动更新。认证走 `security.auth.selectedType`；API key 用户同步 `.env`（GEMINI_API_KEY / GOOGLE_GEMINI_BASE_URL），Google 登录用户同步 `oauth_creds.json` + `google_accounts.json`——settings 镜像了 `oauth-personal` 却缺 token 时，它会卡在登录流程、连 ACP initialize 都不回。
+  // - 设置：以真实 settings.json 为基底（保留 model / security / ui），只剥 `mcpServers`（MCP 必须来自视图/沙箱 curated，防 wechat 回环），并关自动更新。认证走 `security.auth.selectedType`；API key 用户同步 `.env`（GEMINI_API_KEY / GOOGLE_GEMINI_BASE_URL），Google 登录用户同步 `oauth_creds.json` + `google_accounts.json`——settings 镜像了 `oauth-personal` 却缺 token 时，它会卡在登录流程、连 ACP initialize 都不回。
   // - 模型：不支持 `session/set_config_option`（-32601），`--model` 走启动参数（modelArg）；默认不传，跟随 settings.json 的 model.name。
   // - 恢复：loadSession=true、强杀后 session/load 能接回上下文；但 load 返回后它还会**异步回放历史**（streamHistory 不 await），replayOnLoad 让恢复后先等回放结束。
   // - `session/close` 未实现（-32601，WeMind 不调用）；图片实测可收；工具调用 0 反向请求。
@@ -105,7 +105,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     shell: true,
   },
   // GitHub Copilot CLI（原生 ACP，1.0.107 探针实测）。
-  // - COPILOT_HOME 指向独立沙箱；只同步 config.json 登录元数据、skills 与 copilot-instructions.md，不继承用户 MCP/插件/hooks。
+  // - COPILOT_HOME 指向配置视图/sandbox；sandbox 下只同步 config.json 登录元数据、skills 与 copilot-instructions.md，不继承用户 MCP/插件/hooks；real/mirror 的视图会剔除微信 MCP（真实文件不动）。
   // - 用户 MCP 目录是 ~/.copilot/mcp-config.json；stdio MCP 经 session/new 实测可调用（尽管 initialize 只声明 http/sse）。
   // - --allow-all-tools 免除工具审批，但不启用 --allow-all 的路径/URL 放宽；默认 auto 不探测，避免「已安装但未登录」导致误选。
   copilot: {
@@ -124,7 +124,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   },
   // OpenCode：原生 ACP（`opencode acp`）。
   // - Windows 上是 npm shim（PATH 只有 opencode.cmd），故 shell:true + 裸名 binWin。
-  // - 配置目录走 XDG_CONFIG_HOME（指向沙箱 → 配置落在 <沙箱>/opencode/），可真正替换默认 global 目录实现隔离；（OPENCODE_CONFIG_DIR 只「追加」不替换 global，无法隔离，故不用它。）
+  // - 配置目录走 XDG_CONFIG_HOME（指向视图根/sandbox 根 → 配置落在 <视图>/opencode 或 <沙箱>/opencode/），可真正替换默认 global 目录实现隔离；（OPENCODE_CONFIG_DIR 只「追加」不替换 global，无法隔离，故不用它。）
   // - MCP 配置文件是 opencode.json 的 mcp.servers（格式与 kiro 的 settings/mcp.json 不同）。
   // - 记忆/技能为目录式 skills/agents/commands + 单文件 AGENTS.md。
   // 详见 docs/接入-OpenCode.md（含 M1 实测）。
@@ -146,7 +146,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   },
   // DeepSeek Harness（官方 ACP profile）。
   // - 桌面端自带 `dsh.cmd`（只有 .cmd，没有无扩展名 dsh），故 binWin 必须写全；
-  // - DSH_HOME 指向 brain 沙箱；`.credentials.yaml` 由沙箱同步（桌面登录态）；
+  // - DSH_HOME 指向配置视图/账号沙箱；`.credentials.yaml` 在 sandbox 下由账号沙箱同步（real/mirror 的视图直接链接真实文件）；
   // - 无 session/load，用 session/resume；image:false（收图需上层拦截）；
   // - **模型：跟着用户自己 dsh 的配置走（WeMind 只读；real 链接、sandbox 复制，不替 agent 合成配置）。** 桌面端或用户自己的配置工具把 provider 目录与默认模型写进 `~/.dsh/profiles/<profile>/cordis.patch.yml`。
   //   `dsh --profile acp` 的 ACP 桥插件（`@deepseek-ai/dsh-acp`）默认模型写死在它**自己的 bundle patch**里：`- id: acp` 的
@@ -189,7 +189,8 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
 
   // Qoder CLI（官方原生 ACP，qodercli 1.1.78 实测）。
   // - 直接起 qodercli.exe：`qoder` 是分发器（cmd → powershell → qodercli），多一层管道且会与 IDE 命令混淆；
-  // - QODER_CONFIG_DIR 指向 <沙箱>/qoder：与 Qoder Desktop 共用的 ~/.qoder 绝不写入；
+  // - QODER_CONFIG_DIR 指向视图/sandbox 的 qoder 子目录；real/mirror 下没有可重定向目录时 WeMind **只读** ~/.qoder（绝不写 settings.json）；
+  // - 没有配置目录环境变量 → real/mirror 无法生成视图，微信侧 MCP/overlay 对该 agent 不生效（会告警），要生效请用 sandbox；
   // - 登录态要 .auth/user + .auth/machine_id 两个文件（只带 user 会 Authentication required）；
   // - MCP 在 settings.json 的 mcpServers（与其它设置同文件），改后需重启进程 → 加载/卸载 MCP 的 restart 已覆盖；
   // - --yolo 下工具调用不发反向请求；capabilities 有 load/resume/image；
@@ -220,12 +221,12 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   },
 
   // Cline CLI（官方原生 ACP，cline 3.0.74 实测；`cline-acp` 适配器已归档，官方让直接用 `cline --acp`）。
-  // - `CLINE_DIR` 指到 <沙箱>/cline（不用沙箱根：大脑 cwd 就是沙箱根，避免把 agent 自己的配置目录当工作区）；
+  // - `CLINE_DIR` 指到 <视图根或沙箱根>/cline（不用根目录：大脑 cwd 可能就是它，避免把 agent 自己的配置目录当工作区）；
   // - 登录态：ACP 只自动恢复它自己的 3 种登录（cline / cline-pass / openai-codex，读 data/settings/providers.json）；
   //   自定义/API-key provider（如 openai-compatible）必须由 daemon 进程环境提供 CLINE_PROVIDER + CLINE_API_KEY，
   //   否则 session/new 直接 `-32000 Authentication required`（Cline 不会去看 lastUsedProvider）；
-  // - MCP：data/settings/cline_mcp_settings.json（{mcpServers}，与 kiro 同格式）；沙箱用 CLINE_MCP_SETTINGS_PATH 指到
-  //   <沙箱>/cline/mcp.json，真实文件不动。ACP `session/new.mcpServers` 不被 Cline 使用（它只存不用）→ mcpViaAcp 保持 false；
+  // - MCP：data/settings/cline_mcp_settings.json（{mcpServers}，与 kiro 同格式）；视图/沙箱用 CLINE_MCP_SETTINGS_PATH 指到
+  //   <视图或沙箱>/cline/mcp.json，真实文件不动。real/mirror 下没有视图时**连 mcp.json 也不写**（只读真实配置）；
   // - 免审批：`--auto-approve true`（Cline 自己文档给的 ACP 启动开关）；WeMind 侧权限应答器仍默认拒绝权限请求；
   // - 能力：loadSession / images 可用，重启后 session/load 能接回上下文；session/close 未实现（-32601，WeMind 不调用）。
   cline: {
@@ -266,10 +267,10 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // pi coding agent（@earendil-works/pi-coding-agent）经社区适配器 pi-acp 接入：适配器 spawn `pi --mode rpc`，在 ACP 与 pi RPC 之间桥接。
   // 2026-10-30 探针 + 2026-11-01 复跑（pi-acp 0.0.34 + pi 1.4.0，见 docs/接入-pi.md）：
   // - session/load 原生支持（强杀后上下文接上）；image:true；首帧 0–3ms；有 thought/tool 帧；无反向请求——pi 默认不做逐次工具审批（官方 security.md 明说），无需 yolo flag / sessionMode；
-  // - 模型跟随用户 pi 配置（settings.json 的 defaultProvider/defaultModel 随凭据原样同步进沙箱）；覆盖用 `wemind brain set pi --model "<provider>/<model>"`（session/set_config_option 的 configId 就叫 model）；
+  // - 模型跟随用户 pi 配置（settings.json 的 defaultProvider/defaultModel；sandbox 下随凭据原样同步，real/mirror 链接真实目录）；覆盖用 `wemind brain set pi --model "<provider>/<model>"`（session/set_config_option 的 configId 就叫 model）；
   // - MCP：pi 读 <PI_CODING_AGENT_DIR>/mcp.json（`pi mcp list` 实测；不是 settings/mcp.json），格式与 kiro 相同 {mcpServers:{名:{command,args,env}}}；不设 mcpViaAcp（pi-acp 只把 mcpServers 存进会话、从不读取）；
   // - 适配器只是桥：真正进程是 PATH 上的 pi 本体（requiresBins 会在缺 pi 时提前报错，而不是等 session/new 才炸）。
-  // - 适配器的会话映射表固定写在真实 home 的 ~/.pi/pi-acp/session-map.json（不随沙箱走）：跨账号共享的只是 id→会话文件的映射，会话本体仍在各自沙箱的 sessions/ 下。
+  // - 适配器的会话映射表固定写在真实 home 的 ~/.pi/pi-acp/session-map.json（不随视图/沙箱走）：跨账号共享的只是 id→会话文件的映射，会话本体仍在各自 home（real/mirror 是真实 ~/.pi/agent/sessions，sandbox 是账号沙箱副本）的 sessions/ 下。
   // - 适配器类不参与 auto 探测（装好适配器 ≠ 已登录/配好模型），用 `wemind brain set|switch pi` 显式选用。
   pi: {
     name: "pi",
@@ -278,14 +279,14 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     requiresBins: ["pi"], // pi-acp 内部 spawn `pi --mode rpc`；只装适配器不够
     args: [],
     shell: true,
-    homeEnvVar: "PI_CODING_AGENT_DIR", // pi 的配置目录 env（默认 ~/.pi/agent）→ 指向沙箱根
+    homeEnvVar: "PI_CODING_AGENT_DIR", // pi 的配置目录 env（默认 ~/.pi/agent）→ 指向视图根/沙箱根
     realHome: path.join(os.homedir(), ".pi", "agent"),
     inheritDirs: ["skills"],
     inheritFiles: ["AGENTS.md"], // pi 读 <agent-dir>/AGENTS.md 作跨目录全局指令
     // 原样同步：默认模型/供应商（settings.json）、登录态（auth.json）、自定义供应商与模型目录（models*.json，可能含网关地址/密钥）
     credentialFiles: ["settings.json", "auth.json", "models.json", "models-store.json"],
     // pi-acp 把 pi 的启动信息（## Context / ## Skills …）当作 agent_message_chunk 发出来，那是给人看的启动信息，进微信回复就是噪声。
-    // pi 自己的 `quietStartup: true` 关掉它（docs/settings.md）；写进沙箱副本，用户显式设过就保留用户的值。
+    // pi 自己的 `quietStartup: true` 关掉它（docs/settings.md）；写进视图/沙箱副本，用户显式设过就保留用户的值。
     settingsDefaults: { quietStartup: true },
     // pi 的 MCP 是 <agent-dir>/mcp.json（不是 settings/mcp.json）；kiro 格式与 pi 兼容
     mcpConfigFile: "mcp.json",
@@ -298,7 +299,8 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // - 免审批：适配器**不解析** --dangerously-skip-permissions 之类 CLI flag；会话建立/恢复后走 `session/set_mode {modeId:"bypassPermissions"}`（见 sessionMode）。
   //   以 root 运行且未设 IS_SANDBOX=1 时该模式不可用——会话回包的 availableModes 里没有它，applyAcpSessionMode 会跳过并记日志。
   // - 沙箱：CLAUDE_CONFIG_DIR 指向 <BRAIN_HOME>/claude（实测会把 ~/.claude.json 一起搬进该目录，用户级 mcpServers 不会漏进大脑）；
-  //   CLAUDE.md/skills/agents/commands 与日常使用共享；OAuth 登录态 .credentials.json 同步进沙箱。
+  //   real/mirror 没有视图时 CLAUDE_CONFIG_DIR=~，**CLAUDE.md/skills 与 ~/.claude.json 一律只读**，微信侧 overlay/MCP 不生效；
+  //   CLAUDE.md/skills/agents/commands 与日常使用共享；OAuth 登录态 .credentials.json 在 sandbox 下同步进账号沙箱（real/mirror 链接真实文件）。
   //   **不复制 settings.json**：它常含网关 token（env），按 §4.9 密钥由 daemon 进程环境提供；需要网关时设 ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL。
   // - MCP：走 ACP session/new|load 的 mcpServers（mcpViaAcp），不写配置文件；目录取真实 ~/.claude.json 的 mcpServers（`catalogFile` 用 `..` 回到 home）。
   //   探针实测 stdio MCP 可用（尽管 initialize 的 mcpCapabilities 只声明 http/sse——能力字段不可信的又一例）。
@@ -337,7 +339,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   //   模型实际调用 fake_ping 并返回 FAKE_PONG）。旧结论「mcpCapabilities.acp=false = 不支持 stdio」是误读：
   //   `acp` 指 MCP-over-ACP 传输，stdio 是 ACP 的基础传输，不靠这个字段声明。故开 mcpViaAcp。
   //   Codex 自己的 ~/.codex/config.toml 仍会被 Codex 原生加载；同名 server 由 Codex 自身条目优先，适配器会跳过客户端重复项。
-  //   微信侧额外 MCP 可走 overlay 的 mcp.extra；WeMind 暂不解析 config.toml 的 MCP 列表（catalog 只用于列出/加载额外项）。
+  //   微信侧额外 MCP 可走 overlay 的 mcp.extra；WeMind **只读解析** config.toml 的 `[mcp_servers.*]`（列目录 + 启动前检查 wechat），绝不写回，也无法替它 unload。
   // - 2026-10-30 探针实测（codex-acp 2.5.0 / Codex CLI 0.165，Windows）：
   //   loadSession ✅、promptCapabilities.image ✅、session/set_mode ✅、session/set_config_option(model) ✅、session/load 后上下文保留、
   //   工具调用 0 反向请求（只收到无 id 的 _auth/status_update 通知）；首帧 ~20ms、首字 3–4s、带图整轮 ~24s。
@@ -350,8 +352,8 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     shell: true,
     envDefaults: { INITIAL_AGENT_MODE: "agent-full-access" },
     sessionMode: "agent-full-access",
-    // Codex 的真实配置目录（仅用于配置指纹/危险路径判断；homeEnvVar 为空，不传给适配器）。
-    // catalogFile 指向 config.toml：WeMind 目前不解析 TOML，catalog 默认为空；原生 MCP 由 Codex 自己加载。
+    // Codex 的真实配置目录（生成视图/配置指纹/危险路径判断的来源；homeEnvVar 为空，不传给适配器）。
+    // catalogFile 指向 config.toml：WeMind 只读解析其中的 [mcp_servers.*]（列目录 + 启动前检查 wechat），绝不写回；原生 MCP 由 Codex 自己加载。
     realHome: path.join(os.homedir(), ".codex"),
     catalogFile: "config.toml",
     mcpViaAcp: true,

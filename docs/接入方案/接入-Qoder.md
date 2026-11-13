@@ -137,7 +137,7 @@ syncSettings():
   否则                  → syncKiroSettings()（不变）
 ```
 
-`settingsBase()`：读 `realHome/<settingsBase>` → 删除 `mcpServers`、`enabledPlugins`（插件可自带 MCP，有 wechat 回环风险；生成的配置也不继承 `plugins/`）、`providers` / `model`（§5 决定）→ **强制 `general.enableAutoUpdate = false`**（否则 CLI 可能把约 210 MB 的新版本下载进每个沙箱；`general` 的其它键保留）→ 写入当前配置目录（`real`/`mirror` 的视图或 `sandbox`）。随后 `applySandbox()` / `applyWorkerSandbox()` 用已有的 `withMcpServers()` 把 curated `mcpServers` 合并回去，**MCP 写入逻辑不改**。
+`settingsBase()`：读 `realHome/<settingsBase>` → 删除 `mcpServers`、`enabledPlugins`（插件可自带 MCP，有 wechat 回环风险；生成的配置也不继承 `plugins/`）、`providers` / `model`（§5 决定）→ **强制 `general.enableAutoUpdate = false`**（否则 CLI 可能把约 210 MB 的新版本下载进每个沙箱；`general` 的其它键保留）→ 写入当前配置目录（`real`/`mirror` 的视图或 `sandbox`）。**`real`/`mirror` 下没有视图（该 agent 没有 `homeEnvVar`）时直接跳过并告警，绝不写真实 `~/.qoder/settings.json`**；随后 `applySandbox()` / `applyWorkerSandbox()` 用已有的 `withMcpServers()` 把 curated `mcpServers` 合并回去，**MCP 写入逻辑不改**。
 
 ### 4.3 凭据同步（两边同步）
 

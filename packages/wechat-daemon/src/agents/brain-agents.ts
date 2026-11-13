@@ -12,7 +12,7 @@ import { readHomeMode } from "./config/home-mode.js";
 /**
  * ACP agent 与解析。
  *
- * WeMind 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动一个 agent CLI。ACP 是通用协议（kiro-cli、gemini-cli 等都支持），因此接入任意兼容 ACP 的 agent 不需要改协议代码——只需告诉我们三件事：① 二进制名；② 进入 ACP 模式的启动参数；③ 该 agent 读取「配置/数据目录」的环境变量名（我们把它指向 brain 沙箱）。
+ * WeMind 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动一个 agent CLI。ACP 是通用协议（kiro-cli、gemini-cli 等都支持），因此接入任意兼容 ACP 的 agent 不需要改协议代码——只需告诉我们三件事：① 二进制名；② 进入 ACP 模式的启动参数；③ 该 agent 读取「配置/数据目录」的环境变量名（我们把它指向配置视图或账号沙箱）。
  *
  * 选择与覆盖（优先级从高到低）：
  *  ① 环境变量（一次性覆盖；临时试别的 agent 用它，别写进 profile）：
@@ -189,7 +189,7 @@ export type ResolvedAgent = {
   settingsBase?: string;
   /** settingsBase 基底里要删掉的键（默认 DEFAULT_SETTINGS_STRIP）。 */
   settingsStrip: string[];
-  /** 沙箱 settings.json 的预设默认键（只补缺失键；用户显式设过则保留用户的值）。 */
+  /** 视图/沙箱 settings.json 的预设默认键（只补缺失键；用户显式设过则保留用户的值）。 */
   settingsDefaults: Record<string, unknown>;
   model?: string;
   /** 模型改为追加到启动参数（agent 不支持 session/set_config_option 时；如 gemini 的 "--model"）。 */
@@ -218,7 +218,7 @@ export type ResolvedAgent = {
   binOverridden: boolean;
 };
 
-/** 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向沙箱 → 从凭据文件派生的 env（父进程未提供时）→ 预设强制 `env` → 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。 */
+/** 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向视图/沙箱 → 从凭据文件派生的 env（父进程未提供时）→ 预设强制 `env` → 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。 */
 export function agentEnv(
   ag: ResolvedAgent,
   home: string,
@@ -226,7 +226,7 @@ export function agentEnv(
   dataDir: string = DATA_DIR,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = mergeEnvSnapshot(process.env, readEnvSnapshot(dataDir));
-  if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把沙箱目录传给 agent
+  if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把配置视图/账号沙箱目录传给 agent
   // 从 agent 自己的凭据文件派生（如 Cline 的 CLINE_PROVIDER/CLINE_API_KEY）；helper 内部已保证父进程显式值优先
   for (const [k, v] of Object.entries(ag.credentialEnv?.(ag.realHome, process.env) ?? {})) {
     if (env[k] === undefined) env[k] = v;
@@ -320,7 +320,7 @@ function resolveKiroV3(
   return (kiroCliMajor(binPath) ?? 0) >= 3;
 }
 
-/** v3 拒绝 v2 专属的整会话信任参数；v3 的免审批改由沙箱 `settings/permissions.yaml` 承担。 */
+/** v3 拒绝 v2 专属的整会话信任参数；v3 的免审批改由视图/沙箱 `settings/permissions.yaml` 承担。 */
 function stripKiroV2TrustArgs(args: readonly string[]): string[] {
   const kept: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -365,12 +365,12 @@ export function prepareAgent(ag: ResolvedAgent): void {
   }
 }
 
-/** kiro v3 的免审批默认（等价于 v2 的 `--trust-all-tools`）：沙箱 settings/permissions.yaml 缺失时补上。 */
+/** kiro v3 的免审批默认（等价于 v2 的 `--trust-all-tools`）：视图/沙箱 settings/permissions.yaml 缺失时补上。 */
 export function ensureKiroV3Permissions(ag: ResolvedAgent, settingsDir: string): void {
   if (!ag.kiroV3) return;
   try {
     const dst = path.join(settingsDir, "permissions.yaml");
-    if (fs.existsSync(dst)) return; // 真实配置里已有（已同步进沙箱）就尊重用户的规则
+    if (fs.existsSync(dst)) return; // 真实配置里已有（已同步进视图/沙箱）就尊重用户的规则
     fs.mkdirSync(settingsDir, { recursive: true });
     fs.writeFileSync(dst, "rules:\n  - capability: all\n    effect: allow\n", "utf-8");
   } catch {

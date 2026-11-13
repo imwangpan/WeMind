@@ -114,6 +114,7 @@ const host: AcpHost = {
 let turnDepth = 0; // 已入队/正在跑的 ACP 操作数（提问 / 新建会话 / 恢复会话）
 let opChain: Promise<void> = Promise.resolve(); // ACP 操作串行链：同一时刻只有一个操作在碰进程
 let switching = false; // 正在切换大脑
+let pendingReload = false; // 配置变更要求重启，但当前有回合在跑 → 排到最后一个回合结束
 const SWITCH_WAIT_MS = Number(process.env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000; // 回合等切换的上限，与切换自身的启动新大脑的上限一致
 
 export function isTurnInFlight(): boolean {
@@ -130,6 +131,11 @@ function withBrainOp<T>(fn: () => Promise<T>): Promise<T> {
   turnDepth += 1;
   const run = opChain.then(fn, fn).finally(() => {
     turnDepth -= 1;
+    if (turnDepth === 0 && pendingReload) {
+      pendingReload = false;
+      log.info("回合已结束：应用排队的 MCP/config 变更（重启大脑）");
+      reset();
+    }
   });
   opChain = run.then(
     () => {},
@@ -237,20 +243,20 @@ function saveSessionMap(m: Record<string, string>): void {
 }
 
 async function ensureProcess(ag: ResolvedAgent): Promise<void> {
-  const fp = readHomeMode() === "sandbox" ? "" : configFingerprint(ag);
-  if (isAlive() && initialized && configFp === fp) return;
+  const before = readHomeMode() === "sandbox" ? "" : configFingerprint(ag);
+  if (isAlive() && initialized && configFp === before) return;
   if (isAlive() && initialized) {
     // 终端侧改了配置：本轮开始前重建，随后 session/load 恢复上下文；不在一轮对话中途换配置。
     log.info(`real config changed (${ag.name}) → rebuild before next turn`);
   }
   reset();
   const kept: string[] = [];
-  ensureBrainHome(ag); // 视图链接 + 生成的 MCP/settings/overlay 副本一起重建（终端或微信侧刚改过配置）
-  assertNoForbiddenNativeMcp(ag); // Codex 的 config.toml 由它自己加载，WeMind 只读 → 有 wechat 就拒绝启动
-  const rt = agentRuntime("brain", ag); // real/mirror 构建 config view；sandbox 用账号沙箱
+  const rt = ensureBrainHome(ag); // 视图链接 + 生成的 MCP/settings/overlay 副本一起重建（终端或微信侧刚改过配置）
+  assertNoForbiddenNativeMcp(ag, rt); // Codex 的 config.toml 由它自己加载，WeMind 只读 → 有 wechat 或解析不了就拒绝启动
   const env = agentEnv(ag, rt.home, kept); // 父进程 env → 配置视图/沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
   if (kept.length) log.info(`env defaults kept from parent: ${kept.join(",")}`); // 部署方显式设置的审批类开关
   prepareAgent(ag); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
+  const fp = readHomeMode() === "sandbox" ? "" : configFingerprint(ag); // 必须在 ensureBrainHome 之后取：否则把自己的写入误判成「终端改配置」而每轮重启
   const proc = spawnAgent(ag, { cwd: rt.cwd, env });
   child = proc;
   log.info(
@@ -559,6 +565,12 @@ export function restart(): void {
  */
 export async function restartForMcpChange(): Promise<boolean> {
   if (switching && !(await drainSwitch(SWITCH_WAIT_MS))) return false;
+  if (isTurnInFlight()) {
+    pendingReload = true;
+    log.info("MCP/config 已变更：等当前回合结束再重启大脑（不打断正在生成的回复）");
+    return true;
+  }
+  pendingReload = false;
   restart();
   return true;
 }

@@ -5,7 +5,6 @@ import fs from "node:fs";
 import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 import { ensureWorkerHome, workerMcpServers } from "../agents/sandbox/worker-sandbox.js";
 import { assertNoForbiddenNativeMcp, nativeMcpServers } from "../agents/sandbox/mcp-sandbox.js";
-import { agentRuntime } from "../agents/config/runtime.js";
 import { configFingerprint } from "../agents/config/config-fingerprint.js";
 import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
 import { readHomeMode } from "../agents/config/home-mode.js";
@@ -275,8 +274,8 @@ export class WorkerConn {
   }
 
   private async ensureProcess(): Promise<void> {
-    const fp = readHomeMode() === "sandbox" ? "" : configFingerprint(this.agent);
-    if (this.isAlive() && this.initialized && this.configFp === fp) return;
+    const before = readHomeMode() === "sandbox" ? "" : configFingerprint(this.agent);
+    if (this.isAlive() && this.initialized && this.configFp === before) return;
     if (this.isAlive() && this.initialized)
       log.info(`${this.id}(${this.agent.name}) real config changed → rebuild`);
     this.kill();
@@ -286,10 +285,10 @@ export class WorkerConn {
     // 用 effectiveCwd() 而不是 this.cwd：后者不含 WEMIND_WORKER_CWD 一次性覆盖，
     // 否则 spawn 的 cwd 与 session/new 的 cwd 可能不一致。
     const taskCwd = this.effectiveCwd();
-    // 视图链接 + 生成的 MCP/settings/overlay 副本一起重建：长驻的空闲 worker 复用时也能看到终端侧的新配置。
-    ensureWorkerHome(this.agent, DATA_DIR, { cwd: taskCwd });
-    assertNoForbiddenNativeMcp(this.agent); // Codex 的 config.toml 由它自己加载 → 有 wechat 就拒绝启动
-    const rt = agentRuntime("worker", this.agent, DATA_DIR, { cwd: taskCwd }); // real/mirror 会构建 config view；sandbox 用账号沙箱
+    const rt = ensureWorkerHome(this.agent, DATA_DIR, { cwd: taskCwd });
+    assertNoForbiddenNativeMcp(this.agent, rt); // Codex/config.toml 与视图副本：有 wechat 或解析不了就拒绝启动
+    // 必须在 ensureWorkerHome 之后取：否则把自己的写入误判成「终端改配置」而每次复用都重启
+    const fp = readHomeMode() === "sandbox" ? "" : configFingerprint(this.agent);
     const env = agentEnv(this.agent, rt.home, kept); // 父进程 env → 配置视图/沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
     if (kept.length) log.info(`${this.id} env defaults kept from parent: ${kept.join(",")}`);
     prepareAgent(this.agent); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）

@@ -211,7 +211,10 @@ export async function acquire(
   try {
     ensureWorkerHome(ag);
   } catch (e) {
-    log.error(`准备沙箱失败（${ag.name}）：${e instanceof Error ? e.message : String(e)}`);
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error(`准备沙箱失败（${ag.name}）：${msg}`);
+    // 配置没备好就 spawn 只会让 agent 拿半套配置跑（模型/凭据/MCP 缺失）——直接判这条任务失败。
+    return { ok: false, problem: `准备 worker 配置失败（${ag.name}）：${msg}` };
   }
   reapByIds(plan.reap);
 

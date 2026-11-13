@@ -20,7 +20,7 @@
   ```
 
 - 协议能力（3.0.74）：`loadSession:true`、`agent_thought_chunk` / `agent_message_chunk` / `session_info_update`、**0 反向请求**、硬杀后 `session/load` 能接回上下文；`session/close` ❌（`-32601`，WeMind 不调用）。**图片 ❌**：`initialize` 虽然声明 `image:true`，但 ACP `prompt` 的 `de()` 只保留 `text` 块（图片被丢弃），所以预设显式 `images:false`。
-- **MCP 只能走配置文件**：Cline 收到 `session/new.mcpServers` 只存不用；预设用 `CLINE_MCP_SETTINGS_PATH` 指到当前配置目录的 `cline/mcp.json`（`real` 为 `~/.cline/...`，`sandbox` 为 `<沙箱>/cline/mcp.json`；`{ "mcpServers": {…} }`，与 kiro 同格式）。
+- **MCP 只能走配置文件**：Cline 收到 `session/new.mcpServers` 只存不用；预设用 `CLINE_MCP_SETTINGS_PATH` 指到当前配置目录的 `cline/mcp.json`（`real` 为真实 `~/.cline/...` 但 WeMind 不写，`sandbox` 为 `<沙箱>/cline/mcp.json`；`{ "mcpServers": {…} }`，与 kiro 同格式）。
 
 ---
 
@@ -143,8 +143,8 @@ cline: {
 
 - **配置目录**：`real` 模式下 `CLINE_DIR` 直接用真实 `~/.cline`（`realEnv` 修正）；`sandbox` 模式下指到 `<sandbox>/cline`，由 `configSubdir` 决定。brain 的 cwd 始终是 `<账号>/workspace/brain`，不是配置目录；三个 env 必须与 `configSubdir` 一致。
 - `CLINE_DATA_DIR` 显式写成 `<CLINE_DIR>/data`（Cline 的默认值也是它），避免上游改默认值时沙箱漏到真实目录。
-- **MCP 文件**：`CLINE_MCP_SETTINGS_PATH` 在 `sandbox` 下指到 `<sandbox>/cline/mcp.json`；`real` 下直接指到真实 `~/.cline/mcp.json`。Cline 没有 `homeEnvVar`，real 模式没有独立视图，WeMind 会把 curated `mcpServers` 写入这个真实文件（catalog 仍只读 `~/.cline/data/settings/cline_mcp_settings.json`）；其它配置不受影响。`applySandbox()` 写 `{ "mcpServers": {…} }`。
-  - 验证方式（不需要起 daemon）：`cline config mcp --json` 在设置 `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 后能列出**当前配置目录**里的 server（real 即真实 `~/.cline/mcp.json`，sandbox 即 `<sandbox>/cline/mcp.json`）。
+- **MCP 文件**：`CLINE_MCP_SETTINGS_PATH` 在 `sandbox` 下指到 `<sandbox>/cline/mcp.json`；`real` 下直接指到真实 `~/.cline/mcp.json`。Cline 没有 `homeEnvVar`，real/mirror 下没有独立视图：WeMind **不会写**真实 `~/.cline/mcp.json`，`加载`/`卸载` 只更新激活集并告警（普通配置也不受影响）；catalog 仍只读 `~/.cline/data/settings/cline_mcp_settings.json`。要 MCP 生效必须设 `homeMode=sandbox`，此时 `applySandbox()` 写 `<沙箱>/cline/mcp.json` 的 `{ "mcpServers": {…} }`。
+  - 验证方式（不需要起 daemon）：`cline config mcp --json` 在设置 `CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH` 后能列出**当前配置目录**里的 server。`real`/`mirror` 下额外断言真实 `~/.cline/mcp.json` **字节不变**，日志含「real 模式不会改写真实配置（跳过MCP 激活集）」；`sandbox` 下 `<沙箱>/cline/mcp.json` 含所选 server。
   - `wechat` 永久禁止；brain 默认空、按需 `加载 <名>`；worker 继承全量但排除 `wechat` 与 `disabled:true`。
 - **登录态与模型目录**：`data/settings/providers.json`（登录态/自定义 provider）与 `data/settings/models.json`（provider 的模型目录缓存）在 `sandbox` 下按「新者胜」同步（与 DSH `.credentials.yaml` 同策略）；`real` 下直接用真实文件。**`models.json` 不能漏**：缺它时 Cline 的 `session/new` 会回退到 `gpt-4o`，自定义 provider 下第一条 prompt 就报 `knows no model "gpt-4o"`（2026-10-31 真机踩到并修复）。自定义 provider 另由 `credentialEnv: clineCredentialEnv` 在 spawn 前从**真实** `~/.cline/data/settings/providers.json` 派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（显式 env 优先）。**注意**：`sandbox` 里 OAuth token 刷新不会写回真实文件，长期两条登录态可能漂移；用 API-key provider 或定期在日常环境 `cline auth` 可以规避。
 - **记忆/技能**：`real` / `mirror` 下 `rules/`、`skills/`、`agents/` 直接使用真实 `~/.cline`；`sandbox` 下才以 junction（Windows）/ symlink 链入沙箱。`hooks/`、`plugins/` **不继承**（插件可自带 MCP，微信侧只允许 curated MCP）。
@@ -178,8 +178,8 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 任务 cline：把这个仓库的 README 里过期的版本号找出来
 ```
 
-- **brain**：`real`（默认）下 `CLINE_DIR=~/.cline`；`sandbox` 下是 `<账号>/brain-home/cline`。默认 MCP 空，`加载 <名>` 后写当前配置目录的 `mcp.json`，**激活集真变了才重启 ACP 进程**（`daemon-control.ts` 只在 `changed` 时调 `restartForMcpChange()`）。
-- **worker**：`real`（默认）下 `CLINE_DIR=~/.cline`；`sandbox` 下是 `<账号>/worker-home/cline`。全量 MCP（除 `wechat`/`disabled`），同样走 `mcp.json`。
+- **brain**：`real`（默认）下 `CLINE_DIR=~/.cline`；`sandbox` 下是 `<账号>/brain-home/cline`。默认 MCP 空；`sandbox` 下 `加载 <名>` 写 `<沙箱>/cline/mcp.json`，`real`/`mirror` 下只记录激活集、不写真实配置（告警）。**激活集真变了才重启 ACP 进程**（`daemon-control.ts` 只在 `changed` 时调 `restartForMcpChange()`；正在生成的回合会排到回合结束）。
+- **worker**：`real`（默认）下 `CLINE_DIR=~/.cline`；`sandbox` 下是 `<账号>/worker-home/cline`。MCP 集 = 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；只有 `sandbox` 写 `<沙箱>/cline/mcp.json`。
 - **热切换**：`wemind brain switch cline` 会启动新 ACP 进程并等 `session/new` 成功后才写 `brain.json`；失败退回旧大脑。
 
 ---

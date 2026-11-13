@@ -80,7 +80,7 @@
 | 模式 | 行为 | 适用场景 |
 |---|---|---|
 | `real` | real home 是配置/会话/记忆的唯一来源；只对必须覆盖的单个文件（MCP/权限）生成最小视图，其余用目录 junction / 符号链接保持双向 | 默认；单机单人；追求终端等效 |
-| `mirror` | 整个 home 建立视图，对混有 MCP/权限等必须覆盖内容的文件生成副本，并做三路合并 | Agent 不支持直接覆盖单个配置段，或 Windows 文件链接不可用 |
+| `mirror` | 目标：整个 home 建立视图，对混有 MCP/权限等必须覆盖内容的文件生成副本并做三路合并（Phase 2；**当前实现与 `real` 相同**） | 三路合并落地后：Agent 不支持直接覆盖单个配置段，或 Windows 文件链接不可用 |
 | `sandbox` | 完整复制到账号目录，Agent 与真实配置隔离 | 多账号不同人、不可信任务、Agent 不支持共享 home、需要回滚 |
 
 **默认：`real`。** 现有账号迁移后也进入 `real`；`sandbox` 保留为显式选项。
@@ -119,7 +119,7 @@ Phase 1 已落地（本分支）：
 - 微信 overlay 位于 `<账号>/agent-overrides/<agent>.json`；CLI 为 `wemind config wechat ...`，微信侧为 `微信配置 ...` 确定性指令。
 - 真实配置写入走 `agents/config/agent-config-writer.ts`：备份、mtime + size + sha256 并发校验、同目录原子写；含注释 JSONC、YAML/TOML 第一期拒绝写入。
 - 入站媒体在 `real` / `mirror` 下写到 `<账号>/media/inbound`；`sandbox` 仍是 `<sandbox>/media/inbound`。
-- 配置变化通过 `configFingerprint()` 在每轮开始前检测并重建；`wemind config reload` 经控制桥在空闲时重建视图并重启常驻 brain。worker 在每次 `acquire` 时按该任务 agent 重新准备。
+- 配置变化通过 `configFingerprint()` 在每轮开始前检测并重建（只哈希显式配置文件；real/mirror + 无 `homeEnvVar` 直接返回空）；`wemind config reload` 经控制桥**立即重建视图**，brain 有回合在跑时把重启排到回合结束。worker 在每次 `acquire` 时按该任务 agent 重新准备。
 - 技能/记忆的双向共享由 **WeMind 自己**的 config view + `sandbox-inherit.ts` 实现，不是 Agent 或操作系统自动提供。`real` 模式下未被覆盖的目录直接链接；`sandbox` 模式仍只继承预设列出的 `inheritDirs` / `inheritFiles`。
 - 会话指针仍在 `brain-sessions.json` / `worker-sessions.json`；Agent 的真实会话库由各 Agent 自己管理，`real` 模式下与终端共用同一个库。
 
@@ -188,7 +188,7 @@ AgentHomeResolver ──► ConfigViewBuilder ──► Agent 进程
 | `WorkspaceManager`（`agents/config/workspace.ts`） | 校验、创建、读取 brain/worker 默认工作区；区分 managed/external |
 | `EnvProvider`（`agents/config/env-snapshot.ts` + `brain-agents.ts`） | 继承 daemon 环境，或加载非敏感快照（PATH/代理/locale）；解析顺序不绑定某个版本管理器 |
 | `SessionBinder`（`agents/config/session-cwd.ts`） | 保存 `<agent>:<sessionId> → cwd`；恢复时使用并校验 cwd |
-| `ReloadCoordinator`（`config-fingerprint.ts` + `config.reload` 控制桥） | 检测真实配置变化；手动 reload 在空闲时重建视图并重启 brain |
+| `ReloadCoordinator`（`config-fingerprint.ts` + `config.reload` 控制桥） | 检测真实配置变化；手动 reload 立即重建视图，brain 重启在回合结束后执行 |
 | `AgentCapabilityMatrix`（`brain-presets.ts`） | 每个 Agent 的 homeMode、MCP 传输、会话布局、yolo 方式、并发注意事项 |
 
 ### 5.2 brain 与 worker 的差异
@@ -215,13 +215,13 @@ AgentHomeResolver ──► ConfigViewBuilder ──► Agent 进程
 | `copilot` | `COPILOT_HOME` | `~/.copilot` | 根 | ACP `mcpServers` | COPILOT_HOME 内 | `--allow-all-tools` | `real` | 不启用 `--allow-all` 的路径/URL 放宽；图片能力待实测 |
 | `opencode` | `XDG_CONFIG_HOME` | `~/.config/opencode` | `opencode/` | `opencode.json` 的 `mcp.servers` | 真实 `~/.local/share/opencode` | `opencode.json` 的 `permission: "allow"` | `mirror` | 数据目录不在账号内（real 模式正是目标；sandbox 模式会跨账号共享）；MCP/权限同文件 |
 | `deepseek` / DSH | `DSH_HOME` | `~/.dsh` | 根 | ACP `mcpServers` | 真实 `~/.dsh`（real 模式） | `DSH_PERMISSION_MODE=danger-full-access` | `real` | 坏 MCP 可能导致 `session/new` 回滚；当前 `isolateSessions` 需在 real 模式关闭 |
-| `qoder` | `QODER_CONFIG_DIR` | `~/.qoder` | `qoder/` | `settings.json` 的 `mcpServers` | `qoder/` | `--yolo` | `mirror` | `providers`/`model` 同文件；sandbox 模式下 memory 是真实目录 junction，real 模式天然共享 |
-| `cline` | `CLINE_DIR` / `CLINE_DATA_DIR` / `CLINE_MCP_SETTINGS_PATH` | `~/.cline` | `cline/` | `mcp.json`（`CLINE_MCP_SETTINGS_PATH`） | `cline/data/`（SQLite，假设/待实测） | `--auto-approve true` | `real + mcp.json 视图` | sandbox 模式下会话库并发风险；providers/models 需真实登录态 |
+| `qoder` | `QODER_CONFIG_DIR` | `~/.qoder` | `qoder/` | `settings.json` 的 `mcpServers` | `qoder/` | `--yolo` | `sandbox` | 没有 `homeEnvVar`：real/mirror 都只读真实 home，MCP/overlay 不生效；给出建议值 `mirror` 是旧结论 |
+| `cline` | `CLINE_DIR` / `CLINE_DATA_DIR` / `CLINE_MCP_SETTINGS_PATH` | `~/.cline` | `cline/` | `mcp.json`（`CLINE_MCP_SETTINGS_PATH`） | `cline/data/`（SQLite，假设/待实测） | `--auto-approve true` | `sandbox` | 没有 `homeEnvVar`：real/mirror 无视图、不写真实 `mcp.json`；旧建议 `real + mcp.json 视图` 不成立 |
 | `pi` | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | 根 | `mcp.json` | `sessions/` | 无（默认不逐次审批） | `real + mcp.json 视图` | sandbox 模式下 `pi-acp` 仍读真实 `~/.pi/pi-acp/session-map.json`、`~/.agents/skills`；real 模式正是目标 |
 | `claude-code` | `CLAUDE_CONFIG_DIR` | `~/.claude` | `claude/` | ACP `mcpServers` | `claude/` | `session/set_mode bypassPermissions` | `real` | `~/.claude.json` 混状态；sandbox 模式下 `settings.json` 常含网关 token；real 模式直接使用真实配置 |
 | `codex` | 无 home env | `~/.codex` | 真实 `~/.codex` | **stdio MCP 支持**（2026-11-12 复测；`mcpCapabilities.acp=false` 只指 MCP-over-ACP） | `~/.codex` | `INITIAL_AGENT_MODE=agent-full-access` + `set_mode` | `real` | 无独立配置目录；原生 `config.toml` 由 Codex 自己加载 |
 
-**结论**：`real` 是目标默认，但“MCP 必须由 WeMind 控制”意味着即使 `real` 也需要对 MCP 段生成 config view。表中的 `real + mcp.json 视图` 指“home / 会话 / 技能仍是真实目录，只把 MCP 文件换成生成视图”；混合文件（opencode / gemini / qoder）直接 `mirror`，把生成范围限制在单个文件。`claude-code` 的 MCP 走 ACP，因此可以保持 `real`，不要为了 MCP 去复制它的 `settings.json`。
+**结论（2026-11-13 按实现修正）**：`real` 是目标默认，但“MCP 必须由 WeMind 控制”只对有 `homeEnvVar` 的 agent 成立——它们用最小配置视图覆盖 MCP/settings 副本；混合文件（opencode / gemini）仍在视图内只替换单个文件。没有 `homeEnvVar` 的 agent（qoder / cline / claude-code / codex）real/mirror 都没有视图：WeMind **只读真实 home**，MCP/overlay 不生效，要可控只能 `sandbox`。`claude-code` / `codex` 的 MCP 走 ACP，可以保持 `real`；但不要为 MCP 去复制/改写它们的真实配置。
 
 ---
 
@@ -243,14 +243,14 @@ AgentHomeResolver ──► ConfigViewBuilder ──► Agent 进程
 ### 7.2 real 模式
 
 - 通过 Agent 自己的 `homeEnvVar` 指向 real home，或在必须覆盖单个文件时指向“除该文件外全部链接到 real home”的最小视图；例如 `KIRO_HOME=~/.kiro`、`CLAUDE_CONFIG_DIR=~/.claude`、`PI_CODING_AGENT_DIR=~/.pi/agent`。
-- 技能、记忆、会话、插件直接落在真实目录；微信侧写入会立即被终端看到。
+- 技能、记忆、会话、插件直接落在真实目录；微信侧写入会立即被终端看到（仅限有视图的 agent；没有 `homeEnvVar` 的 agent 微信侧不写真实配置）。
 - **`real` 不等于把 real 文件原样交给 Agent。** 以下情况必须有覆盖，覆盖方式是“Agent 原生参数 > 独立视图 > 拒绝启动”，绝不在 real home 里原地改写：
   - brain 的 MCP 段（默认空 / 显式激活集）；
   - `wechat` 排除（硬约束：real 配置里含 `wechat` 时，必须生成剔除后的视图；生成不了就拒绝加载，不能“先跑起来再说”）；
   - yolo 只能通过配置文件开启的 Agent（如 opencode `permission`、kiro v3 `permissions.yaml`）；
   - overlay 涉及的键。
 - 如果 Agent 支持 ACP `mcpServers` 或命令行参数，优先用原生入口覆盖 MCP / 权限，这样 real 文件可以保持原样。
-- 如果 Agent 只从配置读 MCP，且配置不可拆分，则该 Agent 退回 `mirror`；`real` 只适用于“无需覆盖，或 Agent 原生支持分段覆盖”的情况。
+- 如果 Agent 只从配置读 MCP，且配置不可拆分，则该 Agent 应改用 `sandbox`（没有 `homeEnvVar` 时 `mirror` 不生成视图，不是退路）；`real` 只适用于“无需覆盖，或 Agent 原生支持分段覆盖”的情况。
 - 写 real 配置（包括 `promote`）前必须重新读取并校验 mtime/hash，发现终端侧刚改过就备份并拒绝覆盖，避免“微信侧用旧内容盖掉终端的新内容”。
 
 ### 7.3 mirror 模式
@@ -369,7 +369,7 @@ ACP 的 client（WeMind）能处理的反向请求是固定的：`session/reques
 | Admin MCP server | 一个本地 MCP server，声明 `wechat_config` / `agent_config` 两个工具；只接受本账号、本 agent、本角色的调用 |
 | ConfigService | 与 CLI 共用的配置服务：解析路径、合并 patch、密钥/越界校验、备份、并发快照校验、原子写、审计 |
 | Config view / overlay | `scope=agent` 改真实配置；`scope=wechat` 只改 `<账号>/agent-overrides/<agent>.json`，不碰真实文件 |
-| Control bridge | Admin MCP 写完配置后投递 `config.reload`；daemon 在空闲时重建视图/重启 brain |
+| Control bridge | Admin MCP 写完配置后投递 `config.reload`；daemon 立即重建视图，brain 重启排到回合结束 |
 
 #### 怎么注入
 
@@ -391,8 +391,8 @@ ACP 的 client（WeMind）能处理的反向请求是固定的：`session/reques
 
   如果 agent 支持 HTTP MCP，则优先由 daemon 起一个只监听 `127.0.0.1` 的 HTTP MCP，`mcpServers` 里只放 URL + `Authorization` header。这样不会每个会话多一个 Node 子进程，启动成本更低。
 
-- **只从配置文件读 MCP 的 agent**（kiro / opencode / gemini / qoder / cline / pi）：把 `wemind_admin` 写进 WeMind 生成的 config view 的 MCP 文件，**不写真实配置**。终端自己开的会话看不到这个工具，只有微信侧视图能看到。
-- **不支持客户端 MCP 的 agent**（如 codex 适配器）：没有 `wechat_config` 工具，退回“模型通过 shell 调 `wemind config ...`”的 CLI 路径。
+- **只从配置文件读 MCP 的 agent**：kiro / opencode / gemini / pi 把 `wemind_admin` 写进 WeMind 生成的 config view 的 MCP 文件，**不写真实配置**；qoder / cline 没有视图，real/mirror 下注入不进去（只能 `sandbox`）。终端自己开的会话看不到这个工具，只有微信侧视图能看到。
+- **不经过 WeMind 视图的 agent**（如 codex 的原生 `config.toml`）：没有 `wechat_config` 工具，退回“模型通过 shell 调 `wemind config ...`”的 CLI 路径。注意 codex 的客户端 stdio MCP 自 2026-11-12 复测已可用（`mcpViaAcp`），旧文「codex 不支持客户端 MCP」已不成立。
 
 #### 一次调用的完整链路
 

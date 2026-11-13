@@ -167,7 +167,7 @@ async function cmdOverlay(rest: string[], opts: Opts, dir: string, agent: string
       `agent：${agent}`,
       `overlay：${overlayPath(agent, dir)}`,
       jsonText(read.overlay),
-      "提示：未写 overlay 的键直接使用真实配置；修改真实配置用 `wemind config agent ...`。",
+      "提示：未写 overlay 的键沿用视图副本里的值（由真实配置生成）；修改真实配置用 `wemind config agent ...`。没有配置目录环境变量的 agent 在 real/mirror 下 overlay 不生效，需要时用 homeMode=sandbox。",
     ].join("\n");
   }
   if (sub === "edit") {
@@ -207,7 +207,7 @@ function cmdRealAgent(rest: string[], opts: Opts, dir: string, agent: string): s
       `agent：${agent}`,
       `真实配置：${file}`,
       `格式：${configFileFormat(file)}`,
-      "提示：默认修改真实配置；只说“微信侧/仅微信”时才写 overlay。",
+      "提示：默认修改真实配置；只说“微信侧/仅微信”时才写 overlay（只作用于视图副本，不改真实文件；没有配置目录环境变量的 agent 在 real/mirror 下无效）。",
     ].join("\n");
   }
   if (sub === "edit") {
@@ -250,7 +250,7 @@ export async function cmdConfig(rest: string[]): Promise<string> {
   }
   if (sub === "reload") {
     if (bridgeReady(key)) return await viaBridge(key, { kind: "config.reload" });
-    return `账号 ${key} 的 daemon 未运行；配置视图会在下一次启动时重建。`;
+    throw new Error(`账号 ${key} 的 daemon 未运行，无法重载；下次启动会自动重建配置视图。`);
   }
   if (sub === "agent") {
     const agent = rest.shift();
@@ -358,8 +358,9 @@ export function cmdMcp(rest: string[], keySel?: string): string {
     const ov = readOverlay(ag.name, dir).overlay;
     const disable = [...new Set([...(ov.mcp?.disable ?? []), name])];
     writeOverlay(ag.name, { ...ov, mcp: { ...ov.mcp, disable } }, dir);
-    removeMcp(name, ag, dir);
-    return `已禁用「${name}」。用 \`wemind config reload --key ${key}\` 让 daemon 重建配置视图。`;
+    const r = removeMcp(name, ag, dir);
+    const how = r.ok ? `已从当前视图卸载（${r.text}）` : "当前未激活，无需卸载";
+    return `已禁用「${name}」：${how}。用 \`wemind config reload --key ${key}\` 让 daemon 重建配置视图。`;
   }
   if (sub === "add") {
     const name = rest.shift();

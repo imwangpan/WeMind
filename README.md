@@ -450,7 +450,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 
 除了「对话大脑」，daemon 还能把**漫长任务**交给一个**受控的 ACP worker 进程**跑——你在电脑上派发任务后离开，它在「需要你决策」（如列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑（远程 human-in-the-loop）。
 
-worker 与对话大脑是**独立的 ACP 进程，互不干扰**——而且是**每个任务一条连接**（进程池：结束「等你回复」的任务时进程留着复用，空闲超 5 分钟回收；结束「正在跑」的那条只能力杀）：可以同时让 kiro 做任务 1、opencode 做任务 2。worker 跑在任务工作目录、继承所用 agent 真实配置目录的**全量 MCP（除 `wechat`）＋ 记忆/技能/模型**（kiro 即 `~/.kiro`，opencode 即 `~/.config/opencode`）。
+worker 与对话大脑是**独立的 ACP 进程，互不干扰**——而且是**每个任务一条连接**（进程池：结束「等你回复」的任务时进程留着复用，空闲超 5 分钟回收；结束「正在跑」的那条只能力杀）：可以同时让 kiro 做任务 1、opencode 做任务 2。worker 跑在任务工作目录，MCP 集 = 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`（catalog 读真实 home，写落到配置视图或沙箱）；记忆/技能/模型沿用该 agent 的真实配置（kiro 即 `~/.kiro`，opencode 即 `~/.config/opencode`）。
 
 **指令集**：
 
@@ -505,7 +505,7 @@ iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 1
 
 ### 配置视图、MCP 与终端等效
 
-默认 `homeMode = real`。WeMind 不再把大脑/ worker 的整份配置复制进沙箱：能通过 `homeEnvVar` 指向配置目录的 Agent，会得到**最小配置视图** `<账号>/agent-view/<role>/<agent>/`——未覆盖的目录/文件用 junction / symlink 指向该 Agent 的真实 home，只有必须由 WeMind 权威覆盖的 MCP、权限、`settingsBase` 与 overlay 目标生成副本。没有 `homeEnvVar` 的 Agent（如 `claude-code` / `cline` / `qoder` / `codex`）直接使用自己的真实配置目录；其中文件式 MCP 的权威副本仍按各 Agent 的配置能力写入，`mcpViaAcp` 的 Agent 则通过 ACP 下发。因此终端改模型、加技能、写记忆，微信侧默认读到的是同一份；真实配置里的微信 MCP 会被排除，避免形成第二个 poller。
+默认 `homeMode = real`。WeMind 不再把大脑/ worker 的整份配置复制进沙箱：能通过 `homeEnvVar` 指向配置目录的 Agent，会得到**最小配置视图** `<账号>/agent-view/<role>/<agent>/`——未覆盖的目录/文件用 junction / symlink 指向该 Agent 的真实 home，只有必须由 WeMind 权威覆盖的 MCP、权限、`settingsBase` 与 overlay 目标生成副本。没有 `homeEnvVar` 的 Agent（如 `claude-code` / `cline` / `qoder` / `codex`）直接使用自己的真实配置目录，但 WeMind **只读不写**：`settingsBase`/`mcp.json` 等一律跳过并告警，微信侧 MCP 激活与 overlay 对它们不生效（要生效用 `sandbox`）。有视图的 Agent 仍由 WeMind 生成 MCP/设置副本，`mcpViaAcp` 的 Agent 通过 ACP 下发。因此终端改模型、加技能、写记忆，微信侧默认读到的是同一份；真实配置里的微信 MCP 会被排除，避免形成第二个 poller。
 
 > **技能 / 记忆不是“软件自动继承”**：junction / symlink、清单与清理逻辑都是 WeMind 在 `config-view.ts` / `sandbox-inherit.ts` 里实现的。`real`/`mirror` 下未覆盖项直接链接真实目录；`sandbox` 模式才按预设的 `inheritDirs` / `inheritFiles` 选择性继承。Windows 没有 symlink 权限时会回退到复制，此时副本**不保证双向同步**，日志会告警。可用 `WEMIND_BRAIN_REAL_HOME` / `WEMIND_BRAIN_INHERIT_DIRS` 覆盖继承来源，`WEMIND_BRAIN_INHERIT=0` 关闭 sandbox 继承。
 
@@ -522,7 +522,7 @@ worker 是无人值守任务执行机，默认真实配置的**全量 MCP**，�
 | `卸载 <名>` / `unload <名>` | 移除                                            |
 | `新会话 [名字]` / `/new`    | 开启新 ACP 会话（清空多轮上下文）；给名字便于在 `会话列表` 里认出来 |
 
-加载/卸载 MCP 时，**只有激活集真的变了** daemon 才会重启 ACP 进程以按新配置视图重载，下一条消息生效（重复加载已激活项、卸载未激活项都不会重启；切脑进行中会先等切换结束再重启）。激活的 MCP 等于对登录者全权开放（内置预设默认免审批，见[「切换大脑 Agent」](#切换大脑-agent通用化)），按需加载、用完可卸载。
+加载/卸载 MCP 时，**只有激活集真的变了** daemon 才会重启 ACP 进程以按新配置视图重载，下一条消息生效（重复加载已激活项、卸载未激活项都不会重启；切脑进行中会先等切换结束；有回复正在生成时排到该回合结束，不打断输出）。激活的 MCP 等于对登录者全权开放（内置预设默认免审批，见[「切换大脑 Agent」](#切换大脑-agent通用化)），按需加载、用完可卸载。
 
 CLI 管理入口：`wemind config show|home-mode|reload`、`wemind config agent show|get|set|unset|edit`（默认改真实配置）、`wemind config wechat ...`（只改微信 overlay）、`wemind workspace show|set|reset`、`wemind mcp list|enable|disable|add|remove`、`wemind env capture|show|clear`。直接编辑 `<账号>/agent-overrides/<agent>.json` 也可以；改真实配置前会备份并校验 mtime/hash，发现终端侧刚改过就拒绝覆盖。
 
@@ -560,13 +560,13 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 >
 > **OpenCode 已内置 agent**：`WEMIND_BRAIN=opencode` 即可让 `opencode acp` 当大脑（`XDG_CONFIG_HOME` 指向配置视图、curated MCP、共享记忆/技能）。完整设计、M1 实测与风险见 **[docs/接入方案/接入-OpenCode.md](docs/接入方案/接入-OpenCode.md)**。
 >
-> **Claude Code 已内置（探针级实测 + 真机微信单轮 E2E）**：先 `npm i -g @agentclientprotocol/claude-agent-acp`（**Node ≥22**；Windows 得到 `claude-agent-acp.cmd`），再 `wemind brain set claude-code`。预设用 `CLAUDE_CONFIG_DIR` 指向配置视图，`CLAUDE.md`/`skills`/`agents`/`commands` 与日常共用；`~/.claude.json` 作为 `extraConfigFiles` 链入视图，MCP 走 ACP（目录取真实 `~/.claude.json`）；免审批走 `session/set_mode bypassPermissions`。真机微信单轮 E2E 已通过（2026-10-31）；重启续聊/MCP/任务待复测。详见 **[docs/接入方案/接入-ClaudeCode.md](docs/接入方案/接入-ClaudeCode.md)**。
+> **Claude Code 已内置（探针级实测 + 真机微信单轮 E2E）**：先 `npm i -g @agentclientprotocol/claude-agent-acp`（**Node ≥22**；Windows 得到 `claude-agent-acp.cmd`），再 `wemind brain set claude-code`。`real`/`mirror` 直接用真实 `~/.claude`（与终端共用，WeMind 只读、不生成视图；`CLAUDE.md`/`skills`/`agents`/`commands` 即真实目录，MCP 走 ACP，目录取真实 `~/.claude.json`）；`sandbox` 才把 `CLAUDE_CONFIG_DIR` 指向 `<沙箱>/claude` 并同步登录态。免审批走 `session/set_mode bypassPermissions`。真机微信单轮 E2E 已通过（2026-10-31）；重启续聊/MCP/任务待复测。详见 **[docs/接入方案/接入-ClaudeCode.md](docs/接入方案/接入-ClaudeCode.md)**。
 >
 > **DeepSeek 已接入（官方 DSH，微信 brain + worker E2E 已通）**：`wemind brain set deepseek --bin "<...>\dsh.cmd"` 即用 `dsh --profile acp` 当大脑；内置配置已处理 `DSH_HOME` 配置视图、`.credentials.yaml`、**默认模型跟随你日常 dsh**（`real` 模式把整个 `profiles/` 链接真实 home、`sandbox` 模式才原样复制；读默认时优先你自己写的 `- id: acp`，否则 `agent-default-model`；**WeMind 不替你改 agent 的配置**：模型/凭据/路由都由 DSH 自己的 profile 决定，缺 `- id: acp` 时按 `wemind brain` 给的片段补到真实 profile；桌面端改模型后，重启 daemon 或 `wemind brain switch deepseek` 时跟着改；没写 `--model` 时读不到才回退旧 `deepseek-account/deepseek-flash`（rc.3 已失效，只记 WARN））、`session/resume`、**动态 MCP（`加载/卸载` 经 ACP `mcpServers` 生效）**、图片拦截。实测与限制见 **[docs/接入方案/接入-DeepSeek.md](docs/接入方案/接入-DeepSeek.md)**（M3–M5 的验证结果见该文附录）。
 
-> **Qoder 已内置 agent（M0–M3 已完成）**：`wemind brain set qoder` 即用 `qodercli --acp --yolo` 当大脑；内置配置已处理 `QODER_CONFIG_DIR` 配置视图、`.auth/user` + `.auth/machine_id` 登录态同步、`settings.json` 基底（剥离 `providers`/`model`、关自动更新）、文件式 MCP、`memory/` 共享。需先 `qoder login`。实测与限制见 **[docs/接入方案/接入-Qoder.md](docs/接入方案/接入-Qoder.md)**。
+> **Qoder 已内置 agent（M0–M3 已完成）**：`wemind brain set qoder` 即用 `qodercli --acp --yolo` 当大脑；`real`/`mirror` 直接共用真实 `~/.qoder`（WeMind 只读：不写 `settings.json`、不同步 `.auth`、微信侧 MCP/overlay 不生效）；`sandbox` 才生成 `QODER_CONFIG_DIR` 视图、同步 `.auth/user` + `.auth/machine_id`、复制剥离后的 `settings.json` 基底（去掉 `providers`/`model`、关自动更新）并写文件式 MCP。`memory/` 两种模式都共享。需先 `qoder login`。实测与限制见 **[docs/接入方案/接入-Qoder.md](docs/接入方案/接入-Qoder.md)**。
 >
-> **Cline 已内置 agent（原生 ACP，3.0.74 实测）**：装 `npm i -g cline` 后 `wemind brain set cline` 即用 `cline --acp --auto-approve true` 当大脑；`providers.json` / `models.json` 登录态与模型目录同步、`mcp.json` 文件式 MCP 写入配置视图。**认证**：ACP 只自动恢复 `cline` / `cline-pass` / `openai-codex`；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER` + `CLINE_API_KEY`（父进程显式设了就不接管），通常无需手工配置。实测与限制见 **[docs/接入方案/接入-Cline.md](docs/接入方案/接入-Cline.md)**。
+> **Cline 已内置 agent（原生 ACP，3.0.74 实测）**：装 `npm i -g cline` 后 `wemind brain set cline` 即用 `cline --acp --auto-approve true` 当大脑；`real` 直接读真实 `~/.cline`（WeMind 不写、不同步）；仅 `sandbox` 才同步 `providers.json` / `models.json` 登录态与模型目录，并把文件式 MCP 写进 `<沙箱>/cline/mcp.json`。**认证**：ACP 只自动恢复 `cline` / `cline-pass` / `openai-codex`；自定义/API-key provider 由 WeMind 从 `providers.json` 自动派生 `CLINE_PROVIDER` + `CLINE_API_KEY`（父进程显式设了就不接管），通常无需手工配置。实测与限制见 **[docs/接入方案/接入-Cline.md](docs/接入方案/接入-Cline.md)**。
 >
 > **pi 已内置（探针级实测 + 真机 E2E，2026-11-01）**：先 `npm i -g @earendil-works/pi-coding-agent`（pi 本体，**Node ≥22.19**——它的 engines 要求，比适配器的 ≥20 更严）并在终端里 `pi` 登录/配好模型，再 `npm i -g pi-acp`（社区适配器），然后 `wemind brain set pi`。预设用 `PI_CODING_AGENT_DIR` 指向配置视图（`settings.json` / `auth.json` / `models*.json` 按需生成或链接，`skills/` 共享、`AGENTS.md` 链接/复制）；MCP 走 pi 自己的 `<配置根>/mcp.json`（`pi mcp list` 实测，kiro 格式）；免审批无需开关（pi 默认不逐次审批）；启动信息用 pi 自己的 `quietStartup` 在生成的 settings 里关掉（不进微信回复）。**只装适配器不够**——`requiresBins: ["pi"]` 会提前报「运行时 pi 缺失」。**不在自动探测**，只能显式选用。详见 **[docs/接入方案/接入-pi.md](docs/接入方案/接入-pi.md)**。
 

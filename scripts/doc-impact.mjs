@@ -26,12 +26,16 @@ import { RULES, VALID_ESCAPE_HATCH_REASONS } from "./doc-impact.rules.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+/** git 的输出可能超过 Node 默认 1MB maxBuffer（大分支/大文档 diff），显式放宽。 */
+export const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+
 function git(args) {
   // core.quotepath=false：否则中文路径会被写成 `"docs/...\345\244..."`，规则里的文档路径永远对不上。
   return execFileSync("git", ["-c", "core.quotepath=false", ...args], {
     cwd: ROOT,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: GIT_MAX_BUFFER,
   });
 }
 
@@ -77,7 +81,11 @@ export function parseNameStatus(output) {
     const status = (parts[0] ?? "").trim();
     if (!status) continue;
     if (status.startsWith("R") || status.startsWith("C")) {
-      files.push({ status: status[0], oldPath: unquoteGitPath(parts[1]), path: unquoteGitPath(parts[2]) });
+      files.push({
+        status: status[0],
+        oldPath: unquoteGitPath(parts[1]),
+        path: unquoteGitPath(parts[2]),
+      });
     } else {
       files.push({ status: status[0], path: unquoteGitPath(parts[1]) });
     }
@@ -170,7 +178,9 @@ function collectDiff({ staged, base }) {
   // 未跟踪文件整体当作新增：状态行 A + 每行内容都当新增行。
   const untracked = (tryGit(["ls-files", "--others", "--exclude-standard"]) ?? "")
     .split(/\r?\n/)
-    .filter((p) => p && !p.endsWith("/") && !p.startsWith(".worktrees/") && !p.startsWith(".agents/"));
+    .filter(
+      (p) => p && !p.endsWith("/") && !p.startsWith(".worktrees/") && !p.startsWith(".agents/"),
+    );
   for (const rel of untracked) {
     files.push({ status: "A", path: rel });
     try {
@@ -217,7 +227,9 @@ function inRuleScope(rule, line) {
 export function matchRules(rules, ruleInput, addedLines) {
   const results = [];
   for (const rule of rules) {
-    const scopedInput = rule.files ? ruleInput.filter((line) => inRuleScope(rule, line)) : ruleInput;
+    const scopedInput = rule.files
+      ? ruleInput.filter((line) => inRuleScope(rule, line))
+      : ruleInput;
     if (!rule.trigger(scopedInput)) continue;
     let dynamic = false;
     let dynamicNames = [];
@@ -307,7 +319,9 @@ function main(argv) {
   if (!check) {
     console.log(`本次改动触发 ${triggered.length} 条规则：\n`);
     for (const { rule } of triggered) printRule(rule, []);
-    console.log("提交前请同步上述文档，或用 `Docs-Impact: none — <理由>` 豁免（理由仅限 Pure refactor / Comment only / Test update）。");
+    console.log(
+      "提交前请同步上述文档，或用 `Docs-Impact: none — <理由>` 豁免（理由仅限 Pure refactor / Comment only / Test update）。",
+    );
     return 0;
   }
 
@@ -335,7 +349,7 @@ function main(argv) {
     console.error("");
   }
   console.error("如确属纯重构/只改注释/只改测试，用 `Docs-Impact: none — <理由>` 豁免：");
-  console.error("  pre-commit：DOCS_IMPACT=\"none — Pure refactor\" git commit ...");
+  console.error('  pre-commit：DOCS_IMPACT="none — Pure refactor" git commit ...');
   console.error("  CI/已提交：在提交信息或 PR 描述里加一行 `Docs-Impact: none — Pure refactor`");
   return 1;
 }

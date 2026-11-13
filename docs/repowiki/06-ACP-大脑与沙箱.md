@@ -153,7 +153,7 @@ graph TD
 2. **杜绝回环** —— 有效 MCP 集永久排除 `wechat`（否则 bot 用同一 token 长轮询、与 daemon 抢消息）；
 3. **可控覆盖** —— 只对 MCP、`settingsBase`、kiro v3 权限文件和微信 overlay 目标生成副本。
 
-`sandbox` 是显式回退：它继续使用 `BRAIN_HOME` / `<账号>/brain-home`，完整复制并按 `inheritDirs` / `inheritFiles` 选择性继承。`mirror` 与 `real` 共用最小视图；区别是后续 Phase 2 会在需要时做三路合并。
+`sandbox` 是显式回退：它继续使用 `BRAIN_HOME` / `<账号>/brain-home`，由 adapter 复制设置基底，并按 `inheritDirs` / `inheritFiles` 选择性继承技能/记忆。`mirror` 当前与 `real` 共用最小视图（对没有 `homeEnvVar` 的 agent 二者同样不生成视图、不写真实配置）；三路合并是未实现的 Phase 2。
 
 ### MCP 适配器分层
 
@@ -179,9 +179,9 @@ brain **默认不加载任何 MCP**（既快又安全，内置工具如 web_sear
 | `加载 <名>` / `load <名>` | 加入激活集（`wechat` 永久禁止） |
 | `卸载 <名>` / `unload <名>` | 移除 |
 
-加载/卸载后 daemon 重启 ACP 进程以按新视图重载，下一条消息生效。**只有激活集真的变了才重启**（重复加载/卸载未激活项不会白杀一次进程）；**切脑进行中先等切换结束再重启**。激活集持久化在 `<账号>/brain-mcps.json`，结构 `{version:2, active:{"<agent>":[...]}}`；**只影响该 agent、且只影响之后由 WeMind 新建的 brain 会话**。切到另一个 agent 用它自己的集合（没加载过就是空），切回来恢复原集合。终端自己开的会话不受影响。
+加载/卸载后 daemon 重启 ACP 进程以按新视图重载，下一条消息生效。**只有激活集真的变了才重启**（重复加载/卸载未激活项不会白杀一次进程）；**切脑进行中先等切换结束再重启**；**正在生成的回合不打断**——重启排到当前回合结束（`pendingReload`）。激活集持久化在 `<账号>/brain-mcps.json`，结构 `{version:2, active:{"<agent>":[...]}}`；**只影响该 agent、且只影响之后由 WeMind 新建的 brain 会话**。切到另一个 agent 用它自己的集合（没加载过就是空），切回来恢复原集合。终端自己开的会话不受影响。
 
-**catalog 按 agent 各自约定、从该 agent 的「真实」配置目录读**（`mcpCatalogPath()` 用 `realHome`，不是视图）：kiro 是 `~/.kiro/settings/mcp.json`，opencode 是 `~/.config/opencode/opencode.json` 的 `mcp.servers`，qoder 是 `~/.qoder/settings.json` 的 `mcpServers`，cline 是 `~/.cline/data/settings/cline_mcp_settings.json`，gemini 是 `~/.gemini/settings.json`（JSONC），pi 是 `~/.pi/agent/mcp.json`（kiro 格式 `{mcpServers}`）；DSH / Claude Code / Copilot / Codex 走 ACP `mcpServers`（Codex 另会加载自己的 `~/.codex/config.toml` 原生项）。`WEMIND_MCP_CATALOG` 可覆盖成任意路径。**「读真实、写视图/沙箱」**：`加载 <名>` 只把定义写进 WeMind 生成的配置视图或沙箱，真实配置文件一律不动。**不要跨 agent 借配置文件。** overlay 的 `mcp.extra` 扩充可选目录，`mcp.disable` 最后生效；worker 同样支持两者。
+**catalog 按 agent 各自约定、从该 agent 的「真实」配置目录读**（`mcpCatalogPath()` 用 `realHome`，不是视图）：kiro 是 `~/.kiro/settings/mcp.json`，opencode 是 `~/.config/opencode/opencode.json` 的 `mcp.servers`，qoder 是 `~/.qoder/settings.json` 的 `mcpServers`，cline 是 `~/.cline/data/settings/cline_mcp_settings.json`，gemini 是 `~/.gemini/settings.json`（JSONC），pi 是 `~/.pi/agent/mcp.json`（kiro 格式 `{mcpServers}`）；DSH / Claude Code / Copilot / Codex 走 ACP `mcpServers`（Codex 另会加载自己的 `~/.codex/config.toml` 原生项）。`WEMIND_MCP_CATALOG` 可覆盖成任意路径（只影响“可选清单/展示”，不改 native 只读门禁：Codex/DSH/Copilot 的 native 检查始终读真实文件，且读不了/解析失败时拒绝启动）。**「读真实、写视图/沙箱」**：`加载 <名>` 只把定义写进 WeMind 生成的配置视图或沙箱，真实配置文件一律不动。**没有 `homeEnvVar` 的 agent（qoder/cline/claude-code/codex）在 `real`/`mirror` 下生不了视图 → WeMind 直接跳过写入并告警**（overlay/MCP 不生效），不再把 `settingsBase`/`mcp.json` 写进真实 home。有视图的 agent 在写 MCP 前会把视图副本里的微信 MCP 剔除（Copilot 的 `mcp-config.json`、DSH 的 `cordis.patch.yml`），overlay 写入时也拒绝微信 MCP 定义。**不要跨 agent 借配置文件。** overlay 的 `mcp.extra` 扩充可选目录，`mcp.disable` 最后生效；worker 同样支持两者。
 
 ### 记忆/规则/技能共享（config view + sandbox-inherit）
 
@@ -193,11 +193,11 @@ brain **默认不加载任何 MCP**（既快又安全，内置工具如 web_sear
 
 ### settings 处理
 
-`real` / `mirror` 下普通 settings 文件直接在视图中链接真实文件；`settingsBase` 型 agent（qoder / gemini 等）生成副本，按 `settingsStrip` 剥离必须由 WeMind 控制的键（默认 `mcpServers` / `enabledPlugins` / `providers` / `model`；gemini 只剥 `mcpServers`，保留用户 `model` / `security`），再由 adapter 的 `stripSettings()` 剥掉该格式的 MCP 段，并强制 `general.enableAutoUpdate=false`。MCP 仍由 adapter 的 `writeCatalog()` 权威覆盖同一文件里的 MCP 段；配了 `mcpViaAcp` 的 agent 由 `activeMcpServers(ag)` 转成 ACP 声明随 `session/new|resume` 下发——**必须传正在启动的那个 agent**。
+`real` / `mirror` 下普通 settings 文件直接在视图中链接真实文件；`settingsBase` 型且**有配置视图**的 agent（如 gemini）生成副本，按 `settingsStrip` 剥离（qoder 没有 `homeEnvVar`，real/mirror 无视图、不写真实 `settings.json`，要控制 MCP/设置须用 `sandbox`）必须由 WeMind 控制的键（默认 `mcpServers` / `enabledPlugins` / `providers` / `model`；gemini 只剥 `mcpServers`，保留用户 `model` / `security`），再由 adapter 的 `stripSettings()` 剥掉该格式的 MCP 段，并强制 `general.enableAutoUpdate=false`。MCP 仍由 adapter 的 `writeCatalog()` 权威覆盖同一文件里的 MCP 段；配了 `mcpViaAcp` 的 agent 由 `activeMcpServers(ag)` 转成 ACP 声明随 `session/new|resume` 下发——**必须传正在启动的那个 agent**。
 
-`ensureBrainHome()` 的顺序是：构建 config view → overlay → 生成 MCP/权限文件 → `applySettingsDefaults`。`sandbox` 模式额外执行 adapter 的 `inheritSettings()` / `syncProfilePatch` / `syncCredentials` 与 `mirrorRealKiro`。`syncProfilePatch` 对 DSH 的真实 `profiles/<名>/cordis.patch.yml` 原样复制，但剔除用户自己挂的微信 MCP 条目（`stripWechatMcpEntries`；真实文件不动）。
+`ensureBrainHome()` 的顺序是：构建 config view → 同步非 MCP 设置 → overlay → 剔除视图副本里的微信 MCP（`sanitizeView`）→ 生成 MCP/权限文件 → `applySettingsDefaults`。`sandbox` 模式额外执行 adapter 的 `inheritSettings()` / `syncProfilePatch` / `syncCredentials` 与 `mirrorRealKiro`。`syncProfilePatch` 对 DSH 的真实 `profiles/<名>/cordis.patch.yml` 原样复制，但剔除用户自己挂的微信 MCP 条目（`stripWechatMcpEntries`；真实文件不动）。
 
-> 换模型/权限后旧 ACP 会话可能仍绑旧配置，需要新会话或 `wemind config reload`。真实配置变化由 `configFingerprint()` 在下一轮开始前发现并重建；`wemind config reload` 会在空闲时重建视图并重启常驻 brain。
+> 换模型/权限后旧 ACP 会话可能仍绑旧配置，需要新会话或 `wemind config reload`。真实配置变化由 `configFingerprint()` 在下一轮开始前发现并重建（只哈希显式配置文件，Agent 自己写的会话/历史文件不算）；`wemind config reload` 重建视图，brain 有回合在跑时排到回合结束再重启。
 
 ## 6.4 可配置的 agent（brain-presets.ts / brain-agents.ts）
 
@@ -205,7 +205,7 @@ brain **默认不加载任何 MCP**（既快又安全，内置工具如 web_sear
 
 ### AcpAgentPreset 与解析
 
-`AcpAgentPreset` 描述一个 agent：`bin`/`binWin`（二进制名）、`requiresBins`（除 bin 外还必须在 PATH 上解析到的运行时，如 `pi-acp` 需要 `pi` 本体；缺失时 `agentProblem()` 直接报安装提示，不等 `session/new` 才炸）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名）、`shell`（是否经 shell 启动）、`env`（**强制**注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批/沙箱开关）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——`sandbox` 模式**原样复制**真实的 `profiles/<名>/cordis.patch.yml`，并从它读默认模型（DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`），目前只有 DSH 用：`"acp"`）、`realHome`/`inheritDirs`/`inheritFiles`（真实 home 与记忆/技能继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`configSubdir`（agent 配置目录相对 home（视图根 / 沙箱根）的子路径：kiro 空=根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`）、`settingsBase`（以真实设置为基底并剥离 MCP/插件/providers）、`credentialFiles`/`identityFiles`（登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`）、`kiroEngine`（kiro：按 `--agent-engine` / `acp.agentEngine` / CLI 主版本判 v2/v3——`acp --help` 说两者都没设时默认 v2，CLI ≥3 默认 v3 为假设/待实测；v3 剔 v2 参数并写视图/沙箱的 `settings/permissions.yaml`）、`isolateSessions`（DSH：**仅 `sandbox`** 用 `--patch` 把会话 root 指到账号数据目录；`real` 下使用真实会话库）。此外还有 `restore` / `images` / `mcpViaAcp` / `modelArg` / `replayOnLoad` / `firstFrameMs`（首帧超时覆盖）/ `heartbeatMs`（静默期心跳间隔覆盖）/ `settingsStrip` / `settingsDefaults` / `mcpFormat` / `mcpConfigFile` / `catalogFile` 等字段（按 agent 覆盖协议能力与沙箱约定）；完整字段表见 [接入其它-ACP-Agent.md](../接入方案/接入其它-ACP-Agent.md) §4。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量，并在起进程前调 `prepareAgent(ag)` 落盘派生配置（目前是 DSH 在 `sandbox` 下的 `--patch` 文件）。
+`AcpAgentPreset` 描述一个 agent：`bin`/`binWin`（二进制名）、`requiresBins`（除 bin 外还必须在 PATH 上解析到的运行时，如 `pi-acp` 需要 `pi` 本体；缺失时 `agentProblem()` 直接报安装提示，不等 `session/new` 才炸）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名）、`shell`（是否经 shell 启动）、`env`（**强制**注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批/沙箱开关）、`realEnv`（没有 `homeEnvVar` 的 agent 在 real/mirror 下使用的真实目录环境变量，`%HOME%` 替换为真实 home）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——`sandbox` 模式**原样复制**真实的 `profiles/<名>/cordis.patch.yml`，并从它读默认模型（DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`），目前只有 DSH 用：`"acp"`）、`realHome`（真实配置/视图来源）、`inheritDirs`/`inheritFiles`（**仅 sandbox** 的记忆/技能继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`configSubdir`（agent 配置目录相对 home（视图根 / 沙箱根）的子路径：kiro 空=根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`）、`settingsBase`（以真实设置为基底并剥离 MCP/插件/providers）、`credentialFiles`/`identityFiles`（**仅 sandbox** 的登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`）、`kiroEngine`（kiro：按 `--agent-engine` / `acp.agentEngine` / CLI 主版本判 v2/v3——`acp --help` 说两者都没设时默认 v2，CLI ≥3 默认 v3 为假设/待实测；v3 剔 v2 参数并写视图/沙箱的 `settings/permissions.yaml`）、`isolateSessions`（DSH：**仅 `sandbox`** 用 `--patch` 把会话 root 指到账号数据目录；`real` 下使用真实会话库）。此外还有 `restore` / `images` / `mcpViaAcp` / `modelArg` / `replayOnLoad` / `firstFrameMs`（首帧超时覆盖）/ `heartbeatMs`（静默期心跳间隔覆盖）/ `settingsStrip` / `settingsDefaults` / `mcpFormat` / `mcpConfigFile` / `catalogFile` 等字段（按 agent 覆盖协议能力与沙箱约定）；完整字段表见 [接入其它-ACP-Agent.md](../接入方案/接入其它-ACP-Agent.md) §4。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量，并在起进程前调 `prepareAgent(ag)` 落盘派生配置（目前是 DSH 在 `sandbox` 下的 `--patch` 文件）。
 
 内置 agent：
 
@@ -216,7 +216,7 @@ brain **默认不加载任何 MCP**（既快又安全，内置工具如 web_sear
 | `opencode` | OpenCode | 原生 ACP | ✅ 已实测 | `opencode acp`，`XDG_CONFIG_HOME` |
 | `qoder` | Qoder CLI `qodercli` | 原生 ACP | ✅ 已内置/已实测（load/resume/图片/MCP） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`（见 [接入-Qoder](../接入方案/接入-Qoder.md)） |
 | `cline` | Cline CLI `cline` | 原生 ACP | ✅ 已内置/已实测（loadSession ✅ / 图片 ❌（`images:false`，ACP prompt 只保留 text 块）；自定义 provider 需 `CLINE_PROVIDER`+`CLINE_API_KEY`） | `cline --acp --auto-approve true`，`CLINE_DIR`/`CLINE_DATA_DIR`/`CLINE_MCP_SETTINGS_PATH`（见 [接入-Cline](../接入方案/接入-Cline.md)） |
-| `gemini` | Gemini CLI | 原生 ACP | ✅ 已内置/已实测（0.66.0 探针 + 真机 E2E 2026-11-01：load/图片/MCP/yolo；load 后异步回放历史 → `replayOnLoad`；`set_config_option` ❌，模型走 `--model`） | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME` 指向配置视图/沙箱根、配置目录 `<它>/.gemini`；MCP 在配置目录 `settings.json` 的 `mcpServers`；`settingsBase` 只剥 `mcpServers`、`.env` + OAuth 凭据同步、`skills/`+`GEMINI.md` 继承（见 [接入-Gemini](../接入方案/接入-Gemini.md)） |
+| `gemini` | Gemini CLI | 原生 ACP | ✅ 已内置/已实测（0.66.0 探针 + 真机 E2E 2026-11-01：load/图片/MCP/yolo；load 后异步回放历史 → `replayOnLoad`；`set_config_option` ❌，模型走 `--model`） | `gemini --acp --approval-mode yolo --skip-trust`，`GEMINI_CLI_HOME` 指向配置视图/沙箱根、配置目录 `<它>/.gemini`；MCP 在配置目录 `settings.json` 的 `mcpServers`；`settingsBase` 只剥 `mcpServers`、`.env` + OAuth 凭据同步（仅 `sandbox`）、`skills/`+`GEMINI.md` 继承（见 [接入-Gemini](../接入方案/接入-Gemini.md)） |
 | `claude-code` | Claude Code | 需适配器 | ✅ 探针级实测 + 真机微信单轮 E2E（2026-10-31；重启续聊/MCP/任务待复测） | 全局 `claude-agent-acp`（`npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；免审批走 `session/set_mode bypassPermissions`，适配器不解析 CLI flag；Windows `claude-agent-acp.cmd`） |
 | `codex` | OpenAI Codex | 需适配器（ACP 项目维护，非 OpenAI 官方） | ✅ 已内置/已实测（探针级 + 真机 E2E：worker 与 brain 通道均通；load/图片/set_mode/set_config_option ✅；**stdio MCP ✅**，2.5.0 与 2.6.0 均复测模型实际调用 fake MCP；旧结论 `mcpCapabilities.acp=false` 是误读） | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**全局安装**，当前基线 **2.6.0**；Windows 上是 `codex-acp.cmd`；免审批 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`，见 [接入-Codex](../接入方案/接入-Codex.md)） |
 | `pi` | pi coding agent | 需适配器（社区 `pi-acp`） | ✅ 已内置/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务）；load/图片/工具调用 ✅、0 反向请求 | `pi-acp`（`npm i -g pi-acp`）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent` 并先登录）；`PI_CODING_AGENT_DIR` 指向配置视图/沙箱、MCP 走 `<配置视图/沙箱根>/mcp.json`、免审批无需开关；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动信息（用户显式设过则保留），见 [接入-pi](../接入方案/接入-pi.md) |
@@ -285,7 +285,7 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 |---|--------------|----------------|
 | 配置 home | 默认 `real`：有 `homeEnvVar` 的用 `agent-view/brain/<agent>`，没有的直接用真实 home；`sandbox` 才是 `BRAIN_HOME` | 默认 `real`：有 `homeEnvVar` 的用 `agent-view/worker/<agent>`，没有的直接用真实 home；`sandbox` 才是 `WORKER_HOME` |
 | 工作区 cwd | `<账号>/workspace/brain`（或 `session-cwd.json` 记录） | `--cwd` > `WEMIND_WORKER_CWD` > `<账号>/workspace/worker` |
-| MCP 策略 | 默认空，按 agent 持久激活；永久排除 `wechat` | 真实全量（仅排除 `wechat`） |
+| MCP 策略 | 默认空，按 agent 持久激活；永久排除 `wechat` | 真实 catalog + overlay extra − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay disable（完整公式见 [07](07-远程任务-Worker.md)） |
 | 为何不同 | 对话助手，有人在旁逐个加载 | 无人值守跑任务，需开箱即用的完整能力 |
 | 记忆/skills/settings | `real`/`mirror` 链接真实 home；`sandbox` 才按 `inheritDirs`/`inheritFiles` 复制 | 相同 |
 | 会话恢复 | 每用户一个 session；load/resume | 单任务 session；load/resume |

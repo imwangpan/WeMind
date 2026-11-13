@@ -5,53 +5,88 @@ import path from "node:path";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import type { ResolvedAgent } from "../brain-agents.js";
+import { readHomeMode } from "./home-mode.js";
 import { overlayPath } from "./overlay.js";
+
+/** 这些文件由 agent 自己高频写入（会话/历史/统计），不是「配置」；拿 mtime 当指纹会让进程每轮重启。 */
+const VOLATILE = new Set([
+  ".claude.json",
+  "history.jsonl",
+  "todos.json",
+  "statsig",
+  "shell-snapshots",
+  "projects",
+]);
 
 /**
  * 真实配置的轻量指纹：用于“长跑进程发现终端侧改了配置”后，在下一条消息/下一次 spawn 前重建，而不是等 daemon 重启。
  *
- * 不递归整个 home（Gemini 的 realHome 就是家目录）：只覆盖配置目录两层、已知额外配置文件、以及记忆/技能目录的 mtime。
- * 它不追求内容级 diff；目录 mtime + 文件 mtime/size 足以发现“新增/修改/删除”，漏掉的极端情况用 `wemind config reload` 兜底。
+ * 只看**明确的配置文件内容**，不做 realHome 递归 mtime 扫描：
+ * 递归会把 agent 自己写的历史/会话当成“终端改了配置”，导致每轮重启（实测 qoder/claude 都会）。
+ * 没有配置视图的 real/mirror 模式（qoder/cline/claude-code/codex）直接返回空串：本来就没有东西要重建。
  */
 export function configFingerprint(ag: ResolvedAgent, dir: string = DATA_DIR): string {
   const home = ag.realHome;
   if (!home) return "";
+  const mode = readHomeMode(dir);
+  if ((mode === "real" || mode === "mirror") && !ag.homeEnvVar) return "";
   const base =
     ag.name === "gemini" && fs.existsSync(path.join(home, ".gemini"))
       ? path.join(home, ".gemini")
       : home;
   const h = crypto.createHash("sha1");
-  const seen = new Set<string>();
-  const visit = (p: string, depth: number): void => {
-    if (depth < 0 || seen.has(p) || seen.size > 2000) return;
-    seen.add(p);
+  const files = new Set<string>();
+  const add = (rel: string | undefined): void => {
+    if (!rel) return;
+    const p = path.resolve(base, rel);
+    if (!files.has(p)) files.add(p);
+  };
+  add(ag.settingsBase);
+  add(ag.mcpConfigFile);
+  add(ag.catalogFile);
+  for (const f of ag.extraConfigFiles ?? []) {
+    if (VOLATILE.has(path.basename(f.source))) continue;
+    add(path.relative(base, f.source));
+  }
+  // DSH 这类 provider/默认模型在 profile 目录里：只取一层文件内容，不递归整个真实 home。
+  if (ag.realProfile) {
+    const profile = path.join(base, "profiles", ag.realProfile);
+    try {
+      for (const e of fs.readdirSync(profile, { withFileTypes: true })) {
+        if (e.isFile() && !VOLATILE.has(e.name))
+          add(path.relative(base, path.join(profile, e.name)));
+      }
+    } catch {
+      /* profile 不存在：不参与指纹 */
+    }
+  }
+  for (const p of [...files].sort()) {
     let st: fs.Stats;
     try {
       st = fs.statSync(p);
     } catch {
-      return;
+      h.update(`${p}\0missing\n`);
+      continue;
     }
-    h.update(`${p}\0${st.mtimeMs}\0${st.size}\n`);
-    if (!st.isDirectory() || depth === 0) return;
-    let entries: fs.Dirent[] = [];
+    if (!st.isFile()) {
+      h.update(`${p}\0not-a-file\n`);
+      continue;
+    }
+    // 内容哈希：终端用“写临时文件再 rename”原子替换时 mtime/size 可能不变或抖动，内容最可靠。
     try {
-      entries = fs.readdirSync(p, { withFileTypes: true });
+      const buf = fs.readFileSync(p);
+      const digest = crypto.createHash("sha1").update(buf).digest("hex");
+      h.update(`${p}\0${digest}\n`);
     } catch {
-      return;
+      h.update(`${p}\0unreadable\n`);
     }
-    for (const e of entries) {
-      if (e.name === "node_modules" || e.name === ".git" || e.name === "sessions") continue;
-      visit(path.join(p, e.name), depth - 1);
-    }
-  };
-  visit(base, 2);
-  for (const f of ag.extraConfigFiles ?? []) visit(f.source, 0);
-  for (const d of ag.inheritDirs) {
-    const p = path.join(home, d);
-    if (fs.existsSync(p)) visit(p, 1);
   }
-  // 微信侧 overlay 也属于“下一次启动/新会话该看到的配置”：改了它也要重建视图，
-  // 否则进程常驻时 overlay 会一直停在旧副本。
-  visit(overlayPath(ag.name, dir), 0);
+  // 微信侧 overlay 也属于“下一次启动/新会话该看到的配置”。
+  try {
+    const ov = overlayPath(ag.name, dir);
+    h.update(`overlay\0${crypto.createHash("sha1").update(fs.readFileSync(ov)).digest("hex")}\n`);
+  } catch {
+    h.update("overlay\0missing\n");
+  }
   return h.digest("hex");
 }

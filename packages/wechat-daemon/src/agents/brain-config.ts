@@ -41,7 +41,7 @@ export type AgentConfig = {
   extraArgs?: string[];
   /** 覆盖是否经 shell 启动。 */
   shell?: boolean;
-  /** 覆盖「配置目录环境变量名」（指向沙箱）。 */
+  /** 覆盖「配置目录环境变量名」（指向配置视图或账号沙箱）。 */
   homeEnvVar?: string;
   /** 覆盖模型值（会话建立后经 `session/set_config_option` 下发一次）；`auto` / `default` = 跟随默认（DSH 从真实 profile 读，优先 `- id: acp`、否则 `agent-default-model`；读不到就不下发）。 */
   model?: string;
