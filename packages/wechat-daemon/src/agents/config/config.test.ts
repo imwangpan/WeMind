@@ -1,10 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import type { ResolvedAgent } from "../brain-agents.js";
-import { agentRuntime } from "./runtime.js";
+import { agentRuntime, mediaDirFor, resetViewFallback } from "./runtime.js";
 import { applyOverlayToView, overrideRelPaths, viewRoot } from "./config-view.js";
 import { applyPatch, overlayPathProblems, readOverlay, type AgentOverlay } from "./overlay.js";
 import {
@@ -23,6 +23,7 @@ import {
 import { mutateConfigFile, setConfigPath, snapshotConfigFile } from "./agent-config-writer.js";
 import { addMcp, catalogNames, loadActive } from "../sandbox/mcp-sandbox.js";
 import { configFingerprint } from "./config-fingerprint.js";
+import { homeModePath, normalizeHomeMode, readHomeMode, writeHomeMode } from "./home-mode.js";
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "wemind-config-"));
@@ -30,7 +31,7 @@ function tmp(): string {
 
 const oldMode = process.env.WEMIND_HOME_MODE;
 beforeAll(() => {
-  process.env.WEMIND_HOME_MODE = "real";
+  process.env.WEMIND_HOME_MODE = "view";
 });
 afterAll(() => {
   if (oldMode === undefined) delete process.env.WEMIND_HOME_MODE;
@@ -216,7 +217,7 @@ describe("session cwd 与配置写入", () => {
   });
 });
 
-describe("real config view", () => {
+describe("view config view", () => {
   it("overlay 只改视图，不改真实文件", () => {
     const dir = tmp();
     const realHome = path.join(dir, "real");
@@ -392,5 +393,161 @@ describe("configFingerprint", () => {
     );
     const afterOverlay = configFingerprint(ag, dir);
     expect(afterOverlay).not.toBe(afterReal);
+  });
+});
+
+describe("homeMode：view / direct / sandbox", () => {
+  beforeEach(() => resetViewFallback());
+
+  function withoutEnv<T>(fn: () => T): T {
+    const saved = process.env.WEMIND_HOME_MODE;
+    delete process.env.WEMIND_HOME_MODE;
+    try {
+      return fn();
+    } finally {
+      if (saved === undefined) delete process.env.WEMIND_HOME_MODE;
+      else process.env.WEMIND_HOME_MODE = saved;
+    }
+  }
+
+  it("缺省与旧值都规范化为 view", () => {
+    const dir = tmp();
+    withoutEnv(() => {
+      expect(readHomeMode(dir)).toBe("view");
+      fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: "real" }));
+      expect(readHomeMode(dir)).toBe("view");
+      fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: "mirror" }));
+      expect(readHomeMode(dir)).toBe("view");
+      fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: "direct" }));
+      expect(readHomeMode(dir)).toBe("direct");
+    });
+    expect(normalizeHomeMode("real")).toBe("view");
+    expect(normalizeHomeMode("mirror")).toBe("view");
+    expect(normalizeHomeMode("view")).toBe("view");
+    expect(normalizeHomeMode("sandbox")).toBe("sandbox");
+    expect(normalizeHomeMode("nope")).toBeNull();
+    withoutEnv(() => writeHomeMode("view", dir));
+    expect(JSON.parse(fs.readFileSync(homeModePath(dir), "utf-8")).homeMode).toBe("view");
+  });
+
+  it("direct 不生成视图，直接使用真实配置目录", () => {
+    const dir = tmp();
+    const realHome = path.join(dir, "real");
+    fs.mkdirSync(realHome, { recursive: true });
+    withoutEnv(() => writeHomeMode("direct", dir));
+    const rt = withoutEnv(() => agentRuntime("brain", fakeAgent(realHome), dir));
+    expect(rt).toMatchObject({
+      mode: "direct",
+      requestedMode: "direct",
+      home: realHome,
+      configDir: realHome,
+    });
+    expect(rt.view).toBeUndefined();
+    expect(fs.existsSync(path.join(dir, "agent-view"))).toBe(false);
+  });
+
+  it("view 在真实配置目录不存在时降级 direct，且不改 runtime.json", () => {
+    const dir = tmp();
+    const realHome = path.join(dir, "missing");
+    const rt = agentRuntime("brain", fakeAgent(realHome), dir);
+    expect(rt.mode).toBe("direct");
+    expect(rt.requestedMode).toBe("view");
+    expect(rt.fallbackReason).toMatch(/不存在/);
+    expect(rt.view).toBeUndefined();
+    expect(fs.existsSync(path.join(dir, "agent-view"))).toBe(false);
+    expect(readHomeMode(dir)).toBe("view");
+  });
+
+  it("view 建视图抛错时降级 direct（本次运行）", () => {
+    const dir = tmp();
+    const realHome = path.join(dir, "real");
+    fs.mkdirSync(realHome, { recursive: true });
+    const realMkdir = fs.mkdirSync.bind(fs);
+    const spy = vi.spyOn(fs, "mkdirSync").mockImplementation(((p: fs.PathLike, o?: any) => {
+      if (String(p).includes(`${path.sep}agent-view`)) throw new Error("EPERM: denied");
+      return realMkdir(p as never, o as never);
+    }) as typeof fs.mkdirSync);
+    try {
+      const rt = agentRuntime("brain", fakeAgent(realHome), dir);
+      expect(rt.mode).toBe("direct");
+      expect(rt.requestedMode).toBe("view");
+      expect(rt.fallbackReason).toMatch(/构建配置视图失败/);
+      expect(rt.configDir).toBe(realHome);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(readHomeMode(dir)).toBe("view");
+  });
+
+  it("view 降级成功一次后，本次进程内不再重复尝试建视图", () => {
+    const dir = tmp();
+    const realHome = path.join(dir, "real");
+    fs.mkdirSync(realHome, { recursive: true });
+    const realMkdir = fs.mkdirSync.bind(fs);
+    const spy = vi.spyOn(fs, "mkdirSync").mockImplementation(((p: fs.PathLike, o?: any) => {
+      if (String(p).includes(`${path.sep}agent-view`)) throw new Error("EPERM: denied");
+      return realMkdir(p as never, o as never);
+    }) as typeof fs.mkdirSync);
+    const first = agentRuntime("brain", fakeAgent(realHome), dir);
+    expect(first.mode).toBe("direct");
+    try {
+      spy.mockClear();
+      const second = agentRuntime("brain", fakeAgent(realHome), dir);
+      expect(second.mode).toBe("direct");
+      expect(second.fallbackReason).toBe(first.fallbackReason);
+      // 复用的是缓存结论，不会再尝试创建 agent-view（工作区目录的 mkdir 不算）。
+      expect(spy.mock.calls.some(([p]) => String(p).includes("agent-view"))).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+    // 显式 reload 会清掉缓存，下一次重新尝试 view；真实目录已恢复可建视图。
+    resetViewFallback("brain");
+    expect(agentRuntime("brain", fakeAgent(realHome), dir).mode).toBe("view");
+  });
+
+  it("direct 忽略 overlay，不写任何视图文件", () => {
+    const dir = tmp();
+    const realHome = path.join(dir, "real");
+    fs.mkdirSync(realHome, { recursive: true });
+    fs.writeFileSync(path.join(realHome, "settings.json"), '{"model":"terminal"}');
+    fs.mkdirSync(path.join(dir, "agent-overrides"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "agent-overrides", "kiro.json"),
+      JSON.stringify({ version: 1, config: { "settings.json": { model: "wechat" } } }),
+    );
+    withoutEnv(() => writeHomeMode("direct", dir));
+    const rt = withoutEnv(() => agentRuntime("brain", fakeAgent(realHome), dir));
+    expect(rt.overlay).toEqual({ version: 1 });
+    expect(fs.readFileSync(path.join(realHome, "settings.json"), "utf-8")).toBe(
+      '{"model":"terminal"}',
+    );
+    expect(fs.existsSync(path.join(dir, "agent-view"))).toBe(false);
+  });
+
+  it("direct 下配置指纹为空（没有 WeMind 生成的视图要跟随）", () => {
+    const dir = tmp();
+    const realHome = path.join(dir, "real");
+    fs.mkdirSync(path.join(realHome, "settings"), { recursive: true });
+    fs.writeFileSync(path.join(realHome, "settings", "mcp.json"), "{}");
+    withoutEnv(() => writeHomeMode("direct", dir));
+    expect(withoutEnv(() => configFingerprint(fakeAgent(realHome), dir))).toBe("");
+  });
+
+  it("direct 下加载/卸载 MCP 直接拒绝，不写激活集", () => {
+    const dir = tmp();
+    const realHome = path.join(dir, "real");
+    fs.mkdirSync(realHome, { recursive: true });
+    withoutEnv(() => writeHomeMode("direct", dir));
+    const ag = fakeAgent(realHome);
+    const added = withoutEnv(() => addMcp("demo", ag, dir));
+    expect(added.ok).toBe(false);
+    expect(added.text).toMatch(/direct 模式/);
+    expect(loadActive("kiro", dir)).toEqual([]);
+  });
+
+  it("view / direct 的入站媒体都在账号目录", () => {
+    const dir = tmp();
+    expect(mediaDirFor("brain", "view", dir)).toBe(path.join(dir, "media", "inbound"));
+    expect(mediaDirFor("worker", "direct", dir)).toBe(path.join(dir, "media", "inbound"));
   });
 });

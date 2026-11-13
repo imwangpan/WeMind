@@ -46,6 +46,8 @@ import {
   writeOverlay,
   type AgentOverlay,
 } from "../agents/config/overlay.js";
+import { readHomeMode } from "../agents/config/home-mode.js";
+import { resetViewFallback } from "../agents/config/runtime.js";
 import {
   HANDOFF_PROMPT,
   HANDOFF_TTL_MS,
@@ -269,7 +271,8 @@ export async function handleControl(
     if (!presetNames().includes(ag))
       return `❌ 未知 agent「${ag}」。可用：${presetNames().join(", ")}`;
     const preset = ACP_AGENT_PRESETS[ag];
-    const inertReal = !preset.homeEnvVar;
+    const homeMode = readHomeMode(DATA_DIR);
+    const overlayInert = homeMode === "direct" || (homeMode === "view" && !preset.homeEnvVar);
     const read = readOverlay(ag, DATA_DIR);
     if (read.problems.length) return `❌ ${read.problems.join("；")}`;
     if (c.action === "show") {
@@ -308,8 +311,8 @@ export async function handleControl(
     } catch (e) {
       return `❌ ${e instanceof Error ? e.message : String(e)}`;
     }
-    const note = inertReal
-      ? "\n⚠️ 这个 agent 没有配置目录环境变量，real 模式下 overlay 不会生效（真实配置也没被改）；要生效请设 homeMode=sandbox（mirror 与 real 等价）。"
+    const note = overlayInert
+      ? `\n⚠️ 当前 homeMode=${homeMode}，overlay 不会生效（真实配置也没被改）；要生效请用 homeMode=view（该 agent 需要可重定向的配置目录）或 homeMode=sandbox。`
       : "";
     return `✅ 已写入微信侧 overlay：${file} → ${keyPath}\n只影响微信侧；下一条新会话生效。真实配置未改。${note}`;
   }
@@ -342,6 +345,7 @@ export async function handleControlRequest(req: ControlRequest, owner: string): 
     case "brain.handoff":
       return await runHandoff(owner, { owner, notify: async () => {} }, req.expiresAt);
     case "config.reload": {
+      resetViewFallback(); // 用户可能刚修好真实配置目录：brain / worker 都重新尝试 view
       ensureBrainHome();
       ensureWorkerHome();
       killIdleConns();

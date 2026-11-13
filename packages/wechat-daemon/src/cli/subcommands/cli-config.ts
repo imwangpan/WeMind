@@ -131,6 +131,7 @@ function showConfig(dir: string, key: string): string {
   const lines = [
     `账号 ${key}`,
     `homeMode：${mode} — ${homeModeDescription(mode)}`,
+    "说明：view 无法生成视图时本次运行降级 direct（不修改 runtime.json），下次启动仍会重试。",
     `runtime.json：${homeModePath(dir)}`,
     `brain：${brain}；worker：${worker}`,
     `brain realHome：${realHomeOf(brain)}`,
@@ -167,7 +168,7 @@ async function cmdOverlay(rest: string[], opts: Opts, dir: string, agent: string
       `agent：${agent}`,
       `overlay：${overlayPath(agent, dir)}`,
       jsonText(read.overlay),
-      "提示：未写 overlay 的键沿用视图副本里的值（由真实配置生成）；修改真实配置用 `wemind config agent ...`。没有配置目录环境变量的 agent 在 real/mirror 下 overlay 不生效，需要时用 homeMode=sandbox。",
+      "提示：未写 overlay 的键沿用视图副本里的值（由真实配置生成）；修改真实配置用 `wemind config agent ...`。没有配置目录环境变量的 agent 在 view 下会降级 direct，overlay 不生效；需要时用 homeMode=sandbox。",
     ].join("\n");
   }
   if (sub === "edit") {
@@ -207,7 +208,7 @@ function cmdRealAgent(rest: string[], opts: Opts, dir: string, agent: string): s
       `agent：${agent}`,
       `真实配置：${file}`,
       `格式：${configFileFormat(file)}`,
-      "提示：默认修改真实配置；只说“微信侧/仅微信”时才写 overlay（只作用于视图副本，不改真实文件；没有配置目录环境变量的 agent 在 real/mirror 下无效）。",
+      "提示：默认修改真实配置；只说“微信侧/仅微信”时才写 overlay（只作用于视图副本，不改真实文件；direct 模式或没有配置目录环境变量的 agent 下无效）。",
     ].join("\n");
   }
   if (sub === "edit") {
@@ -244,7 +245,10 @@ export async function cmdConfig(rest: string[]): Promise<string> {
     if (!raw)
       return `账号 ${key} 的 homeMode：${readHomeMode(dir)}（${homeModeDescription(readHomeMode(dir))}）`;
     const mode = normalizeHomeMode(raw);
-    if (!mode) throw new Error("homeMode 只能是 real / mirror / sandbox");
+    if (!mode)
+      throw new Error(
+        "homeMode 只能是 view / direct / sandbox（旧值 real / mirror 会映射为 view）",
+      );
     writeHomeMode(mode as HomeMode, dir);
     return `账号 ${key} 的 homeMode 已设为 ${mode}。重启 daemon 后生效：wemind stop ${key} && wemind start ${key}`;
   }

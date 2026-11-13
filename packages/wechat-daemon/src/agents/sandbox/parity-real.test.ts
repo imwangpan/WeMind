@@ -1,12 +1,13 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import type { ResolvedAgent } from "../brain-agents.js";
+import type { AgentRuntime } from "../config/runtime.js";
 
 /**
- * real / mirror 模式的安全边界：没有配置目录环境变量的 agent 绝不写真实 home；有视图的 agent 必须剔除微信 MCP；
+ * view / direct 模式的安全边界：没有配置目录环境变量的 agent 绝不写真实 home；有视图的 agent 必须剔除微信 MCP；
  * overlay 的坏键/穿越/微信条目在写入时就拒绝；指纹只跟配置内容有关，不被 agent 自己的历史文件带偏。
  *
  * 模块级 DATA_DIR 在 import 时解析，所以环境变量必须在动态 import 之前设好。
@@ -48,7 +49,7 @@ beforeAll(() => {
   );
   process.env.WECHAT_ACCOUNT = "acc";
   process.env.WECHAT_DATA_DIR = account;
-  process.env.WEMIND_HOME_MODE = "real";
+  process.env.WEMIND_HOME_MODE = "view";
   delete process.env.WEMIND_MCP_CATALOG;
 });
 
@@ -101,7 +102,7 @@ async function agentOf(name: string, overrides: Record<string, unknown>): Promis
   } as ResolvedAgent;
 }
 
-describe("real 模式：没有配置目录环境变量的 agent", () => {
+describe("view 模式：没有配置目录环境变量的 agent（降级 direct）", () => {
   it("ensureBrainHome 不写真实 settings.json，也不生成视图", async () => {
     const { ensureBrainHome } = await import("./mcp-sandbox.js");
     const { configFingerprint } = await import("../config/config-fingerprint.js");
@@ -120,9 +121,23 @@ describe("real 模式：没有配置目录环境变量的 agent", () => {
     const ag = await agentOf("qoder", { realHome: qoderHome });
     expect(() => assertNoForbiddenNativeMcp(ag)).toThrow(/微信 MCP/);
   });
+
+  it("direct 下真实配置含微信 MCP 只告警，不阻止启动", async () => {
+    const { assertNoForbiddenNativeMcp } = await import("./mcp-sandbox.js");
+    const ag = await agentOf("qoder", { realHome: qoderHome });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(() =>
+        assertNoForbiddenNativeMcp(ag, { mode: "direct" } as AgentRuntime),
+      ).not.toThrow();
+      expect(warn.mock.calls.flat().join(" ")).toMatch(/direct 模式.*不会阻止启动/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
-describe("real 模式：有视图的 agent", () => {
+describe("view 模式：有视图的 agent", () => {
   it("copilot 视图里的微信 MCP 被剔除，真实文件保持原样", async () => {
     const { ensureBrainHome } = await import("./mcp-sandbox.js");
     const ag = await agentOf("copilot", { realHome: copilotHome });
@@ -267,16 +282,23 @@ describe("指纹只跟配置内容走", () => {
     expect(configFingerprint(ag)).not.toBe(a);
   });
 
-  it("mirror 下没有视图的 agent 也返回空指纹（与 real 等价）", async () => {
+  it("direct 下没有视图的 agent 返回空指纹", async () => {
     const { configFingerprint } = await import("../config/config-fingerprint.js");
-    const dir = path.join(root, "mirror-data");
+    const dir = path.join(root, "direct-data");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "runtime.json"),
-      JSON.stringify({ version: 1, homeMode: "mirror" }),
+      JSON.stringify({ version: 1, homeMode: "direct" }),
     );
     const ag = await agentOf("qoder", { realHome: qoderHome });
-    expect(configFingerprint(ag, dir)).toBe("");
+    const saved = process.env.WEMIND_HOME_MODE;
+    delete process.env.WEMIND_HOME_MODE;
+    try {
+      expect(configFingerprint(ag, dir)).toBe("");
+      expect(configFingerprint(await agentOf("copilot", { realHome: copilotHome }), dir)).toBe("");
+    } finally {
+      if (saved !== undefined) process.env.WEMIND_HOME_MODE = saved;
+    }
   });
 });
 

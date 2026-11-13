@@ -13,27 +13,27 @@ import { mcpAdapterFor, mcpAdapterForFile, mcpConfigPath } from "./mcp-adapters.
 
 const log = createLogger("wechat-daemon/mcp");
 
-/** 已经告警过的「real 模式下不可写」组合，避免每条消息刷日志。 */
+/** 已经告警过的「direct 模式下不可写」组合，避免每条消息刷日志。 */
 const warnedRealHome = new Set<string>();
 
-/** 目标目录是不是 agent 的真实 home（real/mirror 下没有视图时，写它就是改用户配置）。 */
+/** 目标目录是不是 agent 的真实 home（direct 下写它就是改用户配置）。 */
 export function isRealHomeTarget(ag: ResolvedAgent, dir: string): boolean {
   return !!ag.realHome && path.resolve(dir) === path.resolve(ag.realHome);
 }
 
-/** real/mirror 模式只有在生成了配置视图时才可以写；sandbox 模式写的是账号沙箱。 */
+/** 只有 sandbox 或真正生成了配置视图的 view 才可以写；direct 一律不写 Agent 配置。 */
 export function canWriteAgentConfig(ag: ResolvedAgent, rt: AgentRuntime): boolean {
-  return rt.mode === "sandbox" || !!rt.view || !isRealHomeTarget(ag, rt.configDir);
+  return rt.mode === "sandbox" || !!rt.view;
 }
 
-/** real 模式下没有可重定向的配置目录：只告警一次，绝不写真实配置。 */
+/** direct 模式（含 view 降级）不写 Agent 配置：只告警一次，绝不写真实配置。 */
 export function warnUnwritableRealHome(ag: ResolvedAgent, what: string): void {
   const key = `${ag.name}:${what}`;
   if (warnedRealHome.has(key)) return;
   warnedRealHome.add(key);
   log.warn(
-    `agent「${ag.name}」没有可重定向的配置目录，real 模式不会改写真实配置（跳过${what}）；` +
-      `微信侧 MCP/设置对这些 agent 不生效。需要生效请设 homeMode=sandbox 或换支持配置目录的 agent（mirror 对这类 agent 与 real 等价）。`,
+    `agent「${ag.name}」当前按 direct 运行，不会改写真实配置（跳过${what}）；` +
+      `微信侧 MCP/设置不生效。需要微信侧管理请设 homeMode=view（该 agent 需要可重定向的配置目录）或 homeMode=sandbox。`,
   );
 }
 
@@ -138,7 +138,7 @@ export function settingsBaseFor(ag: ResolvedAgent): Record<string, unknown> {
 }
 
 /** 把 `settingsBaseFor()` 的结果写到该 agent 的「设置与 MCP 同文件」路径。
- *  返回 false 表示目标就是真实 home（real 模式无视图）：不写，只告警。 */
+ *  返回 false 表示目标就是真实 home（direct 模式）：不写，只告警。 */
 export function writeSettingsBase(
   ag: ResolvedAgent,
   configDir: string,
@@ -238,7 +238,7 @@ export function syncProfilePatch(ag: ResolvedAgent, targetHome: string, label: s
   }
 }
 
-/** 把微信侧 config overlay 落到配置视图；没有配置目录环境变量的 agent 只能告警（不假装生效）。 */
+/** 把微信侧 config overlay 落到配置视图；没有配置目录环境变量（本次降级 direct）的 agent 只能告警（不假装生效）。 */
 export function warnOverlayProblems(ag: ResolvedAgent, rt: AgentRuntime): void {
   const problems = rt.view
     ? applyOverlayToView(rt.view, ag, rt.overlay, rt.mode)

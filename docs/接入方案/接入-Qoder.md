@@ -1,6 +1,6 @@
 # 接入 Qoder CLI（设计与实测）
 
-> **2026-11-12 口径**：默认 `homeMode=real`，Qoder 没有 `homeEnvVar`，微信侧直接使用真实 `~/.qoder`（`QODER_CONFIG_DIR` 指向它），并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/qoder`）。
+> **2026-11-13 口径**：默认 `homeMode=view`，Qoder 没有 `homeEnvVar`，微信侧本次运行降级 `direct`，直接使用真实 `~/.qoder`（`QODER_CONFIG_DIR` 指向它），并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/qoder`）。
 
 > **状态**：M0–M4 全部完成 ✅（`qoder` 是内置预设；M2 按 M0 结果为空）。
 > **实测范围**：Qoder CLI 1.1.78（M0 探针 + M3 真机 E2E，见 §2 / §2.1）｜ **最后核对**：2026-11-12
@@ -15,7 +15,7 @@
 - **M0 实测：能力完整，协议层零改动。** `loadSession`、`resume`、图片、MCP（stdio/HTTP/SSE）都支持；`--yolo` 下调用工具**不发任何反向请求**；硬杀后 `session/load` 能恢复上下文；首字 1–3 s，带 thought/tool 帧。
 - 需要做的只有**agent + 沙箱**：
   1. 直接起 `qodercli.exe --acp --yolo`，**不走 `qoder` 分发器**（它会多套一层 `cmd → powershell`）；
-  2. `QODER_CONFIG_DIR` 在 `real`（默认）下指向真实 `~/.qoder`，`sandbox` 下才指向账号沙箱（`~/.qoder` 与 Qoder Desktop 共用，WeMind 不写真实目录）；
+  2. `QODER_CONFIG_DIR` 在 `view` 降级 `direct` / 显式 `direct` 下指向真实 `~/.qoder`，`sandbox` 下才指向账号沙箱（`~/.qoder` 与 Qoder Desktop 共用，WeMind 不写真实目录）；
   3. **登录态要同步两个文件**：`.auth/user` + `.auth/machine_id`（缺一个就报 `Authentication required`）；
   4. 设置继承：复制 `~/.qoder/settings.json` 作为基底（去掉 MCP/插件/自定义供应商键），并强制关闭自动更新。
 - 已定：用 `--yolo`；官方原生安装；**不复制 `providers`**（BYOK 含明文 `apiKey`，内置模型只需账号登录；`model` 一并剥离，避免指向已剥离的供应商）。
@@ -108,7 +108,7 @@ qoder: {
 },
 ```
 
-- **不用 `homeEnvVar`**：Qoder 通过 `QODER_CONFIG_DIR` 指向配置目录。`real`（默认）下是真实 `~/.qoder`；`sandbox` 下是 `<沙箱>/qoder`（`configSubdir`）。大脑 cwd 始终是 `<账号>/workspace/brain`，与配置目录分开。`%HOME%` 替换在 brain / worker / brain check 三处都已支持。
+- **不用 `homeEnvVar`**：Qoder 通过 `QODER_CONFIG_DIR` 指向配置目录。`view` 降级 `direct` / 显式 `direct` 下是真实 `~/.qoder`；`sandbox` 下是 `<沙箱>/qoder`（`configSubdir`）。大脑 cwd 始终是 `<账号>/workspace/brain`，与配置目录分开。`%HOME%` 替换在 brain / worker / brain check 三处都已支持。
 - **不需要** `restore` / `firstFrameMs` / `heartbeatMs` / `images:false`——Q1/Q4/Q5 证明默认值适用。
 - **记忆/技能继承（M3-5 已核对）**：Qoder 1.1.78 的用户级记忆落在 `~/.qoder/memory/`（agent 的用户画像/偏好），已加入 `inheritDirs` 并以 **junction 共享**——大脑与日常 Qoder 读写同一份记忆（写入会落到真实目录，与 kiro 的 `memories/` 一致）。`skills/agents/commands` 与 `AGENTS.md` 在本机不存在，当前是空操作，保留以便上游新增后自动生效。
 - `AUTO_PROBE_ORDER` 末尾追加 `qoder`，不影响老用户。（**2026-10-27 当时的实施记录**；当前顺序为 `opencode → cline → qoder → gemini → deepseek → kiro`，qoder 排第 3 位——按实测启动耗时排。）
@@ -137,7 +137,7 @@ syncSettings():
   否则                  → syncKiroSettings()（不变）
 ```
 
-`settingsBase()`：读 `realHome/<settingsBase>` → 删除 `mcpServers`、`enabledPlugins`（插件可自带 MCP，有 wechat 回环风险；生成的配置也不继承 `plugins/`）、`providers` / `model`（§5 决定）→ **强制 `general.enableAutoUpdate = false`**（否则 CLI 可能把约 210 MB 的新版本下载进每个沙箱；`general` 的其它键保留）→ 写入当前配置目录（`real`/`mirror` 的视图或 `sandbox`）。**`real`/`mirror` 下没有视图（该 agent 没有 `homeEnvVar`）时直接跳过并告警，绝不写真实 `~/.qoder/settings.json`**；随后 `applySandbox()` / `applyWorkerSandbox()` 用已有的 `withMcpServers()` 把 curated `mcpServers` 合并回去，**MCP 写入逻辑不改**。
+`settingsBase()`：读 `realHome/<settingsBase>` → 删除 `mcpServers`、`enabledPlugins`（插件可自带 MCP，有 wechat 回环风险；生成的配置也不继承 `plugins/`）、`providers` / `model`（§5 决定）→ **强制 `general.enableAutoUpdate = false`**（否则 CLI 可能把约 210 MB 的新版本下载进每个沙箱；`general` 的其它键保留）→ 写入当前配置目录（`view` 的视图或 `sandbox`）。**`view` 下没有视图（该 agent 没有 `homeEnvVar`）时本次降级 `direct`，直接跳过且绝不写真实 `~/.qoder/settings.json`**；随后 `applySandbox()` / `applyWorkerSandbox()` 用已有的 `withMcpServers()` 把 curated `mcpServers` 合并回去，**MCP 写入逻辑不改**。
 
 ### 4.3 凭据同步（两边同步）
 
@@ -186,10 +186,10 @@ syncSettings():
 
 ## 6. 风险
 
-- **令牌轮换（仅 `sandbox`）**：`real`（默认）下只有一份真实 `~/.qoder`，不存在副本漂移；`sandbox` 下真实目录、brain 沙箱、worker 沙箱各持一份 token，如果 Qoder 刷新时轮换 refresh token，某一份刷新后另外几份可能失效（表现为日常 CLI/Desktop 或大脑被登出）。**M3 全程（含多次重启、换脑、worker 重建）未观察到登出**；仍建议在出现时改用 daemon 环境里的 `QODER_PERSONAL_ACCESS_TOKEN`。
-- **共用 `~/.qoder`**：`real`（默认）下 `memory/` 等就是真实目录，大脑与终端读写同一份；`sandbox` 下 `memory/` 以 junction 链入沙箱，**大脑的写入仍会落到真实目录**（与 kiro `memories/` 现状一致，已按此预期验证），其余目录只读复制、不会回流。若将来 `skills/agents/commands` 真的出现，也会沿用同一机制。
+- **令牌轮换（仅 `sandbox`）**：`view` / `direct` 下只有一份真实 `~/.qoder`，不存在副本漂移；`sandbox` 下真实目录、brain 沙箱、worker 沙箱各持一份 token，如果 Qoder 刷新时轮换 refresh token，某一份刷新后另外几份可能失效（表现为日常 CLI/Desktop 或大脑被登出）。**M3 全程（含多次重启、换脑、worker 重建）未观察到登出**；仍建议在出现时改用 daemon 环境里的 `QODER_PERSONAL_ACCESS_TOKEN`。
+- **共用 `~/.qoder`**：`view` / `direct` 下 `memory/` 等就是真实目录，大脑与终端读写同一份；`sandbox` 下 `memory/` 以 junction 链入沙箱，**大脑的写入仍会落到真实目录**（与 kiro `memories/` 现状一致，已按此预期验证），其余目录只读复制、不会回流。若将来 `skills/agents/commands` 真的出现，也会沿用同一机制。
 - **Qoder Desktop 的 MCP 可能不在 `settings.json`**：本机发现 `~/.qoder/mcp-router.json`（本地路由，端口由 Desktop 分配），Desktop 侧管理的 MCP 有机会只登记在路由里而不写 `mcpServers`。此时 `列出 MCP` 看不到它们——**这是预期行为**（沙箱只认 `settings.json`，也避免了 Desktop 配置被动继承）。
-- **worker 的项目级 MCP**：worker `cwd` 是任务项目目录。Q9 实测项目根 `.mcp.json` **不会**被自动加载（`--yolo` 也不加载），回环风险大降；项目内 `.qoder/` 配置**仍未单独实测**（M3 worker 跑在无 `.qoder/` 的临时目录）。若将来发现问题，worker 追加 `--strict-mcp-config --mcp-config <当前配置目录>/settings.json`（`real` 为 `~/.qoder/settings.json`，`sandbox` 为 `<worker-home>/qoder/settings.json`）。
+- **worker 的项目级 MCP**：worker `cwd` 是任务项目目录。Q9 实测项目根 `.mcp.json` **不会**被自动加载（`--yolo` 也不加载），回环风险大降；项目内 `.qoder/` 配置**仍未单独实测**（M3 worker 跑在无 `.qoder/` 的临时目录）。若将来发现问题，worker 追加 `--strict-mcp-config --mcp-config <当前配置目录>/settings.json`（`view` 降级 `direct` / 显式 `direct` 为 `~/.qoder/settings.json`，`sandbox` 为 `<worker-home>/qoder/settings.json`）。
 - **CLI 升级**：结论只对 1.1.78 成立；沙箱关闭了自动更新，但真实目录的 CLI 会升级。升级后跑一次 `wemind brain check`。
 
 ---

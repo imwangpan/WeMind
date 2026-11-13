@@ -1,6 +1,6 @@
 # 接入 Gemini CLI（原生 ACP，探针 + 真机实测）
 
-> **2026-11-12 口径**：默认 `homeMode=real`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+> **2026-11-13 口径**：默认 `homeMode=view`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；`direct` 不生成视图、由 Agent 直接读真实配置；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
 
 > **最后核对**：2026-11-12 ｜ **实测环境**：Windows 11 + Node 24 + `@google/gemini-cli` 0.66.0
 >
@@ -34,7 +34,7 @@ WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / 
 |---|---|---|
 | 启动 | `gemini --acp --approval-mode yolo --skip-trust`，Windows shim 是 `.cmd` → `shell: true` | `--acp` 取代已弃用的 `--experimental-acp`；`--approval-mode yolo` 与 `--yolo` 互斥，二选一 |
 | `--skip-trust` | **必须带** | 未信任的目录不仅把 yolo **静默降回 default**，连 MCP 都不加载（用户级 server 也被抑制）；实测 `gemini mcp list` 在未信任目录直接显示 Disabled |
-| 配置目录 | `homeEnvVar: "GEMINI_CLI_HOME"` 指向配置视图（`real`/`mirror`）或沙箱根（`sandbox`），`configSubdir: ".gemini"` | Gemini 把 `GEMINI_CLI_HOME` 当「家目录」，配置目录是 `<它>/.gemini`（实测：临时 home 自动生成 `.gemini/projects.json`）；不是指到配置目录本身 |
+| 配置目录 | `homeEnvVar: "GEMINI_CLI_HOME"` 指向配置视图（`view`）或沙箱根（`sandbox`）；`direct` 不注入，`configSubdir: ".gemini"` | Gemini 把 `GEMINI_CLI_HOME` 当「家目录」，配置目录是 `<它>/.gemini`（实测：临时 home 自动生成 `.gemini/projects.json`）；不是指到配置目录本身 |
 | 记忆/技能继承 | `inheritDirs: ["skills"]` + `inheritFiles: ["GEMINI.md"]` | 全局技能在 `<配置目录>/skills`，全局记忆是 `<配置目录>/GEMINI.md`（源码 `path.join(geminiDir, "skills")` / `getGlobalMemoryFilePath`） |
 | 设置基底 | `settingsBase: "settings.json"` + `settingsStrip: ["mcpServers"]` | 保留用户自己的 `model.name` / `security` / `ui` / `general`；只剥 `mcpServers`（MCP 必须来自沙箱 curated，防 `wechat` 回环），并强制 `general.enableAutoUpdate=false`（不要让常驻 daemon 自己换版本）。Gemini 自己用 `strip-json-comments` 解析，允许 `//` / `/* */` 注释——沙箱镜像与 MCP 目录也按 JSONC 读 |
 | 凭据同步 | `credentialFiles: [".env", "oauth_creds.json", "google_accounts.json"]` | API key 用户：`GEMINI_API_KEY` / `GOOGLE_GEMINI_BASE_URL` 在 `.env`；Google 登录用户：OAuth token 与账号缓存跟着用户日常配置走（新者胜）。**只镜像 `selectedType=oauth-personal` 却不带 token 时，Gemini 会卡在登录流程，连 ACP `initialize` 都不回** |

@@ -38,7 +38,7 @@ function moveMedia(src: string, dst: string): void {
 }
 
 /**
- * 老账号从“沙箱优先”迁到默认 real：只做尽力迁移 + 备份，不碰真实 Agent home。
+ * 老账号从“沙箱优先”迁到默认 view：只做尽力迁移 + 备份，不碰真实 Agent home。
  * 沙箱模式（显式选择或测试）不动；`WECHAT_BRAIN_HOME` / `WEMIND_WORKER_HOME` 显式覆盖也不动。
  */
 export function migrateLegacySandbox(dir: string = DATA_DIR): void {
@@ -57,7 +57,7 @@ export function migrateLegacySandbox(dir: string = DATA_DIR): void {
     const dst = `${src}${suffix}`;
     try {
       fs.renameSync(src, dst);
-      log.info(`legacy ${label} → ${dst}（已备份；real 模式不再使用）`);
+      log.info(`legacy ${label} → ${dst}（已备份；view/direct 模式不再使用）`);
     } catch (e) {
       log.warn(`无法备份 legacy ${label}：${String(e)}（保留原目录）`);
     }

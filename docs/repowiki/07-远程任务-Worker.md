@@ -142,9 +142,9 @@ spawn 失败（cwd 不存在/权限不足）时，`WorkerConn` 把 `error` 事�
 
 ### worker 配置视图
 
-默认 `homeMode=real`：有 `homeEnvVar` 的 Agent 由 `ensureWorkerHome()` 为 `<账号>/agent-view/worker/<agent>` 构建最小视图；没有 `homeEnvVar` 的 Agent（`claude-code` / `cline` / `qoder`）直接用真实 home，Codex 始终用 `~/.codex`。`sandbox` 模式才使用 `WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain **策略相反**：worker 是无人值守的任务执行机，默认加载 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。overlay 的 `mcp.disable` / `mcp.extra` 同样生效。写入磁盘方式按 agent：文件式 MCP 由 `applyWorkerSandbox` 写视图/沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH / Claude Code / Copilot / Codex）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。`real`/`mirror` 下未覆盖的 settings、技能与记忆由 config view 链接真实 home；`sandbox` 模式才走 `syncSettings` / `mirrorRealKiro` 的选择性继承。预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`）只补缺失键、用户显式设过就保留。
+默认 `homeMode=view`：有 `homeEnvVar` 的 Agent 由 `ensureWorkerHome()` 为 `<账号>/agent-view/worker/<agent>` 构建最小视图；没有 `homeEnvVar`、真实配置目录缺失或建视图失败时本次降级 `direct`，直接用真实 home（`claude-code` / `cline` / `qoder`），Codex 始终用 `~/.codex`；显式 `direct` 完全不建视图、不写配置、不下发额外 MCP。`sandbox` 模式才使用 `WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain **策略相反**：worker 是无人值守的任务执行机，`view` / `sandbox` 下默认加载 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。overlay 的 `mcp.disable` / `mcp.extra` 同样生效。写入磁盘方式按 agent：文件式 MCP 由 `applyWorkerSandbox` 写视图/沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH / Claude Code / Copilot / Codex）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。`view` 下未覆盖的 settings、技能与记忆由 config view 链接真实 home；`direct` 直接使用真实目录；`sandbox` 模式才走 `syncSettings` / `linkRealKnowledge` 的选择性继承。预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`）只补缺失键、用户显式设过就保留。
 
-视图按**这条任务的 agent** 准备：daemon 启动时只按默认任务大脑备一次；`worker-pool.ts` 的 `acquire` 在复用/起进程前会再调 `ensureWorkerHome(ag)`，否则派到别的 agent（如 `--agent pi`）时它自己的 settings/凭据/MCP 还没进视图，agent 会拿空配置跑。准备失败不会带着旧视图起进程：`ensureWorkerHome` 抛错时 `acquire` 返回失败，任务直接报「准备 worker 配置失败（agent）：…」。`real`/`mirror` 下没有视图的 agent 同样跳过 MCP/settings 写入并告警；视图里的 `wechat` 条目会先被 `sanitizeView` 剔除。
+视图按**这条任务的 agent** 准备：daemon 启动时只按默认任务大脑备一次；`worker-pool.ts` 的 `acquire` 在复用/起进程前会再调 `ensureWorkerHome(ag)`，否则派到别的 agent（如 `--agent pi`）时它自己的 settings/凭据/MCP 还没进视图，agent 会拿空配置跑。准备失败不会带着旧视图起进程：`ensureWorkerHome` 抛错时 `acquire` 返回失败，任务直接报「准备 worker 配置失败（agent）：…」。`direct`（含 `view` 降级）下没有视图的 agent 同样跳过 MCP/settings 写入并告警；视图里的 `wechat` 条目会先被 `sanitizeView` 剔除。
 
 > **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个配置视图/真实 home（2026-10-29 一轮样本未见互踩，长期风险仍在）。
 >
@@ -297,7 +297,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 | `WEMIND_WORKER_CAP_MS` | 1800000 | 单轮硬上限（30min） |
 | `WEMIND_WORKER_FIRST_FRAME_MS` | 30000 | 首帧超时 |
 | `WEMIND_WORKER_PROGRESS` | `0` | 是否推全程文字进度 |
-| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | **仅 `sandbox` 模式**的 worker 沙箱目录；`real`/`mirror` 下有 `homeEnvVar` 的 Agent 使用 `agent-view/worker/<agent>`，没有的直接用真实 home |
+| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | **仅 `sandbox` 模式**的 worker 沙箱目录；`view` 下有 `homeEnvVar` 的 Agent 使用 `agent-view/worker/<agent>`，`direct` 直接用真实 home |
 | `WEMIND_WORKER_MCP_EXCLUDE` | `wechat` | 不继承的 MCP（`wechat` 强制排除） |
 | `WEMIND_TASK_SCAN_MS` | 1000 | daemon 扫描 `task-inbox/` 与 `control-inbox/` 的间隔 |
 | `WEMIND_CONTROL_TIMEOUT_MS` | 30000 | CLI 等 daemon 回话的上限（`brain switch` 自动放大） |

@@ -1,6 +1,6 @@
 # 接入 OpenAI Codex（探针 + 真机 E2E）
 
-> **2026-11-12 口径**：默认 `homeMode=real`，Codex 的配置目录无法由 WeMind 重定向：微信侧始终使用真实 `~/.codex`，`cwd` 是账号工作区（brain/worker）或任务 `--cwd`；`sandbox` 也不隔离 `~/.codex`。本文涉及 `brain-home` / `worker-home` 的描述仅适用于其他可重定向 Agent 的配置落点。
+> **2026-11-13 口径**：默认 `homeMode=view`，Codex 的配置目录无法由 WeMind 重定向：`view` 会本次运行降级 `direct`，微信侧始终使用真实 `~/.codex`，`cwd` 是账号工作区（brain/worker）或任务 `--cwd`；`sandbox` 也不隔离 `~/.codex`。本文涉及 `brain-home` / `worker-home` 的描述仅适用于其他可重定向 Agent 的配置落点。
 
 > **最后核对**：2026-11-12 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / `session/load` 恢复 / 图片 / `set_mode` / `set_config_option(model)` / stdio MCP）；**真机 E2E 已通过**（2026-11-01：worker 通道任务 #21 + brain 通道微信单轮，回复均送达）；**适配器 2.6.0 探针复测通过**（2026-11-12，见 §2.1）。
 >

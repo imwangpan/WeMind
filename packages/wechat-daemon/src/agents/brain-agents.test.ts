@@ -448,7 +448,7 @@ describe("resolveAgent agent", () => {
     expect(ag.shell).toBe(false); // 原生 .exe/.bin，不走 shell
     expect(ag.homeEnvVar).toBeUndefined(); // 用 env 指到「配置目录」本身，而非沙箱根
     expect(ag.env.QODER_CONFIG_DIR).toMatch(/^%HOME%[\\/]qoder$/);
-    // real 模式直接用真实 home 时，%HOME% 模板会拼成 ~/.qoder/qoder；realEnv 必须改成真实目录
+    // home 直接指向真实目录时，%HOME% 模板会拼成 ~/.qoder/qoder；realEnv 必须改成真实目录
     expect(agentEnv(ag, ag.realHome!).QODER_CONFIG_DIR).toBe(ag.realHome);
     expect(ag.configSubdir).toBe("qoder");
     expect(ag.mcpFormat).toBe("mcpServers"); // 键名同为 mcpServers
@@ -474,7 +474,7 @@ describe("resolveAgent agent", () => {
     expect(ag.env.CLINE_DIR).toMatch(/^%HOME%[\\/]cline$/);
     expect(ag.env.CLINE_DATA_DIR).toMatch(/^%HOME%[\\/]cline[\\/]data$/);
     expect(ag.env.CLINE_MCP_SETTINGS_PATH).toMatch(/^%HOME%[\\/]cline[\\/]mcp\.json$/);
-    // real 模式：CLINE_* 必须指到真实的 ~/.cline，而不是 ~/.cline/cline
+    // home 直接指向真实目录：CLINE_* 必须指到真实的 ~/.cline，而不是 ~/.cline/cline
     const realEnv = agentEnv(ag, ag.realHome!);
     expect(realEnv.CLINE_DIR).toBe(ag.realHome);
     expect(realEnv.CLINE_DATA_DIR).toBe(path.join(ag.realHome!, "data"));
@@ -511,6 +511,30 @@ describe("resolveAgent agent", () => {
     expect(env2.CLINE_API_KEY).toBe("explicit-key");
   });
 
+  it("direct 不注入 homeEnvVar / 预设 env，但保留 yolo 类 envDefaults 与凭据桥接", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN = "opencode";
+    const opencode = resolveAgent();
+    const managed = agentEnv(opencode, path.join(scratch, "view"), [], scratch);
+    expect(managed.XDG_CONFIG_HOME).toBe(path.join(scratch, "view"));
+    expect(managed.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("1");
+    const direct = agentEnv(opencode, opencode.realHome!, [], scratch, { direct: true });
+    expect(direct.XDG_CONFIG_HOME).toBe(process.env.XDG_CONFIG_HOME);
+    expect(direct.OPENCODE_DISABLE_PROJECT_CONFIG).toBe(
+      process.env.OPENCODE_DISABLE_PROJECT_CONFIG,
+    );
+
+    clearVars();
+    process.env.WEMIND_BRAIN = "codex";
+    const codex = resolveAgent();
+    expect(agentEnv(codex, codex.realHome!, [], scratch).INITIAL_AGENT_MODE).toBe(
+      "agent-full-access",
+    );
+    expect(agentEnv(codex, codex.realHome!, [], scratch, { direct: true }).INITIAL_AGENT_MODE).toBe(
+      "agent-full-access",
+    );
+  });
+
   it("cline 找不到二进制时给安装命令（而不是泛泛的「安装它」）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "cline";
@@ -543,7 +567,7 @@ describe("resolveAgent agent", () => {
     expect(agentEnv(ag, path.join("/tmp", "wemind-home")).CLAUDE_CONFIG_DIR).toBe(
       path.join("/tmp", "wemind-home", "claude"),
     );
-    // real 模式：直接指到 ~/.claude，而不是 ~/.claude/claude
+    // home 直接指向真实目录：CLAUDE_CONFIG_DIR 必须是 ~/.claude，而不是 ~/.claude/claude
     expect(agentEnv(ag, ag.realHome!).CLAUDE_CONFIG_DIR).toBe(ag.realHome);
     // 记忆/技能继承；凭据同步（OAuth 登录态）
     expect(ag.realHome).toBe(path.join(os.homedir(), ".claude"));

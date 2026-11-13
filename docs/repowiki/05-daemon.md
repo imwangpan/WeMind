@@ -48,7 +48,7 @@ packages/wechat-daemon/src/
 │   ├── profile-model.ts      # 真实 profile 的默认模型读取与「缺 - id: acp」提示
 │   ├── cline-credentials.ts  # 从 Cline providers.json 派生 CLINE_PROVIDER/CLINE_API_KEY
 │   ├── config/               # homeMode、配置视图、overlay、工作区、环境快照
-│   │   ├── home-mode.ts      # runtime.json：real（默认）/ mirror / sandbox
+│   │   ├── home-mode.ts      # runtime.json：view（默认）/ direct / sandbox
 │   │   ├── runtime.ts        # 一次启动的 home/configDir/cwd/mediaDir 总装
 │   │   ├── config-view.ts    # agent-view 最小视图（仅 homeEnvVar Agent；链接真实技能/记忆/会话）
 │   │   ├── overlay.ts        # agent-overrides/<agent>.json（仅微信侧）
@@ -332,7 +332,7 @@ graph TD
 | `VIDEO` | 同上，文件名固定 `video.mp4`，prompt 写「大小/时长/本地路径」 |
 | 其它 / 工具 item 11/12 | 未知类型计入 `unsupportedTypes`；只有未知类型时明确告知用户；入站工具 item 直接忽略（它们只用于出站进度） |
 
-- **落盘位置**：默认 `real`/`mirror` 是 `<账号>/media/inbound`，`sandbox` 才是 `<sandbox>/media/inbound`。prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
+- **落盘位置**：默认 `view`/`direct` 是 `<账号>/media/inbound`，`sandbox` 才是 `<sandbox>/media/inbound`。prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
 - **文件名安全**：`safeMediaFileName()` 去掉路径分隔符/控制字符、替换 Windows 非法字符、给保留名（`CON`/`NUL`/`COM1`…）加后缀、保留扩展名；同名用 `-1`/`-2` 后缀，绝不覆盖。
 - **清理**：`saveInboundMedia()` 每次写入后问一次 `pruneInboundMediaIfDue()`，daemon 启动时也调一次（时钟为「从未清理」→ 必执行）；真正清理至少间隔 1 小时，避免同一批附件重复扫目录（挂在 poller 主循环上没有必要，目录只在写入时才增长）。每次先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 30 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 1GB）从最旧开始删；best-effort，失败不影响消息处理。
 - **大小上限**：入站文件/视频/语音默认 `WECHAT_INBOUND_MEDIA_MAX_MB=100`；图片仍走图片专用链路（20MB 上限）。

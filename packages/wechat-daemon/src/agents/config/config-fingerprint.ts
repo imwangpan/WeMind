@@ -19,17 +19,18 @@ const VOLATILE = new Set([
 ]);
 
 /**
- * 真实配置的轻量指纹：用于“长跑进程发现终端侧改了配置”后，在下一条消息/下一次 spawn 前重建，而不是等 daemon 重启。
+ * 真实配置的轻量指纹：用于 view 模式下“长跑进程发现终端侧改了配置”后，在下一条消息/下一次 spawn 前重建，而不是等 daemon 重启。
  *
  * 只看**明确的配置文件内容**，不做 realHome 递归 mtime 扫描：
  * 递归会把 agent 自己写的历史/会话当成“终端改了配置”，导致每轮重启（实测 qoder/claude 都会）。
- * 没有配置视图的 real/mirror 模式（qoder/cline/claude-code/codex）直接返回空串：本来就没有东西要重建。
+ * `direct` / `sandbox` 直接返回空串：direct 没有 WeMind 生成的视图，sandbox 的副本不跟随真实配置。
+ * `view` 但 agent 没有可重定向的配置目录（qoder/cline/claude-code/codex）也返回空串——它们本次会降级 direct。
  */
 export function configFingerprint(ag: ResolvedAgent, dir: string = DATA_DIR): string {
   const home = ag.realHome;
   if (!home) return "";
   const mode = readHomeMode(dir);
-  if ((mode === "real" || mode === "mirror") && !ag.homeEnvVar) return "";
+  if (mode !== "view" || !ag.homeEnvVar) return "";
   const base =
     ag.name === "gemini" && fs.existsSync(path.join(home, ".gemini"))
       ? path.join(home, ".gemini")

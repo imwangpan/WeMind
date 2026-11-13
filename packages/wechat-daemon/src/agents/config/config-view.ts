@@ -13,7 +13,7 @@ import type { HomeMode } from "./home-mode.js";
 const log = createLogger("wechat-daemon/config-view");
 
 /**
- * 配置视图：给 Agent 一个“看起来像 real home”的目录。
+ * 配置视图：给 Agent 一个“看起来像真实 home”的目录（`homeMode=view`）。
  *
  * - 目录优先 junction/symlink，单文件优先 hardlink；这样技能/记忆/会话仍是真实目录的双向镜像；
  * - 需要 WeMind 权威覆盖的文件（MCP、settingsBase、settingsDefaults、overlay）先断开链接，再生成副本；
@@ -474,7 +474,7 @@ export function applyOverlayToView(
   view: ConfigView,
   ag: ResolvedAgent,
   overlay: AgentOverlay,
-  mode: HomeMode = "real",
+  mode: HomeMode = "view",
 ): string[] {
   const problems: string[] = [];
   if (!ag.realHome || !overlay.config) return problems;
@@ -499,7 +499,7 @@ export function applyOverlayToView(
       problems.push(`overlay.config.${key} 指向了不允许的路径`);
       continue;
     }
-    // real/mirror 用真实文件做基底，每次重建都重新 patch（终端修改才能进来）；
+    // view 用真实文件做基底，每次重建都重新 patch（终端修改才能进来）；
     // sandbox 是账号隔离副本，只能用沙箱里已剥离的视图，否则会把真实 wechat MCP/密钥带回来。
     const baseFile = mode === "sandbox" && fs.existsSync(target.view) ? target.view : target.real;
     let base: Record<string, unknown> = {};

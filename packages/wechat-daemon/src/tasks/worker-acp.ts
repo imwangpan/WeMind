@@ -7,7 +7,7 @@ import { ensureWorkerHome, workerMcpServers } from "../agents/sandbox/worker-san
 import { assertNoForbiddenNativeMcp, nativeMcpServers } from "../agents/sandbox/mcp-sandbox.js";
 import { configFingerprint } from "../agents/config/config-fingerprint.js";
 import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
-import { readHomeMode } from "../agents/config/home-mode.js";
+import { viewFallbackReason, type AgentRuntime } from "../agents/config/runtime.js";
 import { deleteSessionCwd, getSessionCwd, setSessionCwd } from "../agents/config/session-cwd.js";
 import { ensureWorkspace } from "../agents/config/workspace.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
@@ -127,6 +127,7 @@ export class WorkerConn {
   private host: AcpHost;
   private cwd?: string; // 本任务的工作目录（spawn 时生效；子进程 cwd 不可中途改）
   private spawnError?: Error; // spawn 失败的真实原因（cwd 不存在/权限），kill() 用它答复而不是笼统的 killed
+  private runtime?: AgentRuntime; // 最近一次准备配置视图/沙箱的结果；用于判断本次是否 direct（不下发 MCP）
   /** spawn 后立刻回调：池据此把 pid 身份记录写入磁盘（`wemind stop` 靠它精确找到本进程）。 */
   onSpawn?: (conn: WorkerConn) => void;
 
@@ -274,10 +275,11 @@ export class WorkerConn {
   }
 
   private async ensureProcess(): Promise<void> {
-    const before = readHomeMode() === "sandbox" ? "" : configFingerprint(this.agent);
+    // 该 worker 已从 view 降级为 direct 时不再反复尝试建视图；指纹按「没有视图」处理，避免每次复用都重建进程。
+    const before = viewFallbackReason("worker", this.agent) ? "" : configFingerprint(this.agent);
     if (this.isAlive() && this.initialized && this.configFp === before) return;
     if (this.isAlive() && this.initialized)
-      log.info(`${this.id}(${this.agent.name}) real config changed → rebuild`);
+      log.info(`${this.id}(${this.agent.name}) config changed → rebuild`);
     this.kill();
     this.spawnError = undefined; // 上一次的 spawn 失败不能污染这一次
     const kept: string[] = [];
@@ -286,10 +288,12 @@ export class WorkerConn {
     // 否则 spawn 的 cwd 与 session/new 的 cwd 可能不一致。
     const taskCwd = this.effectiveCwd();
     const rt = ensureWorkerHome(this.agent, DATA_DIR, { cwd: taskCwd });
+    this.runtime = rt;
     assertNoForbiddenNativeMcp(this.agent, rt); // Codex/config.toml 与视图副本：有 wechat 或解析不了就拒绝启动
     // 必须在 ensureWorkerHome 之后取：否则把自己的写入误判成「终端改配置」而每次复用都重启
-    const fp = readHomeMode() === "sandbox" ? "" : configFingerprint(this.agent);
-    const env = agentEnv(this.agent, rt.home, kept); // 父进程 env → 配置视图/沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
+    // 没有视图（direct / sandbox / view 降级）就不需要跟随终端配置；降级状态在本次进程内缓存，显式 reload 才重试 view。
+    const fp = rt.view ? configFingerprint(this.agent) : "";
+    const env = agentEnv(this.agent, rt.home, kept, DATA_DIR, { direct: rt.mode === "direct" }); // 父进程 env → 配置视图/沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
     if (kept.length) log.info(`${this.id} env defaults kept from parent: ${kept.join(",")}`);
     prepareAgent(this.agent); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
     const cwd = rt.cwd;
@@ -345,7 +349,9 @@ export class WorkerConn {
     const existing = this.sessions.get(key);
     if (existing) return existing;
     // 配了 mcpViaAcp 的 agent（DSH / Claude Code / Copilot / Codex）：worker 继承全量 MCP（除排除集），随 session 下发；其余 agent 传空
-    const mcpServers = this.agent.mcpViaAcp ? workerMcpServers(this.agent) : [];
+    // direct 由 Agent 自己完整加载真实配置，WeMind 不下发任何额外 MCP。
+    const mcpServers =
+      this.agent.mcpViaAcp && this.runtime?.mode !== "direct" ? workerMcpServers(this.agent) : [];
     const mapKey = sessionKey(this.agent.name, key);
     const map = loadSessionMap(this.agent);
     const saved = map[mapKey];

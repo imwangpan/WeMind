@@ -31,7 +31,7 @@ export interface McpAdapter {
   readonly id: "jsonMcpServers" | "jsonMcpNested" | "tomlMcpServers";
   /** Agent 自己会加载、WeMind 改不了的原生 MCP（目前只有 Codex） */
   readonly nativeOwned: boolean;
-  /** real/mirror 视图下也要重建设置基底（MCP 与其它设置同文件时，不能直接链接真实文件） */
+  /** view 视图下也要重建设置基底（MCP 与其它设置同文件时，不能直接链接真实文件） */
   readonly rebuildSettingsInView: boolean;
   /** 读真实目录文件里的 MCP 定义（只读；缺失/损坏返回空表） */
   readCatalog(file: string): McpCatalog;
@@ -43,7 +43,7 @@ export interface McpAdapter {
   toAcp(servers: McpCatalog, exclude?: Iterable<string>): AcpConversion;
   /** 该 Agent 原生加载的 MCP（非原生适配器返回空表） */
   nativeCatalog(file: string): McpCatalog;
-  /** `sandbox` 模式下继承「除 MCP 外」的设置；real/mirror 由配置视图链接，不调用 */
+  /** `sandbox` 模式下继承「除 MCP 外」的设置；view 由配置视图链接，不调用 */
   inheritSettings?(ag: ResolvedAgent, realHome: string, targetConfigDir: string): void;
 }
 

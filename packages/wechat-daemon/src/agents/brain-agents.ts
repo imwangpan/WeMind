@@ -171,7 +171,7 @@ export type ResolvedAgent = {
   env: Record<string, string>;
   /** 预设给的「默认环境变量」：父进程已设同名变量时不覆盖（用于审批类开关，部署方可以收紧）。 */
   envDefaults: Record<string, string>;
-  /** 没有 homeEnvVar 时，real/mirror 直接用真实 home 需要覆盖的 env（见 preset 注释）。 */
+  /** 没有 homeEnvVar 的 agent 在非 direct 场景直接用真实 home 时需要覆盖的 env（见 preset 注释）。 */
   realEnv: Record<string, string>;
   /** 从 agent 自己的凭据文件派生环境变量（父进程未显式提供时；如 Cline 自定义 provider）。 */
   credentialEnv?: (
@@ -218,25 +218,36 @@ export type ResolvedAgent = {
   binOverridden: boolean;
 };
 
-/** 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向视图/沙箱 → 从凭据文件派生的 env（父进程未提供时）→ 预设强制 `env` → 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。 */
+/**
+ * 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向视图/沙箱 → 从凭据文件派生的 env（父进程未提供时）→ 预设强制 `env` → 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。
+ *
+ * `direct`（homeMode=direct，或 view 建视图失败降级）：不注入 `homeEnvVar` / 预设 `env` / `realEnv`，
+ * 让 Agent 像在终端直接启动一样读取自己的真实配置；仍保留 `envDefaults`（yolo / 免审批等默认值，父进程显式设置优先）与只读的凭据环境桥接。
+ */
 export function agentEnv(
   ag: ResolvedAgent,
   home: string,
   skipped: string[] = [],
   dataDir: string = DATA_DIR,
+  opts: { direct?: boolean } = {},
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = mergeEnvSnapshot(process.env, readEnvSnapshot(dataDir));
-  if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把配置视图/账号沙箱目录传给 agent
+  const direct = opts.direct === true;
+  if (ag.homeEnvVar && !direct) env[ag.homeEnvVar] = home; // 把配置视图/账号沙箱目录传给 agent
   // 从 agent 自己的凭据文件派生（如 Cline 的 CLINE_PROVIDER/CLINE_API_KEY）；helper 内部已保证父进程显式值优先
   for (const [k, v] of Object.entries(ag.credentialEnv?.(ag.realHome, process.env) ?? {})) {
     if (env[k] === undefined) env[k] = v;
   }
-  for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
-  // 没有 homeEnvVar 的 agent 在 real/mirror 下 home 就是真实目录：`env` 里的 %HOME% 模板会多拼一层
-  // （如 CLAUDE_CONFIG_DIR 变成 ~/.claude/claude）。realEnv 给出真实路径下的正确值，只在这个分支生效。
-  if (!ag.homeEnvVar && ag.realHome && path.resolve(home) === path.resolve(ag.realHome)) {
-    for (const [k, v] of Object.entries(ag.realEnv)) env[k] = v.replaceAll("%HOME%", home);
+  if (!direct) {
+    for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
+    // 没有 homeEnvVar 的 agent 在视图/沙箱里 home 就是目标目录：`env` 里的 %HOME% 模板会多拼一层
+    // （如 CLAUDE_CONFIG_DIR 变成 ~/.claude/claude）。realEnv 给出真实路径下的正确值，只在这个分支生效。
+    if (!ag.homeEnvVar && ag.realHome && path.resolve(home) === path.resolve(ag.realHome)) {
+      for (const [k, v] of Object.entries(ag.realEnv)) env[k] = v.replaceAll("%HOME%", home);
+    }
   }
+  // envDefaults 是 WeMind 为保证「微信侧免逐次审批」而下发的默认值，不属于 Agent 配置；direct 下仍要保留。
+  // 显式设置的同名变量优先（部署方可用它收紧权限），所以叫 defaults。
   for (const [k, v] of Object.entries(ag.envDefaults ?? {})) {
     if (env[k] !== undefined) {
       skipped.push(k);

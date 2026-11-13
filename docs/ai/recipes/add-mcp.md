@@ -28,7 +28,7 @@ catalog（定义从哪来；一律读**真实**配置目录，不读配置视图
   └─ 微信指令「加载 <名>」/「卸载 <名>」修改；按 agent 分键，wechat 永久禁止
 
 transport（怎么让 agent 看到）
-  └─ brain：applySandbox() 写配置视图（`real`/`mirror`，仅 `homeEnvVar` agent）或沙箱（`sandbox`）的文件式 MCP 配置，或 mcpViaAcp 传 session/new|resume（DSH / claude-code / copilot / codex）；无 `homeEnvVar` 时跳过并告警，激活不生效
+  └─ brain：applySandbox() 写配置视图（`view`，仅 `homeEnvVar` agent）或沙箱（`sandbox`）的文件式 MCP 配置，或 mcpViaAcp 传 session/new|resume（DSH / claude-code / copilot / codex）；`direct` / 无 `homeEnvVar` 时跳过并告警，激活不生效
   └─ worker：applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）
 
 微信独享增删（不改真实配置）

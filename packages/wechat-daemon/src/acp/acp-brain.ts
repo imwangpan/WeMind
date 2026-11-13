@@ -8,10 +8,9 @@ import {
   ensureBrainHome,
   nativeMcpServers,
 } from "../agents/sandbox/mcp-sandbox.js";
-import { agentRuntime } from "../agents/config/runtime.js";
+import { agentRuntime, resetViewFallback, viewFallbackReason } from "../agents/config/runtime.js";
 import { configFingerprint } from "../agents/config/config-fingerprint.js";
 import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
-import { readHomeMode } from "../agents/config/home-mode.js";
 import { getSessionCwd, setSessionCwd } from "../agents/config/session-cwd.js";
 import { getAgent } from "../agents/agent-slot.js";
 import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
@@ -243,20 +242,23 @@ function saveSessionMap(m: Record<string, string>): void {
 }
 
 async function ensureProcess(ag: ResolvedAgent): Promise<void> {
-  const before = readHomeMode() === "sandbox" ? "" : configFingerprint(ag);
+  // 本次进程内已从 view 降级为 direct 时不再反复尝试建视图；指纹按「没有视图」处理，避免每条消息重启进程。
+  const before = viewFallbackReason("brain", ag) ? "" : configFingerprint(ag);
   if (isAlive() && initialized && configFp === before) return;
   if (isAlive() && initialized) {
     // 终端侧改了配置：本轮开始前重建，随后 session/load 恢复上下文；不在一轮对话中途换配置。
-    log.info(`real config changed (${ag.name}) → rebuild before next turn`);
+    log.info(`config changed (${ag.name}) → rebuild before next turn`);
   }
   reset();
   const kept: string[] = [];
   const rt = ensureBrainHome(ag); // 视图链接 + 生成的 MCP/settings/overlay 副本一起重建（终端或微信侧刚改过配置）
   assertNoForbiddenNativeMcp(ag, rt); // Codex 的 config.toml 由它自己加载，WeMind 只读 → 有 wechat 或解析不了就拒绝启动
-  const env = agentEnv(ag, rt.home, kept); // 父进程 env → 配置视图/沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
+  const env = agentEnv(ag, rt.home, kept, DATA_DIR, { direct: rt.mode === "direct" }); // 父进程 env → 配置视图/沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
   if (kept.length) log.info(`env defaults kept from parent: ${kept.join(",")}`); // 部署方显式设置的审批类开关
   prepareAgent(ag); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
-  const fp = readHomeMode() === "sandbox" ? "" : configFingerprint(ag); // 必须在 ensureBrainHome 之后取：否则把自己的写入误判成「终端改配置」而每轮重启
+  // 视图存在时才需要跟随终端配置变化；没有视图（direct / sandbox / view 降级）就不重建。
+  // 降级状态在本次进程内缓存，避免每条消息重试建视图；`wemind config reload` 会清掉缓存重新尝试。
+  const fp = rt.view ? configFingerprint(ag) : "";
   const proc = spawnAgent(ag, { cwd: rt.cwd, env });
   child = proc;
   log.info(
@@ -301,7 +303,8 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
   if (existing) return existing;
   const rt = agentRuntime("brain", ag);
   // 配了 mcpViaAcp 的 agent（DSH / Claude Code / Copilot / Codex）：激活集随 session 下发；其余 agent 传空（走各自配置文件）
-  const mcpServers = ag.mcpViaAcp ? activeMcpServers(ag) : [];
+  // direct 由 Agent 自己完整加载真实配置，WeMind 不下发任何额外 MCP。
+  const mcpServers = ag.mcpViaAcp && rt.mode !== "direct" ? activeMcpServers(ag) : [];
   const map = loadSessionMap(ag);
   const saved = map[keyOf(ag, userId)];
   if (saved) {
@@ -507,7 +510,7 @@ export async function resumeSession(
     const short = sessionId.slice(0, 8);
     await ensureProcess(ag);
     const rt = agentRuntime("brain", ag);
-    const mcpServers = ag.mcpViaAcp ? activeMcpServers(ag) : [];
+    const mcpServers = ag.mcpViaAcp && rt.mode !== "direct" ? activeMcpServers(ag) : [];
     const savedCwd = getSessionCwd(ag.name, sessionId);
     const cwd = savedCwd ?? rt.cwd;
     const methods: Array<"load" | "resume"> =
@@ -571,6 +574,7 @@ export async function restartForMcpChange(): Promise<boolean> {
     return true;
   }
   pendingReload = false;
+  resetViewFallback("brain"); // 显式 reload 允许重新尝试 view（用户可能刚修好真实配置目录）
   restart();
   return true;
 }

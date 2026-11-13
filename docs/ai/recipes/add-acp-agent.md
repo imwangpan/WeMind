@@ -48,7 +48,7 @@ node scripts/acp-probe.mjs
 | 正文非逐 token / 无 activity 帧                                                         | 预设加 `firstFrameMs`（首帧超时）与 `heartbeatMs`（静默期心跳），见 §4                                                                                                                                                                                                                                                                                                                                                            |
 | `session/new` 先要求 `authenticate`（`-32000 Authentication required`）                 | 先看能否靠**复制凭据**自动恢复（`credentialFiles`；Cline 只自动恢复它自己的 3 种 OAuth provider）；不能就**从 agent 自己的配置派生环境变量**（`credentialEnv`，参考 Cline 的 `clineCredentialEnv()`：只读、显式 env 优先），或要求部署方提供 agent 官方文档里的环境变量。**不要**在 daemon 里实现交互式 `authenticate`——无头环境会卡在浏览器/输入上；把可执行的提示写进 `brain check` 与失败回复（参考 `authHint()`）             |
 | 默认模型路由需要 API key / 桌面登录要切 account                                         | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖                                                                                                                                                                                                                          |
-| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：`real`/`mirror` 链接真实 `profiles/`，`sandbox` 才**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在），并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
+| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：`view` 链接真实 `profiles/`，`sandbox` 才**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在），`direct` 直接用真实 home；并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
 
 ---
 
@@ -91,7 +91,7 @@ node scripts/acp-probe.mjs
 | --- | ----------------------- | ---------------------------------------------------------------------------------------------- | --------------------- |
 | 1   | 二进制/路径             | PATH 名或绝对路径                                                                              | `dsh` / `dsh.cmd`     |
 | 2   | ACP 启动参数            | 进入 ACP server over stdio                                                                     | `--profile acp`       |
-| 3   | 配置目录环境变量        | 该 agent 读取配置/数据目录的 env 名；WeMind 指向配置视图（`real`/`mirror`）或沙箱（`sandbox`） | `DSH_HOME`            |
+| 3   | 配置目录环境变量        | 该 agent 读取配置/数据目录的 env 名；WeMind 在 `view` 指向配置视图、在 `sandbox` 指向沙箱；`direct` 不注入 | `DSH_HOME`            |
 | 4   | 配置目录布局 / MCP 格式 | `configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile`                                    | 空 / ACP `mcpServers` |
 
 > 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
@@ -153,12 +153,12 @@ acme: {
 
 ## 3. 配置视图 / MCP / 记忆
 
-- `homeEnvVar` 指向 `agent-view/<role>/<agent>`（`real`/`mirror`）或 `BRAIN_HOME`/`WORKER_HOME`（`sandbox`）；没有 `homeEnvVar` 的 Agent 在 `real`/`mirror` 下直接用真实 home、WeMind 只读不写（`settingsBase`/`mcp.json` 跳过并告警，MCP/overlay 不生效），只能靠 `env`/`realEnv` 指配置目录。`configSubdir` 决定配置目录在其中的位置。
+- `homeEnvVar` 指向 `agent-view/<role>/<agent>`（`view`）或 `BRAIN_HOME`/`WORKER_HOME`（`sandbox`）；`direct` 不注入，直接用真实 home。没有 `homeEnvVar` 的 Agent 在 `view` 下会降级 `direct`、WeMind 只读不写（`settingsBase`/`mcp.json` 跳过并告警，MCP/overlay 不生效），只能靠 `env`/`realEnv` 指配置目录。`configSubdir` 决定配置目录在其中的位置。
 - `mcpFormat`：`mcpServers`（顶层）或 `mcp.servers`（嵌套）；DSH 这类走 ACP 的用 `mcpViaAcp`，不要写文件。
-- 记忆/技能：`real`/`mirror` 由 config view 直接链接 `realHome` 的未覆盖目录/文件；`sandbox` 才按 `inheritDirs`（junction/symlink）与 `inheritFiles`（复制）选择性继承。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
+- 记忆/技能：`view` 由 config view 直接链接 `realHome` 的未覆盖目录/文件；`direct` 完全使用真实目录；`sandbox` 才按 `inheritDirs`（junction/symlink）与 `inheritFiles`（复制）选择性继承。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
 - 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时视图/沙箱。
 - 设置继承：`settingsBase` 会在 brain/worker 两个角色的视图（`sandbox` 模式是沙箱）生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）；`settingsStrip` 可改剥离键（gemini 只剥 `mcpServers`，保留用户的 `model`/`security`），`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。
-- **profile**（`realProfile`，可选）：`real`/`mirror` 下整个 `profiles/` 链接真实 home；`sandbox` 模式把真实 `<realHome>/profiles/<名>/cordis.patch.yml` **原样复制**进沙箱——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在。默认模型从真实 profile 读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
+- **profile**（`realProfile`，可选）：`view` 下整个 `profiles/` 链接真实 home；`sandbox` 模式把真实 `<realHome>/profiles/<名>/cordis.patch.yml` **原样复制**进沙箱——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在；`direct` 直接用真实 profile。默认模型从真实 profile 读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
 - brain 默认空 MCP、按 agent 持久激活；worker 真实全量。两者都永久禁止 `wechat`（防它把消息发回自己）。
 - **每个 agent 只读自己的 catalog**；不要把 kiro 的文件指给 DSH。
 

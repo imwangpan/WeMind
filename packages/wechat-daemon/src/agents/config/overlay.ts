@@ -11,7 +11,7 @@ import { findForbiddenMcpEntries, normalizeMcpName, parseJsonc } from "../sandbo
  * 微信独享覆盖：`<账号>/agent-overrides/<agent>.json`。
  *
  * 只影响微信侧，永不自动写回真实配置。默认修改真实配置；用户明确说“微信侧/仅微信”时才走这里。
- * 有视图时 overlay 只写视图副本；没有 `homeEnvVar` 的 agent 在 real/mirror 下 overlay 不生效（要生效用 sandbox）。
+ * 有视图时 overlay 只写视图副本；`direct` 模式或没有 `homeEnvVar` 的 agent 下 overlay 不生效（要生效用 view/sandbox）。
  * 不设“安全键”白名单——任何真实配置键都允许覆盖；安全性靠路径校验、解析失败拒绝、写前备份与原子写。
  */
 export type OverlayMcp = {

@@ -38,9 +38,11 @@ import {
 const log = createLogger("wechat-daemon/mcp");
 
 /**
- * brain 的 MCP 视图：brain 的配置根是 agent-view（real/mirror）或 brain-home（sandbox），默认不加载任何 MCP。
+ * brain 的 MCP 视图：brain 的配置根是 agent-view（view）或 brain-home（sandbox），默认不加载任何 MCP。
  * 通过对话指令（加载/卸载/列出）动态调整「激活集」，从全局 MCP 目录取定义写入视图/沙箱。
  * DATA_DIR 从 core 导入（支持 WECHAT_DATA_DIR 覆盖，便于多账号隔离）。
+ *
+ * `direct` 模式不经过本模块：Agent 直接加载自己的完整真实配置，WeMind 不写 MCP、也不下发额外 MCP。
  *
  * 按 agent 适配（见 brain-agents.ts 里的 agent 配置与 docs/接入-OpenCode.md）：
  * - 配置目录：kiro = home 根本身（KIRO_HOME）；opencode = <home>/opencode（XDG_CONFIG_HOME）。
@@ -51,7 +53,7 @@ const log = createLogger("wechat-daemon/mcp");
  * 或在入口用 `getAgent("brain")` 取一次当前大脑——热切换后视图/沙箱会写到新 agent 的配置目录。
  */
 
-/** sandbox 模式的 brain 沙箱根目录（显式回退；real/mirror 用 agentRuntime().home）。 */
+/** sandbox 模式的 brain 沙箱根目录（显式回退；view/direct 用 agentRuntime().home）。 */
 export const BRAIN_HOME = process.env.WECHAT_BRAIN_HOME?.trim() || sandboxRoot("brain", DATA_DIR);
 
 /** 该 agent 的「配置目录」（kiro=home 根；opencode=<home>/opencode）。 */
@@ -79,7 +81,7 @@ let legacyActiveNoticed = false;
  * 使微信里的大脑和你日常使用读到同样的记忆、规则、技能。
  * **MCP（settings/opencode.json 的 mcp 段）与 brain 自有会话（sessions）不照搬**：MCP 必须走视图/沙箱的排除集（排除 wechat，防它把消息发回自己），会话不能混。
  */
-function mirrorRealKiro(ag: ResolvedAgent, rt: AgentRuntime): void {
+function linkRealKnowledge(ag: ResolvedAgent, rt: AgentRuntime): void {
   syncInherited(rt.home, brainConfigDir(ag, rt), ag);
 }
 
@@ -131,7 +133,7 @@ export function nativeMcpServers(ag: ResolvedAgent): Record<string, unknown> {
   }
 }
 
-/** 启动检查要看的文件（存在才查）：视图里的副本优先（real/mirror 下已清洗），否则真实文件。 */
+/** 启动检查要看的文件（存在才查）：视图里的副本优先（view 下已清洗），否则真实文件。 */
 function nativeScanFiles(ag: ResolvedAgent, rt?: AgentRuntime): string[] {
   const out = new Set<string>();
   if (ag.realProfile && ag.realHome) {
@@ -154,10 +156,12 @@ function nativeScanFiles(ag: ResolvedAgent, rt?: AgentRuntime): string[] {
 }
 
 /**
- * brain/worker 启动前的强制检查：agent 自己会加载的配置里不得出现微信 MCP。
+ * brain/worker 启动前的检查：agent 自己会加载的配置里不得出现微信 MCP。
+ * - `view` / `sandbox`：无法替 Agent 剥离时拒绝启动（防两个 poller 抢同一条消息）；
+ * - `direct`：用户明确要求完全按终端配置运行，只告警、不阻止启动，由用户自行删除；
  * - Codex TOML：WeMind 只读，解析失败/截断一律拒绝（fail-closed）；
  * - DSH profile / Copilot 等 JSON：视图副本已由 sanitizeView 剔除，真实文件仍含就拒绝（无法替它剥离）；
- * - 无视图的文件式 agent：真实 MCP 文件里含微信条目就拒绝（real 模式不会写入，只会冲突）。
+ * - 无视图的文件式 agent：真实 MCP 文件里含微信条目就拒绝（view 不会写入，只会冲突）。
  */
 export function assertNoForbiddenNativeMcp(ag: ResolvedAgent, rt?: AgentRuntime): void {
   const problems: string[] = [];
@@ -201,12 +205,25 @@ export function assertNoForbiddenNativeMcp(ag: ResolvedAgent, rt?: AgentRuntime)
       problems.push((e as Error)?.message ?? String(e));
     }
   }
+  if (bad.length && rt?.mode === "direct") {
+    log.warn(
+      `agent 自己的配置文件里有微信 MCP（${bad.join(", ")}）：direct 模式不替 Agent 剥离，也不会阻止启动；` +
+        `同一条微信消息可能被两个程序抢/回环，请自行删除这些条目。`,
+    );
+    return;
+  }
   if (bad.length) {
     throw new Error(
       `agent 自己的配置文件里有微信 MCP（${bad.join(", ")}），WeMind 无法替它剥离；同一条微信消息会被两个程序抢/回环。请删除这些条目后重启，或换一个大脑。`,
     );
   }
   if (problems.length) {
+    if (rt?.mode === "direct") {
+      log.warn(
+        `direct 模式无法完整检查 agent 自己的配置（${problems.join("；")}），按用户配置继续启动。`,
+      );
+      return;
+    }
     throw new Error(
       `无法确认 agent 自己的配置里是否含微信 MCP，已拒绝启动：${problems.join("；")}。`,
     );
@@ -275,6 +292,10 @@ function applySandbox(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = DATA_D
   if (ag.mcpViaAcp) return;
   // 不要在这里重建视图：调用方的 rt 里已经有 overlay 之后的视图，重算会把 overlay 覆盖回真实值。
   const target = rt ?? agentRuntime("brain", ag, dir);
+  if (target.mode === "direct") {
+    warnUnwritableRealHome(ag, "MCP 激活集");
+    return;
+  }
   if (!canWriteAgentConfig(ag, target)) {
     warnUnwritableRealHome(ag, "MCP 激活集");
     return;
@@ -348,9 +369,11 @@ function syncSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
 export function ensureBrainHome(forAgent?: ResolvedAgent, dir: string = DATA_DIR): AgentRuntime {
   const ag = forAgent ?? getAgent("brain");
   const rt = agentRuntime("brain", ag, dir);
+  // direct：不生成视图、不写 MCP/设置/overlay/权限；Agent 完全按自己的真实配置启动。
+  if (rt.mode === "direct") return rt;
   syncSettings(ag, rt); // 先同步「非 MCP」设置(模型/免确认等)，让大脑与日常使用同款配置
   if (rt.mode === "sandbox") {
-    mirrorRealKiro(ag, rt); // 继承真实配置目录的记忆/steering/skills
+    linkRealKnowledge(ag, rt); // 继承真实配置目录的记忆/steering/skills
     syncCredentials(ag, brainConfigDir(ag, rt)); // 登录态/凭据（如 DSH 的 .credentials.yaml、Qoder 的 .auth/*）
   }
   warnOverlayProblems(ag, rt);
@@ -377,6 +400,13 @@ export function addMcp(
   role: AgentRole = "brain",
 ): McpChangeResult {
   const ag = forAgent ?? getAgent(role);
+  const rt = agentRuntime(role, ag, dir);
+  if (rt.mode === "direct")
+    return {
+      ok: false,
+      changed: false,
+      text: `当前是 direct 模式：WeMind 不管理 MCP，请直接在 ${ag.name} 的真实配置里增删（本次未改动）。`,
+    };
   const cat = loadCatalog(ag, dir);
   if (forbiddenMcpServer(name, cat[name]))
     return { ok: false, changed: false, text: `不允许加载「${name}」（防它把消息发回自己）。` };
@@ -410,7 +440,7 @@ export function addMcp(
     if (!next.mcp?.disable?.length && !next.mcp?.extra) delete (next as { mcp?: unknown }).mcp;
     writeOverlay(ag.name, next, dir);
   }
-  applySandbox(ag, agentRuntime(role, ag, dir), dir);
+  applySandbox(ag, rt, dir);
   return {
     ok: true,
     changed,
@@ -425,11 +455,18 @@ export function removeMcp(
   role: AgentRole = "brain",
 ): McpChangeResult {
   const ag = forAgent ?? getAgent(role);
+  const rt = agentRuntime(role, ag, dir);
+  if (rt.mode === "direct")
+    return {
+      ok: false,
+      changed: false,
+      text: `当前是 direct 模式：WeMind 不管理 MCP，请直接在 ${ag.name} 的真实配置里增删（本次未改动）。`,
+    };
   const a = loadActive(ag.name, dir);
   if (!a.includes(name)) return { ok: false, changed: false, text: `「${name}」当前未激活。` };
   const next = a.filter((x) => x !== name);
   saveActive(next, ag.name, dir);
-  applySandbox(ag, agentRuntime(role, ag, dir), dir);
+  applySandbox(ag, rt, dir);
   return {
     ok: true,
     changed: true,
@@ -439,6 +476,13 @@ export function removeMcp(
 
 export function listMcp(dir: string = DATA_DIR): string {
   const ag = getAgent("brain");
+  // 只用于提示 direct 模式；工作区异常时不应让「列出 MCP」整体失败，按非 direct 继续展示目录。
+  let direct = false;
+  try {
+    direct = agentRuntime("brain", ag, dir).mode === "direct";
+  } catch {
+    direct = false;
+  }
   const avail = catalogNames(ag, dir);
   const cat = loadCatalog(ag, dir);
   const disabled = overlayDisableSet(readOverlay(ag.name, dir).overlay);
@@ -449,6 +493,7 @@ export function listMcp(dir: string = DATA_DIR): string {
     (n) => cat[n] && !disabled.has(normalizeMcpName(n)) && !forbiddenMcpServer(n, cat[n]),
   );
   const lines = [
+    ...(direct ? ["当前是 direct 模式：以下激活集不会生效，MCP 由 Agent 真实配置决定。"] : []),
     `可选 MCP：${avail.join(", ") || "（无）"}`,
     `已激活：${active.join(", ") || "（空，默认不加载）"}`,
   ];

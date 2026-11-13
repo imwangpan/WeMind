@@ -37,7 +37,7 @@ node scripts/acp-probe.mjs
 
 > **2026-11-03 两个回归点**（改 kiro/DSH 相关代码后重跑）：
 > - **kiro v3**：临时 `KIRO_HOME` 的 `settings/cli.json` 写 `{"acp.agentEngine":"v3"}`，`wemind brain check` 应通过；看 `agent-view/brain/kiro/settings/permissions.yaml`（`sandbox` 模式才是 `brain-home/settings/permissions.yaml`）是 allow-all，且解析出的 args 已没有 `--trust-all-tools`（多了 `--agent-engine v3`）。真实设置已有 `permissions.yaml` 时不得被覆盖。
-> - **DSH 会话隔离（仅 `sandbox` 模式）**：看 `<账号目录>/agent-sessions/deepseek/session-root-{brain,worker}.patch.yml` 与两个 root 目录；要复现旧故障，先在 `brain-home/sessions/` 放一个平铺会话文件再跑 `wemind brain check`（修复后 DSH 不再读那个目录）。`real` 模式不追加 `--patch`，用 DSH 真实会话库。模型过期用 `wemind brain` 看是否给出 `no configured model` 的替换提示。
+> - **DSH 会话隔离（仅 `sandbox` 模式）**：看 `<账号目录>/agent-sessions/deepseek/session-root-{brain,worker}.patch.yml` 与两个 root 目录；要复现旧故障，先在 `brain-home/sessions/` 放一个平铺会话文件再跑 `wemind brain check`（修复后 DSH 不再读那个目录）。`view` / `direct` 不追加 `--patch`，用 DSH 真实会话库。模型过期用 `wemind brain` 看是否给出 `no configured model` 的替换提示。
 
 Claude Code 的 L3 示例（需要先 `npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；用临时 `CLAUDE_CONFIG_DIR`，别碰真实 `~/.claude`）：
 
@@ -229,7 +229,7 @@ MCP
 | 9 | 图片 | 按 agent 能力工作或友好拒绝 |
 | 10 | MCP | 加载/卸载生效；`wechat` 禁止 |
 | 11 | worker | 派发/中断/继续可用（多任务见 §7.1） |
-| 12 | 多账号 | token/会话指针/overlay/工作区按账号隔离；`real` 下 Agent 真实配置/技能/记忆/会话库按设计共享 |
+| 12 | 多账号 | token/会话指针/overlay/工作区按账号隔离；`view` / `direct` 下 Agent 真实配置/技能/记忆/会话库按设计共享 |
 | 13 | 热切换 | 不重启 daemon 换大脑，在途回合跑完 |
 | 14 | 切换回滚 | 坏 bin（**存在但不是 ACP agent**）被拒，旧大脑继续答，`brain.json` 未变 |
 | 15 | 多任务并行 | 两条不同 agent 同时跑且都出结果 |
@@ -244,10 +244,10 @@ MCP
 | 24 | 工具进度 | 默认发文本「步骤 N」；`WECHAT_TOOL_PROGRESS_ITEMS=1` 才发结构化 11/12（客户端目前不渲染） |
 | 25 | 消息 ID 精度 | 连发两条，`state.json` 的字符串 ID 不同、不丢消息 |
 | 26 | 正在输入（typing） | 长回合里「正在输入」持续可见；每 5s 续发，发消息后立刻补一次 |
-| 27 | 终端等效 | 在终端改真实 Agent 配置/技能/记忆后，下一条微信消息可见；会话历史与终端共用（`homeMode=real`） |
+| 27 | 终端等效 | 在终端改真实 Agent 配置/技能/记忆后，下一条微信消息可见；会话历史与终端共用（`homeMode=view`；无法建视图时本次降级 `direct`） |
 | 28 | 微信独享 overlay | `wemind config wechat set <agent> <path> <value>` 只改 `<账号>/agent-overrides/<agent>.json`，真实配置不变；新会话生效 |
 | 29 | 默认工作区 | brain/worker 分别使用 `<账号>/workspace/{brain,worker}`；`wemind config workspace set` 后已有会话 cwd 不变、新会话用新目录 |
-| 30 | worker MCP 有效集 | 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；`real`/`mirror` 无视图的 agent 不写真实 `mcp.json`，日志告警 |
+| 30 | worker MCP 有效集 | 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；`view` 无视图（降级 `direct`）或显式 `direct` 的 agent 不写真实 `mcp.json`，日志告警 |
 | 31 | 配置热重载 | `wemind config reload` 立即重建视图；brain 有回合在跑时日志记「等当前回合结束再重启」，回复不中断；daemon 未运行时命令返回非零 |
 
 ### 7.1 控制面九项（1.2.0 新增，手工）
@@ -383,7 +383,7 @@ wemind brain set kiro --restart <key>   # 老写法：写入磁盘 + 重启 daem
 
 清空对话记忆（**不是**回滚，是重置）：
 
-- 删 `<数据目录>/brain-sessions.json`（当前会话表，权威）+ `<数据目录>/session-registry.json`（登记表，派生）+ **该 agent 的真实会话库**：`real`/`mirror` 去预设的 `realHome`；`sandbox` 才在 `<沙箱>/<configSubdir>`（kiro 为空=沙箱根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`、pi 空=沙箱根）。**不要直接删视图里看起来像会话库的目录/文件**——它们可能是指向真实库的 junction / hardlink，会穿透删到终端数据。DSH 的会话库 `real` 下是真实 `~/.dsh`，`sandbox` 下另在 `<账号目录>/agent-sessions/deepseek/`（`isolateSessions`）；要清就按对应模式去真实位置清；
+- 删 `<数据目录>/brain-sessions.json`（当前会话表，权威）+ `<数据目录>/session-registry.json`（登记表，派生）+ **该 agent 的真实会话库**：`view` / `direct` 去预设的 `realHome`；`sandbox` 才在 `<沙箱>/<configSubdir>`（kiro 为空=沙箱根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`、pi 空=沙箱根）。**不要直接删视图里看起来像会话库的目录/文件**——它们可能是指向真实库的 junction / hardlink，会穿透删到终端数据。DSH 的会话库 `view` / `direct` 下是真实 `~/.dsh`，`sandbox` 下另在 `<账号目录>/agent-sessions/deepseek/`（`isolateSessions`）；要清就按对应模式去真实位置清；
 - 单个会话不用删文件：微信里 `删除会话 <序号>` 即可（只删登记项，agent 侧存档仍在磁盘上）。
 
 清空任务侧：

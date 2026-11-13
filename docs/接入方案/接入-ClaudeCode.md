@@ -1,6 +1,6 @@
 # 接入 Claude Code（ACP 适配器）
 
-> **2026-11-12 口径**：默认 `homeMode=real`，Claude Code 没有 `homeEnvVar`，微信侧直接使用真实 `~/.claude`（`CLAUDE_CONFIG_DIR` 指向它），并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/claude`）。
+> **2026-11-13 口径**：默认 `homeMode=view`，Claude Code 没有 `homeEnvVar`，微信侧本次运行降级 `direct`，直接使用真实 `~/.claude`（`CLAUDE_CONFIG_DIR` 指向它），并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/claude`）。
 
 > **最后核对**：2026-11-12 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / 强杀后 `session/load` / stdio MCP / `bypassPermissions`）；**真机微信单轮 E2E 已通过**（2026-10-31）；重启续聊 / MCP 加载 / 任务派发待真机复测。
 >
@@ -65,7 +65,7 @@ claude-agent-acp --version     # 0.99.1
 
 适配器把认证交给 Claude Code，支持：
 
-- `claude` 登录（OAuth）：登录态在 `~/.claude/.credentials.json`（macOS 可能在 Keychain）；`real`（默认）直接共用真实 `~/.claude`（WeMind 只读，不改写真实配置；没有 `homeEnvVar`，微信侧 MCP/overlay 不生效），`sandbox` 下才把 `.credentials.json` 同步进沙箱。
+- `claude` 登录（OAuth）：登录态在 `~/.claude/.credentials.json`（macOS 可能在 Keychain）；默认 `view` 降级 `direct`，直接共用真实 `~/.claude`（WeMind 只读，不改写真实配置；没有 `homeEnvVar`，微信侧 MCP/overlay 不生效），`sandbox` 下才把 `.credentials.json` 同步进沙箱。
 - 环境变量：`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`；自定义网关再加 `ANTHROPIC_BASE_URL`。这些变量要对 **daemon 进程**生效（§4.9：密钥不写进 agent 配置）。
 
 **WeMind 不复制 `settings.json`**：这份文件经常把网关 token 放在 `env` 里；按仓库纪律，凭据由 daemon 环境提供，不写进 agent 配置。因此你在 Claude Code 里设的 `hooks` / `permissions` 也不会带进微信大脑——权限由 `sessionMode`（见 §3）负责。**模型不由 WeMind 下发**（预设没有 `model` 字段，`applyAcpModel()` 见 `!ag.model` 就直接返回），跟随 Claude Code 自身配置与 daemon 环境；要固定就 `wemind brain set claude-code --model "…"` 再 `wemind brain switch claude-code` 应用。
@@ -97,8 +97,8 @@ claude-agent-acp --version     # 0.99.1
 逐项说明：
 
 - **`bin` 不再写 `npx`**：全局适配器本体就是 ACP server，`args` 为空。`shell: true` 是因为 Windows 上 npm 产出的是 `.cmd` shim。
-- **配置目录**：`real`（默认）下 `CLAUDE_CONFIG_DIR=~/.claude`，直接使用终端同一份配置；`sandbox` 下才指到 `<沙箱>/claude`。实测（Claude Code 2.1.314）在隔离目录里它会连 `~/.claude.json` 一起搬进去，用户级 MCP 不会漏进大脑。
-- **记忆/技能**：`real` / `mirror` 下 `CLAUDE.md`、`skills/`、`agents/`、`commands/` 直接来自真实 `~/.claude`；`sandbox` 下 `CLAUDE.md` 复制、目录用 junction/symlink 共享。`settings.json`、`plugins/` 不继承（插件可自带 MCP）。
+- **配置目录**：默认 `view` 降级 `direct` 下 `CLAUDE_CONFIG_DIR=~/.claude`，直接使用终端同一份配置；`sandbox` 下才指到 `<沙箱>/claude`。实测（Claude Code 2.1.314）在隔离目录里它会连 `~/.claude.json` 一起搬进去，用户级 MCP 不会漏进大脑。
+- **记忆/技能**：`view` / `direct` 下 `CLAUDE.md`、`skills/`、`agents/`、`commands/` 直接来自真实 `~/.claude`；`sandbox` 下 `CLAUDE.md` 复制、目录用 junction/symlink 共享。`settings.json`、`plugins/` 不继承（插件可自带 MCP）。
 - **MCP 走 ACP**：`mcpViaAcp: true`，激活集随 `session/new|load` 的 `mcpServers` 下发，不写配置文件。目录取真实 `~/.claude.json` 的 `mcpServers`（`catalogFile` 用 `..` 回到 home）；`wechat` 永久禁止。
 - **免审批**：`sessionMode: "bypassPermissions"`。适配器**不解析** `--dangerously-skip-permissions` 之类的 CLI flag；WeMind 在 `session/new|load|resume` 之后调用 `session/set_mode`。实测该模式下 MCP 工具调用**不再发** `session/request_permission`。
 - **图片**：预设不设 `images: false`，即按支持图片处理；适配器 `initialize` 的 `promptCapabilities.image = true`。
@@ -144,7 +144,7 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 大脑自检（claude-code，bin=claude-agent-acp.cmd）：ACP 握手成功（initialize + session/new，sessionId=…，mode=bypassPermissions）（1987ms）
 ```
 
-> `home_env=(无)` **不代表没有配置目录**——它只反映预设的 `homeEnvVar` 字段（claude-code 没设）。`real` 下 `CLAUDE_CONFIG_DIR=~/.claude`；`sandbox` 下才是 `<沙箱>/claude`。codex 同样是 `(无)`，而它**确实没有可由 WeMind 替换的配置目录**（cwd 始终是角色工作区，见 [接入-Codex.md](接入-Codex.md) §4.5）。
+> `home_env=(无)` **不代表没有配置目录**——它只反映预设的 `homeEnvVar` 字段（claude-code 没设）。`view` 降级 `direct` 下 `CLAUDE_CONFIG_DIR=~/.claude`；`sandbox` 下才是 `<沙箱>/claude`。codex 同样是 `(无)`，而它**确实没有可由 WeMind 替换的配置目录**（cwd 始终是角色工作区，见 [接入-Codex.md](接入-Codex.md) §4.5）。
 
 ### 5.2 经过微信（2026-10-31 单轮已通过）
 
@@ -176,7 +176,7 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 已确认的限制（均来自上文实测与预设配置）：
 
 - **必须全局安装，且 Node ≥22**：适配器是 daemon spawn 出来的子进程，继承 daemon 的 PATH 与 Node；`agentProblem()` 只查 PATH 上有没有 bin、**不查版本**，所以 Node 20 的 daemon 能通过 `wemind brain` 预检、却会在 spawn/握手时失败（§2.1）。
-- **`settings.json` / `plugins/` 的落点随模式变化**：`real`（默认）直接使用真实 `~/.claude`，你在 Claude Code 里设的 `hooks` / `permissions` / 插件会生效；`sandbox` 下才不继承 `settings.json` / `plugins/`，权限由 `sessionMode` 负责（§2.2、§3）。两种模式都不把 `wechat` MCP 带进大脑。
+- **`settings.json` / `plugins/` 的落点随模式变化**：`view` 降级 `direct` / 显式 `direct` 下直接使用真实 `~/.claude`，你在 Claude Code 里设的 `hooks` / `permissions` / 插件会生效；`sandbox` 下才不继承 `settings.json` / `plugins/`，权限由 `sessionMode` 负责（§2.2、§3）。两种模式都不把 `wechat` MCP 带进大脑（`direct` 只告警，需用户自己移除）。
 - **模型不由 WeMind 下发**：预设没有 `model` 字段，跟随 Claude Code 自身配置与 daemon 环境；要固定需 `wemind brain set claude-code --model "…"` 并应用（§2.2）。
 - **`bypassPermissions` 是全量放行**：消息一旦被 daemon 接受，AI 就能在运行 daemon 的机器上执行工具（含 shell / 写文件）；唯一能收紧的开关是 `WEMIND_ACP_SESSION_MODE=0`（§7）。
 - **首轮回复慢**：首次要起 SDK 与原生 Claude Code，实测首段正文 7.9–11.9s、一轮 prompt 8–12s（§4）。
@@ -189,7 +189,7 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 - `bypassPermissions` = 接受所有权限：**消息一旦被 daemon 接受，AI 就能在运行 daemon 的机器上执行工具（含 shell / 写文件）**。这是「微信远程干活」的前提；唯一的闸是微信侧「只有登录者能发」+ `allowFrom` 兜底。
 - 想收紧：`WEMIND_ACP_SESSION_MODE=0`（关掉 `set_mode`，回到 Claude Code 自己的审批流程；WeMind 侧权限应答器默认拒绝权限请求）。**这是唯一能收紧的开关**。
 - `WEMIND_ACP_AUTO_ALLOW=1` **不是收紧手段，是放宽**：它让宿主对每一次 `session/request_permission` 自动选 `allow_once`/`allow_always`（`acp-reverse.ts`），效果接近 `bypassPermissions`。只在「工具调用一直被拒、确实要放宽」时用。
-- `sandbox` 里**没有** `settings.json` / `plugins/`；`real` 下它们是真实 `~/.claude` 的一部分。`wechat` MCP 永远不进 WeMind 生成的大脑 MCP 集（防回环）。
+- `sandbox` 里**没有** `settings.json` / `plugins/`；`view` / `direct` 下它们是真实 `~/.claude` 的一部分。`wechat` MCP 永远不进 WeMind 生成的大脑 MCP 集（防回环）；`direct` 不生成 MCP 集，发现 `wechat` 只告警。
 
 ---
 
