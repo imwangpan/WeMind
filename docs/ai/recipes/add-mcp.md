@@ -49,7 +49,7 @@ transport（怎么让 agent 看到）
 | `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | worker 全量继承、排除集                                                       |
 | `packages/wechat-daemon/src/agents/sandbox/mcp-adapters.ts`   | 按文件格式的 MCP 适配器：路径、读写、剥离、ACP 转换、原生只读（Codex TOML）   |
 | `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts`      | MCP 格式纯函数（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）与 wechat 判定 |
-| `packages/wechat-daemon/src/cli/subcommands/cli-config.ts`    | `wemind config mcp list/enable/disable/add/remove` 的 CLI 入口                |
+| `packages/wechat-daemon/src/cli/subcommands/cli-config.ts`    | `wemind mcp list/enable/disable/add/remove` 的 CLI 入口（`config mcp` 只是兼容别名） |
 | `packages/wechat-daemon/src/index.ts`                         | 指令拦截；加载/卸载后 `restart()`                                             |
 | `packages/wechat-daemon/src/acp/acp-brain.ts`                 | 重启 ACP，重建后恢复 session                                                  |
 

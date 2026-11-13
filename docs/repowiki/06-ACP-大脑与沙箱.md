@@ -148,7 +148,7 @@ graph TD
 
 ## 6.3 brain 的工作模式与 MCP（runtime.ts / mcp-sandbox.ts / mcp-adapters.ts）
 
-默认 `homeMode=direct`：`agentRuntime("brain", ag)` 直接返回 Agent 的真实配置目录，WeMind 不写任何配置、不注入 `homeEnvVar`/预设 env。技能、记忆、模型、权限、MCP、会话库都与终端共用；真实配置里的微信 MCP 只告警、不阻止启动（`warnForbiddenNativeMcp`）。
+默认 `homeMode=direct`：`agentRuntime("brain", ag)` 直接返回 Agent 的真实配置目录，WeMind 在 daemon 启动/运行期不自动写配置、不注入 `homeEnvVar`/预设 env（用户显式执行 `wemind config agent ...` 时写并备份）。技能、记忆、模型、权限、MCP、会话库都与终端共用；真实配置里的微信 MCP 只告警、不阻止启动（`warnForbiddenNativeMcp`）。
 
 `sandbox` 是显式隔离选项：使用 `BRAIN_HOME` / `<账号>/brain-home`，由 adapter 复制设置基底，并按 `inheritDirs` / `inheritFiles` 选择性继承技能/记忆。WeMind 自己生成的 sandbox MCP 集永久排除 `wechat`（否则 bot 用同一 token 长轮询、与 daemon 抢消息）。`direct` 下 `加载/卸载 MCP` 原样转给 Agent，由它自己改配置。
 
@@ -161,6 +161,7 @@ MCP **文件格式**知识集中在 `agents/sandbox/mcp-adapters.ts` 的 `McpAda
 | `jsonMcpServers` | `{ mcpServers: {...} }` | 读/写同一套 JSONC 逻辑，保留同文件其它键 | `sandbox` 模式复制真实 `settings/`（跳过 `mcp.json`） |
 | `jsonMcpNested` | `{ mcp: { servers: {...} } }` | 写入时默认补 `permission=allow`（用户显式配置优先） | `sandbox` 复制真实 `opencode.json(c)` 并剔除 `mcp` 段后重建基底 |
 | `tomlMcpServers` | `[mcp_servers.*]` | **只读**；写入直接报错 | 不参与 |
+| `dshProfileYaml` | `profiles/<profile>/cordis.patch.yml` 的 `@deepseek-ai/dsh-mcp-client` 条目 | **只读**；写入直接报错；`sandbox` 复制 profile 时按投递方式全量剥离 MCP 条目 | 不参与 |
 
 名称描述的是**文件格式**，不是 Agent：多个 Agent 可以共用同一种格式，adapter 本身不认识 agent 名。
 
@@ -296,7 +297,7 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 | 记忆/skills/settings | `direct` 直接用真实 home；`sandbox` 才按 `inheritDirs`/`inheritFiles` 复制 | 相同 |
 | 会话恢复 | 每用户一个 session；load/resume | 单任务 session；load/resume |
 
-worker 沙箱详见 [7. 远程任务 Worker](07-远程任务-Worker.md#worker-沙箱)。
+worker 沙箱详见 [7. 远程任务 Worker](07-远程任务-Worker.md#worker-配置)。
 
 ## 6.6 能力差异与接入检查（重要）
 

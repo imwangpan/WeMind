@@ -259,14 +259,7 @@ export async function handleControl(
       return `❌ 未知 agent「${ag}」。可用：${presetNames().join(", ")}`;
     const read = readOverlay(ag, DATA_DIR);
     if (read.problems.length) return `❌ ${read.problems.join("；")}`;
-    if (c.action === "show") {
-      return `微信侧 overlay（${overlayPath(ag, DATA_DIR)}）：\n${JSON.stringify(read.overlay, null, 2)}`;
-    }
-    return (
-      "微信侧 overlay 只支持 mcp.disable / mcp.extra（不写回 Agent 真实配置）。" +
-      `请直接编辑 ${overlayPath(ag, DATA_DIR)}，或用 CLI：wemind config wechat edit ${ag}。` +
-      "要改 Agent 配置请说「修改 <agent> 配置」（默认改真实配置）。"
-    );
+    return `微信侧 overlay（${overlayPath(ag, DATA_DIR)}）：\n${JSON.stringify(read.overlay, null, 2)}\n修改请用本机 CLI：wemind config wechat edit ${ag}（只支持 mcp.disable / mcp.extra）。要改 Agent 真实配置，直接对大脑说清要改的内容即可（默认改真实配置）。`;
   }
   if (c.kind === "handoff") return await runHandoff(userId, ctx);
   // 兜底：指令表新增了 kind 但这里还没接通时（正常情况下 TS 会先把这里判成不可达），别静默吞掉

@@ -42,14 +42,8 @@ export type ChatCommand =
   | { kind: "allowSensitive"; minutes?: number }
   /** 查看 / 设置 brain 默认工作区（登录者）。 */
   | { kind: "workspace"; path?: string; reset?: boolean }
-  /** 微信独享配置：查看 / 设置 / 删除（登录者，确定性入口）。 */
-  | {
-      kind: "wechatConfig";
-      action: "show" | "set" | "unset";
-      agent: string;
-      target?: string;
-      value?: string;
-    }
+  /** 微信独享配置：只读查看（登录者，确定性入口）。 */
+  | { kind: "wechatConfig"; action: "show"; agent: string }
   | { kind: "help" };
 
 export type TaskCommand =
@@ -312,7 +306,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     section: "brain",
     ownerOnly: true,
     zh: "微信配置 查看 <agent>",
-    brief: "只改微信独享 overlay，不污染真实配置",
+    brief: "查看微信独享 overlay，不改真实配置",
     match: (t) => {
       const m = t.match(/^微信配置\s+查看\s+(\S+)$/i);
       if (!m) return null;

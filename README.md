@@ -338,7 +338,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 | 工作区 | 查看 brain 默认工作区 |
 | 设置工作区 <绝对路径> | 设置 brain 默认工作区（新会话生效） |
 | 重置工作区 | 恢复 brain 默认 managed 工作区 |
-| 微信配置 查看 <agent> | 只改微信独享 overlay，不污染真实配置 |
+| 微信配置 查看 <agent> | 查看微信独享 overlay，不改真实配置 |
 | 帮助 | 这张表 |
 | 任务 [<agent 名>：]正文 | 派发新任务（有活跃任务时发给它）；带 agent 名就由它执行（只影响这一条） |
 | #<编号> 正文 | 给指定编号的任务回话（回任务都用它；无前缀消息走大脑） |
@@ -508,7 +508,7 @@ iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 1
 
 默认 `homeMode = direct`。两种模式：
 
-- `direct`（默认）：**终端等效**。WeMind 不写任何 Agent 配置文件、不注入 `homeEnvVar` / 预设 env；Agent 像在终端直接启动一样读取完整真实配置（技能、记忆、模型、权限、MCP、会话库都与终端共用）。WeMind **不会**把 Agent 已原生加载的 MCP catalog 再经 ACP 重发；只有用户显式配置微信独享的 `overlay.mcp.extra` 时，才把它补进会话。真实配置里若有微信 MCP，只告警、不阻止启动。
+- `direct`（默认）：**终端等效**。WeMind 在 daemon 启动/运行期不自动写 Agent 配置文件、不注入 `homeEnvVar` / 预设 env（用户显式执行 `wemind config agent ...` 时才会写并备份）；Agent 像在终端直接启动一样读取完整真实配置（技能、记忆、模型、权限、MCP、会话库都与终端共用）。WeMind **不会**把 Agent 已原生加载的 MCP catalog 再经 ACP 重发；只有用户显式配置微信独享的 `overlay.mcp.extra` 时，才把它补进会话。真实配置里若有微信 MCP，只告警、不阻止启动。
 - `sandbox`：把配置完整复制到 `<账号>/brain-home` / `worker-home`，与真实配置隔离；MCP 激活、overlay、凭据同步都在沙箱内执行。适合需要 WeMind 托管 MCP、或希望微信侧与终端互不影响的场景。
 
 `direct` 下终端改模型、加技能、写记忆，微信侧读到的是同一份。`sandbox` 下 WeMind 才按预设的 `inheritDirs` / `inheritFiles` 选择性继承真实配置里的技能/记忆；Windows 没有 symlink 权限时会回退到复制，副本**不保证双向同步**，日志会告警。可用 `WEMIND_BRAIN_REAL_HOME` / `WEMIND_BRAIN_INHERIT_DIRS` 覆盖继承来源，`WEMIND_BRAIN_INHERIT=0` 关闭 sandbox 继承。
@@ -524,7 +524,7 @@ iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 1
 | --------------------------- | ----------------------------------------------- |
 | `MCP` / `列出 MCP` / `/mcp` / `mcp list` | 列出该 Agent 的可选 MCP 与当前已激活 |
 | `加载 <名>` / `load <名>`   | `sandbox`：加入激活集（`wechat` 永久禁止）；`direct`：原样转给 Agent |
-| `卸载 <名>` / `unload <名>` | `sandbox`：从激活集移除；`direct`：同上        |
+| `卸载 <名>` / `unload <名>` | `sandbox`：从激活集移除；`direct`：原样转给 Agent |
 | `新会话 [名字]` / `/new`    | 开启新 ACP 会话（清空多轮上下文）；给名字便于在 `会话列表` 里认出来 |
 
 `sandbox` 下加载/卸载 MCP 时，**只有激活集真的变了** daemon 才会重启 ACP 进程以按新配置重载，下一条消息生效（重复加载已激活项、卸载未激活项都不会重启；切脑进行中会先等切换结束；有回复正在生成时排到该回合结束，不打断输出）。`direct` 下改 MCP 由 Agent 自己处理（它改完自己的配置后按 Agent 的规则生效）。激活的 MCP 等于对登录者全权开放（内置预设默认免审批），按需加载、用完可卸载。

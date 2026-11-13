@@ -1,6 +1,6 @@
 # 接入 Qoder CLI（设计与实测）
 
-> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 不写任何 Agent 配置，Qoder 直接读真实 `~/.qoder`，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/qoder`）。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Qoder 直接读真实 `~/.qoder`，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/qoder`）。
 
 > **状态**：M0–M4 全部完成 ✅（`qoder` 是内置预设；M2 按 M0 结果为空）。
 > **实测范围**：Qoder CLI 1.1.78（M0 探针 + M3 真机 E2E，见 §2 / §2.1）｜ **最后核对**：2026-11-12

@@ -246,7 +246,7 @@ MCP
 | 26 | 正在输入（typing） | 长回合里「正在输入」持续可见；每 5s 续发，发消息后立刻补一次 |
 | 27 | 终端等效 | 在终端改真实 Agent 配置/技能/记忆后，下一条微信消息可见；会话历史与终端共用（默认 `homeMode=direct`） |
 | 28 | 微信侧 overlay | `wemind config wechat edit <agent>` 只改 `<账号>/agent-overrides/<agent>.json`（`mcp.disable` / `mcp.extra`），真实配置不变；新会话生效 |
-| 29 | 默认工作区 | brain/worker 分别使用 `<账号>/workspace/{brain,worker}`；`wemind config workspace set` 后已有会话 cwd 不变、新会话用新目录 |
+| 29 | 默认工作区 | brain/worker 分别使用 `<账号>/workspace/{brain,worker}`；`wemind workspace set <绝对路径> --role brain\|worker` 后已有会话 cwd 不变、新会话用新目录 |
 | 30 | worker MCP 有效集（sandbox） | 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；`direct` 由 Agent 自己加载真实配置，WeMind 不写 `mcp.json` |
 | 31 | 配置热重载 | `wemind config reload` 重新读取 Agent 配置并重启大脑；brain 有回合在跑时日志记「等当前回合结束再重启」，回复不中断；daemon 未运行时命令返回非零 |
 

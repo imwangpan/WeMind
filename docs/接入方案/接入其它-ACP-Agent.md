@@ -1,6 +1,6 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-> **最后核对**：2026-11-13 ｜ **状态**：内置 10 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**、**Copilot CLI 已探针级实测（1.0.107，Windows，2026-11-09；WeChat E2E 待验证）**。默认 `homeMode=direct`：WeMind 不写任何 Agent 配置，Agent 完全使用真实配置/技能/记忆/会话库；`sandbox` 才是账号副本。
+> **最后核对**：2026-11-13 ｜ **状态**：内置 10 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**、**Copilot CLI 已探针级实测（1.0.107，Windows，2026-11-09；WeChat E2E 待验证）**。默认 `homeMode=direct`：WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Agent 完全使用真实配置/技能/记忆/会话库；`sandbox` 才是账号副本。
 >
 > 本文说明如何把 WeMind daemon 的「大脑」从默认的 `auto` 换成另一个 ACP agent（默认 `auto` 按 `opencode → cline → qoder → gemini → deepseek → kiro` 探测已安装者，kiro 排最后）。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 
@@ -290,7 +290,7 @@ WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直
 
 ## 6. 配置来源与 MCP 策略（重要差异点）
 
-自 2026-11-13 起默认 `homeMode=direct`：WeMind **不写任何 Agent 配置**，Agent 直接读真实 home。技能、记忆、规则、MCP、会话库与终端完全同一份；文件式 Agent 由自己加载 MCP，`acpMcpServers` 的 Agent 也先由自己读真实配置——WeMind 只补 `overlay.mcp.extra`（并减去 `mcp.disable`），**不重发 catalog**。微信里的 `加载 / 卸载 MCP` 在 `direct` 下原样转给 Agent，由它自己决定是否/如何改配置。
+自 2026-11-13 起默认 `homeMode=direct`：WeMind 在 daemon 启动/运行期**不自动写 Agent 配置**（显式 `wemind config agent ...` 例外），Agent 直接读真实 home。技能、记忆、规则、MCP、会话库与终端完全同一份；文件式 Agent 由自己加载 MCP，`acpMcpServers` 的 Agent 也先由自己读真实配置——WeMind 只补 `overlay.mcp.extra`（并减去 `mcp.disable`），**不重发 catalog**。微信里的 `加载 / 卸载 MCP` 在 `direct` 下原样转给 Agent，由它自己决定是否/如何改配置。
 
 `homeMode=sandbox` 是显式隔离选项：它使用 `BRAIN_HOME` / `<账号>/brain-home`（由 `WECHAT_BRAIN_HOME` 决定）完整复制配置，适合需要强隔离的场景。下文未特别说明时，`配置根` 指 sandbox 根。
 

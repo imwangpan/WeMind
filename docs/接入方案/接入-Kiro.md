@@ -1,6 +1,6 @@
 # 接入 Kiro CLI（原生 ACP；v2 真机 / v3 探针级）
 
-> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 不写任何 Agent 配置，Agent 直接读真实 home，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Agent 直接读真实 home，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
 
 > **最后核对**：2026-11-12 ｜ **实测环境**：Windows 11 + kiro-cli 2.37.1（v2）；v3 用临时 `KIRO_HOME` + `acp.agentEngine=v3` 验证
 >

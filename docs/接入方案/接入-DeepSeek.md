@@ -1,6 +1,6 @@
 # 接入 DeepSeek（评估、实施与实测）
 
-> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 不写任何 Agent 配置，Agent 直接读真实 home，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Agent 直接读真实 home，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
 
 > **状态**：官方 DSH **已接入，微信 brain + worker E2E 均通过**（2026-10-24，M1/M2 已实现）；初测 `dsh 0.2.1-rc.2`、2026-11-03 在 **0.2.1-rc.3** 上复测并修复两处真机故障：**会话库与别的 agent 共用沙箱根**（改用 `--patch` 把会话 root 隔离到账号数据目录）、**用户 `- id: acp` 的模型被桌面端目录淘汰**（`wemind brain` 给替换提示）。`initialize` / `session/new` / `prompt` / 工具调用 / `close` / `resume`（上下文保留）/ `load`（-32601）/ 带图（-32602）/ stdio MCP 均已验。
 > **实测环境**：Windows 11；桌面端 `dsh 0.2.1-rc.3`；隔离 `DSH_HOME`（复制 `.credentials.yaml`）；2026-11-12 真实配置复测（模型由真实 profile 的 `- id: acp` 决定，见 §7.6）。

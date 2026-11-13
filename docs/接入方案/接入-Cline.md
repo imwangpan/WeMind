@@ -1,6 +1,6 @@
 # 接入 Cline CLI（原生 ACP 实测）
 
-> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 不写任何 Agent 配置，Cline 直接读真实 `~/.cline`，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/cline`）。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Cline 直接读真实 `~/.cline`，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/cline`）。
 
 > **状态**：M0–M3 全部完成 ✅（`cline` 是内置预设；M2 协议层无改动）。
 > **实测范围**：Cline CLI 3.0.74（M0 探针 + 微信真机 E2E，2026-10-31，见 §2 / §6）｜ **最后核对**：2026-11-12

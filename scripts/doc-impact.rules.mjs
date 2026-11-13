@@ -17,6 +17,8 @@
 //
 // 豁免：提交信息或 PR 描述里写一行 `Docs-Impact: none — <理由>`。
 // pre-commit 阶段还没有提交信息，改用环境变量 DOCS_IMPACT（值只写 `none — Pure refactor` 即可）。
+// 分支级检查（merge-base..HEAD）包含多个提交时，最近一次提交信息不作数；
+// 要豁免整条分支必须显式设置 DOCS_IMPACT_MESSAGE，避免 HEAD 的一句「只改注释」跳过前面提交的缺口。
 // 允许的理由只有 Pure refactor / Comment only / Test update 三种，见文件末尾。
 
 export const RULES = [

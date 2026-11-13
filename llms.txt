@@ -100,12 +100,16 @@
 - `npm run build`, `npm run typecheck`, `npm test`, `npm run lint`, `npm run verify` (CI-equivalent self-check).
 - `npm run check:version` (package name + version consistency). `npm run verify` is the CI-equivalent gate (lint, format check, typecheck, build, version check, both `npm pack --dry-run` guards, tests, docs link check); `npm run verify:publish` is the publish-only subset.
 - `wemind list` / `wemind brain <key>` / `wemind brain check <key>` / `wemind log [key] [--lines N] [--errors] [--file N]` (installed CLI; `wemind log` prints the tail of the account's full `daemon.log`, not errors only; `--errors` filters `[ERROR]`/`[WARN]` level lines plus 2 lines of context each, legacy lines fall back to keywords; `--help` prints usage)
+- `wemind config show|home-mode|reload|agent|wechat` (mode, real Agent config, WeChat-only overlay; `agent` writes the real config with a backup)
+- `wemind mcp list|enable|disable|add|remove` (brain MCP activation set in `sandbox`; in `direct` the chat `加载/卸载` messages are passed through to the Agent)
+- `wemind workspace show|set|reset [--role brain|worker]` (default workspace; changes apply to new sessions)
+- `wemind env capture|show|clear [--dry-run]` (non-secret environment snapshot: PATH/proxy/locale)
 - `node packages/wechat-daemon/dist/cli.js list` (same thing from source)
 - `pwsh -NoProfile -File scripts/doctor.ps1`
 - `pwsh -NoProfile -File scripts/check-docs.ps1`
 - `node scripts/acp-probe.mjs` (env: `ACP_BIN`, `ACP_ARGS`, `ACP_SHELL`, `ACP_HOME_ENV`, `ACP_HOME`, `ACP_MODEL`)
 
-## Hard facts (2026-11-09)
+## Hard facts (2026-11-13)
 
 - Published: `@wemind/wechat-mcp` and `@wemind/cli`. Never publish `@wemind/wechat-ilink-core` (private, inlined).
 - Package name ≠ command name: `@wemind/cli` installs the `wemind` binary. `npx` must use the package name.

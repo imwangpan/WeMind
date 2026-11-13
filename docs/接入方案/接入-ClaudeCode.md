@@ -1,6 +1,6 @@
 # 接入 Claude Code（ACP 适配器）
 
-> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 不写任何 Agent 配置，Claude Code 直接读真实 `~/.claude`，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/claude`）。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Claude Code 直接读真实 `~/.claude`，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/claude`）。
 
 > **最后核对**：2026-11-12 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / 强杀后 `session/load` / stdio MCP / `bypassPermissions`）；**真机微信单轮 E2E 已通过**（2026-10-31）；重启续聊 / MCP 加载 / 任务派发待真机复测。
 >

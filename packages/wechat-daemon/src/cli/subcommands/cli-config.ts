@@ -91,7 +91,7 @@ function showConfig(dir: string, key: string): string {
   const lines = [
     `账号 ${key}`,
     `homeMode：${mode} — ${homeModeDescription(mode)}`,
-    "说明：direct 不写 Agent 配置；需要账号隔离时切 sandbox。",
+    "说明：direct 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 会写并备份）；需要账号隔离时切 sandbox。",
     `runtime.json：${homeModePath(dir)}`,
     `brain：${brain}；worker：${worker}`,
     `brain realHome：${realHomeOf(brain)}`,

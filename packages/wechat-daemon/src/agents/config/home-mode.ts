@@ -8,7 +8,7 @@ import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
 /**
  * homeMode：Agent 的配置/会话/记忆从哪里读。
  *
- * - `direct`（默认）：Agent 直接使用完整真实配置；WeMind 不写任何 Agent 配置。
+ * - `direct`（默认）：Agent 直接使用完整真实配置；WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外）。
  * - `sandbox`：完整复制到账号目录，与真实配置隔离。
  */
 export type HomeMode = "direct" | "sandbox";
@@ -46,5 +46,5 @@ export function writeHomeMode(mode: HomeMode, dir: string = DATA_DIR): void {
 
 export function homeModeDescription(mode: HomeMode): string {
   if (mode === "sandbox") return "sandbox（完整复制到账号目录，与真实配置隔离）";
-  return "direct（默认：Agent 使用完整真实配置；WeMind 不写 Agent 配置，MCP/技能/记忆/权限与终端一致）";
+  return "direct（默认：Agent 使用完整真实配置；WeMind 启动/运行期不自动写 Agent 配置（显式 config agent 例外），MCP/技能/记忆/权限与终端一致）";
 }

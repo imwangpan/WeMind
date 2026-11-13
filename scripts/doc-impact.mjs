@@ -12,9 +12,11 @@
  *   --base REF  指定对比基准
  *
  * 豁免：
- *   --check 时认两种来源，任一含 `Docs-Impact: none — <理由>` 即放行。
+ *   --check 时认三种来源，任一含 `Docs-Impact: none — <理由>` 即放行。
  *   - pre-commit 阶段提交信息还不存在，读环境变量 DOCS_IMPACT（如 `DOCS_IMPACT=none — Pure refactor`）
- *   - CI / 本地已提交场景读 `--message`、环境变量 DOCS_IMPACT_MESSAGE 或最近一次提交信息
+ *   - CI / 本地已提交场景读环境变量 DOCS_IMPACT_MESSAGE（显式声明，覆盖整条对比范围）
+ *   - 最近一次提交信息**只在对比范围恰好包含一个提交时**生效；多提交分支不能用 HEAD 的
+ *     「Comment only」把整条分支的文档检查一起跳过
  *   允许的理由只有 Pure refactor / Comment only / Test update，见规则表末尾。
  */
 import { execFileSync } from "node:child_process";
@@ -164,7 +166,12 @@ function collectDiff({ staged, base }) {
   if (staged) {
     const nameStatus = git(["diff", "--cached", "--name-status", "-M"]);
     const content = git(["diff", "--cached", "-U0"]);
-    return { files: parseNameStatus(nameStatus), added: parseAddedLines(content) };
+    return {
+      files: parseNameStatus(nameStatus),
+      added: parseAddedLines(content),
+      commitCount: 0,
+      dirty: false,
+    };
   }
   const resolved = resolveBase(base);
   if (!resolved) return null;
@@ -173,6 +180,12 @@ function collectDiff({ staged, base }) {
   const content = git(["diff", "-U0", mb]);
   const files = parseNameStatus(nameStatus);
   const added = parseAddedLines(content);
+  const commitCount = Number(
+    (tryGit(["rev-list", "--count", `${mb}..HEAD`]) ?? "").trim() || 0,
+  );
+  const dirty = Boolean(
+    (tryGit(["status", "--porcelain", "--untracked-files=normal"]) ?? "").trim(),
+  );
 
   // `git diff` 不含未跟踪文件；本地 verify 时常还没 git add，漏掉它们会让规则假绿。
   // 未跟踪文件整体当作新增：状态行 A + 每行内容都当新增行。
@@ -190,7 +203,7 @@ function collectDiff({ staged, base }) {
       // 读不到就只记录路径，规则仍能看到「新增了这个文件」。
     }
   }
-  return { files, added };
+  return { files, added, commitCount, dirty };
 }
 
 /** 接入文档名归一化：大小写与连字符不参与比较（预设 `claude-code` ↔ 文件 `接入-ClaudeCode.md`）。 */
@@ -247,18 +260,31 @@ export function matchRules(rules, ruleInput, addedLines) {
   return results;
 }
 
-function readEscapeHatch({ staged }) {
-  const fromEnv = process.env.DOCS_IMPACT;
-  const fromMessage = process.env.DOCS_IMPACT_MESSAGE;
-  const fromLastCommit = staged ? null : tryGit(["log", "-1", "--format=%B"]);
+export function readEscapeHatch({
+  staged,
+  allowCommitMessage = true,
+  lastCommitMessage,
+  env = process.env,
+} = {}) {
+  const fromEnv = env.DOCS_IMPACT;
+  const fromMessage = env.DOCS_IMPACT_MESSAGE;
+  const fromLastCommit =
+    !staged && allowCommitMessage
+      ? (lastCommitMessage ?? tryGit(["log", "-1", "--format=%B"]))
+      : null;
   for (const parsed of [
     parseEscapeHatchEnv(fromEnv),
-    parseEscapeHatch(fromMessage),
+    parseEscapeHatchEnv(fromMessage),
     parseEscapeHatch(fromLastCommit),
   ]) {
     if (parsed) return parsed;
   }
   return null;
+}
+
+/** 只有「范围恰好一个提交且工作区干净」时，HEAD 的提交信息才覆盖本次检查的 diff。 */
+export function commitMessageCoversDiff({ commitCount, dirty }) {
+  return commitCount === 1 && !dirty;
 }
 
 function printRule(rule, missing) {
@@ -325,7 +351,12 @@ function main(argv) {
     return 0;
   }
 
-  const escape = readEscapeHatch({ staged });
+  // 最近一次提交信息只对它自己的 diff 负责。分支对比是 merge-base..HEAD，
+  // 多提交时不能拿 HEAD 的一句「Comment only」豁免整条分支。
+  const escape = readEscapeHatch({
+    staged,
+    allowCommitMessage: commitMessageCoversDiff(diff),
+  });
   if (escape?.status === "none") {
     if (escape.valid) {
       console.log(`豁免生效：${escape.status} — ${escape.reason}`);
@@ -350,7 +381,12 @@ function main(argv) {
   }
   console.error("如确属纯重构/只改注释/只改测试，用 `Docs-Impact: none — <理由>` 豁免：");
   console.error('  pre-commit：DOCS_IMPACT="none — Pure refactor" git commit ...');
-  console.error("  CI/已提交：在提交信息或 PR 描述里加一行 `Docs-Impact: none — Pure refactor`");
+  console.error(
+    "  单提交范围：在提交信息里加一行 `Docs-Impact: none — Pure refactor`",
+  );
+  console.error(
+    '  多提交分支/CI：显式设置 DOCS_IMPACT_MESSAGE="none — Pure refactor"（提交信息不会跨提交生效）',
+  );
   return 1;
 }
 

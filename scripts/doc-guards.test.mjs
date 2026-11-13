@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   GIT_MAX_BUFFER,
+  commitMessageCoversDiff,
   docPathOf,
   matchRules,
   normalizeDocName,
@@ -9,6 +10,7 @@ import {
   parseEscapeHatch,
   parseEscapeHatchEnv,
   parseNameStatus,
+  readEscapeHatch,
   toRuleInput,
   unquoteGitPath,
 } from "./doc-impact.mjs";
@@ -102,6 +104,42 @@ describe("doc-impact 解析", () => {
     });
     expect(parseEscapeHatchEnv("none — 时间不够")).toMatchObject({ valid: false });
     expect(parseEscapeHatchEnv("")).toBeNull();
+  });
+
+  it("多提交分支不认最近一次提交的豁免", () => {
+    expect(
+      readEscapeHatch({
+        staged: false,
+        allowCommitMessage: false,
+        lastCommitMessage: "Docs-Impact: none — Comment only",
+        env: {},
+      }),
+    ).toBeNull();
+  });
+
+  it("单提交但工作区有未提交改动时，提交信息也不覆盖本次 diff", () => {
+    expect(commitMessageCoversDiff({ commitCount: 1, dirty: false })).toBe(true);
+    expect(commitMessageCoversDiff({ commitCount: 1, dirty: true })).toBe(false);
+    expect(commitMessageCoversDiff({ commitCount: 2, dirty: false })).toBe(false);
+  });
+
+  it("单提交范围仍认提交信息；env 显式声明始终生效", () => {
+    expect(
+      readEscapeHatch({
+        staged: false,
+        allowCommitMessage: true,
+        lastCommitMessage: "Docs-Impact: none — Comment only",
+        env: {},
+      }),
+    ).toMatchObject({ status: "none", valid: true });
+    expect(
+      readEscapeHatch({
+        staged: false,
+        allowCommitMessage: false,
+        lastCommitMessage: "",
+        env: { DOCS_IMPACT_MESSAGE: "none — Pure refactor" },
+      }),
+    ).toMatchObject({ status: "none", valid: true });
   });
 });
 
