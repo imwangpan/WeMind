@@ -38,12 +38,12 @@ const log = createLogger("wechat-daemon/mcp");
 /**
  * brain 的 MCP 策略：
  * - `direct`（默认）：Agent 直接加载自己的完整真实配置，WeMind 不写文件、不改 MCP；
- *   只有走 ACP 下发 MCP 的 agent 会把真实 catalog 原样交给 ACP（叠加 overlay.mcp）。
- * - `sandbox`：从真实目录复制出账号沙箱，MCP 只用「激活集」（默认空，对话中按需加载）。
+ *   只有用户显式配置的 `overlay.mcp.extra` 会经 ACP 补进会话（且仅 `acpMcpServers` 的 Agent），**不重发 catalog**。
+ * - `sandbox`：从真实目录复制出账号沙箱，MCP 只用「激活集」（默认空，对话中按需加载）；
+ *   `mcpDelivery: "acp"` 的 Agent 随会话下发，其余 Agent 写沙箱配置文件。
  *
- * 按 agent 适配（见 brain-agents.ts 与 docs/接入方案/接入-OpenCode.md）：
- * - 配置目录：kiro = home 根本身（KIRO_HOME）；opencode = <home>/opencode（XDG_CONFIG_HOME）。
- * - MCP 文件：kiro = settings/mcp.json（{mcpServers}）；opencode = opencode.json（mcp.servers）。
+ * 格式知识集中在 `mcp-adapters.ts` 的 `McpAdapter`（顶层 JSON / 嵌套 JSON / TOML / DSH profile YAML），
+ * 这里只算激活集、排除集与投递方式，不再按 agent 名或格式分支。
  *
  * agent 不再存成模块常量：每个函数显式收 `ag`，或在入口用 `getAgent("brain")` 取一次当前大脑。
  */

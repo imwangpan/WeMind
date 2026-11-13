@@ -34,7 +34,7 @@
 | 默认配置模式 | `direct`（终端完全等效）；`sandbox` 为显式隔离选项；接受 yolo + 真实 HOME 的完整权限代价 |
 | Agent 覆盖 | 10 个内置预设全部覆盖 |
 | 配置修改 | 默认改真实 Agent 配置；明确说“微信侧/仅微信”时改 overlay |
-| brain MCP | `direct`：真实配置全量，WeMind 不维护激活集；`sandbox`：默认空，显式加载后按 agent 持久到所有由 WeMind 新建的 brain 会话，直到卸载 / 禁用 |
+| brain MCP | `direct`：由 Agent 自己加载真实配置全量，WeMind 不维护激活集、不重发 catalog；`sandbox`：默认空，显式加载后按 agent 持久到所有由 WeMind 新建的 brain 会话，直到卸载 / 禁用 |
 | worker MCP | `direct`：由 Agent 自己加载真实配置，WeMind 不额外下发；`sandbox`：真实全量减 `wechat`（WeMind 下发集） |
 | 启动变慢 | 只警告，不自动禁用成功的 MCP |
 | 工作区 | brain / worker 各一个默认工作区；可指定外部项目目录 |
@@ -131,7 +131,7 @@ Phase 1 已落地（本分支）：
 | 配置 | 默认 `direct`，完全使用真实配置；WeMind 不写任何 Agent 文件 | 仍需各 Agent 实测“哪些设置无需新会话”，Phase 2 补矩阵 |
 | 配置回写 | 默认改真实配置；overlay 只写微信侧 | 已实现；JSONC 注释/YAML/TOML 的保留格式编辑留到 Phase 2 |
 | 技能/记忆 | `direct` 共享真实目录；`sandbox` 复制回退不保证双向 | 需要在无 symlink 权限的平台记录“副本漂移”告警 |
-| MCP | `direct` 下 brain 用真实全量、worker 不额外下发；`sandbox` 才 brain 默认空 / worker 全量减 `wechat`；日志有 `mcpCount/sessionNewMs/firstFrameMs`，doctor 超阈值只警告；Codex 原生 TOML 只读可见、含 `wechat` 只告警 | 主体已实现；MCP 预检/跳过坏条目留 Phase 2；各 Agent 的耗时基线数值仍要在真机上收集后写进接入文档 |
+| MCP | `direct` 下 brain/worker 都由 Agent 自己加载真实配置、WeMind 不额外下发；`sandbox` 才 brain 默认空 / worker 全量减 `wechat`；日志有 `mcpCount/sessionNewMs/firstFrameMs`，doctor 超阈值只警告；Codex 原生 TOML 只读可见、含 `wechat` 只告警 | 主体已实现；MCP 预检/跳过坏条目留 Phase 2；各 Agent 的耗时基线数值仍要在真机上收集后写进接入文档 |
 | cwd | brain/worker 各有账号级默认工作区；旧会话按 `session-cwd.json` 恢复 | 已实现；各 Agent 对“恢复时改 cwd”的接受度待逐家实测 |
 | 环境 | 默认继承 daemon；可选非敏感快照 | 已实现；不绑定 fnm/nvm/Volta/asdf/mise |
 | 权限 | 预设 yolo + 宿主默认放行（`WEMIND_ACP_AUTO_ALLOW=0` 可恢复拒绝） | 已保留；真正隔离仍需独立 OS 用户/VM |
@@ -167,7 +167,7 @@ AgentHomeResolver ──► Agent 进程
    ├── direct：Agent 真实配置目录（配置/技能/记忆/会话）
    └── sandbox：账号副本 + 继承 + 生成的 MCP 文件
    │
-   ├── McpPolicy（direct brain 真实全量、worker 不额外下发 / sandbox brain 默认空 / sandbox worker 全量）
+   ├── McpPolicy（direct brain/worker 均不额外下发 / sandbox brain 默认空 / sandbox worker 全量）
    ├── WorkspaceManager（brain / worker 默认工作区）
    ├── EnvProvider（继承或非敏感快照）
    ├── SessionBinder（sessionId ↔ cwd）
@@ -181,7 +181,7 @@ AgentHomeResolver ──► Agent 进程
 | `AgentHomeResolver`（`agents/config/runtime.ts`） | 根据 Agent 预设、账号配置与角色（brain/worker）决定 `homeMode`、真实配置目录 / 沙箱根、`cwd`、媒体目录 |
 | `OverlayStore`（`agents/config/overlay.ts`） | 读写 `<账号>/agent-overrides/<agent>.json` 的 `mcp.disable` / `mcp.extra` |
 | `McpAdapter`（`agents/sandbox/mcp-adapters.ts`） | 每种 MCP **文件格式**的路径/读写/剥离/ACP 转换/原生只读/设置继承；Agent 只是选择其中一种，新增格式才加 adapter |
-| `McpPolicy`（`agents/sandbox/mcp-sandbox.ts`、`worker-sandbox.ts`） | `direct` 下 brain 用真实全量、worker 不额外下发；`sandbox` 算激活集/全量集；处理 disable/extra 与 `wechat` 排除 |
+| `McpPolicy`（`agents/sandbox/mcp-sandbox.ts`、`worker-sandbox.ts`） | `direct` 下 brain/worker 都由 Agent 自己加载真实配置、WeMind 不额外下发；`sandbox` 算激活集/全量集；处理 disable/extra 与 `wechat` 排除 |
 | `WorkspaceManager`（`agents/config/workspace.ts`） | 校验、创建、读取 brain/worker 默认工作区；区分 managed/external |
 | `EnvProvider`（`agents/config/env-snapshot.ts` + `brain-agents.ts`） | 继承 daemon 环境，或加载非敏感快照（PATH/代理/locale）；解析顺序不绑定某个版本管理器 |
 | `SessionBinder`（`agents/config/session-cwd.ts`） | 保存 `<agent>:<sessionId> → cwd`；恢复时使用并校验 cwd |
@@ -194,7 +194,7 @@ AgentHomeResolver ──► Agent 进程
 |---|---|---|
 | 配置来源 | `direct`（默认，真实配置）/ `sandbox`（账号副本） | 同左 |
 | 默认工作区 | `<账号>/workspace/brain` | `<账号>/workspace/worker` |
-| MCP 默认 | `direct`：真实配置全量；`sandbox`：**空**，显式加载后持久到所有新会话 | `direct`：由 Agent 自己加载真实配置，WeMind 不额外下发；`sandbox`：真实全量减 `wechat` |
+| MCP 默认 | `direct`：由 Agent 自己加载真实配置（WeMind 不额外下发）；`sandbox`：**空**，显式加载后持久到所有新会话 | `direct`：由 Agent 自己加载真实配置，WeMind 不额外下发；`sandbox`：真实全量减 `wechat` |
 | 会话 | 每个用户一条当前 session | 每个任务一条 session |
 | 进程 | 1 个常驻 ACP 进程 | N 个进程池 |
 | 重载 | 空闲时 reload / 新会话 | 每次 `acquire` 重新解析配置；任务中不热切换 |
@@ -231,7 +231,7 @@ AgentHomeResolver ──► Agent 进程
 ```text
 1. Agent 真实配置基底（模型/供应商/技能/记忆/设置）
 2. overlay            微信独享的 mcp.disable / mcp.extra（只对 brain 的 ACP 下发或 sandbox 生效）
-3. MCP policy         direct brain 真实全量、worker 不额外下发；sandbox 才 brain 默认空 / worker 全量减 wechat
+3. MCP policy         direct brain/worker 均不额外下发；sandbox 才 brain 默认空 / worker 全量减 wechat
 4. role policy        yolo envDefaults、路径、会话目录
 5. validation         解析、必填项、wechat 告警、危险路径
 6. materialize        direct 不生成；sandbox 完整复制
@@ -286,7 +286,7 @@ AgentHomeResolver ──► Agent 进程
 
 - 只支持 `mcp.disable`（从有效集移除）与 `mcp.extra`（增加真实配置没有的 MCP）。其它键（如 `config`、`replyStyle`）会被忽略并告警；Agent 的模型/权限/settings 修改请直接改真实配置，不走 overlay。
 - `mcp.extra` 使用中性描述（`type: stdio|http` + `command/args/env` 或 `url/headers`），由各 Agent 适配器转成原生格式；不支持的类型明确拒绝，不猜测。
-- 生效范围：`sandbox` 的 brain 与 worker 都生效；`direct` 只对 brain 的 ACP 下发集合（DSH / Claude Code / Copilot / Codex）生效。`direct` 的文件式 Agent 由 Agent 自己读配置，overlay 不参与，WeMind 会提示“改 Agent 配置”；`direct` 的 worker 不额外下发，overlay 也不参与。
+- 生效范围：`sandbox` 的 brain 与 worker 都生效；`direct` 只对 `acpMcpServers` 的 Agent（brain 与 worker）经 ACP 补进会话（DSH / Claude Code / Copilot / Codex）。`direct` 的文件式 Agent 由 Agent 自己读配置，overlay 不参与，WeMind 会提示“改 Agent 配置”。
 - overlay **不保存密钥**：`mcp.extra` 的认证信息通过环境变量/密钥链注入；发现 `*_KEY`、`*_TOKEN`、`*_SECRET`、`*_PASSWORD`、`*_CREDENTIAL*` 字面值要告警并拒绝写入。
 - `sandbox` 的 brain 是否自动加载 `extra` 仍由激活集决定；worker 的 `extra` 默认生效。`mcp.disable` 永远最后生效。
 - **工作区不放进 agent overlay**：它是“账号 + 角色（brain/worker）”级配置，放在 `<账号>/workspace.json`（见第 9 章）。把工作区塞进 per-agent overlay 会导致切换 Agent 时工作区跟着变，不符合“brain / worker 各一个默认工作区”的目标。
@@ -482,7 +482,7 @@ sandbox worker:
   − overlay.mcp.disable
 ```
 
-`sandbox` 的 brain 不会因为 `mcp.extra` 里“存在”某个 MCP 就自动加载；它只有在用户显式 `加载` 后才进入激活集。`sandbox` 的 worker 则按“无人值守任务需要开箱即用”的语义，直接使用真实全量加 extra。`direct` 完全由 Agent 真实配置决定；overlay 只对 brain 的 ACP 下发集合生效。
+`sandbox` 的 brain 不会因为 `mcp.extra` 里“存在”某个 MCP 就自动加载；它只有在用户显式 `加载` 后才进入激活集。`sandbox` 的 worker 则按“无人值守任务需要开箱即用”的语义，直接使用真实全量加 extra。`direct` 完全由 Agent 真实配置决定；overlay 只对 `acpMcpServers` 的 Agent（brain 与 worker）经 ACP 补进会话，不重发 catalog。
 
 如果 `brain-mcps.json` 里的某个名字在 catalog 中已经不存在（真实配置删了、extra 也删了），不要静默丢弃：保留记录、在 `wemind mcp list` / `doctor` 里标记 `missing`，等用户确认后再清理。
 
@@ -490,7 +490,7 @@ sandbox worker:
 
 - 名字为 `wechat`；
 - command/args/url 里跑 `wemind-mcp` 或 `@wemind/wechat-mcp`；
-- `sandbox` 副本里的微信 MCP 会被剔除（`stripWechatFromConfigCopy`），真实文件不动；`direct` 下 Agent 真实配置里的微信 MCP 只告警，由用户自行删除。
+- `sandbox` 副本里的微信 MCP 会被剔除（`stripWechatFromConfigCopy`）；`mcpDelivery: "acp"` 的 Agent 在复制阶段就剥离全部 MCP 条目，真实文件不动；`direct` 下 Agent 真实配置里的微信 MCP 只告警，由用户自行删除。
 
 ### 8.3 传输方式
 

@@ -5,7 +5,7 @@ import path from "node:path";
 
 /**
  * DSH 沙箱：把真实 `~/.dsh/profiles/<profile>/cordis.patch.yml`（桌面端维护的用户层，含 provider 目录与默认模型）同步进 sandbox。
- * **原样复制**——`- id: acp` 这类覆盖由用户自己在真实 profile 里维护（缺了 `wemind brain` 会提示），WeMind 不替 agent 合成配置，
+ * provider/模型条目**原样复制**，MCP 条目全部剥离（由 WeMind 经 ACP 注入）。`- id: acp` 这类覆盖由用户自己在真实 profile 里维护（缺了 `wemind brain` 会提示），WeMind 不替 agent 合成配置，
  * 这样「终端 dsh」与「微信大脑」行为一致。模块级常量（DATA_DIR/沙箱根）在 import 时解析，故先设环境再动态导入（同 sandbox-qoder.test.ts）。
  */
 
@@ -64,7 +64,7 @@ afterAll(() => {
 });
 
 describe("DSH 沙箱（profile 用户层同步）", () => {
-  it("brain：真实 profiles/acp/cordis.patch.yml 原样进沙箱（WeMind 不追加任何条目）", () => {
+  it("brain：provider/模型条目原样进沙箱（MCP 条目另有剥离用例；WeMind 不追加任何条目）", () => {
     ensureBrainHome();
     const text = fs.readFileSync(brainPatch, "utf-8");
     expect(text).toBe(patch("auto/deepseek-v4.1-flash"));
@@ -73,7 +73,7 @@ describe("DSH 沙箱（profile 用户层同步）", () => {
     expect(fs.existsSync(path.join(dataDir, "brain-home", ".credentials.yaml"))).toBe(true);
   });
 
-  it("worker：同一份用户层也进 worker 沙箱（同样原样）", () => {
+  it("worker：同一份用户层也进 worker 沙箱（provider/模型原样）", () => {
     ensureWorkerHome();
     expect(fs.readFileSync(workerPatch, "utf-8")).toBe(patch("auto/deepseek-v4.1-flash"));
   });

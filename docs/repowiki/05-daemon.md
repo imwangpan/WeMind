@@ -54,8 +54,8 @@ packages/wechat-daemon/src/
 │   │   ├── workspace.ts      # workspace.json + 默认工作区
 │   │   └── agent-config-writer.ts # 真实配置备份、并发校验、原子写
 │   └── sandbox/              # sandbox 的 MCP 策略与记忆/技能继承
-│       ├── mcp-sandbox.ts    # brain：direct 真实全量 / sandbox 激活集（→ 第 6 章）
-│       ├── worker-sandbox.ts # worker：direct 真实全量 / sandbox 全量 − wechat − EXCLUDE − disabled + overlay（→ 第 7 章）
+│       ├── mcp-sandbox.ts    # brain：direct 不重发 / sandbox 激活集（→ 第 6 章）
+│       ├── worker-sandbox.ts # worker：direct 不重发 / sandbox 全量 − wechat − EXCLUDE − disabled + overlay（→ 第 7 章）
 │       ├── mcp-adapters.ts   # 按文件格式的 MCP 适配器（读写/剥离/ACP 转换/原生只读）
 │       ├── agent-mcp.ts      # MCP 格式纯函数、wechat 判定与 ACP 转换
 │       └── sandbox-inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单）

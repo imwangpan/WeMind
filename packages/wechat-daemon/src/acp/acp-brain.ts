@@ -55,7 +55,7 @@ const log = createLogger("wechat-daemon/acp");
  * - 每用户一个 ACP session（原生多轮记忆）；session 映射持久化到磁盘。
  * - 自愈：session/prompt 超时/失败 → 杀进程重建；重建后用 session/load 恢复上下文。
  * - 诊断日志（统一走 `createLogger("wechat-daemon/acp")`，格式 `[wemind/wechat-daemon/acp][INFO|WARN|ERROR] …`，全部 stderr、进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差；`spawn`/`initialized`/`session/new`/`prompt ok` 等帧级关键线索归 INFO（排障必须可见），失败与自愈归 WARN/ERROR。
- * 跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
+ * `direct`（默认）直接用 Agent 真实 home；`sandbox` 才跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
  * 协议细节（帧处理、请求/回合超时、模型与模式、回放静默）与 worker 共用 `acp-connection.ts`；本模块只保留常驻单例与会话持久化。
  *
  * **agent 显式传参**：本模块不再持有「当前 agent」常量（改造前是 import 时解析的 `AGENT`，

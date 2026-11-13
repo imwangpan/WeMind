@@ -204,9 +204,10 @@ function isRegularFile(file: string): boolean {
 }
 
 /**
- * 继承真实 profile 的用户层（DSH：`profiles/<名>/cordis.patch.yml`，桌面端写 provider 目录与默认模型），**原样复制**。
- * WeMind 只镜像用户配置、不合成（`- id: acp` 由用户自己维护，缺失时 CLI 提示怎么补）；
- * **唯独剔除用户自己挂的微信 MCP 条目**：沙箱里的 MCP 只能是 WeMind 的激活集。
+ * 继承真实 profile 的用户层（DSH：`profiles/<名>/cordis.patch.yml`，桌面端写 provider 目录与默认模型）：
+ * provider/模型等非 MCP 条目**原样复制**，WeMind 不合成（`- id: acp` 由用户自己维护，缺失时 CLI 提示怎么补）。
+ * MCP 条目按投递方式处理：`mcpDelivery: "acp"` 时**全部剥离**（沙箱里的集合由 WeMind 经 ACP 注入，避免重复）；
+ * 否则只剔除用户自己挂的微信 MCP 条目（防回环）。
  */
 export function syncProfilePatch(ag: ResolvedAgent, targetHome: string, label: string): void {
   if (!ag.realProfile || !ag.realHome || !ag.inherit) return;

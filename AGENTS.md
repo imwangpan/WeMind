@@ -94,7 +94,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 
 > 每条末尾的**守卫**标注：哪份测试/脚本能自动发现这条被违反。标「未覆盖」的只能靠评审。守卫文件都在 `packages/wechat-daemon/src/**/*.test.ts` 或 `scripts/`。
 
-1. **单实例收消息**：同一个 bot token 同时只能有一个程序收消息；MCP 形态与 daemon 形态二选一；**WeMind 自己生成的 brain / worker MCP 集（`sandbox`）**永久禁止 `wechat`（防它把消息发回自己）；**按名字之外还按定义判**——改名条目只要 command/args/url 里跑 `wemind-mcp` 或 `@wemind/wechat-mcp` 同样被拒（`isWechatMcpServer()`，brain 与 worker 共用）。DSH 的 `cordis.patch.yml` 复制进沙箱前剔除并告警（真实文件不动，`stripWechatMcpEntries`）。`direct` 完全按 Agent 真实配置运行，发现微信 MCP 时**只告警、不阻止启动**（`warnForbiddenNativeMcp`）；用户需自行移除，否则可能形成第二个 poller/回环。**守卫**：`agent-mcp.test.ts`、`sandbox-*.test.ts`、`config.test.ts`。
+1. **单实例收消息**：同一个 bot token 同时只能有一个程序收消息；MCP 形态与 daemon 形态二选一；**WeMind 自己生成的 brain / worker MCP 集（`sandbox`）**永久禁止 `wechat`（防它把消息发回自己）；**按名字之外还按定义判**——改名条目只要 command/args/url 里跑 `wemind-mcp` 或 `@wemind/wechat-mcp` 同样被拒（`isWechatMcpServer()`，brain 与 worker 共用）。DSH 的 `cordis.patch.yml` 复制进沙箱前按投递方式处理：`mcpDelivery: "acp"` 时剥离**全部** MCP 条目，否则只剔除微信条目并告警（真实文件不动，`stripAllDshMcpEntries` / `stripWechatMcpEntries`）。`direct` 完全按 Agent 真实配置运行，发现微信 MCP 时**只告警、不阻止启动**（`warnForbiddenNativeMcp`）；用户需自行移除，否则可能形成第二个 poller/回环。**守卫**：`agent-mcp.test.ts`、`sandbox-*.test.ts`、`config.test.ts`。
 2. **ACP 是最小方法集，不是「所有 agent 都一样」**：
    - `session/load` 不是通用能力；DSH 只有 `session/resume`，缺失时退化为 `session/new`。
    - **image / restore / `acpMcpServers` / `mcpDelivery` 来自 `agents/brain-presets.ts` 的配置字段，不来自 `initialize` 回包**（`acp-brain.ts` 从不解析 `agentCapabilities`）。接新 agent 必须人工跑一次 `scripts/acp-probe.mjs` 并把结论写进预设。

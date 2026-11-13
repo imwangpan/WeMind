@@ -48,7 +48,7 @@ export type AcpAgentPreset = {
   settingsDefaults?: Record<string, unknown>; // sandbox settings.json 的默认键：副本里没有该键时补上（用户显式设过则保留用户的值；只改副本）
   model?: string; // 默认模型值（如 DSH 的 ["deepseek-account","deepseek-flash"]）：经 session/set_config_option（agent 自己的 ACP 接口）在会话建立后下发一次；可用 brain.json / `brain set --model` 覆盖，`auto` = 跟随默认；配了 realProfile 时默认值优先从真实 profile 读
   modelArg?: string; // 不支持 session/set_config_option 的 agent：模型改为追加到启动参数（如 gemini 的 "--model"），不再走 ACP 下发
-  realProfile?: string; // 真实 home 里该 agent 的 profile 名（`profiles/<名>/cordis.patch.yml` 是用户/桌面端维护的用户层：沙箱**原样复制**、不追加条目，默认模型从它读——优先 `- id: acp`，否则 `agent-default-model`）；如 DSH 的 "acp"
+  realProfile?: string; // 真实 home 里该 agent 的 profile 名（`profiles/<名>/cordis.patch.yml` 是用户/桌面端维护的用户层：沙箱复制时非 MCP 条目原样、`mcpDelivery=acp` 时剥离全部 MCP 条目，不追加条目；默认模型从它读——优先 `- id: acp`，否则 `agent-default-model`）；如 DSH 的 "acp"
   acpMcpServers?: boolean; // 纯能力：该 Agent 接受 ACP session/new|resume 的 mcpServers（不表示它不读自己的配置）
   mcpDelivery?: "config" | "acp"; // WeMind 在 sandbox 托管 MCP 时的投递方式：写 Agent 配置文件，或随 ACP 会话下发（默认 config）
   sessionMode?: string; // 会话建立/恢复后经 `session/set_mode` 切到的模式 id（agent 自己的 ACP 接口）；用于「免审批」模式：claude-code 的 bypassPermissions、codex 的 agent-full-access。留空=不调用
@@ -157,7 +157,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   //   `config: { provider: deepseek-official, model: deepseek-v4-flash }`；profile 用户层只覆盖 `llm-pi-ai` / `agent-default-model` / `web-search-deepseek`，
   //   `- id: acp` 要靠**用户自己**补（插件 README：a later patch can replace that row's complete config）——这就是
   //   「agent-default-model 写着用户的默认、session/new 仍报 deepseek-official、一 prompt 就 no API key」的原因（2026-10-29 拆开 app.asar 核实）。
-  //   所以 `realProfile: "acp"`：direct 直接用真实 `profiles/`；sandbox 模式才**原样复制**真实 profile 用户层（否则沙箱是空壳 `[]`，连用户自己的 provider 路由都没有；不追加条目），
+  //   所以 `realProfile: "acp"`：direct 直接用真实 `profiles/`；sandbox 模式才复制真实 profile 用户层（否则沙箱是空壳 `[]`，连用户自己的 provider 路由都没有；provider/模型条目原样、MCP 条目全部剥离；不追加条目），
   //   缺 `- id: acp` 时由 `wemind brain` 提示用户补到真实 profile（`acpOverrideHint`）；不少配置工具只写 `agent-default-model` / `web-search-deepseek`，`- id: acp` 仍要用户单独补。
   //   默认模型从这份配置读（优先 `- id: acp`，否则 `agent-default-model`）→ 用户日常用哪个模型，微信大脑就用哪个。
   // - 读不到时回退到下面的 `model`（deepseek-account/deepseek-flash：rc.2 的账号登录兜底；rc.3 已从模型目录移除，真被用到时只记 WARN，不拖垮回合）；

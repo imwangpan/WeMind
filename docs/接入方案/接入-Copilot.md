@@ -4,7 +4,7 @@
 
 > **最后核对**：2026-11-12 ｜ **实测环境**：Windows 11、Node 24.21.0、GitHub Copilot CLI 1.0.107 ｜ **状态**：✅ 已内置预设并通过 ACP 探针；WeChat brain/worker 真机 E2E 待验证。
 
-Copilot CLI 原生支持 ACP，可作为 WeMind 的对话大脑与任务 worker。内置 `copilot` 预设默认 `direct`：不注入 `COPILOT_HOME`，由 Agent 直接读真实配置；`sandbox` 才把 `COPILOT_HOME` 指向账号沙箱，并同步登录配置与个人指令/技能。`direct` 下 MCP 全量来自真实配置（经 ACP 下发），`sandbox` 按 WeMind 激活集提供；WeMind 自己生成的集合永久排除 `wechat`。
+Copilot CLI 原生支持 ACP，可作为 WeMind 的对话大脑与任务 worker。内置 `copilot` 预设默认 `direct`：不注入 `COPILOT_HOME`，由 Agent 直接读真实配置；`sandbox` 才把 `COPILOT_HOME` 指向账号沙箱，并同步登录配置与个人指令/技能。`direct` 下 MCP 由 Agent 自己加载真实配置（WeMind 不重发），`sandbox` 按 WeMind 激活集提供；WeMind 自己生成的集合永久排除 `wechat`。
 
 ## 1. 安装与认证
 

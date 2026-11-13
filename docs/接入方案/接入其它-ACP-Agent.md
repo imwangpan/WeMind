@@ -213,10 +213,10 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `credentialFiles` | 否 | **仅 `sandbox`**：需从 `realHome` 同步进沙箱配置目录的凭据文件（新者胜；DSH `.credentials.yaml`、qoder `.auth/user`） |
 | `identityFiles` | 否 | **仅 `sandbox`**：必须与 `realHome` 完全一致的标识文件（内容不同即覆盖；qoder `.auth/machine_id`——被 agent 重新生成会导致永久认证失败） |
 | `model` | 否 | 默认模型（格式 `[provider 路由, 模型名]`，值由该 agent 自己的配置决定）：会话建立后经 `session/set_config_option { configId:"model", value }` 下发一次（显式覆盖以它为准）；**用户可用 `wemind brain set <agent 名> --model …` 覆盖**（写进 `brain.json` 的 `presets.<名>.model`）。解析优先级「本段 > `presets[agent 名]` > 真实 profile 的默认 > 预设兜底」，`--model auto`/`default` = 跟随真实 profile 的默认（见下行 `realProfile`），**读不到就不下发**（由 agent 用自己的默认，**不会**改用本行的预设值）；只有完全没写 model 时，读不到才用本行预设值兜底。DSH 用户层里 `- id: acp` 是 ACP 桥真正读的键：缺它时 `wemind brain` 只给片段，由用户补到真实 profile |
-| `modelArg` | 否 | 不支持 `session/set_config_option` 的 agent（gemini 实测 `-32601`）：模型改为追加到启动参数，如 `"--model"` → `gemini … --model <值>`（进程启动时生效，不再走 ACP 下发） |
-| `realProfile` | 否 | 该 agent **用户层 profile 的名字**（DSH：`"acp"`，对应真实 `<realHome>/profiles/acp/`）。`direct` 直接使用；`sandbox` 在 `syncSettings` 里**原样复制**这份 `cordis.patch.yml`（agent 自己首次启动生成的往往是空壳 `[]`，不同步就连它的 provider 路由都不存在；WeMind 不追加任何条目——缺的配置由用户自己补，`wemind brain` 只提示），并由 `profile-model.ts` 从它读默认模型（优先用户写的 `- id: acp`，否则 `agent-default-model`）——用户日常怎么用，WeMind 就跟着怎么用 |
+| `modelArg` | 否 | 不支持 `session/set_config_option` 的 agent（gemini 实测 `-32601`）：模型改为追加到启动参数，如 `"--model"` → `gemini … --model <值>`（进程启动时生效，不再走 ACP 下发；`direct`/`sandbox` 一致） |
+| `realProfile` | 否 | 该 agent **用户层 profile 的名字**（DSH：`"acp"`，对应真实 `<realHome>/profiles/acp/`）。`direct` 直接使用；`sandbox` 在 `syncSettings` 里复制这份 `cordis.patch.yml`：provider/模型条目原样，`mcpDelivery: "acp"` 时**剥离全部 MCP 条目**（集合由 WeMind 经 ACP 注入）——agent 自己首次启动生成的往往是空壳 `[]`，不同步就连它的 provider 路由都不存在；WeMind 不追加任何条目，缺的配置由用户自己补（`wemind brain` 只提示）。`profile-model.ts` 从它读默认模型（优先用户写的 `- id: acp`，否则 `agent-default-model`）——用户日常怎么用，WeMind 就跟着怎么用 |
 | `kiroEngine` | 否 | kiro 专用（`true`）：按 `--agent-engine` → 真实 `settings/cli.json` 的 `acp.agentEngine` → CLI 主版本 ≥3 判断 v2/v3（`acp --help`：两者都没设时默认 v2；CLI ≥3 默认 v3 为假设/待实测，仅作兜底）；v3 时剔除 v2 专属的 `--trust-all-tools` / `-a` / `--trust-tools`、补 `--agent-engine v3`，并在 `sandbox` 写 `settings/permissions.yaml` 的 allow-all 规则（真实设置已有则原样保留）。见 §5 |
-| `isolateSessions` | 否 | DSH 专用（`true`）：启动前落盘 `<数据目录>/agent-sessions/deepseek/session-root-<brain\|worker>.patch.yml`，用 `--patch` 把 `session-persistence-jsonl.root` 指到 `agent-sessions/deepseek/<role>`，避免与 kiro/pi 共用 sandbox 根时把其它 agent 写进 `sessions/` 的平铺文件当成自己的会话库；用户 `--args` 自带 `--patch` 时不再追加。`direct` 不启用 |
+| `isolateSessions` | 否 | DSH 专用（`true`）：启动前落盘 `<数据目录>/agent-sessions/deepseek/session-root-<brain\|worker>.patch.yml`，用 `--patch` 把 `session-persistence-jsonl.root` 指到 `agent-sessions/deepseek/<role>`，避免与 kiro/pi 共用 sandbox 根时把其它 agent 写进 `sessions/` 的平铺文件当成自己的会话库；用户 `--args` 自带 `--patch` 时不再追加。`direct` 下不启用 |
 
 ---
 
@@ -290,7 +290,7 @@ WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直
 
 ## 6. 配置来源与 MCP 策略（重要差异点）
 
-自 2026-11-13 起默认 `homeMode=direct`：WeMind **不写任何 Agent 配置**，Agent 直接读真实 home。技能、记忆、规则、MCP、会话库与终端完全同一份；文件式 Agent 由自己加载 MCP，走 ACP 的 Agent 由 WeMind 把真实 catalog 全量下发（叠加 overlay 的 `mcp.extra`、减去 `mcp.disable`）。微信里的 `加载 / 卸载 MCP` 在 `direct` 下原样转给 Agent，由它自己决定是否/如何改配置。
+自 2026-11-13 起默认 `homeMode=direct`：WeMind **不写任何 Agent 配置**，Agent 直接读真实 home。技能、记忆、规则、MCP、会话库与终端完全同一份；文件式 Agent 由自己加载 MCP，`acpMcpServers` 的 Agent 也先由自己读真实配置——WeMind 只补 `overlay.mcp.extra`（并减去 `mcp.disable`），**不重发 catalog**。微信里的 `加载 / 卸载 MCP` 在 `direct` 下原样转给 Agent，由它自己决定是否/如何改配置。
 
 `homeMode=sandbox` 是显式隔离选项：它使用 `BRAIN_HOME` / `<账号>/brain-home`（由 `WECHAT_BRAIN_HOME` 决定）完整复制配置，适合需要强隔离的场景。下文未特别说明时，`配置根` 指 sandbox 根。
 
