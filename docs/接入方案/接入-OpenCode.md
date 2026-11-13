@@ -1,6 +1,6 @@
 # 接入 OpenCode（设计与实测）
 
-> **2026-11-13 口径**：默认 `homeMode=view`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；`direct` 不生成视图、由 Agent 直接读真实配置；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 不写任何 Agent 配置，Agent 直接读真实 home，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
 
 > **状态**：M1–M4 全部落地 ✅ —— `opencode` 是内置预设（见 §3.6）。**brain 通道的真机 E2E 已在 2026-10-29 通过**（微信发消息 → opencode acp → 自动回复，记录见 [CHANGELOG](../发布与变更记录/CHANGELOG.md)），M4 行与此一致。
 > **实测范围**：OpenCode v2.0.29（M1 探针）；2026-10-29 在 2.0.32 上复测 `session/delete`、`load` 回放与并行任务（见 [run-e2e §7.3](../ai/recipes/run-e2e.md)）｜ **最后核对**：2026-11-12
@@ -83,7 +83,7 @@ WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文�
 | MCP 配置格式 | `{ "mcpServers": { 名: {command, args, env} } }` | `{ "mcp": { "servers": { 名: {type:"local", command:[...], environment:{...}} } } }` |
 | 模型选择 | `settings/cli.json` 的 `chat.defaultModel` | `opencode.json` 的 `model` 字段 |
 | 记忆/技能 | 目录式 `steering/ memories/ skills/ …` | 目录式 `skills/ agents/ commands/`；另有单文件 `AGENTS.md` |
-| 权限 | `--trust-all-tools` | `opencode acp` **不接受** `--auto`（官方 issue #52216）；WeMind 在沙箱 `opencode.json` 写 `"permission": "allow"`（用户自己配了 permission 则保留用户的）；ACP 仍可能发 `session/request_permission`，宿主默认拒绝、`WEMIND_ACP_AUTO_ALLOW=1` 放行 |
+| 权限 | `--trust-all-tools` | `opencode acp` **不接受** `--auto`（官方 issue #52216）；WeMind 在沙箱 `opencode.json` 写 `"permission": "allow"`（用户自己配了 permission 则保留用户的）；ACP 仍可能发 `session/request_permission`，宿主默认 yolo 放行（`WEMIND_ACP_AUTO_ALLOW=0` 恢复拒绝） |
 | 凭证/数据 | `KIRO_HOME` 移动 = 同目录规则 | 数据在 `~/.local/share/opencode`（**与配置分离**）→ 隔离配置不丢登录态；**代价是数据目录本身没有按账号隔离**：同一台机器上多个 WeMind 账号共用同一份登录态与后台服务（与 AGENTS.md §4.7「数据按账号隔离」的口径有出入，已知边界） |
 
 ### 3.3 M1 实测结果（已验证事实）
@@ -282,25 +282,25 @@ npm run build; npm run daemon
 
 `opencode` 是内置预设（`ACP_AGENT_PRESETS`），字段定义见 §3.4 Step 1；落地结果如下：
 
-> 本节表格已按 2026-11-13 的默认 `homeMode=view` 校正；§3 的 Step 1–8 是当时 M2/M3 沙箱阶段的实现记录，其中「沙箱」在默认模式下对应 `<账号>/agent-view/<role>/opencode`，只有显式 `homeMode=sandbox` 才是 `brain-home` / `worker-home`；`direct` 不生成视图。
+> 本节表格已按 2026-11-13 的默认 `homeMode=direct` 校正；§3 的 Step 1–8 是当时 M2/M3 沙箱阶段的实现记录，其中「沙箱」现在只对应显式 `homeMode=sandbox` 的 `brain-home` / `worker-home`；`direct` 不生成任何副本。
 
 | 项目 | 落地结果 | 依据 |
 |---|---|---|
 | 启动 | `opencode acp`；`shell: true`、`binWin: "opencode"` | §3.4 Step 1 / Step 7 |
-| 配置目录 | `view`：`XDG_CONFIG_HOME=<账号>/agent-view/<role>/opencode`（视图根）→ 配置实到 `<视图根>/opencode/`；`direct` 不注入、直接用真实 `~/.config/opencode`；`sandbox`：`XDG_CONFIG_HOME=<沙箱>` → `<沙箱>/opencode/`。`OPENCODE_CONFIG_DIR` 只「追加」、不替换 global，无法隔离，故不用 | §3.2、§3.3 |
-| MCP 文件 | 当前配置目录的 `opencode.json` 的 `mcp.servers`（`mcpFormat: "mcp.servers"`；`view` 为 `<账号>/agent-view/<role>/opencode/opencode/opencode.json`——视图根 `/` `configSubdir=opencode` `/` 文件名 `opencode.json`，三层同名不是笔误；`direct` 为真实 `~/.config/opencode/opencode.json`） | §3.4 Step 3 |
-| MCP 激活 | brain 默认空 MCP；微信 `加载/卸载` 后写激活集，重启 ACP 生效；`mcp.servers` 条目原样透传 | §3.4 Step 3 |
+| 配置目录 | `direct` 不注入、直接用真实 `~/.config/opencode`；`sandbox`：`XDG_CONFIG_HOME=<沙箱>` → `<沙箱>/opencode/`。`OPENCODE_CONFIG_DIR` 只「追加」、不替换 global，无法隔离，故不用 | §3.2、§3.3 |
+| MCP 文件 | 当前配置目录的 `opencode.json` 的 `mcp.servers`（`mcpFormat: "mcp.servers"`；`direct` 为真实 `~/.config/opencode/opencode.json`；`sandbox` 为 `<沙箱>/opencode/opencode.json`） | §3.4 Step 3 |
+| MCP 激活 | `direct` 由 Agent 真实配置决定，`加载/卸载` 直接拒绝；`sandbox` 下 brain 默认空、微信 `加载/卸载` 后写激活集并重启 ACP 生效；`mcp.servers` 条目原样透传 | §3.4 Step 3 |
 | MCP 目录（CATALOG） | 默认 `<realHome>/opencode.json`；**不**回退 `opencode.jsonc`——真实配置只有 `.jsonc` 时用 `WEMIND_MCP_CATALOG` 显式指过去 | §3.4 Step 3 |
-| worker | 继承全量 MCP、仅排除 `wechat`；路径同为当前 worker 配置目录的 `opencode.json`（`view` 为 `<账号>/agent-view/worker/opencode/opencode/opencode.json`，路径组成同上；`direct` 为真实配置） | §3.4 Step 5 |
-| 记忆/技能 | `skills` / `agents` / `commands` 目录 junction；`AGENTS.md` 单文件额外拷贝 | §3.4 Step 4 |
-| 模型基底 | 用户真实 `opencode.json`（去掉 `mcp` 段）作基底写入当前配置目录，继承 `model` 等设置；MCP 仍由 WeMind 生成的配置权威 | §3.4 Step 6、§3.5 #3 |
+| worker | `direct` 由 Agent 自己加载真实全量；`sandbox` 继承全量 MCP、仅排除 `wechat`，路径为 `<沙箱>/opencode/opencode.json` | §3.4 Step 5 |
+| 记忆/技能 | `direct` 直接使用真实目录；`sandbox` 下 `skills` / `agents` / `commands` 目录 junction，`AGENTS.md` 单文件额外拷贝 | §3.4 Step 4 |
+| 模型基底 | `direct` 直接用真实 `opencode.json`；`sandbox` 才以真实文件（去掉 `mcp` 段）为基底写入沙箱，MCP 仍由 WeMind 生成的配置权威 | §3.4 Step 6、§3.5 #3 |
 | 项目配置发现 | `OPENCODE_DISABLE_PROJECT_CONFIG=1`，不从 cwd 祖先目录发现用户 `opencode.json` | §3.4 Step 2 |
 | 数据/凭证 | `~/.local/share/opencode`，与配置分离；隔离配置不丢登录态，但该目录不按账号隔离 | §3.2 |
 
 补充：
 
 - **隔离与 MCP 端到端已实测**：`XDG_CONFIG_HOME=<dir>` 后 `opencode debug paths config` 输出 `<dir>/opencode`；ACP 的 `session/new` 采用该目录 `opencode.json` 的 `model`；放进 `mcp.servers` 的假 MCP 被实际拉起（标记文件被创建）→ `opencode acp` 完整读取 `<XDG>/opencode/opencode.json`。
-- **生成配置是生成物**：`view` 的视图 `opencode.json` 与 `sandbox` 的那份都由真实配置重新生成，手改生成物下次启动即失效——改模型/设置请改真实那份；`direct` 直接使用真实文件。
+- **生成配置是生成物**：只有 `sandbox` 的 `opencode.json` 由真实配置重新生成，手改生成物下次启动即失效——改模型/设置请改真实那份；`direct` 直接使用真实文件。
 - **`opencode mcp list` 不代表 ACP 行为**：它连的是共享后台服务，不能用来判断 ACP 进程读了哪个配置目录。
 
 ---
@@ -340,7 +340,7 @@ npm run build; npm run daemon
 - **沙箱配置是生成物**：手改沙箱 `opencode.json` 会在下次启动被真实配置覆盖。
 - **CATALOG 只认单一文件名**：默认 `<realHome>/opencode.json`，不自动回退 `.jsonc`；真实配置只有 `opencode.jsonc` 时必须用 `WEMIND_MCP_CATALOG` 显式指定。
 - **模型由 OpenCode 决定**：预设不带 `model`，WeMind 默认不下发；`wemind brain set opencode --model …` 的 `configId` 是否被接受尚未实测（见「待实测」），下发失败会让该回合报错，稳妥做法是改真实 `opencode.json` 的 `model`。
-- **权限**：`opencode acp` 不接受 `--auto`（官方 issue #52216）；WeMind 在沙箱 `opencode.json` 写 `"permission": "allow"`（用户自己配了 permission 则保留用户的）。ACP 仍可能发 `session/request_permission`：宿主默认拒绝，`WEMIND_ACP_AUTO_ALLOW=1` 才逐次放行；daemon 的 `allowFrom` 登录者白名单是兜底校验，勿关。
+- **权限**：`opencode acp` 不接受 `--auto`（官方 issue #52216）；WeMind 在沙箱 `opencode.json` 写 `"permission": "allow"`（用户自己配了 permission 则保留用户的）。ACP 仍可能发 `session/request_permission`：宿主默认 yolo 放行（`WEMIND_ACP_AUTO_ALLOW=0` 恢复逐次拒绝）；daemon 的 `allowFrom` 登录者白名单是兜底校验，勿关。
 - **共享后台服务**：`opencode acp` 是否复用全局 background server 未确认；多实例/生命周期需观察，必要时评估 `--standalone`。
 - **冷启动时延**：首帧阈值是否够用取决于机器（本机记录见 §6.3），按需放宽 `WECHAT_BRAIN_FIRST_FRAME_MS`。
 - **Code Mode 工具命名**：`tool_call.title` 文案可能影响微信「步骤 N」，必要时在 `toolSummary()` / `zhTool()` 增加 OpenCode 风格映射。

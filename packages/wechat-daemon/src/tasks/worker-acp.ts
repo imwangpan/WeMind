@@ -4,10 +4,10 @@ import fs from "node:fs";
 
 import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 import { ensureWorkerHome, workerMcpServers } from "../agents/sandbox/worker-sandbox.js";
-import { assertNoForbiddenNativeMcp, nativeMcpServers } from "../agents/sandbox/mcp-sandbox.js";
+import { nativeMcpServers, warnForbiddenNativeMcp } from "../agents/sandbox/mcp-sandbox.js";
 import { configFingerprint } from "../agents/config/config-fingerprint.js";
 import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
-import { viewFallbackReason, type AgentRuntime } from "../agents/config/runtime.js";
+import { agentRuntime, type AgentRuntime } from "../agents/config/runtime.js";
 import { deleteSessionCwd, getSessionCwd, setSessionCwd } from "../agents/config/session-cwd.js";
 import { ensureWorkspace } from "../agents/config/workspace.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
@@ -46,7 +46,7 @@ const log = createLogger("wechat-daemon/worker");
  * - **每连接一实例**（child/pending/session/进度全在实例里，不再是模块级全局）——多任务并行要有多个进程；
  *   进程池（worker-pool.ts）持有它们、按 agent 复用，任务结束把连接**还给进程池**而不是杀掉；
  * - **每任务一个 session key**（`task-<编号>@<userId>`），持久化到 worker-sessions.json，重建后 session/load 续上下文；
- * - **cwd = 任务工作目录**（本地派发可指定，默认账号 workspace/worker），而配置 home 走 agent-view/worker（sandbox 才是 WORKER_HOME）；
+ * - **cwd = 任务工作目录**（本地派发可指定，默认账号 workspace/worker），配置 home 由 direct（Agent 真实 home）或 sandbox（WORKER_HOME）决定；
  * - **更宽松超时**（漫长任务，env 可调）；去掉 brain 的「可发图」首轮提示（任务执行不是聊天发图场景）。
  * 自愈：session/prompt 超时/失败 → 只杀**这一条**连接的进程；下次 ask 重建并 session/load 恢复（→ 用户回「继续」即可续跑）。
  */
@@ -127,7 +127,7 @@ export class WorkerConn {
   private host: AcpHost;
   private cwd?: string; // 本任务的工作目录（spawn 时生效；子进程 cwd 不可中途改）
   private spawnError?: Error; // spawn 失败的真实原因（cwd 不存在/权限），kill() 用它答复而不是笼统的 killed
-  private runtime?: AgentRuntime; // 最近一次准备配置视图/沙箱的结果；用于判断本次是否 direct（不下发 MCP）
+  private runtime?: AgentRuntime; // 最近一次准备配置的结果；用于判断本次是 direct 还是 sandbox（MCP 策略不同）
   /** spawn 后立刻回调：池据此把 pid 身份记录写入磁盘（`wemind stop` 靠它精确找到本进程）。 */
   onSpawn?: (conn: WorkerConn) => void;
 
@@ -275,25 +275,25 @@ export class WorkerConn {
   }
 
   private async ensureProcess(): Promise<void> {
-    // 该 worker 已从 view 降级为 direct 时不再反复尝试建视图；指纹按「没有视图」处理，避免每次复用都重建进程。
-    const before = viewFallbackReason("worker", this.agent) ? "" : configFingerprint(this.agent);
+    // 指纹盯真实配置：终端改过就让复用的空闲 worker 重建进程。
+    const probe = agentRuntime("worker", this.agent, DATA_DIR, { cwd: this.effectiveCwd() });
+    const before = configFingerprint(this.agent, probe);
     if (this.isAlive() && this.initialized && this.configFp === before) return;
     if (this.isAlive() && this.initialized)
       log.info(`${this.id}(${this.agent.name}) config changed → rebuild`);
     this.kill();
     this.spawnError = undefined; // 上一次的 spawn 失败不能污染这一次
     const kept: string[] = [];
-    // 视图链接 + 生成的 MCP/settings/overlay 副本一起重建：长驻的空闲 worker 复用时也能看到终端侧的新配置。
+    // direct 不写文件；sandbox 重新复制副本：长驻的空闲 worker 复用时也能看到终端侧的新配置。
     // 用 effectiveCwd() 而不是 this.cwd：后者不含 WEMIND_WORKER_CWD 一次性覆盖，
     // 否则 spawn 的 cwd 与 session/new 的 cwd 可能不一致。
     const taskCwd = this.effectiveCwd();
     const rt = ensureWorkerHome(this.agent, DATA_DIR, { cwd: taskCwd });
     this.runtime = rt;
-    assertNoForbiddenNativeMcp(this.agent, rt); // Codex/config.toml 与视图副本：有 wechat 或解析不了就拒绝启动
+    warnForbiddenNativeMcp(this.agent, rt); // 只告警：agent 自己配置里有微信 MCP 时提示回环风险
     // 必须在 ensureWorkerHome 之后取：否则把自己的写入误判成「终端改配置」而每次复用都重启
-    // 没有视图（direct / sandbox / view 降级）就不需要跟随终端配置；降级状态在本次进程内缓存，显式 reload 才重试 view。
-    const fp = rt.view ? configFingerprint(this.agent) : "";
-    const env = agentEnv(this.agent, rt.home, kept, DATA_DIR, { direct: rt.mode === "direct" }); // 父进程 env → 配置视图/沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
+    const fp = configFingerprint(this.agent, rt);
+    const env = agentEnv(this.agent, rt.home, kept, DATA_DIR, { direct: rt.mode === "direct" }); // 父进程 env → 沙箱目录（direct 跳过）→ 预设 env（direct 跳过）→ 预设 envDefaults
     if (kept.length) log.info(`${this.id} env defaults kept from parent: ${kept.join(",")}`);
     prepareAgent(this.agent); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
     const cwd = rt.cwd;

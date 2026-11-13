@@ -1,6 +1,6 @@
 # 接入 OpenAI Codex（探针 + 真机 E2E）
 
-> **2026-11-13 口径**：默认 `homeMode=view`，Codex 的配置目录无法由 WeMind 重定向：`view` 会本次运行降级 `direct`，微信侧始终使用真实 `~/.codex`，`cwd` 是账号工作区（brain/worker）或任务 `--cwd`；`sandbox` 也不隔离 `~/.codex`。本文涉及 `brain-home` / `worker-home` 的描述仅适用于其他可重定向 Agent 的配置落点。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 不写任何 Agent 配置，Codex 直接读真实 `~/.codex`；`cwd` 是账号工作区（brain/worker）或任务 `--cwd`。Codex 的配置目录无法由 WeMind 重定向，`sandbox` 也不隔离 `~/.codex`。本文涉及 `brain-home` / `worker-home` 的描述仅适用于其他可重定向 Agent 的配置落点。
 
 > **最后核对**：2026-11-12 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / `session/load` 恢复 / 图片 / `set_mode` / `set_config_option(model)` / stdio MCP）；**真机 E2E 已通过**（2026-11-01：worker 通道任务 #21 + brain 通道微信单轮，回复均送达）；**适配器 2.6.0 探针复测通过**（2026-11-12，见 §2.1）。
 >
@@ -119,7 +119,7 @@ codex: {
 ## 4. 已知限制
 
 1. **MCP 有两条来源，别混为一谈**（C7）：
-   - **Codex 原生 MCP**：`~/.codex/config.toml` 里定义的 server 由 Codex 自己加载；WeMind 只读解析 `[mcp_servers.*]` 用于 `列出`/指标，**不会写回、也无法 unload**。终端 Codex 能用的原生 MCP，微信侧 codex 也能用；因此 brain 的“默认空 MCP”管不住这部分。原生条目里出现 `wechat`（或任何会跑 `wemind-mcp` 的定义）时，brain/worker 直接拒绝启动，避免第二个 poller。
+   - **Codex 原生 MCP**：`~/.codex/config.toml` 里定义的 server 由 Codex 自己加载；WeMind 只读解析 `[mcp_servers.*]` 用于 `列出`/指标，**不会写回、也无法 unload**。终端 Codex 能用的原生 MCP，微信侧 codex 也能用；因此 brain 的“默认空 MCP”管不住这部分。原生条目里出现 `wechat`（或任何会跑 `wemind-mcp` 的定义）时**只告警、不阻止启动**（`warnForbiddenNativeMcp`），由用户自行删除；同时启动第二个 poller 会有回环风险。
    - **WeMind 动态 MCP**：`mcpViaAcp: true` 后，微信侧 `加载/卸载` 通过 ACP `session/new|load|resume` 的 `mcpServers` 下发给 codex；只对 WeMind catalog / overlay `mcp.extra` 里的定义有效。原生 config.toml 里的名字不会出现在 `加载` 的候选列表里。
    - **同名冲突**：Codex 原生条目优先，适配器会跳过同名的客户端条目（并记日志）；不会出现两个同名 server。
    - **brain 默认空** 只控制 WeMind 下发的 ACP 集合；Codex 原生 `config.toml` 的 MCP 仍会被 Codex 加载。这是 codex 没有独立配置目录带来的边界，不是 WeMind 静默忽略。

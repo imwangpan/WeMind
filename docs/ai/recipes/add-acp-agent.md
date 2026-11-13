@@ -48,7 +48,7 @@ node scripts/acp-probe.mjs
 | 正文非逐 token / 无 activity 帧                                                         | 预设加 `firstFrameMs`（首帧超时）与 `heartbeatMs`（静默期心跳），见 §4                                                                                                                                                                                                                                                                                                                                                            |
 | `session/new` 先要求 `authenticate`（`-32000 Authentication required`）                 | 先看能否靠**复制凭据**自动恢复（`credentialFiles`；Cline 只自动恢复它自己的 3 种 OAuth provider）；不能就**从 agent 自己的配置派生环境变量**（`credentialEnv`，参考 Cline 的 `clineCredentialEnv()`：只读、显式 env 优先），或要求部署方提供 agent 官方文档里的环境变量。**不要**在 daemon 里实现交互式 `authenticate`——无头环境会卡在浏览器/输入上；把可执行的提示写进 `brain check` 与失败回复（参考 `authHint()`）             |
 | 默认模型路由需要 API key / 桌面登录要切 account                                         | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖                                                                                                                                                                                                                          |
-| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：`view` 链接真实 `profiles/`，`sandbox` 才**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在），`direct` 直接用真实 home；并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
+| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：`direct` 直接用真实 `profiles/`，`sandbox` 才**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在）；并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
 
 ---
 
@@ -91,7 +91,7 @@ node scripts/acp-probe.mjs
 | --- | ----------------------- | ---------------------------------------------------------------------------------------------- | --------------------- |
 | 1   | 二进制/路径             | PATH 名或绝对路径                                                                              | `dsh` / `dsh.cmd`     |
 | 2   | ACP 启动参数            | 进入 ACP server over stdio                                                                     | `--profile acp`       |
-| 3   | 配置目录环境变量        | 该 agent 读取配置/数据目录的 env 名；WeMind 在 `view` 指向配置视图、在 `sandbox` 指向沙箱；`direct` 不注入 | `DSH_HOME`            |
+| 3   | 配置目录环境变量        | 该 agent 读取配置/数据目录的 env 名；WeMind 仅在 `sandbox` 下指向沙箱；`direct` 不注入 | `DSH_HOME`            |
 | 4   | 配置目录布局 / MCP 格式 | `configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile`                                    | 空 / ACP `mcpServers` |
 
 > 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
@@ -110,7 +110,7 @@ acme: {
   args: ["serve", "--acp"],
   shell: true,                   // .cmd/.bat/npx 必须；.exe 可 false
   // requiresBins: ["acme"],     // 适配器内部还要 spawn 的运行时（只装适配器不够）；缺失时 agentProblem() 提前报错
-  homeEnvVar: "ACME_HOME",       // 指向 agent-view/<role>/<agent> 或 sandbox 根；没有就删掉
+  homeEnvVar: "ACME_HOME",       // 仅 sandbox 指向沙箱根；没有就删掉
   realHome: path.join(os.homedir(), ".acme"),
   inheritDirs: ["skills"],       // 目录式记忆/技能
   inheritFiles: ["AGENTS.md"],   // 单文件记忆
@@ -123,7 +123,7 @@ acme: {
   // modelArg: "--model",               // 不支持 session/set_config_option 时模型走启动参数（gemini）
   // replayOnLoad: true,                // load/resume 返回后仍异步回放历史：恢复后先等帧流安静，否则旧历史会拼进本轮答复（gemini）
   // sessionMode: "bypassPermissions",  // 会话建立/恢复后经 session/set_mode 切模式（claude-code / codex）
-  // env: { CLAUDE_CONFIG_DIR: "%HOME%/claude" },                  // 强制注入（值里 %HOME% → 视图根/沙箱根；没有 homeEnvVar 时还要配 realEnv）
+  // env: { CLAUDE_CONFIG_DIR: "%HOME%/claude" },                  // 仅 sandbox 强制注入（值里 %HOME% → 沙箱根）
   // envDefaults: { DSH_PERMISSION_MODE: "danger-full-access" }, // 审批类默认值：父进程已设同名变量时以父进程为准
   // credentialEnv: (realHome, parentEnv) => ({ ... }),            // 从 agent 凭据文件派生 env（仅父进程未提供时；Cline 的 CLINE_PROVIDER/CLINE_API_KEY）
   // isolateSessions: true,             // 会话持久化 root 用 agent 自己的 --patch 指到账号数据目录（DSH）
@@ -151,15 +151,15 @@ acme: {
 
 ---
 
-## 3. 配置视图 / MCP / 记忆
+## 3. 配置目录 / MCP / 记忆
 
-- `homeEnvVar` 指向 `agent-view/<role>/<agent>`（`view`）或 `BRAIN_HOME`/`WORKER_HOME`（`sandbox`）；`direct` 不注入，直接用真实 home。没有 `homeEnvVar` 的 Agent 在 `view` 下会降级 `direct`、WeMind 只读不写（`settingsBase`/`mcp.json` 跳过并告警，MCP/overlay 不生效），只能靠 `env`/`realEnv` 指配置目录。`configSubdir` 决定配置目录在其中的位置。
+- `homeEnvVar` 仅在 `sandbox` 下指向 `BRAIN_HOME`/`WORKER_HOME`；`direct` 不注入，Agent 直接用真实 home。`env` 同样只在 `sandbox` 注入。`configSubdir` 决定配置目录在沙箱根中的位置。
 - `mcpFormat`：`mcpServers`（顶层）或 `mcp.servers`（嵌套）；DSH 这类走 ACP 的用 `mcpViaAcp`，不要写文件。
-- 记忆/技能：`view` 由 config view 直接链接 `realHome` 的未覆盖目录/文件；`direct` 完全使用真实目录；`sandbox` 才按 `inheritDirs`（junction/symlink）与 `inheritFiles`（复制）选择性继承。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
+- 记忆/技能：`direct` 完全使用真实目录；`sandbox` 才按 `inheritDirs`（junction/symlink）与 `inheritFiles`（复制）选择性继承。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
 - 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时视图/沙箱。
-- 设置继承：`settingsBase` 会在 brain/worker 两个角色的视图（`sandbox` 模式是沙箱）生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）；`settingsStrip` 可改剥离键（gemini 只剥 `mcpServers`，保留用户的 `model`/`security`），`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。
-- **profile**（`realProfile`，可选）：`view` 下整个 `profiles/` 链接真实 home；`sandbox` 模式把真实 `<realHome>/profiles/<名>/cordis.patch.yml` **原样复制**进沙箱——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在；`direct` 直接用真实 profile。默认模型从真实 profile 读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
-- brain 默认空 MCP、按 agent 持久激活；worker 真实全量。两者都永久禁止 `wechat`（防它把消息发回自己）。
+- 设置继承：`settingsBase` 只在 `sandbox` 下生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）；`settingsStrip` 可改剥离键（gemini 只剥 `mcpServers`，保留用户的 `model`/`security`），`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。
+- **profile**（`realProfile`，可选）：`direct` 直接用真实 `profiles/`；`sandbox` 模式把真实 `<realHome>/profiles/<名>/cordis.patch.yml` **原样复制**进沙箱——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在。默认模型从真实 profile 读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
+- `sandbox` 下 brain 默认空 MCP、按 agent 持久激活；worker 真实全量。两者都永久禁止 `wechat`（防它把消息发回自己）。`direct` 完全由 Agent 自己的配置决定。
 - **每个 agent 只读自己的 catalog**；不要把 kiro 的文件指给 DSH。
 
 验证：
@@ -177,7 +177,7 @@ wemind brain check
 | 探针结果                                       | 要改                                                                                                                                                    |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 无 `session/load`，有 `resume`                 | `acp-brain.ts` + `worker-acp.ts` 的 `ensureSession`：load → resume → new 兜底                                                                           |
-| 有反向请求                                     | 已由 `acp-reverse.ts` 统一应答（brain / worker / `brain check` 共用）：`session/request_permission` 默认拒绝、未知 method 回 `-32601`；改语义只改这一处 |
+| 有反向请求                                     | 已由 `acp-reverse.ts` 统一应答（brain / worker / `brain check` 共用）：`session/request_permission` 默认 yolo（`WEMIND_ACP_AUTO_ALLOW=0` 恢复拒绝）、未知 method 回 `-32601`；改语义只改这一处 |
 | 首帧慢 / 无 activity 帧                        | 配置里的 `firstFrameMs`；`index.ts` 心跳/`heartbeatMs`                                                                                                  |
 | `image:false`                                  | 预设加 `images: false`（`planImageTurn()` / `askBrainTurn` 据此友好拒绝，不会 `-32602` 重试）；**别只改 daemon 侧的拦截**——能力来自预设字段             |
 | `session/set_config_option` 不支持（`-32601`） | 预设加 `modelArg`（如 gemini 的 `"--model"`）：模型改为拼到启动参数，不再走 ACP 下发；`wemind brain set <名> --model …` 仍是入口                        |

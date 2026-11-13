@@ -1447,10 +1447,10 @@ export async function runDaemon(): Promise<void> {
   try {
     ensureParityAccountDirs();
     migrateLegacySandbox();
-    ensureBrainHome(); // 准备 brain 配置视图/沙箱（默认空 MCP）
-    ensureWorkerHome(); // 准备 worker 配置视图/沙箱（继承全量 MCP 除 wechat + 记忆/技能/settings）
+    ensureBrainHome(); // 准备 brain 配置：direct 直接用真实配置，sandbox 才建账号副本
+    ensureWorkerHome(); // 准备 worker 配置：direct 直接用真实配置，sandbox 才建账号副本
   } catch (e) {
-    // 工作区或配置视图不可用属于“启动前就能发现”的配置错误：明确报错，不带着半份配置跑。
+    // 工作区或 Agent 配置不可用属于“启动前就能发现”的配置错误：明确报错，不带着半份配置跑。
     log.error("agent config/workspace unavailable:", describeError(e, import.meta.url));
     throw e;
   }

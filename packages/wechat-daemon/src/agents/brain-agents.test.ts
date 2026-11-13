@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { DATA_DIR } from "@wemind/wechat-ilink-core";
+
 import {
   ACP_AGENT_PRESETS,
   resolveAgent,
@@ -285,7 +287,7 @@ describe("resolveAgent agent", () => {
 
   it("deepseek：dsh.cmd + DSH_HOME + resume/model/images=false", () => {
     clearVars();
-    process.env.WEMIND_HOME_MODE = "sandbox"; // sessionPatch 只在 sandbox 下启用（real 用真实会话目录）
+    process.env.WEMIND_HOME_MODE = "sandbox"; // sessionPatch 只在 sandbox 下启用（direct 用真实会话目录）
     process.env.WEMIND_BRAIN = "deepseek";
     const ag = resolveAgent();
     expect(ag.name).toBe("deepseek");
@@ -448,8 +450,10 @@ describe("resolveAgent agent", () => {
     expect(ag.shell).toBe(false); // 原生 .exe/.bin，不走 shell
     expect(ag.homeEnvVar).toBeUndefined(); // 用 env 指到「配置目录」本身，而非沙箱根
     expect(ag.env.QODER_CONFIG_DIR).toMatch(/^%HOME%[\\/]qoder$/);
-    // home 直接指向真实目录时，%HOME% 模板会拼成 ~/.qoder/qoder；realEnv 必须改成真实目录
-    expect(agentEnv(ag, ag.realHome!).QODER_CONFIG_DIR).toBe(ag.realHome);
+    // direct：不注入任何 home 覆盖，让 qoder 像终端一样自己读 ~/.qoder
+    expect(
+      agentEnv(ag, ag.realHome!, [], DATA_DIR, { direct: true }).QODER_CONFIG_DIR,
+    ).toBeUndefined();
     expect(ag.configSubdir).toBe("qoder");
     expect(ag.mcpFormat).toBe("mcpServers"); // 键名同为 mcpServers
     expect(ag.mcpConfigFile).toBe("settings.json");
@@ -474,11 +478,11 @@ describe("resolveAgent agent", () => {
     expect(ag.env.CLINE_DIR).toMatch(/^%HOME%[\\/]cline$/);
     expect(ag.env.CLINE_DATA_DIR).toMatch(/^%HOME%[\\/]cline[\\/]data$/);
     expect(ag.env.CLINE_MCP_SETTINGS_PATH).toMatch(/^%HOME%[\\/]cline[\\/]mcp\.json$/);
-    // home 直接指向真实目录：CLINE_* 必须指到真实的 ~/.cline，而不是 ~/.cline/cline
-    const realEnv = agentEnv(ag, ag.realHome!);
-    expect(realEnv.CLINE_DIR).toBe(ag.realHome);
-    expect(realEnv.CLINE_DATA_DIR).toBe(path.join(ag.realHome!, "data"));
-    expect(realEnv.CLINE_MCP_SETTINGS_PATH).toBe(path.join(ag.realHome!, "mcp.json"));
+    // direct：不注入 CLINE_*，让 cline 像终端一样自己读 ~/.cline
+    const directEnv = agentEnv(ag, ag.realHome!, [], DATA_DIR, { direct: true });
+    expect(directEnv.CLINE_DIR).toBeUndefined();
+    expect(directEnv.CLINE_DATA_DIR).toBeUndefined();
+    expect(directEnv.CLINE_MCP_SETTINGS_PATH).toBeUndefined();
     expect(ag.configSubdir).toBe("cline");
     expect(ag.mcpFormat).toBe("mcpServers"); // cline_mcp_settings.json 的键名同为 mcpServers
     expect(ag.mcpConfigFile).toBe("mcp.json");
@@ -515,8 +519,8 @@ describe("resolveAgent agent", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "opencode";
     const opencode = resolveAgent();
-    const managed = agentEnv(opencode, path.join(scratch, "view"), [], scratch);
-    expect(managed.XDG_CONFIG_HOME).toBe(path.join(scratch, "view"));
+    const managed = agentEnv(opencode, path.join(scratch, "sandbox"), [], scratch);
+    expect(managed.XDG_CONFIG_HOME).toBe(path.join(scratch, "sandbox"));
     expect(managed.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("1");
     const direct = agentEnv(opencode, opencode.realHome!, [], scratch, { direct: true });
     expect(direct.XDG_CONFIG_HOME).toBe(process.env.XDG_CONFIG_HOME);
@@ -567,8 +571,10 @@ describe("resolveAgent agent", () => {
     expect(agentEnv(ag, path.join("/tmp", "wemind-home")).CLAUDE_CONFIG_DIR).toBe(
       path.join("/tmp", "wemind-home", "claude"),
     );
-    // home 直接指向真实目录：CLAUDE_CONFIG_DIR 必须是 ~/.claude，而不是 ~/.claude/claude
-    expect(agentEnv(ag, ag.realHome!).CLAUDE_CONFIG_DIR).toBe(ag.realHome);
+    // direct：不注入 CLAUDE_CONFIG_DIR，让适配器像终端一样自己读 ~/.claude
+    expect(
+      agentEnv(ag, ag.realHome!, [], DATA_DIR, { direct: true }).CLAUDE_CONFIG_DIR,
+    ).toBeUndefined();
     // 记忆/技能继承；凭据同步（OAuth 登录态）
     expect(ag.realHome).toBe(path.join(os.homedir(), ".claude"));
     expect(ag.inheritDirs).toEqual(["skills", "agents", "commands"]);

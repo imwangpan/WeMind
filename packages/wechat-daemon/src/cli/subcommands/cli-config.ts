@@ -12,10 +12,8 @@ import {
   getConfigPath,
   mutateConfigFile,
   parseCliValue,
-  patchWithDelete,
   readConfigObject,
   resolveAgentConfigFileByName,
-  setConfigPath,
 } from "../../agents/config/agent-config-writer.js";
 import {
   captureEnvSnapshot,
@@ -32,12 +30,7 @@ import {
   normalizeHomeMode,
   type HomeMode,
 } from "../../agents/config/home-mode.js";
-import {
-  overlayPath,
-  readOverlay,
-  writeOverlay,
-  type AgentOverlay,
-} from "../../agents/config/overlay.js";
+import { overlayPath, readOverlay, writeOverlay } from "../../agents/config/overlay.js";
 import {
   defaultWorkspacePath,
   loadWorkspaceConfig,
@@ -70,39 +63,6 @@ function parseOpts(rest: string[]): Opts {
   return opts;
 }
 
-function splitFileAndPath(value: string, fallbackFile?: string): { file: string; keyPath: string } {
-  const i = value.indexOf("#");
-  if (i >= 0) return { file: value.slice(0, i), keyPath: value.slice(i + 1) };
-  if (!fallbackFile) throw new Error("需要文件路径：用 <file>#<键路径> 或 --file <file>");
-  return { file: fallbackFile, keyPath: value };
-}
-
-function deepMergeKeepNull(
-  a: Record<string, unknown>,
-  b: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...a };
-  for (const [k, v] of Object.entries(b)) {
-    if (
-      v &&
-      typeof v === "object" &&
-      !Array.isArray(v) &&
-      out[k] &&
-      typeof out[k] === "object" &&
-      !Array.isArray(out[k])
-    )
-      out[k] = deepMergeKeepNull(out[k] as Record<string, unknown>, v as Record<string, unknown>);
-    else out[k] = v;
-  }
-  return out;
-}
-
-function defaultOverlayFile(agent: string): string {
-  const preset = ACP_AGENT_PRESETS[agent.toLowerCase()];
-  if (!preset) throw new Error(`未知 agent「${agent}」`);
-  return preset.settingsBase ?? preset.mcpConfigFile ?? "settings.json";
-}
-
 function openEditor(file: string): void {
   const editor =
     process.env.VISUAL?.trim() ||
@@ -131,7 +91,7 @@ function showConfig(dir: string, key: string): string {
   const lines = [
     `账号 ${key}`,
     `homeMode：${mode} — ${homeModeDescription(mode)}`,
-    "说明：view 无法生成视图时本次运行降级 direct（不修改 runtime.json），下次启动仍会重试。",
+    "说明：direct 不写 Agent 配置；需要账号隔离时切 sandbox。",
     `runtime.json：${homeModePath(dir)}`,
     `brain：${brain}；worker：${worker}`,
     `brain realHome：${realHomeOf(brain)}`,
@@ -160,7 +120,6 @@ function realHomeOf(agent: string): string {
 
 async function cmdOverlay(rest: string[], opts: Opts, dir: string, agent: string): Promise<string> {
   const sub = (rest.shift() ?? "show").toLowerCase();
-  const fileDefault = opts.file || defaultOverlayFile(agent);
   const read = readOverlay(agent, dir);
   if (read.problems.length) throw new Error(read.problems.join("；"));
   if (sub === "show") {
@@ -168,36 +127,17 @@ async function cmdOverlay(rest: string[], opts: Opts, dir: string, agent: string
       `agent：${agent}`,
       `overlay：${overlayPath(agent, dir)}`,
       jsonText(read.overlay),
-      "提示：未写 overlay 的键沿用视图副本里的值（由真实配置生成）；修改真实配置用 `wemind config agent ...`。没有配置目录环境变量的 agent 在 view 下会降级 direct，overlay 不生效；需要时用 homeMode=sandbox。",
+      "提示：微信侧 overlay 只支持 mcp.disable / mcp.extra（会话级、不落盘）。修改 Agent 真实配置用 `wemind config agent ...`；默认改真实配置，只有明确说“微信侧/仅微信”时才用 overlay。",
     ].join("\n");
   }
   if (sub === "edit") {
     openEditor(overlayPath(agent, dir));
     return `已关闭编辑器。overlay：${overlayPath(agent, dir)}\n下一条新会话生效（当前会话不热改）。`;
   }
-  if (sub !== "get" && sub !== "set" && sub !== "unset")
-    throw new Error("用法：config wechat show|get|set|unset|edit <agent> ...");
-  const target = rest.shift();
-  if (!target) throw new Error("需要 <file#键路径> 或 <键路径>");
-  const { file, keyPath } = splitFileAndPath(target, fileDefault);
-  const overlay: AgentOverlay = {
-    ...read.overlay,
-    config: { ...read.overlay.config },
-  };
-  if (sub === "get") {
-    return jsonText(getConfigPath(overlay.config?.[file] ?? {}, keyPath));
-  }
-  if (sub === "set") {
-    const raw = rest.shift();
-    if (raw === undefined) throw new Error("需要值");
-    const patch = setConfigPath(overlay.config?.[file] ?? {}, keyPath, parseCliValue(raw));
-    overlay.config = { ...overlay.config, [file]: patch };
-  } else {
-    const patch = deepMergeKeepNull(overlay.config?.[file] ?? {}, patchWithDelete(keyPath));
-    overlay.config = { ...overlay.config, [file]: patch };
-  }
-  writeOverlay(agent, overlay, dir);
-  return `已写入微信侧 overlay：${overlayPath(agent, dir)}\n文件：${file}\n键：${keyPath}\n下一条新会话生效（当前会话不热改）。`;
+  throw new Error(
+    "微信侧 overlay 只支持 mcp.disable / mcp.extra：用 `config wechat edit <agent>` 直接编辑；" +
+      "要改 Agent 配置请用 `config agent ...`（默认改真实配置）。",
+  );
 }
 
 function cmdRealAgent(rest: string[], opts: Opts, dir: string, agent: string): string {
@@ -208,7 +148,7 @@ function cmdRealAgent(rest: string[], opts: Opts, dir: string, agent: string): s
       `agent：${agent}`,
       `真实配置：${file}`,
       `格式：${configFileFormat(file)}`,
-      "提示：默认修改真实配置；只说“微信侧/仅微信”时才写 overlay（只作用于视图副本，不改真实文件；direct 模式或没有配置目录环境变量的 agent 下无效）。",
+      "提示：这里直接改 Agent 真实配置，微信侧与终端共用；只有明确说“微信侧/仅微信”时才用 `config wechat`。",
     ].join("\n");
   }
   if (sub === "edit") {
@@ -245,16 +185,13 @@ export async function cmdConfig(rest: string[]): Promise<string> {
     if (!raw)
       return `账号 ${key} 的 homeMode：${readHomeMode(dir)}（${homeModeDescription(readHomeMode(dir))}）`;
     const mode = normalizeHomeMode(raw);
-    if (!mode)
-      throw new Error(
-        "homeMode 只能是 view / direct / sandbox（旧值 real / mirror 会映射为 view）",
-      );
+    if (!mode) throw new Error("homeMode 只能是 direct / sandbox");
     writeHomeMode(mode as HomeMode, dir);
     return `账号 ${key} 的 homeMode 已设为 ${mode}。重启 daemon 后生效：wemind stop ${key} && wemind start ${key}`;
   }
   if (sub === "reload") {
     if (bridgeReady(key)) return await viaBridge(key, { kind: "config.reload" });
-    throw new Error(`账号 ${key} 的 daemon 未运行，无法重载；下次启动会自动重建配置视图。`);
+    throw new Error(`账号 ${key} 的 daemon 未运行，无法重载；下次启动会重新读取配置。`);
   }
   if (sub === "agent") {
     const agent = rest.shift();
@@ -353,7 +290,7 @@ export function cmdMcp(rest: string[], keySel?: string): string {
     if (!name) throw new Error("需要 MCP 名字");
     const r = addMcp(name, ag, dir);
     return r.ok
-      ? `${r.text}\n用 \`wemind config reload --key ${key}\` 让 daemon 重建配置视图。`
+      ? `${r.text}\n用 \`wemind config reload --key ${key}\` 让 daemon 重启大脑。`
       : r.text;
   }
   if (sub === "disable") {
@@ -363,8 +300,8 @@ export function cmdMcp(rest: string[], keySel?: string): string {
     const disable = [...new Set([...(ov.mcp?.disable ?? []), name])];
     writeOverlay(ag.name, { ...ov, mcp: { ...ov.mcp, disable } }, dir);
     const r = removeMcp(name, ag, dir);
-    const how = r.ok ? `已从当前视图卸载（${r.text}）` : "当前未激活，无需卸载";
-    return `已禁用「${name}」：${how}。用 \`wemind config reload --key ${key}\` 让 daemon 重建配置视图。`;
+    const how = r.ok ? `已从当前集合卸载（${r.text}）` : r.text;
+    return `已禁用「${name}」：${how}。用 \`wemind config reload --key ${key}\` 让 daemon 重启大脑。`;
   }
   if (sub === "add") {
     const name = rest.shift();

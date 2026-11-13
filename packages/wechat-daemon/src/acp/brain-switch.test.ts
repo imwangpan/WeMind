@@ -19,7 +19,7 @@ fs.mkdirSync(dataDir, { recursive: true });
 process.env.WECHAT_DATA_DIR = dataDir;
 process.env.WEMIND_MCP_CATALOG = path.join(root, "no-such-catalog.json"); // 别去读用户真实的 MCP 配置
 process.env.WEMIND_SWITCH_DRAIN_MS = "400"; // drain 门缩短，好测超时分支
-// 本文件会真实构建配置视图；不覆盖 realHome 的话，默认预设会去读写当前用户真实的 ~/.kiro 等目录。
+// 本文件会真实构建 sandbox 副本；不覆盖 realHome 的话，默认预设会去读写当前用户真实的 ~/.kiro 等目录。
 const realHome = path.join(root, "real-home");
 fs.mkdirSync(realHome, { recursive: true });
 const savedRealHome = process.env.WEMIND_BRAIN_REAL_HOME;

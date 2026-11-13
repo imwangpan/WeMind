@@ -1,6 +1,6 @@
 /**
  * MCP 配置的「格式」适配：不同 ACP agent 把 MCP server 定义放在不同文件、不同键路径里。
- * 本模块只做纯数据的组织/解析（无文件 IO），便于单测；沙箱/视图层（mcp-sandbox.ts、worker-sandbox.ts）负责写入磁盘。
+ * 本模块只做纯数据的组织/解析（无文件 IO），便于单测；沙箱层（mcp-sandbox.ts、worker-sandbox.ts）负责写入磁盘。
  *
  * 取值是 JSON 里的**键路径**，与 agent 名无关：
  * - `mcpServers`：`{ "mcpServers": { 名: {command,args,env} } }`

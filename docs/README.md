@@ -66,7 +66,7 @@
 
 - [文档守卫设计](设计文档/文档守卫设计.md) —— 三个守卫脚本（doc-impact / check-agent-docs / gen-docs-tables）的设计、运行方式、已知边界与维护指南
 - [源码目录分层设计](设计文档/源码目录分层设计.md) —— `packages/wechat-daemon/src/` 的 8 个一级 + 6 个二级目录分层、A/B 类文件拆分、按目录分批的实施与文档同步流程（已实施）
-- [WeMind 接入本机 Agent 工作模式设计与实现](设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md) —— 让 daemon / worker 直接使用本机 Agent 的真实配置、技能、记忆与会话；`view` / `direct` / `sandbox` 三种模式（`view` 失败时本次降级 `direct`）、微信 overlay、工作区、MCP 策略、yolo、迁移与验收
+- [WeMind 接入本机 Agent 工作模式设计与实现](设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md) —— 让 daemon / worker 直接使用本机 Agent 的真实配置、技能、记忆与会话；`direct`（默认）/ `sandbox` 两种模式、微信 overlay、工作区、MCP 策略、yolo、迁移与验收
 
 ### 历史归档（明确标注，不作为现行说明）
 

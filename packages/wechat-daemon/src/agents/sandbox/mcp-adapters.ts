@@ -20,7 +20,7 @@ export type AcpConversion = { servers: AcpMcpDeclaration[]; skipped: string[] };
 
 /**
  * 一种 MCP **文件格式**的适配器：把「这种格式的 MCP 放在哪、长什么样、怎么写、怎么交给 ACP」
- * 集中到一处。brain/worker 的视图/沙箱层只负责算激活集/排除集，不再按 agent 名或格式分支。
+ * 集中到一处。brain/worker 的沙箱层只负责算激活集/排除集，不再按 agent 名或格式分支。
  *
  * 实现按**文件格式**划分，与 agent 名无关（多个 agent 可以共用同一种格式）：
  * - `jsonMcpServers`：顶层 `{ "mcpServers": { 名: {...} } }`
@@ -31,11 +31,11 @@ export interface McpAdapter {
   readonly id: "jsonMcpServers" | "jsonMcpNested" | "tomlMcpServers";
   /** Agent 自己会加载、WeMind 改不了的原生 MCP（目前只有 Codex） */
   readonly nativeOwned: boolean;
-  /** view 视图下也要重建设置基底（MCP 与其它设置同文件时，不能直接链接真实文件） */
+  /** 设置基底里要剥离的键（sandbox 重建配置文件时调用） */
   readonly rebuildSettingsInView: boolean;
   /** 读真实目录文件里的 MCP 定义（只读；缺失/损坏返回空表） */
   readCatalog(file: string): McpCatalog;
-  /** 把「当前有效集合」写进视图/沙箱文件，保留同文件的其它键 */
+  /** 把「当前有效集合」写进沙箱文件，保留同文件的其它键 */
   writeCatalog(file: string, servers: McpCatalog): void;
   /** 从设置基底里删掉该格式的 MCP 段（`ag.settingsStrip` 之外的那部分） */
   stripSettings(base: McpCatalog): void;
@@ -43,7 +43,7 @@ export interface McpAdapter {
   toAcp(servers: McpCatalog, exclude?: Iterable<string>): AcpConversion;
   /** 该 Agent 原生加载的 MCP（非原生适配器返回空表） */
   nativeCatalog(file: string): McpCatalog;
-  /** `sandbox` 模式下继承「除 MCP 外」的设置；view 由配置视图链接，不调用 */
+  /** `sandbox` 模式下继承「除 MCP 外」的设置；direct 不调用（直接用真实文件） */
   inheritSettings?(ag: ResolvedAgent, realHome: string, targetConfigDir: string): void;
 }
 

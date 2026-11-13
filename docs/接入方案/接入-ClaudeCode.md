@@ -1,6 +1,6 @@
 # 接入 Claude Code（ACP 适配器）
 
-> **2026-11-13 口径**：默认 `homeMode=view`，Claude Code 没有 `homeEnvVar`，微信侧本次运行降级 `direct`，直接使用真实 `~/.claude`（`CLAUDE_CONFIG_DIR` 指向它），并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/claude`）。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 不写任何 Agent 配置，Claude Code 直接读真实 `~/.claude`，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`（此时配置落到 `<沙箱>/claude`）。
 
 > **最后核对**：2026-11-12 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / 强杀后 `session/load` / stdio MCP / `bypassPermissions`）；**真机微信单轮 E2E 已通过**（2026-10-31）；重启续聊 / MCP 加载 / 任务派发待真机复测。
 >
@@ -65,7 +65,7 @@ claude-agent-acp --version     # 0.99.1
 
 适配器把认证交给 Claude Code，支持：
 
-- `claude` 登录（OAuth）：登录态在 `~/.claude/.credentials.json`（macOS 可能在 Keychain）；默认 `view` 降级 `direct`，直接共用真实 `~/.claude`（WeMind 只读，不改写真实配置；没有 `homeEnvVar`，微信侧 MCP/overlay 不生效），`sandbox` 下才把 `.credentials.json` 同步进沙箱。
+- `claude` 登录（OAuth）：登录态在 `~/.claude/.credentials.json`（macOS 可能在 Keychain）；默认 `direct` 直接共用真实 `~/.claude`（WeMind 只读，不改写真实配置；没有 `homeEnvVar`，MCP 由 ACP 全量下发、overlay 的 disable/extra 仍可用），`sandbox` 下才把 `.credentials.json` 同步进沙箱。
 - 环境变量：`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`；自定义网关再加 `ANTHROPIC_BASE_URL`。这些变量要对 **daemon 进程**生效（§4.9：密钥不写进 agent 配置）。
 
 **WeMind 不复制 `settings.json`**：这份文件经常把网关 token 放在 `env` 里；按仓库纪律，凭据由 daemon 环境提供，不写进 agent 配置。因此你在 Claude Code 里设的 `hooks` / `permissions` 也不会带进微信大脑——权限由 `sessionMode`（见 §3）负责。**模型不由 WeMind 下发**（预设没有 `model` 字段，`applyAcpModel()` 见 `!ag.model` 就直接返回），跟随 Claude Code 自身配置与 daemon 环境；要固定就 `wemind brain set claude-code --model "…"` 再 `wemind brain switch claude-code` 应用。
@@ -97,8 +97,8 @@ claude-agent-acp --version     # 0.99.1
 逐项说明：
 
 - **`bin` 不再写 `npx`**：全局适配器本体就是 ACP server，`args` 为空。`shell: true` 是因为 Windows 上 npm 产出的是 `.cmd` shim。
-- **配置目录**：默认 `view` 降级 `direct` 下 `CLAUDE_CONFIG_DIR=~/.claude`，直接使用终端同一份配置；`sandbox` 下才指到 `<沙箱>/claude`。实测（Claude Code 2.1.314）在隔离目录里它会连 `~/.claude.json` 一起搬进去，用户级 MCP 不会漏进大脑。
-- **记忆/技能**：`view` / `direct` 下 `CLAUDE.md`、`skills/`、`agents/`、`commands/` 直接来自真实 `~/.claude`；`sandbox` 下 `CLAUDE.md` 复制、目录用 junction/symlink 共享。`settings.json`、`plugins/` 不继承（插件可自带 MCP）。
+- **配置目录**：默认 `direct` 下 `CLAUDE_CONFIG_DIR=~/.claude`，直接使用终端同一份配置；`sandbox` 下才指到 `<沙箱>/claude`。实测（Claude Code 2.1.314）在隔离目录里它会连 `~/.claude.json` 一起搬进去，用户级 MCP 不会漏进大脑。
+- **记忆/技能**：`direct` 下 `CLAUDE.md`、`skills/`、`agents/`、`commands/` 直接来自真实 `~/.claude`；`sandbox` 下 `CLAUDE.md` 复制、目录用 junction/symlink 共享。`settings.json`、`plugins/` 不继承（插件可自带 MCP）。
 - **MCP 走 ACP**：`mcpViaAcp: true`，激活集随 `session/new|load` 的 `mcpServers` 下发，不写配置文件。目录取真实 `~/.claude.json` 的 `mcpServers`（`catalogFile` 用 `..` 回到 home）；`wechat` 永久禁止。
 - **免审批**：`sessionMode: "bypassPermissions"`。适配器**不解析** `--dangerously-skip-permissions` 之类的 CLI flag；WeMind 在 `session/new|load|resume` 之后调用 `session/set_mode`。实测该模式下 MCP 工具调用**不再发** `session/request_permission`。
 - **图片**：预设不设 `images: false`，即按支持图片处理；适配器 `initialize` 的 `promptCapabilities.image = true`。
@@ -115,7 +115,7 @@ claude-agent-acp --version     # 0.99.1
 | `initialize` 能力 | `loadSession: true`；`sessionCapabilities` 含 `resume / close / delete / fork / list / additionalDirectories / systemPrompt`（按条件还有 `subagents`）；`promptCapabilities.image: true`、`embeddedContext: true`；`mcpCapabilities: { http: true, sse: true }`（**没有声明 stdio，但实测 stdio 可用**） |
 | `session/new` | 成功；`modes` = `default / acceptEdits / plan / auto / bypassPermissions`；`configOptions` = `mode / model / effort / ultracode`（`fast` 仅当前模型支持快速模式时出现，`agent` 仅配置了自定义 agent 时出现） |
 | `session/set_mode` | `bypassPermissions` → `{}`（成功）；随后 MCP 工具调用**0 反向请求** |
-| MCP（stdio） | 可用：假 MCP 的 `echo` 工具以 `mcp__probe__echo` 暴露并被模型真实调用（`ECHO:hello`）；不设 `bypassPermissions` 时会发 `session/request_permission`，宿主默认拒绝即失败——**这是 WeMind 默认 deny 的正常表现** |
+| MCP（stdio） | 可用：假 MCP 的 `echo` 工具以 `mcp__probe__echo` 暴露并被模型真实调用（`ECHO:hello`）；不设 `bypassPermissions` 时会发 `session/request_permission`，宿主默认 yolo 放行（`WEMIND_ACP_AUTO_ALLOW=0` 时回 `cancelled`） |
 | 强杀后恢复 | `session/load` 成功；PINEAPPLE 上下文保留 |
 | 反向请求 | `bypassPermissions` 下为 0；`default` 模式下 MCP 工具调用会触发 `session/request_permission` |
 | 耗时 | `session/new` ~1.2s、`session/load` ~1.0s、首帧 2–246ms、**首段正文 7.9–11.9s**；一轮 prompt 8–12s |
@@ -144,7 +144,7 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 大脑自检（claude-code，bin=claude-agent-acp.cmd）：ACP 握手成功（initialize + session/new，sessionId=…，mode=bypassPermissions）（1987ms）
 ```
 
-> `home_env=(无)` **不代表没有配置目录**——它只反映预设的 `homeEnvVar` 字段（claude-code 没设）。`view` 降级 `direct` 下 `CLAUDE_CONFIG_DIR=~/.claude`；`sandbox` 下才是 `<沙箱>/claude`。codex 同样是 `(无)`，而它**确实没有可由 WeMind 替换的配置目录**（cwd 始终是角色工作区，见 [接入-Codex.md](接入-Codex.md) §4.5）。
+> `home_env=(无)` **不代表没有配置目录**——它只反映预设的 `homeEnvVar` 字段（claude-code 没设）。`direct` 下 `CLAUDE_CONFIG_DIR=~/.claude`；`sandbox` 下才是 `<沙箱>/claude`。codex 同样是 `(无)`，而它**确实没有可由 WeMind 替换的配置目录**（cwd 始终是角色工作区，见 [接入-Codex.md](接入-Codex.md) §4.5）。
 
 ### 5.2 经过微信（2026-10-31 单轮已通过）
 
@@ -166,8 +166,8 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 | `找不到大脑「claude-code」的适配器「claude-agent-acp」` | 没全局安装。`npm i -g @agentclientprotocol/claude-agent-acp`；装完仍找不到就 `wemind brain set claude-code --bin "<绝对路径>"` |
 | `Claude native binary not found for win32-x64` | 适配器的 optional 依赖没装上（常见于 `--omit=optional` / 网络中断）。重装时不要 omit optional；或设 `CLAUDE_CODE_EXECUTABLE` 指向本机 `claude` |
 | `session/new` 报认证失败 | 没登录且 daemon 环境没有 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`；先 `claude` 登录，或把变量放到 daemon 环境 |
-| `bypassPermissions` 没生效（日志「跳过」） | 以 root 运行且没设 `IS_SANDBOX=1`，适配器不提供该模式；WeMind 会跳过 `set_mode`，权限请求回到应答器（默认拒绝） |
-| 工具调用被拒 | `WEMIND_ACP_SESSION_MODE=0` 关掉了 `set_mode`，或模式不可用；恢复默认或设 `WEMIND_ACP_AUTO_ALLOW=1`（逐次放行，不是放宽沙箱） |
+| `bypassPermissions` 没生效（日志「跳过」） | 以 root 运行且没设 `IS_SANDBOX=1`，适配器不提供该模式；WeMind 会跳过 `set_mode`，权限请求回到应答器（默认 yolo；`WEMIND_ACP_AUTO_ALLOW=0` 时拒绝） |
+| 工具调用被拒 | `WEMIND_ACP_SESSION_MODE=0` 关掉了 `set_mode`，或模式不可用；恢复默认；仍被拒时确认 `WEMIND_ACP_AUTO_ALLOW` 没有被设成 `0`（默认放行，不是放宽沙箱） |
 | 连接慢 / 第一次回复慢 | 首次要起 SDK 与原生 Claude Code；实测首段正文 8–12s。npx 会更慢 |
 | `claude-agent-acp` 升级后行为变了 | 适配器 pre-1.0，能力/字段可能漂移；按 §8 重跑探针并更新 `brain-agents.ts` 注释与本文 |
 
@@ -176,7 +176,7 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 已确认的限制（均来自上文实测与预设配置）：
 
 - **必须全局安装，且 Node ≥22**：适配器是 daemon spawn 出来的子进程，继承 daemon 的 PATH 与 Node；`agentProblem()` 只查 PATH 上有没有 bin、**不查版本**，所以 Node 20 的 daemon 能通过 `wemind brain` 预检、却会在 spawn/握手时失败（§2.1）。
-- **`settings.json` / `plugins/` 的落点随模式变化**：`view` 降级 `direct` / 显式 `direct` 下直接使用真实 `~/.claude`，你在 Claude Code 里设的 `hooks` / `permissions` / 插件会生效；`sandbox` 下才不继承 `settings.json` / `plugins/`，权限由 `sessionMode` 负责（§2.2、§3）。两种模式都不把 `wechat` MCP 带进大脑（`direct` 只告警，需用户自己移除）。
+- **`settings.json` / `plugins/` 的落点随模式变化**：`direct` 下直接使用真实 `~/.claude`，你在 Claude Code 里设的 `hooks` / `permissions` / 插件会生效；`sandbox` 下才不继承 `settings.json` / `plugins/`，权限由 `sessionMode` 负责（§2.2、§3）。`direct` 发现 `wechat` MCP 只告警；WeMind 自己生成的集合永久排除它。
 - **模型不由 WeMind 下发**：预设没有 `model` 字段，跟随 Claude Code 自身配置与 daemon 环境；要固定需 `wemind brain set claude-code --model "…"` 并应用（§2.2）。
 - **`bypassPermissions` 是全量放行**：消息一旦被 daemon 接受，AI 就能在运行 daemon 的机器上执行工具（含 shell / 写文件）；唯一能收紧的开关是 `WEMIND_ACP_SESSION_MODE=0`（§7）。
 - **首轮回复慢**：首次要起 SDK 与原生 Claude Code，实测首段正文 7.9–11.9s、一轮 prompt 8–12s（§4）。
@@ -187,9 +187,9 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 ## 7. 安全
 
 - `bypassPermissions` = 接受所有权限：**消息一旦被 daemon 接受，AI 就能在运行 daemon 的机器上执行工具（含 shell / 写文件）**。这是「微信远程干活」的前提；唯一的闸是微信侧「只有登录者能发」+ `allowFrom` 兜底。
-- 想收紧：`WEMIND_ACP_SESSION_MODE=0`（关掉 `set_mode`，回到 Claude Code 自己的审批流程；WeMind 侧权限应答器默认拒绝权限请求）。**这是唯一能收紧的开关**。
-- `WEMIND_ACP_AUTO_ALLOW=1` **不是收紧手段，是放宽**：它让宿主对每一次 `session/request_permission` 自动选 `allow_once`/`allow_always`（`acp-reverse.ts`），效果接近 `bypassPermissions`。只在「工具调用一直被拒、确实要放宽」时用。
-- `sandbox` 里**没有** `settings.json` / `plugins/`；`view` / `direct` 下它们是真实 `~/.claude` 的一部分。`wechat` MCP 永远不进 WeMind 生成的大脑 MCP 集（防回环）；`direct` 不生成 MCP 集，发现 `wechat` 只告警。
+- 想收紧：`WEMIND_ACP_SESSION_MODE=0`（关掉 `set_mode`，回到 Claude Code 自己的审批流程）。**`WEMIND_ACP_AUTO_ALLOW=0` 让 WeMind 侧应答器恢复逐次拒绝，两个开关合起来才是完整收紧。**
+- `WEMIND_ACP_AUTO_ALLOW` **默认就是放行**（等价于旧版 `=1`）：宿主对每一次 `session/request_permission` 自动选 `allow_once`/`allow_always`（`acp-reverse.ts`），效果接近 `bypassPermissions`。只有设成 `0`/`false`/`off`/`no` 才是逐次拒绝。
+- `sandbox` 里**没有** `settings.json` / `plugins/`；`direct` 下它们是真实 `~/.claude` 的一部分。`wechat` MCP 永远不进 WeMind 生成的 MCP 集（防回环）；`direct` 的真实配置发现 `wechat` 只告警。
 
 ---
 

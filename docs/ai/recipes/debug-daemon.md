@@ -18,7 +18,7 @@
 | 回复突然停 / 「接近微信连续消息上限」 | 进度条数 | iLink 连发上限 ~10；回「继续」恢复 |
 | 重启后「它忘了」 | `session/load failed` / `session/resume` | agent 不支持 load，或 resume 参数/cwd 不对 |
 | 发图报错/重试 | `prompt FAIL` + `-32602` | agent `image:false`（如 DSH 官方） |
-| DSH 报 `no API key for ... deepseek-official` 或连接错误 | agent 的 model / 路由 | 桥插件（`@deepseek-ai/dsh-acp`）的 bundle patch 写死了 `- id: acp` 的 `provider/model`。在**真实 profile** 里补 `- id: acp`（值取自 `agent-default-model`；`wemind brain` 给片段）——不少配置工具只写 `agent-default-model` / `web-search-deepseek`，只写一边会半配置。WeMind 在 view 模式链接整个 `profiles/`、sandbox 模式复制（不追加条目），direct 直接用真实 `~/.dsh`；默认模型按「优先 `- id: acp`，否则 `agent-default-model`」读，会话建立后发 `set_config_option`；**没写 `--model` 时**，读不到默认才回退旧 `deepseek-account/deepseek-flash`（rc.3 已失效，只记 WARN）；显式 `--model auto`/`default` 读不到时**不下发**（DSH 用回自带的 `deepseek-official/deepseek-v4-flash`，仍需 API key）。provider 自己的凭据/依赖（如自建网关是否在运行）按该 provider 的文档排查——核对 `wemind brain` 的「生效」行 `model=` 与 profile 是否一致 |
+| DSH 报 `no API key for ... deepseek-official` 或连接错误 | agent 的 model / 路由 | 桥插件（`@deepseek-ai/dsh-acp`）的 bundle patch 写死了 `- id: acp` 的 `provider/model`。在**真实 profile** 里补 `- id: acp`（值取自 `agent-default-model`；`wemind brain` 给片段）——不少配置工具只写 `agent-default-model` / `web-search-deepseek`，只写一边会半配置。WeMind 在 direct 直接用真实 `~/.dsh`、sandbox 模式复制（不追加条目）；默认模型按「优先 `- id: acp`，否则 `agent-default-model`」读，会话建立后发 `set_config_option`；**没写 `--model` 时**，读不到默认才回退旧 `deepseek-account/deepseek-flash`（rc.3 已失效，只记 WARN）；显式 `--model auto`/`default` 读不到时**不下发**（DSH 用回自带的 `deepseek-official/deepseek-v4-flash`，仍需 API key）。provider 自己的凭据/依赖（如自建网关是否在运行）按该 provider 的文档排查——核对 `wemind brain` 的「生效」行 `model=` 与 profile 是否一致 |
 | 多账号互相抢消息 | `list` / 进程 | 同一 bot token 起了多个 daemon，或 brain 加载了 `wechat` MCP |
 | worker 任务不动 | `wemind task-list` | worker 超时/权限/agent 不支持；看 `.../worker` 日志 |
 | 切换大脑失败 / 回滚 | 答复 + `wemind brain` | 目标 agent 不可用、新大脑启动超时（120s）、等在途回合结束超时（30s）、`WEMIND_BRAIN` 压着命令 |
@@ -85,11 +85,10 @@ wemind session list <key|label>
 | `handoff.json` | 交接摘要（切脑后带上一次；24h TTL） |
 | `control-inbox/` / `control-out/` | CLI ↔ daemon 控制桥；`control-out/.bridge` = daemon 自己的 pid（认桥凭据） |
 | `brain-mcps.json` | 当前激活的 MCP（按 agent 分键） |
-| `runtime.json` | 账号级 `homeMode`（缺省 `view`） |
-| `agent-view/` | `view` 的最小配置视图（仅 `homeEnvVar` Agent；技能/记忆/会话链接真实 home）；`direct` 不生成 |
+| `runtime.json` | 账号级 `homeMode`（缺省 `direct`） |
 | `agent-overrides/` | 微信独享配置 patch |
 | `workspace/` / `workspace.json` | brain/worker 默认工作区 |
-| `media/inbound/` | `view`/`direct` 的入站媒体（`sandbox` 才在 `<sandbox>/media/inbound`） |
+| `media/inbound/` | `direct` 的入站媒体（`sandbox` 才在 `<sandbox>/media/inbound`） |
 | `brain-home/` / `worker-home/` | **仅 `sandbox` 模式**的配置沙箱 |
 | `daemon.pid` | daemon 进程 |
 | `brain.pid` | 大脑进程**身份记录**（JSON：pid/agent/bin/args/shell） |
@@ -158,7 +157,7 @@ wemind brain
 - 卡在 `initialize` → 不是 ACP，或参数没进入 ACP server 模式；
 - Windows `.cmd`/`npx` → `shell: true`（agent 或 `WEMIND_BRAIN_SHELL=1`）；
 - 路径含空格/`&` → 用绝对路径 + `shell`，并确认 `spawnAgent` 的引号逻辑；
-- 反向请求无应答 → **不会发生了**：brain / worker / `brain check` 三处共用 `acp-reverse.ts` 的应答器，权限请求默认回 `cancelled`、未知 method 回 `-32601`，对端不会挂起。要逐次放行设 `WEMIND_ACP_AUTO_ALLOW=1`（见 `docs/ai/recipes/add-acp-agent.md`）。
+- 反向请求无应答 → **不会发生了**：brain / worker / `brain check` 三处共用 `acp-reverse.ts` 的应答器，权限请求默认 yolo 放行、未知 method 回 `-32601`，对端不会挂起。要恢复逐次拒绝设 `WEMIND_ACP_AUTO_ALLOW=0`（见 `docs/ai/recipes/add-acp-agent.md`）。
 
 ### 3.4 重启后上下文丢失
 
@@ -171,7 +170,7 @@ wemind brain
 
 - agent 不支持 `session/load` → 需要 `session/resume` 兜底；DSH 属此类；
 - `resume` 失败 → 检查 `cwd`、`mcpServers`、会话是否已持久化；
-- 想彻底重来 → 微信「新会话」，或删 `brain-sessions.json` + `session-registry.json`。默认 `view` / `direct` 下对话历史在 Agent 自己的真实会话库、与终端共用，WeMind 不替你删；`sandbox` 模式才在 `brain-home`/`worker-home` 或 `agent-sessions/` 下。
+- 想彻底重来 → 微信「新会话」，或删 `brain-sessions.json` + `session-registry.json`。默认 `direct` 下对话历史在 Agent 自己的真实会话库、与终端共用，WeMind 不替你删；`sandbox` 模式才在 `brain-home`/`worker-home` 或 `agent-sessions/` 下。
 
 ### 3.5 连发上限 / 进度刷屏
 

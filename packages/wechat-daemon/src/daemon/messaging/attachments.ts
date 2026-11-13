@@ -74,7 +74,7 @@ function isUnderRoot(file: string, root: string): boolean {
 }
 
 /**
- * agent 配置文件可能含网关 token / 默认 provider：除了数据目录（含 agent-view / brain-home / worker-home），
+ * agent 配置文件可能含网关 token / 默认 provider：除了数据目录（含 brain-home / worker-home），
  * 各 preset 的 `realHome` 原件同样不能外发（如 `~/.copilot/config.json`、`~/.claude/settings.json`、
  * `~/.pi/agent/models*.json`）。
  */

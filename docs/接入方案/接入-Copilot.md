@@ -1,10 +1,10 @@
 # 接入 GitHub Copilot CLI
 
-> **2026-11-13 口径**：默认 `homeMode=view`，微信侧使用 `<账号>/agent-view/<role>/<agent>/` 配置视图，并与终端共享真实配置、技能、记忆与会话库；`direct` 不生成视图、由 Agent 直接读真实配置；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 不写任何 Agent 配置，Agent 直接读真实 home，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
 
 > **最后核对**：2026-11-12 ｜ **实测环境**：Windows 11、Node 24.21.0、GitHub Copilot CLI 1.0.107 ｜ **状态**：✅ 已内置预设并通过 ACP 探针；WeChat brain/worker 真机 E2E 待验证。
 
-Copilot CLI 原生支持 ACP，可作为 WeMind 的对话大脑与任务 worker。内置 `copilot` 预设把 `COPILOT_HOME` 指向配置视图（`view`）或账号沙箱（`sandbox`）；`direct` 不注入 `COPILOT_HOME`、由 Agent 直接读真实配置。登录配置与个人指令/技能按模式链接或同步；`view` / `sandbox` 下 MCP 按 WeMind 激活集经 ACP 提供，`wechat` 始终排除；`direct` 下 MCP 由真实配置决定。
+Copilot CLI 原生支持 ACP，可作为 WeMind 的对话大脑与任务 worker。内置 `copilot` 预设默认 `direct`：不注入 `COPILOT_HOME`，由 Agent 直接读真实配置；`sandbox` 才把 `COPILOT_HOME` 指向账号沙箱，并同步登录配置与个人指令/技能。`direct` 下 MCP 全量来自真实配置（经 ACP 下发），`sandbox` 按 WeMind 激活集提供；WeMind 自己生成的集合永久排除 `wechat`。
 
 ## 1. 安装与认证
 
@@ -17,9 +17,9 @@ copilot login
 copilot --version
 ```
 
-预设会把 `~/.copilot/config.json` 同步到各自的 `COPILOT_HOME` 配置视图/沙箱；用户 MCP 配置文件不会复制。无人值守环境也可使用 Copilot CLI 支持的 `COPILOT_GITHUB_TOKEN`、`GH_TOKEN` 或 `GITHUB_TOKEN`，由 daemon 进程继承，**不要写进 brain 配置或源码**。若真实配置目录不是默认的 `~/.copilot`，启动 daemon 前用 `WEMIND_BRAIN_REAL_HOME` 指向该目录。
+`direct` 下不注入 `COPILOT_HOME`，Agent 直接用真实 `~/.copilot`；`sandbox` 才把 `~/.copilot/config.json` 同步到沙箱。无人值守环境也可使用 Copilot CLI 支持的 `COPILOT_GITHUB_TOKEN`、`GH_TOKEN` 或 `GITHUB_TOKEN`，由 daemon 进程继承，**不要写进 brain 配置或源码**。若真实配置目录不是默认的 `~/.copilot`，启动 daemon 前用 `WEMIND_BRAIN_REAL_HOME` 指向该目录。
 
-## 2. 预设与配置视图/沙箱
+## 2. 预设与 direct / sandbox
 
 配置预设等价于：
 
@@ -57,7 +57,7 @@ copilot: {
 
 ## 4. 限制与风险
 
-- Copilot 登录是硬前置；`COPILOT_HOME` 指向新的视图/沙箱时若 CLI 报 `Authentication required`，检查 `config.json` 是否同步，或给 daemon 提供 Copilot CLI 支持的 token 环境变量。
+- Copilot 登录是硬前置；`sandbox` 下 `COPILOT_HOME` 指向新沙箱时若 CLI 报 `Authentication required`，检查 `config.json` 是否同步，或给 daemon 提供 Copilot CLI 支持的 token 环境变量。
 - 图像由 CLI 与当前模型共同决定。探针里 ACP 接受图像，但实际模型拒绝并退回文本；该结果不保证其它模型相同。
 - 预设不启用 Copilot 自动更新，需按上游方式自行更新 CLI，并重新运行 ACP 探针。
 - 尚未验证 WeChat brain/worker 的完整真实消息链路、多账号隔离、模型切换，以及其它平台的 npm shim 与认证行为。

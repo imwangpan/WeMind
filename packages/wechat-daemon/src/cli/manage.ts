@@ -253,11 +253,11 @@ export function helpText(): string {
                                  改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--extra-args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用；--extra-args 追加在预设参数后，不会漏掉 ACP 子命令）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
   config show|home-mode|reload [--key <key|label>]
-                                 查看/设置 homeMode（view/direct/sandbox）与配置视图
+                                 查看/设置 homeMode（direct/sandbox）与运行时路径
   config agent show|get|set|unset|edit <agent> [<file#键路径>] [值] [--file <相对路径>]
                                  默认改**真实 Agent 配置**（JSON/JSONC；写前备份）
-  config wechat show|get|set|unset|edit <agent> [<file#键路径>] [值] [--file <相对路径>]
-                                 只改微信独享 overlay（不影响真实配置）
+  config wechat show|edit <agent>
+                                 只改微信独享 overlay（mcp.disable / mcp.extra，不改真实配置）
   mcp list|enable|disable|add|remove [--key <key|label>]
                                  管理 brain MCP 激活集 / overlay disable / extra
   workspace show|set <绝对路径>|reset [--role brain|worker]

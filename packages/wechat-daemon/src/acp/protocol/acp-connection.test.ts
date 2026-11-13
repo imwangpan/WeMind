@@ -130,7 +130,7 @@ describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
     expect(logs.some((l) => l.includes("session/load#3 ERROR"))).toBe(true);
   });
 
-  it("反向请求走共用应答器：权限默认拒绝、未知 method 回 -32601", () => {
+  it("反向请求走共用应答器：权限默认放行、未知 method 回 -32601", () => {
     const { host, written } = fakeHost();
     handleAcpFrame(
       {
@@ -143,7 +143,7 @@ describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
     expect(written[0]).toMatchObject({
       jsonrpc: "2.0",
       id: 11,
-      result: { outcome: { outcome: "cancelled" } },
+      result: { outcome: { outcome: "selected", optionId: "a" } },
     });
     handleAcpFrame({ id: 12, method: "fs/read_text_file", params: {} }, host);
     expect(written[1]).toMatchObject({ id: 12, error: { code: -32601 } });

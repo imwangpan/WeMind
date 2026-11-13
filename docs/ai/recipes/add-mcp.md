@@ -9,7 +9,7 @@
 ## 0. 先理解三条链路
 
 ```text
-catalog（定义从哪来；一律读**真实**配置目录，不读配置视图/沙箱）
+catalog（定义从哪来；一律读 Agent 的**真实**配置目录，不读 sandbox 副本）
   └─ 按 agent 各自约定读取（不要跨 agent 借文件）：
        kiro     ~/.kiro/settings/mcp.json                 { "mcpServers": { ... } }
        opencode ~/.config/opencode/opencode.json          { "mcp": { "servers": { ... } } }
@@ -28,23 +28,24 @@ catalog（定义从哪来；一律读**真实**配置目录，不读配置视图
   └─ 微信指令「加载 <名>」/「卸载 <名>」修改；按 agent 分键，wechat 永久禁止
 
 transport（怎么让 agent 看到）
-  └─ brain：applySandbox() 写配置视图（`view`，仅 `homeEnvVar` agent）或沙箱（`sandbox`）的文件式 MCP 配置，或 mcpViaAcp 传 session/new|resume（DSH / claude-code / copilot / codex）；`direct` / 无 `homeEnvVar` 时跳过并告警，激活不生效
-  └─ worker：applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）
+  └─ brain：`sandbox` 下 applySandbox() 写沙箱的文件式 MCP 配置；mcpViaAcp 走 session/new|resume（DSH / claude-code / copilot / codex），`sandbox` 传激活集、`direct` 原样传真实 catalog
+  └─ `direct`：文件式 MCP 由 Agent 自己读真实配置；WeMind 的 `加载/卸载` 直接拒绝
+  └─ worker：`sandbox` 下 applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）；`direct` 由 Agent 自己加载
 
 微信独享增删（不改真实配置）
   └─ <账号>/agent-overrides/<agent>.json 的 mcp.extra / mcp.disable
-  └─ mcp.disable 最后生效；wechat 任何路径都进不了有效集
+  └─ `sandbox` 全量生效；`direct` 只对 mcpViaAcp 的 Agent 生效（文件式 MCP 仍由 Agent 自己的配置决定）
+  └─ `sandbox` 的 curated 集里 mcp.disable 最后生效；wechat 永远进不了 curated 集
 ```
 
-> 注意「catalog 读真实、transport 写视图/沙箱」：`加载 <名>` 只把定义**写进 WeMind 生成的配置视图**（brain 默认空、worker 全量），真实配置文件一律不动；没有视图时连视图文件也不生成，`加载` 只改激活集并告警。
+> 注意「catalog 读真实、transport 写沙箱」：`sandbox` 下 `加载 <名>` 只把定义**写进 WeMind 生成的沙箱配置**（brain 默认空、worker 全量），真实配置文件一律不动；`direct` 下不生成任何副本，`加载/卸载` 只提示去 Agent 配置里改。
 
 关键代码：
 
 | 文件                                                          | 作用                                                                          |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `packages/wechat-daemon/src/agents/config/config-view.ts`     | 最小配置视图；MCP 目标文件生成副本，其余链接真实 home                         |
 | `packages/wechat-daemon/src/agents/config/overlay.ts`         | 微信独享 `mcp.extra` / `mcp.disable`                                          |
-| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts`    | brain 视图/沙箱、catalog、激活集、`加载/卸载`                                 |
+| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts`    | brain 沙箱、catalog、激活集、`加载/卸载`                                      |
 | `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | worker 全量继承、排除集                                                       |
 | `packages/wechat-daemon/src/agents/sandbox/mcp-adapters.ts`   | 按文件格式的 MCP 适配器：路径、读写、剥离、ACP 转换、原生只读（Codex TOML）   |
 | `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts`      | MCP 格式纯函数（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）与 wechat 判定 |

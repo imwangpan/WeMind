@@ -12,7 +12,7 @@ import { readHomeMode } from "./config/home-mode.js";
 /**
  * ACP agent 与解析。
  *
- * WeMind 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动一个 agent CLI。ACP 是通用协议（kiro-cli、gemini-cli 等都支持），因此接入任意兼容 ACP 的 agent 不需要改协议代码——只需告诉我们三件事：① 二进制名；② 进入 ACP 模式的启动参数；③ 该 agent 读取「配置/数据目录」的环境变量名（我们把它指向配置视图或账号沙箱）。
+ * WeMind 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动一个 agent CLI。ACP 是通用协议（kiro-cli、gemini-cli 等都支持），因此接入任意兼容 ACP 的 agent 不需要改协议代码——只需告诉我们三件事：① 二进制名；② 进入 ACP 模式的启动参数；③ 该 agent 读取「配置/数据目录」的环境变量名（只在 sandbox 下指向账号沙箱；direct 不设置）。
  *
  * 选择与覆盖（优先级从高到低）：
  *  ① 环境变量（一次性覆盖；临时试别的 agent 用它，别写进 profile）：
@@ -158,7 +158,7 @@ export type ResolvedAgent = {
   bin: string;
   args: string[];
   homeEnvVar?: string;
-  extraConfigFiles: Array<{ source: string; target: string }>;
+  extraConfigFiles: string[];
   shell: boolean;
   inherit: boolean;
   realHome?: string;
@@ -172,7 +172,6 @@ export type ResolvedAgent = {
   /** 预设给的「默认环境变量」：父进程已设同名变量时不覆盖（用于审批类开关，部署方可以收紧）。 */
   envDefaults: Record<string, string>;
   /** 没有 homeEnvVar 的 agent 在非 direct 场景直接用真实 home 时需要覆盖的 env（见 preset 注释）。 */
-  realEnv: Record<string, string>;
   /** 从 agent 自己的凭据文件派生环境变量（父进程未显式提供时；如 Cline 自定义 provider）。 */
   credentialEnv?: (
     realHome: string | undefined,
@@ -189,7 +188,7 @@ export type ResolvedAgent = {
   settingsBase?: string;
   /** settingsBase 基底里要删掉的键（默认 DEFAULT_SETTINGS_STRIP）。 */
   settingsStrip: string[];
-  /** 视图/沙箱 settings.json 的预设默认键（只补缺失键；用户显式设过则保留用户的值）。 */
+  /** sandbox settings.json 的预设默认键（只补缺失键；用户显式设过则保留用户的值）。 */
   settingsDefaults: Record<string, unknown>;
   model?: string;
   /** 模型改为追加到启动参数（agent 不支持 session/set_config_option 时；如 gemini 的 "--model"）。 */
@@ -219,9 +218,9 @@ export type ResolvedAgent = {
 };
 
 /**
- * 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向视图/沙箱 → 从凭据文件派生的 env（父进程未提供时）→ 预设强制 `env` → 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。
+ * 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向沙箱（仅 sandbox）→ 从凭据文件派生的 env（父进程未提供时）→ 预设强制 `env`（仅 sandbox）→ 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。
  *
- * `direct`（homeMode=direct，或 view 建视图失败降级）：不注入 `homeEnvVar` / 预设 `env` / `realEnv`，
+ * `direct`（默认）：不注入 `homeEnvVar` / 预设 `env`，
  * 让 Agent 像在终端直接启动一样读取自己的真实配置；仍保留 `envDefaults`（yolo / 免审批等默认值，父进程显式设置优先）与只读的凭据环境桥接。
  */
 export function agentEnv(
@@ -233,18 +232,13 @@ export function agentEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = mergeEnvSnapshot(process.env, readEnvSnapshot(dataDir));
   const direct = opts.direct === true;
-  if (ag.homeEnvVar && !direct) env[ag.homeEnvVar] = home; // 把配置视图/账号沙箱目录传给 agent
+  if (ag.homeEnvVar && !direct) env[ag.homeEnvVar] = home; // 把账号沙箱目录传给 agent（direct 不注入）
   // 从 agent 自己的凭据文件派生（如 Cline 的 CLINE_PROVIDER/CLINE_API_KEY）；helper 内部已保证父进程显式值优先
   for (const [k, v] of Object.entries(ag.credentialEnv?.(ag.realHome, process.env) ?? {})) {
     if (env[k] === undefined) env[k] = v;
   }
   if (!direct) {
     for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
-    // 没有 homeEnvVar 的 agent 在视图/沙箱里 home 就是目标目录：`env` 里的 %HOME% 模板会多拼一层
-    // （如 CLAUDE_CONFIG_DIR 变成 ~/.claude/claude）。realEnv 给出真实路径下的正确值，只在这个分支生效。
-    if (!ag.homeEnvVar && ag.realHome && path.resolve(home) === path.resolve(ag.realHome)) {
-      for (const [k, v] of Object.entries(ag.realEnv)) env[k] = v.replaceAll("%HOME%", home);
-    }
   }
   // envDefaults 是 WeMind 为保证「微信侧免逐次审批」而下发的默认值，不属于 Agent 配置；direct 下仍要保留。
   // 显式设置的同名变量优先（部署方可用它收紧权限），所以叫 defaults。
@@ -331,7 +325,7 @@ function resolveKiroV3(
   return (kiroCliMajor(binPath) ?? 0) >= 3;
 }
 
-/** v3 拒绝 v2 专属的整会话信任参数；v3 的免审批改由视图/沙箱 `settings/permissions.yaml` 承担。 */
+/** v3 拒绝 v2 专属的整会话信任参数；v3 的免审批改由 sandbox `settings/permissions.yaml` 承担。 */
 function stripKiroV2TrustArgs(args: readonly string[]): string[] {
   const kept: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -376,12 +370,12 @@ export function prepareAgent(ag: ResolvedAgent): void {
   }
 }
 
-/** kiro v3 的免审批默认（等价于 v2 的 `--trust-all-tools`）：视图/沙箱 settings/permissions.yaml 缺失时补上。 */
+/** kiro v3 的免审批默认（等价于 v2 的 `--trust-all-tools`）：sandbox settings/permissions.yaml 缺失时补上。 */
 export function ensureKiroV3Permissions(ag: ResolvedAgent, settingsDir: string): void {
   if (!ag.kiroV3) return;
   try {
     const dst = path.join(settingsDir, "permissions.yaml");
-    if (fs.existsSync(dst)) return; // 真实配置里已有（已同步进视图/沙箱）就尊重用户的规则
+    if (fs.existsSync(dst)) return; // 沙箱里已有（或用户已同步）就尊重用户的规则
     fs.mkdirSync(settingsDir, { recursive: true });
     fs.writeFileSync(dst, "rules:\n  - capability: all\n    effect: allow\n", "utf-8");
   } catch {
@@ -535,7 +529,6 @@ function resolveAgentCore(
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},
     envDefaults: preset.envDefaults ?? {},
-    realEnv: preset.realEnv ?? {},
     credentialEnv: preset.credentialEnv,
     restore: preset.restore,
     replayOnLoad: preset.replayOnLoad ?? false,

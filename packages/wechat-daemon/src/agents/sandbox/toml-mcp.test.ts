@@ -2,10 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseTomlMcpServers } from "./toml-mcp.js";
-import { assertNoForbiddenNativeMcp, nativeMcpServers } from "./mcp-sandbox.js";
+import { nativeMcpServers, warnForbiddenNativeMcp } from "./mcp-sandbox.js";
 
 const tmpDirs: string[] = [];
 function codexHomeWith(toml: string) {
@@ -94,15 +94,21 @@ command = "wemind-mcp"
     expect(parseTomlMcpServers('model = "x"\n')).toEqual({ mcpServers: {}, problems: [] });
   });
 
-  it("只对 Codex（.toml 目录）读原生 MCP；含 wechat 时拒绝启动", () => {
+  it("只对 Codex（.toml 目录）读原生 MCP；含 wechat 时只告警", () => {
     const ok = codexHomeWith('[mcp_servers.fake]\ncommand = "node"\n');
     expect(Object.keys(nativeMcpServers(ok))).toEqual(["fake"]);
-    expect(() => assertNoForbiddenNativeMcp(ok)).not.toThrow();
+    expect(() => warnForbiddenNativeMcp(ok)).not.toThrow();
 
     const bad = codexHomeWith(
       '[mcp_servers.wechat]\ncommand = "npx"\nargs = ["-y", "@wemind/wechat-mcp"]\n',
     );
-    expect(() => assertNoForbiddenNativeMcp(bad)).toThrow(/微信 MCP/);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(() => warnForbiddenNativeMcp(bad)).not.toThrow();
+      expect(warn.mock.calls.flat().join(" ")).toMatch(/微信 MCP/);
+    } finally {
+      warn.mockRestore();
+    }
 
     // 非 .toml 目录（其它 agent 的 JSON 配置）不归这里管：WeMind 会生成隔离后的副本
     expect(

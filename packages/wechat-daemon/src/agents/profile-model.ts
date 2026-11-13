@@ -4,7 +4,7 @@ import path from "node:path";
 /**
  * 真实 profile 用户层（`<realHome>/profiles/<profile>/cordis.patch.yml`）的三件事：
  * ① 读默认模型（`readProfileDefaultModel`）；② 缺 `- id: acp` 时给用户提示（`acpOverrideHint`）；
- * ③ 复制进视图/沙箱前剔除「微信 MCP」条目（`stripWechatMcpEntries`，防回环）。
+ * ③ 复制进沙箱前剔除「微信 MCP」条目（`stripWechatMcpEntries`，防回环）。
  * 文件是桌面端维护的 YAML 用户层，结构是一个 patch 列表。这里只做定点抽取（块式与 flow 式映射都认），不引入 YAML 依赖。
  */
 
@@ -35,7 +35,7 @@ export function readProfileDefaultModel(realHome: string, profile: string): stri
 }
 
 /**
- * 复制进视图/沙箱前剔除「微信 MCP」条目（真实文件不动）。DSH 自己的 MCP 也写在 profile 里
+ * 复制进沙箱前剔除「微信 MCP」条目（真实文件不动）。DSH 自己的 MCP 也写在 profile 里
  * （`- id: mcp-xxx` + `name: '@deepseek-ai/dsh-mcp-client'`）；如果用户在自己的 dsh 配置里挂过微信 MCP，
  * 原样复制会让 agent 用同一个 bot token 起第二个收消息实例（抢消息/回环）。
  * 大脑与 worker 的 MCP 都由 WeMind 的激活集权威决定（`wechat` 永远不在里面），所以只剔这一种条目，其余原样保留。
@@ -74,7 +74,7 @@ function isWechatMcpEntry(body: string): boolean {
   );
 }
 
-/** 把真实 profile 用户层复制进某个视图/沙箱 home（复制前剔除微信 MCP 条目；没有命中时逐字节原样）——三个调用方共用同一段路径与剔除逻辑。
+/** 把真实 profile 用户层复制进某个沙箱 home（复制前剔除微信 MCP 条目；没有命中时逐字节原样）——调用方共用同一段路径与剔除逻辑。
  *  `src` 不存在时抛错，调用方按 best-effort 包 try/catch。返回被剔除的条目（供调用方记日志）。 */
 export function copyProfilePatch(realHome: string, profile: string, destHome: string): string[] {
   const src = path.join(realHome, "profiles", profile, "cordis.patch.yml");

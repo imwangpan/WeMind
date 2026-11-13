@@ -21,7 +21,7 @@
 
 ### 其它
 
-各 agent 的配置视图、凭据与免审批配置见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
+各 agent 的配置来源（direct / sandbox）、凭据与免审批配置见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 
 ## 安装
 
@@ -63,7 +63,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `wemind brain [show\|set\|unset\|check]`                                                            | 查看 / 设置（写入磁盘）/ 清除 / 自检大脑（`brain set deepseek --bin "<绝对路径>" --restart`）；只加启动开关用 `--extra-args "…"`（追加，保留预设的 ACP 模式参数），`--args "…"` 是整段替换（漏掉 `acp` 会握手超时，`wemind brain` 会警告；`--args ""` 清空） |
 | `wemind brain switch <agent 名\|auto>`                                                              | **热切换对话大脑**：daemon 在跑也不重启、不打断在途回合；失败自动回滚。`--worker` 设默认任务大脑；`wemind brain handoff` 生成交接摘要                                                                                                                        |
 | `wemind session new [名字] / list / resume <ref> / rename <ref> <名> / delete <ref> [<key\|label>]` | 会话管理：新建 / 列表 / 严格恢复 / 改名 / 删除（`ref` = 序号、名字或 id 前缀；省略账号 = 默认账号）                                                                                                                                                          |
-| `wemind config show \| home-mode [view\|direct\|sandbox] \| reload`                                 | 看当前 homeMode/路径；切模式或重建配置视图（`reload` 在回合进行中会排队到回合结束）                                                                                                                                                                          |
+| `wemind config show \| home-mode [direct\|sandbox] \| reload`                                        | 看当前 homeMode/路径；切模式或重新读取 Agent 配置（`reload` 在回合进行中会排队到回合结束）                                                                                                                                                                  |
 | `wemind config agent show\|get\|set\|unset\|edit <agent> <键路径> [值]`                             | 改 Agent 的**真实**配置（写前备份+mtime/hash 校验；JSONC 含注释拒绝写）                                                                                                                                                                                      |
 | `wemind config wechat show\|get\|set\|unset\|edit <agent> <file#键路径> [值]`                       | 改微信侧 overlay（只影响微信，不碰真实配置；拒绝密钥值/微信 MCP/越界路径）                                                                                                                                                                                   |
 | `wemind mcp list \| enable <名> \| disable <名> \| add <名> '<JSON>' \| remove <名>`                | 管理大脑 MCP（brain 默认空集；worker 始终排除 `wechat`）                                                                                                                                                                                                     |
@@ -90,8 +90,8 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 
 ## 数据与安全
 
-- 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标、`allowFrom.json` 授权清单、`runtime.json`（homeMode）、`agent-view/`（`view` 下仅用于有 `homeEnvVar` 的 Agent；`direct` 直接用真实 home）、`agent-overrides/`（微信独享配置）、`workspace.json` 与 `workspace/`、`media/inbound/`、`session-cwd.json`、`daemon.log` 等。`brain-home/` / `worker-home/` 与 DSH 的 `agent-sessions/` 只在 `sandbox` 模式使用。
-- **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：`npm i -g <适配器包>` 后 `wemind brain set <agent 名>`；各适配器的安装命令、认证、配置视图与 MCP 差异见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
+- 所有状态在 `~/.wemind/<账号>/`（可用 `WEMIND_HOME` 改根目录）：`account.json` 登录凭证、`state.json` 游标、`allowFrom.json` 授权清单、`runtime.json`（homeMode）、`agent-overrides/`（微信侧 overlay，仅 `mcp.disable` / `mcp.extra`）、`workspace.json` 与 `workspace/`、`media/inbound/`、`session-cwd.json`、`daemon.log` 等。`brain-home/` / `worker-home/` 与 DSH 的 `agent-sessions/` 只在 `sandbox` 模式使用。
+- **适配器类大脑要单独装**（`claude-code` / `codex` / `pi`）：`npm i -g <适配器包>` 后 `wemind brain set <agent 名>`；各适配器的安装命令、认证、配置来源与 MCP 差异见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - ⚠️ **daemon 会让大脑免确认执行工具**：10 个内置预设默认都免审批，能给这个 bot 发消息的人即可让大脑在本机执行工具（shell / 写文件）；Copilot 预设仅使用 `--allow-all-tools`，不启用 `--allow-all`。微信平台限制决定了只有扫码登录这个 bot 的**登录者**能发消息；另有一道**发件人授权（allowFrom）兜底**：登录者自动写入，**勿清空**。想收紧权限见 [接入其它 ACP agent](../../docs/接入方案/接入其它-ACP-Agent.md)。
 - `account.json`（bot token）、`state.json`（`context_token`）、`qr_login.json` 在 POSIX 上统一 chmod 600；Windows 上都是明文，请用目录权限或磁盘加密。
 - **出站附件有安全闸**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 用 `<...>`）。只允许**本地**绝对路径（`file://host/...` 与 UNC 网络路径拒绝，软链接目标同样检查；Windows 的 `文件::$DATA` 数据流也拒绝）；读取前 `realpath` 并拒绝状态/凭据文件（`account.json`、`.env`、各 agent 的 `.credentials*`、`.auth/`、`oauth_creds.json`、`settings.json`/`models*.json` 等），单文件默认上限 25MB（`WECHAT_OUTBOUND_FILE_MAX_MB`）。硬链接无法从路径区分，属已接受风险。**临时要发这类文件**时，登录者在微信发 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30）开窗口：只跳过敏感名单，网络路径/数据流/大小上限照旧；**先开窗再发、或被拦下后回这条指令补发**都行（被拦下的路径在内存里保留 30 分钟）。窗口只在本 daemon 进程内，重启即失效。
@@ -105,17 +105,17 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `WECHAT_ACCOUNT` / `WECHAT_DATA_DIR`                                                  | 指定账号 / 指定完整数据目录（多账号隔离）。`WECHAT_DATA_DIR` **只对 `wemind daemon` 直跑生效**；`start` / `login --start` / pm2 runner / 自启忽略它 |
 | `WEMIND_RUNNER`                                                                       | `builtin`（默认）或 `pm2`                                                                                                                           |
 | `WEMIND_BRAIN` / `WEMIND_BRAIN_BIN` / `WEMIND_BRAIN_ARGS` / `WEMIND_BRAIN_EXTRA_ARGS` | 一次性覆盖大脑选择与启动参数（`ARGS` 整段替换、`EXTRA_ARGS` 追加；持久化请用 `wemind brain set`）                                                   |
-| `WEMIND_HOME_MODE`                                                                    | 一次性覆盖 homeMode：`view`（默认）/ `direct` / `sandbox`（旧值 `real` / `mirror` 映射为 `view`）；持久化用 `wemind config home-mode`                |
+| `WEMIND_HOME_MODE`                                                                    | 一次性覆盖 homeMode：`direct`（默认）/ `sandbox`；持久化用 `wemind config home-mode`                                                              |
 | `WEMIND_WORKER_CWD`                                                                   | 一次性覆盖 worker 默认工作目录（显式任务 `--cwd` 优先）                                                                                             |
 | `WEMIND_WORKER_MCP_EXCLUDE`                                                           | worker 额外排除的 MCP 名（逗号分隔；`wechat` 始终强制排除）                                                                                         |
 | `WEMIND_MCP_CATALOG` / `WECHAT_MCP_CATALOG`                                           | 覆盖 MCP 可选清单文件路径（不影响 native 只读门禁）                                                                                                 |
-| `COPILOT_HOME`                                                                        | 由 WeMind 给子进程设置，指向配置视图/沙箱；不要手动固定                                                                                             |
-| `WEMIND_ACP_AUTO_ALLOW=1`                                                             | 放行 ACP agent 的一次性权限请求（默认为拒绝）                                                                                                       |
+| `COPILOT_HOME`                                                                        | 由 WeMind 给子进程设置，仅 sandbox 指向账号沙箱；不要手动固定                                                                                             |
+| `WEMIND_ACP_AUTO_ALLOW`                                                               | ACP agent 反向权限请求：**默认 yolo 放行**（自动选 `allow_once`/`allow_always`）；设 `0`/`false`/`off`/`no` 恢复逐次拒绝                          |
 | `WEMIND_ACP_SESSION_MODE`                                                             | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off`/`no` 关闭，其它值 = 该 modeId                                                      |
 | `WEMIND_LOG_MAX_MB` / `WEMIND_LOG_KEEP`                                               | `daemon.log` 轮转：单文件上限（默认 10）/ 保留份数（默认 3，`0` = 不留历史）；builtin 运行中轮转，pm2 用 `pm2-logrotate`                            |
 | `WEMIND_LOG_LEVEL`                                                                    | 设为 `debug` 才输出 DEBUG 级别（预留级别，当前没有 debug 调用点）；INFO/WARN/ERROR 始终输出                                                         |
 | `WECHAT_INBOUND_MEDIA_MAX_MB` / `WECHAT_OUTBOUND_FILE_MAX_MB`                         | 入站文件/视频/语音单文件上限（默认 100）/ 出站附件单文件上限（默认 25）                                                                             |
-| `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`                                       | 入站媒体（`view`/`direct` 为 `<账号>/media/inbound`，`sandbox` 为沙箱内）保留天数 / 总量上限（默认 30 天 / 1GB；启动时 + 写入媒体时清理）             |
+| `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`                                       | 入站媒体（`direct` 为 `<账号>/media/inbound`，`sandbox` 为沙箱内）保留天数 / 总量上限（默认 30 天 / 1GB；启动时 + 写入媒体时清理）                     |
 | `WECHAT_TOOL_PROGRESS_ITEMS`                                                          | 结构化工具进度 item（11/12）开关（**默认关**：微信客户端目前不渲染，只发文本「步骤 N」；`1` = 启用）                                                |
 
 ## 与 MCP 形态的区别

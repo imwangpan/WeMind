@@ -8,7 +8,6 @@ import {
 } from "../acp/acp-brain.js";
 import { agentConfigFor, loadBrainConfig } from "../agents/brain-config.js";
 import {
-  ACP_AGENT_PRESETS,
   presetAvailable,
   presetNames,
   resolvePresetByName,
@@ -35,19 +34,7 @@ import {
   updateWorkspace,
   WORKSPACE_CHANGE_NOTICE,
 } from "../agents/config/workspace.js";
-import {
-  mergeOverlayPatch,
-  patchWithDelete,
-  setConfigPath,
-} from "../agents/config/agent-config-writer.js";
-import {
-  overlayPath,
-  readOverlay,
-  writeOverlay,
-  type AgentOverlay,
-} from "../agents/config/overlay.js";
-import { readHomeMode } from "../agents/config/home-mode.js";
-import { resetViewFallback } from "../agents/config/runtime.js";
+import { overlayPath, readOverlay } from "../agents/config/overlay.js";
 import {
   HANDOFF_PROMPT,
   HANDOFF_TTL_MS,
@@ -270,51 +257,16 @@ export async function handleControl(
     const ag = c.agent.toLowerCase();
     if (!presetNames().includes(ag))
       return `❌ 未知 agent「${ag}」。可用：${presetNames().join(", ")}`;
-    const preset = ACP_AGENT_PRESETS[ag];
-    const homeMode = readHomeMode(DATA_DIR);
-    const overlayInert = homeMode === "direct" || (homeMode === "view" && !preset.homeEnvVar);
     const read = readOverlay(ag, DATA_DIR);
     if (read.problems.length) return `❌ ${read.problems.join("；")}`;
     if (c.action === "show") {
       return `微信侧 overlay（${overlayPath(ag, DATA_DIR)}）：\n${JSON.stringify(read.overlay, null, 2)}`;
     }
-    if (!c.target) return "❌ 需要 <file#键路径>（例如 settings.json#model）";
-    const i = c.target.indexOf("#");
-    if (i <= 0 || i === c.target.length - 1)
-      return "❌ 目标要写成 <file#键路径>，例如 settings.json#model";
-    const file = c.target.slice(0, i);
-    const keyPath = c.target.slice(i + 1);
-    const overlay: AgentOverlay = {
-      ...read.overlay,
-      config: { ...read.overlay.config },
-    };
-    if (c.action === "set") {
-      if (c.value === undefined) return "❌ 需要值";
-      let value: unknown;
-      try {
-        value = JSON.parse(c.value);
-      } catch {
-        value = c.value;
-      }
-      overlay.config = {
-        ...overlay.config,
-        [file]: setConfigPath(overlay.config?.[file] ?? {}, keyPath, value),
-      };
-    } else {
-      overlay.config = {
-        ...overlay.config,
-        [file]: mergeOverlayPatch(overlay.config?.[file] ?? {}, patchWithDelete(keyPath)),
-      };
-    }
-    try {
-      writeOverlay(ag, overlay, DATA_DIR);
-    } catch (e) {
-      return `❌ ${e instanceof Error ? e.message : String(e)}`;
-    }
-    const note = overlayInert
-      ? `\n⚠️ 当前 homeMode=${homeMode}，overlay 不会生效（真实配置也没被改）；要生效请用 homeMode=view（该 agent 需要可重定向的配置目录）或 homeMode=sandbox。`
-      : "";
-    return `✅ 已写入微信侧 overlay：${file} → ${keyPath}\n只影响微信侧；下一条新会话生效。真实配置未改。${note}`;
+    return (
+      "微信侧 overlay 只支持 mcp.disable / mcp.extra（会话级、不落盘）。" +
+      `请直接编辑 ${overlayPath(ag, DATA_DIR)}，或用 CLI：wemind config wechat edit ${ag}。` +
+      "要改 Agent 配置请说「修改 <agent> 配置」（默认改真实配置）。"
+    );
   }
   if (c.kind === "handoff") return await runHandoff(userId, ctx);
   // 兜底：指令表新增了 kind 但这里还没接通时（正常情况下 TS 会先把这里判成不可达），别静默吞掉
@@ -345,15 +297,14 @@ export async function handleControlRequest(req: ControlRequest, owner: string): 
     case "brain.handoff":
       return await runHandoff(owner, { owner, notify: async () => {} }, req.expiresAt);
     case "config.reload": {
-      resetViewFallback(); // 用户可能刚修好真实配置目录：brain / worker 都重新尝试 view
       ensureBrainHome();
       ensureWorkerHome();
       killIdleConns();
       if (!(await restartForMcpChange()))
-        return "配置视图已重建，但大脑正在切换中，这次没有重启；切换完成后用 `wemind config reload` 再试一次。";
+        return "Agent 配置已重新读取，但大脑正在切换中，这次没有重启；切换完成后用 `wemind config reload` 再试一次。";
       if (isTurnInFlight())
-        return "配置视图已重建，重启已排队：当前回合结束后生效（不打断正在生成的回复）。";
-      return "配置视图已重建，常驻大脑已重启；下一条消息使用新配置。已有会话会在重启后自动 session/load 恢复。";
+        return "Agent 配置已重新读取，重启已排队：当前回合结束后生效（不打断正在生成的回复）。";
+      return "Agent 配置已重新读取，常驻大脑已重启；下一条消息使用新配置。已有会话会在重启后自动 session/load 恢复。";
     }
     case "session.new":
       return await newSessionCmd({

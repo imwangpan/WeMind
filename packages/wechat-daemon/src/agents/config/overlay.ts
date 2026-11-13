@@ -5,14 +5,17 @@ import crypto from "node:crypto";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
-import { findForbiddenMcpEntries, normalizeMcpName, parseJsonc } from "../sandbox/agent-mcp.js";
+import { findForbiddenMcpEntries, normalizeMcpName } from "../sandbox/agent-mcp.js";
 
 /**
- * 微信独享覆盖：`<账号>/agent-overrides/<agent>.json`。
+ * 微信侧独享配置：`<账号>/agent-overrides/<agent>.json`。
  *
- * 只影响微信侧，永不自动写回真实配置。默认修改真实配置；用户明确说“微信侧/仅微信”时才走这里。
- * 有视图时 overlay 只写视图副本；`direct` 模式或没有 `homeEnvVar` 的 agent 下 overlay 不生效（要生效用 view/sandbox）。
- * 不设“安全键”白名单——任何真实配置键都允许覆盖；安全性靠路径校验、解析失败拒绝、写前备份与原子写。
+ * WeMind 不改写 Agent 配置，所以这里**只支持会话级 MCP 调整**：
+ * - `mcp.disable`：不把同名 MCP 交给 ACP（仅对走 ACP 下发 MCP 的 agent 有效）；
+ * - `mcp.extra`：额外追加的 MCP 定义（对象即定义，不落盘）。
+ *
+ * 其余微信独享项（模型/模式/回复风格）走会话参数或运行时指令，不在这里改 Agent 文件。
+ * 默认修改 Agent 真实配置；只有用户明确说“微信侧/仅微信”时才用这个文件。
  */
 export type OverlayMcp = {
   disable?: string[];
@@ -21,7 +24,6 @@ export type OverlayMcp = {
 
 export type AgentOverlay = {
   version: 1;
-  config?: Record<string, Record<string, unknown>>;
   mcp?: OverlayMcp;
 };
 
@@ -89,7 +91,7 @@ export function findSecretKeys(value: unknown, prefix = ""): string[] {
   return out;
 }
 
-/** 读 overlay；损坏/版本不支持返回空对象并记录问题，调用方决定是否拒绝启动。 */
+/** 读 overlay；损坏/版本不支持返回空对象并记录问题，调用方决定是否告警。 */
 export function readOverlay(agent: string, dir: string = DATA_DIR): OverlayRead {
   let raw: unknown;
   try {
@@ -103,26 +105,11 @@ export function readOverlay(agent: string, dir: string = DATA_DIR): OverlayRead 
   const problems: string[] = [];
   if (raw.version !== undefined && raw.version !== 1)
     problems.push(`overlay version=${String(raw.version)} 不支持（当前只支持 1）`);
+  if (raw.config !== undefined)
+    problems.push(
+      "overlay.config 已不再支持：WeMind 不改写 Agent 配置文件；微信独享配置只支持 mcp.disable / mcp.extra",
+    );
   const overlay: AgentOverlay = { version: 1 };
-  if (raw.config !== undefined) {
-    if (!isObj(raw.config)) problems.push("overlay.config 不是对象");
-    else {
-      const config: Record<string, Record<string, unknown>> = {};
-      for (const [file, patch] of Object.entries(raw.config)) {
-        if (!isObj(patch)) {
-          problems.push(`overlay.config.${file} 不是对象`);
-          continue;
-        }
-        const secrets = findSecretKeys(patch);
-        if (secrets.length) {
-          problems.push(`overlay.config.${file} 含疑似密钥键：${secrets.join(", ")}`);
-          continue;
-        }
-        config[file] = patch;
-      }
-      if (Object.keys(config).length) overlay.config = config;
-    }
-  }
   if (raw.mcp !== undefined) {
     if (!isObj(raw.mcp)) problems.push("overlay.mcp 不是对象");
     else {
@@ -182,14 +169,9 @@ export function writeOverlay(
   dir: string = DATA_DIR,
   opts: { expectedSha256?: string } = {},
 ): void {
-  const secrets = [
-    ...findSecretKeys(overlay.config ?? {}),
-    ...findSecretKeys(overlay.mcp?.extra ?? {}),
-  ];
+  const secrets = findSecretKeys(overlay.mcp?.extra ?? {});
   if (secrets.length) throw new Error(`overlay 不能保存疑似密钥：${secrets.join(", ")}`);
-  const problems = overlayKeyProblems(undefined, overlay);
-  if (problems.length) throw new Error(problems.join("；"));
-  const forbidden = findForbiddenMcpEntries(overlay.config ?? {});
+  const forbidden = findForbiddenMcpEntries(overlay.mcp?.extra ?? {});
   if (forbidden.length)
     throw new Error(
       `overlay 不能加入微信 MCP（${forbidden.join(", ")}）：会形成第二个 poller/回环。`,
@@ -204,98 +186,10 @@ export function writeOverlay(
   writeJsonAtomic(file, overlay);
 }
 
-/** 深合并 patch：对象递归合并，数组整段替换，`null` 删除键。 */
-export function applyPatch(
-  base: Record<string, unknown>,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...base };
-  for (const [k, v] of Object.entries(patch)) {
-    if (v === null) {
-      delete out[k];
-      continue;
-    }
-    if (isObj(v) && isObj(out[k])) out[k] = applyPatch(out[k] as Record<string, unknown>, v);
-    else out[k] = v;
-  }
-  return out;
-}
-
-function isInside(child: string, parent: string): boolean {
-  const rel = path.relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-}
-
-/**
- * 解析 overlay 的文件键。默认相对 realHome；只有 `extraConfigFiles` 里的目标允许用 `..` 指过去。
- * 返回 real 目标与 view 目标，调用方负责“先断开链接再写副本”。
- */
-export function resolveOverlayTarget(
-  realHome: string,
-  configDir: string,
-  key: string,
-  extraConfigFiles: string[] = [],
-): { real: string; view: string } | null {
-  if (!key.trim() || path.isAbsolute(key)) return null;
-  const real = path.resolve(realHome, key);
-  const view = path.resolve(configDir, key);
-  const allowedFile = extraConfigFiles.some((f) => path.resolve(f) === real);
-  if (!isInside(real, path.resolve(realHome)) && !allowedFile) return null;
-  if (!isInside(view, path.resolve(configDir)) && !allowedFile) return null;
-  return { real, view };
-}
-
 export function overlayDisableSet(overlay: AgentOverlay): Set<string> {
   return new Set((overlay.mcp?.disable ?? []).map(normalizeMcpName));
 }
 
 export function overlayExtraServers(overlay: AgentOverlay): Record<string, unknown> {
   return overlay.mcp?.extra ?? {};
-}
-
-/** overlay 的文件键是否合法：路径不越界、扩展名可写、不注入微信 MCP。返回 `key：原因` 列表。 */
-export function overlayKeyProblems(
-  realHome: string | undefined,
-  overlay: AgentOverlay,
-  extraConfigFiles: string[] = [],
-): string[] {
-  if (!overlay.config) return [];
-  const out: string[] = [];
-  for (const [key, patch] of Object.entries(overlay.config)) {
-    if (path.isAbsolute(key) || key.split(/[\\/]/).includes("..")) {
-      out.push(`overlay.config.${key} 必须是 agent 配置目录内的相对路径`);
-      continue;
-    }
-    const ext = path.extname(key).toLowerCase();
-    if (ext !== ".json" && ext !== ".jsonc")
-      out.push(`overlay.config.${key}：只支持 .json / .jsonc（其它格式会被写坏或丢失注释）`);
-    if (realHome) {
-      const target = resolveOverlayTarget(realHome, realHome, key, extraConfigFiles);
-      if (!target) out.push(`overlay.config.${key} 指向了 real home 之外的路径`);
-    }
-    const forbidden = findForbiddenMcpEntries(patch);
-    if (forbidden.length)
-      out.push(`overlay.config.${key} 含微信 MCP（${forbidden.join(", ")}），会形成第二个 poller`);
-  }
-  return out;
-}
-
-/** overlay 的文件键是否越界；只按 real home 判断，视图目录与它同构。 */
-export function overlayPathProblems(
-  realHome: string | undefined,
-  overlay: AgentOverlay,
-  extraConfigFiles: string[] = [],
-): string[] {
-  return overlayKeyProblems(realHome, overlay, extraConfigFiles).filter(
-    (p) => p.includes("real home 之外") || p.includes("必须是 agent 配置目录内的相对路径"),
-  );
-}
-
-/** 读一个真实配置文件作为 patch 基底；JSONC/JSON 支持，其它格式返回 null（调用方报错，不静默写坏）。 */
-export function readJsonConfig(file: string): Record<string, unknown> | null {
-  try {
-    return parseJsonc(fs.readFileSync(file, "utf-8"));
-  } catch {
-    return null;
-  }
 }

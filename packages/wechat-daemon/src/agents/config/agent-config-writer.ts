@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import type { ResolvedAgent } from "../brain-agents.js";
 import { ACP_AGENT_PRESETS } from "../brain-presets.js";
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
-import { readJsonConfig } from "./overlay.js";
+import { parseJsonc } from "../sandbox/agent-mcp.js";
 
 /**
  * 真实 Agent 配置的受控写入层。
@@ -14,6 +14,15 @@ import { readJsonConfig } from "./overlay.js";
  * 不把 JSON 硬写进 `.yml`（那会把用户配置写坏）。写入前备份，写入用原子 rename。
  */
 export type ConfigFileFormat = "json" | "jsonc" | "unsupported";
+
+/** 宽松读取（JSONC）：注释/尾逗号不应被当成损坏。 */
+function readJsonConfig(file: string): Record<string, unknown> | null {
+  try {
+    return parseJsonc(fs.readFileSync(file, "utf-8"));
+  } catch {
+    return null;
+  }
+}
 
 /** 写入前的文件快照：用于乐观并发校验，避免覆盖终端侧刚改过的真实配置。 */
 export type ConfigFileSnapshot = {
@@ -295,59 +304,4 @@ export function mutateConfigFile(
     expected: opts.expected ?? snapshotBefore,
   });
   return { file, backup, before: getConfigPath(before, expr), snapshotBefore };
-}
-
-/** overlay 的 config 段是 `{ 文件相对路径: patch }`；这里只做“路径级 patch”的更新。 */
-export function applyOverlayPathPatch(
-  base: Record<string, unknown>,
-  expr: string,
-  value: unknown | undefined,
-): Record<string, unknown> {
-  if (!expr.trim()) {
-    if (value === undefined) return {};
-    if (!value || typeof value !== "object" || Array.isArray(value))
-      throw new Error("overlay 整文件 patch 必须是对象");
-    return value as Record<string, unknown>;
-  }
-  return value === undefined ? deleteConfigPath(base, expr) : setConfigPath(base, expr, value);
-}
-
-/** overlay patch 的合并：对象递归合并，数组整段替换，`null` 保留（表示“删除真实键”）。 */
-export function mergeOverlayPatch(
-  a: Record<string, unknown>,
-  b: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...a };
-  for (const [k, v] of Object.entries(b)) {
-    if (
-      v &&
-      typeof v === "object" &&
-      !Array.isArray(v) &&
-      out[k] &&
-      typeof out[k] === "object" &&
-      !Array.isArray(out[k])
-    )
-      out[k] = mergeOverlayPatch(out[k] as Record<string, unknown>, v as Record<string, unknown>);
-    else out[k] = v;
-  }
-  return out;
-}
-
-/** 把 `null` 写进 overlay patch 表示删除键；CLI unset 用这个语义。 */
-export function patchWithDelete(expr: string): Record<string, unknown> {
-  const keys = parseConfigPath(expr);
-  if (!keys.length) return {};
-  const out: Record<string, unknown> = {};
-  let cur = out;
-  for (let i = 0; i < keys.length - 1; i++) {
-    const key = keys[i];
-    if (typeof key === "number") throw new Error("overlay patch 的父级暂不支持数组下标");
-    const child: Record<string, unknown> = {};
-    cur[key] = child;
-    cur = child;
-  }
-  const last = keys[keys.length - 1];
-  if (typeof last === "number") throw new Error("overlay patch 的末级暂不支持数组下标");
-  cur[last] = null;
-  return out;
 }

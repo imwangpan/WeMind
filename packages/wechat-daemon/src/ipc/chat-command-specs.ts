@@ -311,18 +311,15 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     id: "wechat.config",
     section: "brain",
     ownerOnly: true,
-    zh: "微信配置 <查看|设置|删除> <agent> [<file#键路径>] [值]",
+    zh: "微信配置 查看 <agent>",
     brief: "只改微信独享 overlay，不污染真实配置",
     match: (t) => {
-      const m = t.match(/^微信配置\s+(查看|设置|删除)\s+(\S+)(?:\s+(\S+))?(?:\s+([\s\S]+))?$/i);
+      const m = t.match(/^微信配置\s+查看\s+(\S+)$/i);
       if (!m) return null;
-      const action = m[1] === "查看" ? "show" : m[1] === "设置" ? "set" : "unset";
       return {
         kind: "wechatConfig",
-        action,
-        agent: m[2],
-        target: m[3]?.trim(),
-        value: m[4]?.trim(),
+        action: "show",
+        agent: m[1],
       };
     },
   },

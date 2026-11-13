@@ -203,7 +203,7 @@ isWorkerAlive() → boolean
 1. **派发入口** ✅ 已确认（2026-06-17）：MVP 用**微信「任务：xxx」**（零额外 IPC，最快闭环）。本地命令派发（`manage.js task "..."`，贴合「电脑上开启任务」原场景）为**紧接着的下一步**——本地 CLI 写任务文件、poller 顺带扫描启动（轻量文件桥）。
 2. **单任务 vs 多任务**：MVP **单任务**（一个 activeTask）。多任务（多 worker 进程 + 任务标识）后续。
 3. **worker cwd（按 kiro 约定）** ✅：MVP 微信派发无「用户所在目录」概念 → 默认用户主目录（`WEMIND_WORKER_CWD` 可覆盖）；任务用绝对路径仍可访问任意项目。下一步本地命令派发时取「执行派发命令时所在目录」为 cwd——与本地开 kiro 完全一致（真正的 kiro 约定）。
-4. **worker 继承（按用户确认：尽可能继承 kiro 的一切）** ✅：独立 `WORKER_HOME`，**继承真实 ~/.kiro 的全部 MCP，仅排除 `wechat`（防它把消息发回自己，技术必然，同坑①）**；同时继承记忆/技能/规则（steering/memories/skills/agents/powers/tasks/extensions）与 settings（含模型 `claude-opus-4.8`、信任配置）；会话独立（`worker-sessions.json`）。**与 brain 的差异**：brain 是对话助手，默认空 MCP、对话中按需「加载 X」；worker 无人值守跑任务，故**默认全继承**（开箱即用的完整工具能力）。实现复用 `mcp-sandbox` 的 `mirrorRealKiro`/`syncSettings`，MCP 由「复制 catalog 全量 − 排除集」生成（而非 brain 的「空 + 激活集」）。
+4. **worker 继承（按用户确认：尽可能继承 kiro 的一切）** ✅：独立 `WORKER_HOME`，**继承真实 ~/.kiro 的全部 MCP，仅排除 `wechat`（防它把消息发回自己，技术必然，同坑①）**；同时继承记忆/技能/规则（steering/memories/skills/agents/powers/tasks/extensions）与 settings（含模型 `claude-opus-4.8`、信任配置）；会话独立（`worker-sessions.json`）。**与 brain 的差异**：brain 是对话助手，`sandbox` 下默认空 MCP、对话中按需「加载 X」；worker 无人值守跑任务，故**默认全继承**（开箱即用的完整工具能力）。实现复用 `mcp-sandbox` 的 `syncSettings` 与旧沙箱复制实现，MCP 由「复制 catalog 全量 − 排除集」生成（而非 brain 的「空 + 激活集」）。
 5. **进度反馈**：文字 **默认安静**——只在「轮次结束 / 中断 / 派发答复」推送文字（正合「只在卡点找我」，也避开连续发送上限）；但 worker 跑每一轮期间**持续发 typing「正在输入中」**（每 5s，不占连续发送上限），让用户知道在干活、不焦虑（真机实测：长任务文字静默会让人以为卡了）。全程文字进度可选 `WEMIND_WORKER_PROGRESS=1` 开启。
 6. **「继续」的三种含义** ⚠️：现有 poller 里「继续」用于**连续发送上限的等待段恢复**（`budgetOf.awaiting`）。任务的「继续」是**发给 worker**。二者需分流：当存在 waiting 中的 activeTask 且不处于发送上限等待段时，「继续」路由给任务；否则维持原有上限恢复语义。实现时明确判定顺序，避免互相吞掉。
 

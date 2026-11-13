@@ -5,7 +5,6 @@ import { createLogger } from "@wemind/wechat-ilink-core";
 
 import type { ResolvedAgent } from "../brain-agents.js";
 import { copyProfilePatch, stripWechatMcpEntries } from "../profile-model.js";
-import { applyOverlayToView, markGenerated, type ConfigView } from "../config/config-view.js";
 import type { AgentRuntime } from "../config/runtime.js";
 import { writeFileAtomic } from "../../shared/io/atomic-json.js";
 import { forbiddenMcpServer, parseJsonc } from "./agent-mcp.js";
@@ -16,24 +15,24 @@ const log = createLogger("wechat-daemon/mcp");
 /** 已经告警过的「direct 模式下不可写」组合，避免每条消息刷日志。 */
 const warnedRealHome = new Set<string>();
 
-/** 目标目录是不是 agent 的真实 home（direct 下写它就是改用户配置）。 */
+/** 目标目录是不是 agent 的真实 home。 */
 export function isRealHomeTarget(ag: ResolvedAgent, dir: string): boolean {
   return !!ag.realHome && path.resolve(dir) === path.resolve(ag.realHome);
 }
 
-/** 只有 sandbox 或真正生成了配置视图的 view 才可以写；direct 一律不写 Agent 配置。 */
-export function canWriteAgentConfig(ag: ResolvedAgent, rt: AgentRuntime): boolean {
-  return rt.mode === "sandbox" || !!rt.view;
+/** 只有 sandbox 才由 WeMind 写 Agent 配置；direct 一律不写。 */
+export function canWriteAgentConfig(_ag: ResolvedAgent, rt: AgentRuntime): boolean {
+  return rt.mode === "sandbox";
 }
 
-/** direct 模式（含 view 降级）不写 Agent 配置：只告警一次，绝不写真实配置。 */
+/** direct 模式不写 Agent 配置：只告警一次，绝不写真实配置。 */
 export function warnUnwritableRealHome(ag: ResolvedAgent, what: string): void {
   const key = `${ag.name}:${what}`;
   if (warnedRealHome.has(key)) return;
   warnedRealHome.add(key);
   log.warn(
     `agent「${ag.name}」当前按 direct 运行，不会改写真实配置（跳过${what}）；` +
-      `微信侧 MCP/设置不生效。需要微信侧管理请设 homeMode=view（该 agent 需要可重定向的配置目录）或 homeMode=sandbox。`,
+      `MCP/设置以 Agent 自己的配置为准。需要 WeMind 托管请设 homeMode=sandbox。`,
   );
 }
 
@@ -83,14 +82,10 @@ export function syncCredentials(ag: ResolvedAgent, configDir: string): void {
   for (const file of ag.identityFiles) syncCredentialFile(ag, configDir, file, "always");
 }
 
-/** 把预设的默认设置项补进视图/沙箱 settings.json：只补缺失键（用户显式设过就保留用户的值），真实配置不动。 */
-export function applySettingsDefaults(
-  ag: ResolvedAgent,
-  configDir: string,
-  view?: ConfigView,
-): void {
+/** 把预设的默认设置项补进沙箱 settings.json：只补缺失键（用户显式设过就保留用户的值）。 */
+export function applySettingsDefaults(ag: ResolvedAgent, configDir: string): void {
   if (Object.keys(ag.settingsDefaults).length === 0) return;
-  if (!view && isRealHomeTarget(ag, configDir)) {
+  if (isRealHomeTarget(ag, configDir)) {
     warnUnwritableRealHome(ag, "settingsDefaults");
     return;
   }
@@ -107,19 +102,18 @@ export function applySettingsDefaults(
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(cur, null, 2), "utf-8");
-    if (view) markGenerated(view, file);
   } catch {
     /* best-effort */
   }
 }
 
-/** 「设置与 MCP 同文件」的 agent：以真实 settings.json 为基底生成视图/沙箱的设置副本。
+/** 「设置与 MCP 同文件」的 agent：以真实 settings.json 为基底生成沙箱副本。
  *  剥离必须由沙箱权威决定的键（`ag.settingsStrip`，默认 DEFAULT_SETTINGS_STRIP）：
- *  - `mcpServers`：MCP 只能来自视图/沙箱的 curated 激活集（防 wechat 回环）；
+ *  - `mcpServers`：MCP 只能来自沙箱的 curated 激活集（防 wechat 回环）；
  *  - `enabledPlugins`：插件可自带 MCP，且沙箱不继承 `plugins/`；
  *  - `providers` / `model`：自定义供应商（BYOK）含明文密钥，`model` 又可能指向已剥离的供应商。
  *  gemini 只剥 `mcpServers`——它的 model/security 是用户自己的选择，必须原样保留。
- *  并强制 `general.enableAutoUpdate=false`：否则每个视图/沙箱都会各下一份约 210 MB 的 CLI。 */
+ *  并强制 `general.enableAutoUpdate=false`：否则每个沙箱都会各下一份约 210 MB 的 CLI。 */
 export function settingsBaseFor(ag: ResolvedAgent): Record<string, unknown> {
   const base =
     ag.settingsBase && ag.realHome
@@ -137,54 +131,47 @@ export function settingsBaseFor(ag: ResolvedAgent): Record<string, unknown> {
   return base;
 }
 
-/** 把 `settingsBaseFor()` 的结果写到该 agent 的「设置与 MCP 同文件」路径。
- *  返回 false 表示目标就是真实 home（direct 模式）：不写，只告警。 */
-export function writeSettingsBase(
-  ag: ResolvedAgent,
-  configDir: string,
-  view?: ConfigView,
-): boolean {
-  if (!view && isRealHomeTarget(ag, configDir)) {
+/** 把 `settingsBaseFor()` 的结果写到该 agent 的「设置与 MCP 同文件」路径。 */
+export function writeSettingsBase(ag: ResolvedAgent, configDir: string): boolean {
+  if (isRealHomeTarget(ag, configDir)) {
     warnUnwritableRealHome(ag, "settingsBase/MCP");
     return false;
   }
   fs.mkdirSync(configDir, { recursive: true });
   const file = mcpConfigPath(ag, configDir);
   fs.writeFileSync(file, JSON.stringify(settingsBaseFor(ag), null, 2), "utf-8");
-  if (view) markGenerated(view, file);
   return true;
 }
 
 /**
- * 把配置视图里由真实 home 链接/复制来的 MCP 文件再清一遍：
+ * 把沙箱副本里由真实 home 复制来的 MCP 文件再清一遍：
  *  - DSH：`profiles/<realProfile>/cordis.patch.yml`（mcpViaAcp，不会走 curated 写入）；
- *  - Copilot 这类「catalog 文件在视图根」的 agent：JSON 里的微信条目逐条剔除。
- *  只改视图副本（普通文件），不碰真实文件；清不掉（TOML/不可解析）就交给启动检查拒绝。
+ *  - Copilot 这类「catalog 文件在配置目录」的 agent：JSON 里的微信条目逐条剔除。
+ *  只改沙箱副本，不碰真实文件。
  */
-export function sanitizeView(ag: ResolvedAgent, rt: AgentRuntime): void {
-  const view = rt.view;
-  // 没有视图时写的就是真实目录/沙箱外的实文件，这里一律不碰。
-  if (!view) return;
+export function stripWechatFromConfigCopy(ag: ResolvedAgent, rt: AgentRuntime): void {
+  if (rt.mode !== "sandbox") return;
+  const base = rt.configDir;
   if (ag.realProfile) {
     for (const name of ["cordis.patch.yml", "cordis.yml"]) {
-      const file = path.join(view.configDir, "profiles", ag.realProfile, name);
+      const file = path.join(base, "profiles", ag.realProfile, name);
       if (!isRegularFile(file)) continue;
       try {
         const { text, removed } = stripWechatMcpEntries(fs.readFileSync(file, "utf-8"));
         if (!removed.length) continue;
         writeFileAtomic(file, text);
         log.warn(
-          `配置视图里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
+          `沙箱副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
         );
       } catch (e) {
         log.error(
-          `配置视图清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
+          `沙箱副本清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
         );
       }
     }
   }
   if (!ag.mcpViaAcp || !ag.catalogFile || ag.catalogFile.includes("..")) return;
-  const file = path.join(view.configDir, ag.catalogFile);
+  const file = path.join(base, ag.catalogFile);
   if (!isRegularFile(file)) return;
   const adapter = mcpAdapterForFile(ag, file);
   if (adapter.id === "tomlMcpServers") return;
@@ -197,16 +184,16 @@ export function sanitizeView(ag: ResolvedAgent, rt: AgentRuntime): void {
     adapter.writeCatalog(file, kept);
     const removed = Object.keys(servers).filter((n) => !(n in kept));
     log.warn(
-      `配置视图里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
+      `沙箱副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
     );
   } catch (e) {
     log.error(
-      `配置视图 MCP 清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
+      `沙箱副本 MCP 清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
     );
   }
 }
 
-/** 视图里的路径常是从真实 home 链接过来的：跟随链接读内容，写入时由 writeFileAtomic 换成独立副本。 */
+/** 跟随链接读内容，写入时由 writeFileAtomic 换成独立副本。 */
 function isRegularFile(file: string): boolean {
   try {
     const st = fs.lstatSync(file);
@@ -236,16 +223,4 @@ export function syncProfilePatch(ag: ResolvedAgent, targetHome: string, label: s
   } catch {
     /* best-effort */
   }
-}
-
-/** 把微信侧 config overlay 落到配置视图；没有配置目录环境变量（本次降级 direct）的 agent 只能告警（不假装生效）。 */
-export function warnOverlayProblems(ag: ResolvedAgent, rt: AgentRuntime): void {
-  const problems = rt.view
-    ? applyOverlayToView(rt.view, ag, rt.overlay, rt.mode)
-    : Object.keys(rt.overlay.config ?? {}).length
-      ? [
-          `agent「${ag.name}」没有配置目录环境变量，微信侧 config overlay 无法生效（真实配置不受影响）`,
-        ]
-      : [];
-  for (const problem of problems) log.warn(problem);
 }
