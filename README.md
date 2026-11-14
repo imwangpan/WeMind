@@ -221,9 +221,9 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain-sessions.json`                         | `<agent>:<userId> → ACP sessionId` 映射（按大脑分开存，切换 agent 互不覆盖）；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建） |
 | `worker-sessions.json`                        | worker（远程任务）`ACP sessionId` 映射（键 `<agent>:task-<编号>@<userId>`），任务中断后据此 `load`/`resume` 续跑 |
 | `brain-mcps.json`                             | **仅 `managed`**：brain 当前激活的 MCP 集（按 agent 分键，默认空）；`direct` 不读，MCP 完全由 Agent 真实配置决定 |
-| `runtime.json`                                | 账号级 `homeMode`：默认 `direct`；可显式设 `managed`。缺失/损坏/旧值一律回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖；按需创建 |
+| `runtime.json`                                | 账号级 `homeMode`：默认 `direct`；可显式设 `managed`。缺失/损坏回落 `direct`；旧值 `sandbox` 按 `managed` 处理并告警一次，`WEMIND_HOME_MODE` 只做一次性覆盖；按需创建 |
 | `agent-overrides/<agent>.json`                | 微信侧 overlay：只支持 `mcp.disable` / `mcp.extra`（不写 Agent 真实配置）；目录随账号创建，文件在首次写入时生成。默认改 Agent 真实配置，只有明确说“微信侧/仅微信”时才用它 |
-| `workspace.json` / `workspace/{brain,worker}/` | brain / worker 默认工作区配置与 managed 目录；`workspace/{brain,worker}/` 随账号创建，`workspace.json` 按需创建；改默认值只影响新会话 |
+| `workspace.json` / `workspace/{brain,worker}/` | brain / worker 默认工作区配置与默认目录（`workspace.mode` 只有 `default` / `external`，与 `homeMode=managed` 无关）；`workspace/{brain,worker}/` 随账号创建，`workspace.json` 按需创建；改默认值只影响新会话 |
 | `session-cwd.json`                            | `<agent>:<sessionId> → cwd`；恢复旧会话时使用，避免把旧会话搬到新工作区；按需创建 |
 | `env.json`                                    | 可选的非敏感环境快照（PATH/代理/locale）；API key/token 不落盘；按需创建 |
 | `wechat-settings.json`                        | 账号级微信行为设置；目前只有 `replyStyle`（`null` 默认 / `concise` 精简），每轮现读、下一条消息生效 |
@@ -337,7 +337,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 | 允许敏感文件 [分钟] | 临时放行凭证/状态文件的外发（默认 2 分钟，最多 30；只在本进程有效） |
 | 工作区 | 查看 brain 默认工作区 |
 | 设置工作区 <绝对路径> | 设置 brain 默认工作区（新会话生效） |
-| 重置工作区 | 恢复 brain 默认 managed 工作区 |
+| 重置工作区 | 恢复 brain 默认工作区 |
 | 微信配置 查看 <agent> | 查看微信独享 overlay，不改真实配置 |
 | 帮助 | 这张表 |
 | 任务 [<agent 名>：]正文 | 派发新任务（有活跃任务时发给它）；带 agent 名就由它执行（只影响这一条） |
@@ -379,7 +379,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_ACCOUNT`                                        | 账号 key，决定状态子目录 `~/.wemind/<key>/`（默认 `default`）。**必须是 `wemind login` 登记过的 key**（见上文「多账号」），日常用 `wemind start <key\|label>` 即可 |
 | `WECHAT_DATA_DIR`                                       | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则。**只对 `wemind daemon` 直跑有效**：`wemind start` / `login --start` / pm2 / 自启一律忽略它（并按账号 key 寻址），检测到时会向 stderr 打迁移指引 |
 | `WEMIND_HOME`                                           | 数据根目录（默认 `~/.wemind`）                                                                                                      |
-| `WEMIND_HOME_MODE`                                      | 一次性覆盖账号 `homeMode`：`direct`（默认）/ `managed`。持久值在 `<账号>/runtime.json`，不要写进 profile；旧值一律回落 `direct` |
+| `WEMIND_HOME_MODE`                                      | 一次性覆盖账号 `homeMode`：`direct`（默认）/ `managed`。持久值在 `<账号>/runtime.json`，不要写进 profile；缺失/损坏回落 `direct`，旧值 `sandbox` 按 `managed` 处理并告警一次 |
 | `WECHAT_BRAIN_HOME`                                     | **仅 `managed` 模式**的 brain 副本目录（默认 `<数据目录>/brain-home`）；`direct` 直接用真实 home |
 | `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS`          | 大脑单回合空闲/硬超时（默认 120000 / 900000；重任务实测需 ~6.5min）                                                                 |
 | `WECHAT_BRAIN_FIRST_FRAME_MS`                           | 首帧超时：prompt 发出后多久仍无任何帧判「开局即卡死」并快速重试（默认 25000）                                                       |

@@ -297,7 +297,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     zh: "重置工作区",
     slash: "/workspace reset",
     cli: "wemind workspace reset --role brain",
-    brief: "恢复 brain 默认 managed 工作区",
+    brief: "恢复 brain 默认工作区",
     match: (t) =>
       /^(?:重置工作区|\/workspace\s+reset)$/i.test(t) ? { kind: "workspace", reset: true } : null,
   },

@@ -245,7 +245,7 @@ export function cmdWorkspace(rest: string[]): string {
       `账号 ${key}`,
       `brain：${b.mode} ${b.path}${b.problem ? `（${b.problem}）` : ""}`,
       `worker：${w.mode} ${w.path}${w.problem ? `（${w.problem}）` : ""}`,
-      `默认 managed 路径：brain=${defaultWorkspacePath("brain", dir)}  worker=${defaultWorkspacePath("worker", dir)}`,
+      `默认路径（mode=default）：brain=${defaultWorkspacePath("brain", dir)}  worker=${defaultWorkspacePath("worker", dir)}`,
     ].join("\n");
   }
   const role = opts.role ?? "brain";

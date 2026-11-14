@@ -15,9 +15,11 @@ import {
 import { getSessionCwd, setSessionCwd } from "./session-cwd.js";
 import {
   defaultWorkspacePath,
+  loadWorkspaceConfig,
   resolveWorkspace,
   updateWorkspace,
   validateWorkspacePath,
+  workspaceConfigPath,
 } from "./workspace.js";
 import { mutateConfigFile, setConfigPath, snapshotConfigFile } from "./agent-config-writer.js";
 import { addMcp, catalogNames, loadActive } from "../managed/mcp-brain.js";
@@ -71,13 +73,27 @@ function fakeAgent(realHome: string): ResolvedAgent {
 }
 
 describe("workspace", () => {
-  it("默认 brain/worker 工作区是账号目录下的 managed 路径", () => {
+  it("默认 brain/worker 工作区是账号目录下的默认路径（mode=default）", () => {
     const dir = tmp();
     expect(resolveWorkspace("brain", dir)).toMatchObject({
-      mode: "managed",
+      mode: "default",
       path: defaultWorkspacePath("brain", dir),
     });
     expect(resolveWorkspace("worker", dir).path).toBe(defaultWorkspacePath("worker", dir));
+    expect(loadWorkspaceConfig(dir).config.brain).toMatchObject({ mode: "default" });
+  });
+
+  it("旧值 mode=managed 按 default 处理（2026-11-14 改名，避免与 homeMode=managed 撞名）", () => {
+    const dir = tmp();
+    fs.writeFileSync(
+      workspaceConfigPath(dir),
+      JSON.stringify({ version: 1, brain: { mode: "managed" }, worker: { mode: "managed" } }),
+    );
+    expect(resolveWorkspace("brain", dir)).toMatchObject({
+      mode: "default",
+      path: defaultWorkspacePath("brain", dir),
+    });
+    expect(resolveWorkspace("brain", dir).problem).toBeUndefined();
   });
 
   it("external 必须是已存在目录；账号目录/家目录/Agent 配置目录被拒", () => {

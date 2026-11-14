@@ -2,17 +2,26 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { DATA_DIR } from "@wemind/wechat-ilink-core";
+import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
 import { ACP_AGENT_PRESETS } from "../brain-presets.js";
 
+const log = createLogger("wechat-daemon/config");
+let legacyModeWarned = false;
+
 export type AgentRole = "brain" | "worker";
-export type WorkspaceMode = "managed" | "external";
+/**
+ * 工作区取值：`default` = 账号目录下的默认工作区（`<账号>/workspace/<角色>`，由 WeMind 创建），
+ * `external` = 用户指定的外部目录（必须已存在）。
+ *
+ * 不叫 `managed`：它与 `homeMode=managed`（配置副本隔离）是两件事，同名字容易读错。
+ */
+export type WorkspaceMode = "default" | "external";
 
 export type WorkspaceEntry = {
   mode: WorkspaceMode;
-  /** managed 可省略（按账号目录计算）；external 必须是绝对路径。 */
+  /** default 可省略（按账号目录计算）；external 必须是绝对路径。 */
   path?: string;
 };
 
@@ -40,21 +49,43 @@ export function defaultWorkspacePath(role: AgentRole, dir: string = DATA_DIR): s
 function emptyConfig(): WorkspaceConfig {
   return {
     version: 1,
-    brain: { mode: "managed" },
-    worker: { mode: "managed" },
+    brain: { mode: "default" },
+    worker: { mode: "default" },
   };
+}
+
+/**
+ * 旧值 `managed` 是 `default` 的曾用名（2026-11-14 改名，避免与 `homeMode=managed` 撞名）：
+ * 读到就按 `default` 处理，老账号不会因为一个取值被当成「配置损坏」。
+ */
+function legacyWorkspaceMode(v: unknown): WorkspaceMode | null {
+  if (v === "managed") {
+    if (!legacyModeWarned) {
+      legacyModeWarned = true;
+      log.warn(
+        "workspace.json 的 mode=managed 已改名为 default：本次按默认工作区处理；下次 `wemind workspace set|reset` 会写回新值",
+      );
+    }
+    return "default";
+  }
+  return null;
 }
 
 function normEntry(raw: unknown): WorkspaceEntry | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const j = raw as Record<string, unknown>;
-  const mode = j.mode === "external" ? "external" : j.mode === "managed" ? "managed" : null;
+  const mode =
+    j.mode === "external"
+      ? "external"
+      : j.mode === "default"
+        ? "default"
+        : legacyWorkspaceMode(j.mode);
   if (!mode) return null;
   const p = typeof j.path === "string" && j.path.trim() ? j.path.trim() : undefined;
   return p ? { mode, path: p } : { mode };
 }
 
-/** 读 workspace.json；缺文件/损坏回落默认 managed（损坏只影响本次读取，不覆盖用户文件）。 */
+/** 读 workspace.json；缺文件/损坏回落默认（损坏只影响本次读取，不覆盖用户文件）。 */
 export function loadWorkspaceConfig(dir: string = DATA_DIR): {
   config: WorkspaceConfig;
   problem?: string;
@@ -113,7 +144,7 @@ function systemDangerRoots(): string[] {
 
 /**
  * 校验工作区：绝对路径、存在且是目录、不是系统/账号/Agent 配置目录、不是家目录根。
- * `external` 必须已经存在；`managed` 由 ensure 创建。
+ * `external` 必须已经存在；`default` 由 ensure 创建。
  */
 export function validateWorkspacePath(
   raw: string,
@@ -184,13 +215,13 @@ export function validateWorkspacePath(
   return null;
 }
 
-/** 解析某角色的工作区；external 先校验再返回，managed 只计算路径。 */
+/** 解析某角色的工作区；external 先校验再返回，default 只计算路径。 */
 export function resolveWorkspace(role: AgentRole, dir: string = DATA_DIR): ResolvedWorkspace {
   const { config, problem } = loadWorkspaceConfig(dir);
   const entry = config[role];
-  if (entry.mode === "managed") {
+  if (entry.mode === "default") {
     return {
-      mode: "managed",
+      mode: "default",
       path: defaultWorkspacePath(role, dir),
       ...(problem ? { problem } : {}),
     };
@@ -204,7 +235,7 @@ export function resolveWorkspace(role: AgentRole, dir: string = DATA_DIR): Resol
   };
 }
 
-/** 确保 managed 工作区存在；external 只校验，不自动创建。问题通过返回值交给调用方报错。 */
+/** 确保默认工作区存在；external 只校验，不自动创建。问题通过返回值交给调用方报错。 */
 export function ensureWorkspace(role: AgentRole, dir: string = DATA_DIR): ResolvedWorkspace {
   const ws = resolveWorkspace(role, dir);
   if (ws.problem) return ws;
@@ -216,7 +247,7 @@ export function ensureWorkspace(role: AgentRole, dir: string = DATA_DIR): Resolv
   return ws;
 }
 
-/** `set`/`reset` 都走这里：null = 恢复 managed 默认。 */
+/** `set`/`reset` 都走这里：null = 恢复 `default` 默认工作区。 */
 export function updateWorkspace(
   role: AgentRole,
   value: string | null,
@@ -224,7 +255,7 @@ export function updateWorkspace(
 ): WorkspaceConfig {
   const { config } = loadWorkspaceConfig(dir);
   if (value === null) {
-    config[role] = { mode: "managed" };
+    config[role] = { mode: "default" };
   } else {
     const invalid = validateWorkspacePath(value, role, dir);
     if (invalid) throw new Error(invalid);

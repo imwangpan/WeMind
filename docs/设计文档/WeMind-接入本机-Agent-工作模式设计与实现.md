@@ -82,7 +82,7 @@
 | `direct` | 启动路径不生成副本、不注入 `homeEnvVar` / 预设 `env`；Agent 直接读取完整真实配置。WeMind 只保留 `envDefaults`（yolo 默认值）与只读凭据桥接。只有用户显式执行 `wemind config agent ...` 才写真实配置；微信侧 overlay 只由显式 `wemind config wechat ...` 写入，且文件式 Agent 不消费 | **默认**；单机单人；要求“终端怎么配，微信就怎么跑” |
 | `managed` | 完整复制到账号目录，Agent 与真实配置隔离；技能/记忆按 `inheritDirs` / `inheritFiles` 选择性继承 | 多账号不同人、不可信任务、Agent 不支持共享 home、需要回滚 |
 
-**默认：`direct`。** 现有账号迁移后也进入 `direct`；`managed` 保留为显式选项。历史遗留的其他 `homeMode` 值读取时一律按 `direct` 处理，新写入只写 `direct / managed`。
+**默认：`direct`。** 现有账号迁移后也进入 `direct`；`managed` 保留为显式选项。历史遗留值 `sandbox`（`managed` 的曾用名，2026-11-14 改名）读取时按 `managed` 处理并告警一次；其它无法识别的值回落 `direct`。新写入只写 `direct / managed`。
 
 ### 2.2 副本隔离的取舍
 
@@ -109,7 +109,7 @@
 
 Phase 1 已落地（本分支）：
 
-- 账号默认 `homeMode = direct`（`agents/config/home-mode.ts`），读取 `<账号>/runtime.json`；缺失/损坏/历史遗留值一律回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖。
+- 账号默认 `homeMode = direct`（`agents/config/home-mode.ts`），读取 `<账号>/runtime.json`；缺失/损坏回落 `direct`，旧值 `sandbox` 按 `managed` 处理并告警一次，`WEMIND_HOME_MODE` 只做一次性覆盖。
 - `agentRuntime("brain"|"worker", ag)` 在 `direct` 下直接返回 Agent 的真实配置目录，`configDir === home`；WeMind 不生成任何配置副本、不注入 `homeEnvVar`、不写 settings / MCP / 权限文件。`managed` 才使用 `brain-home` / `worker-home`，由 adapter 生成副本并按 `inheritDirs` / `inheritFiles` 继承。
 - brain 与 worker 的启动/会话 `cwd` 改为账号级默认工作区（`<账号>/workspace/brain`、`<账号>/workspace/worker`，`agents/config/workspace.ts`）；`session-cwd.json` 记录 `<agent>:<sessionId> → cwd`，恢复旧会话时优先使用它。`WEMIND_WORKER_CWD` 与 `task --cwd` 仍是一次性覆盖。
 - `direct` 的 MCP 完全由 Agent 真实配置决定：文件式 Agent 自己读配置，DSH 读 profile YAML 的 `dsh-mcp-client` 条目，Claude Code / Copilot / Codex 读各自的 `.claude.json` / `mcp-config.json` / `config.toml`。WeMind **不重发 catalog**；只有用户显式配置的微信独享 `overlay.mcp.extra` 会通过 ACP 补进会话（仅 `acpMcpServers` 的 Agent）。`加载/卸载 MCP` 在 direct 下原样转给 Agent（由它自己改配置）。`managed` 才是 brain 默认空（激活集按 agent 分键持久化在 `<账号>/brain-mcps.json`，`version: 2`）、worker 真实全量减 `wechat`；`mcpDelivery: "acp"` 的 Agent 由 WeMind 经 ACP 投递，文件式 Agent 写副本配置。
@@ -184,7 +184,7 @@ AgentHomeResolver ──► Agent 进程
 | `OverlayStore`（`agents/config/overlay.ts`） | 读写 `<账号>/agent-overrides/<agent>.json` 的 `mcp.disable` / `mcp.extra` |
 | `McpAdapter`（`agents/managed/mcp-adapters.ts`） | 每种 MCP **文件格式**的路径/读写/剥离/ACP 转换/原生只读/设置继承；Agent 只是选择其中一种，新增格式才加 adapter |
 | `McpPolicy`（`agents/managed/mcp-brain.ts`、`mcp-worker.ts`） | `direct` 下 brain/worker 都由 Agent 自己加载真实配置、WeMind 不额外下发；`managed` 算激活集/全量集；处理 disable/extra 与 `wechat` 排除 |
-| `WorkspaceManager`（`agents/config/workspace.ts`） | 校验、创建、读取 brain/worker 默认工作区；区分 managed/external |
+| `WorkspaceManager`（`agents/config/workspace.ts`） | 校验、创建、读取 brain/worker 默认工作区；区分 default/external |
 | `EnvProvider`（`agents/config/env-snapshot.ts` + `brain-agents.ts`） | 继承 daemon 环境，或加载非敏感快照（PATH/代理/locale）；解析顺序不绑定某个版本管理器 |
 | `SessionBinder`（`agents/config/session-cwd.ts`） | 保存 `<agent>:<sessionId> → cwd`；恢复时使用并校验 cwd |
 | `ReloadCoordinator`（`config-fingerprint.ts` + `config.reload` 控制桥） | 检测真实配置变化；手动 reload 让 brain 重建进程，重启在回合结束后执行 |
@@ -558,15 +558,15 @@ MCP 数量会同时影响：
 - 不能是账号根目录（`<账号>/` 本身）、`DATA_DIR` 根、`brain-home`、`worker-home`、`agent-overrides`、`media`、`agent-sessions`、Agent 真实配置目录、系统目录或家目录根；也不能位于这些目录内部、包含 `DATA_DIR` 根，或落在其它账号的数据目录内。
 - 路径稳定；`session/new` 的 `cwd` 是会话身份的一部分。
 - 项目级技能/规则需要项目根时，用户应把工作区指到项目根。
-- `external` 工作区不随账号删除；`managed` 工作区随账号清理。
+- `external` 工作区不随账号删除；`default`（账号目录下的默认工作区）随账号清理。
 
 ### 9.2 默认布局
 
 ```text
 ~/.wemind/<账号>/
 ├── workspace/
-│   ├── brain/       # brain 默认 managed 工作区
-│   └── worker/      # worker 默认 managed 工作区
+│   ├── brain/       # brain 默认工作区（mode=default）
+│   └── worker/      # worker 默认工作区（mode=default）
 └── workspace.json   # 可选；首次 workspace set 时创建
 ```
 
@@ -575,12 +575,14 @@ MCP 数量会同时影响：
 ```json
 {
   "version": 1,
-  "brain": { "mode": "managed" },
-  "worker": { "mode": "managed" }
+  "brain": { "mode": "default" },
+  "worker": { "mode": "default" }
 }
 ```
 
-`managed` 不需要写 `path`；代码按账号目录计算，账号目录整体搬家后仍然有效。只有 `external` 必须写绝对路径。
+取值只有两个：`default`（账号目录下的默认工作区，不需要写 `path`，代码按账号目录计算，账号目录整体搬家后仍然有效）与 `external`（必须写绝对路径）。
+
+> 这里的 `mode` 与 `homeMode` 无关：`homeMode=managed` 说的是「Agent 配置用账号副本」，`workspace.mode` 说的是「会话 cwd 放哪儿」。为避免同名误读，工作区取值不使用 `managed` 这个词；旧文件里读到 `mode: "managed"` 按 `default` 处理并告警一次，下次 `wemind workspace set|reset` 写回新值。
 
 外部项目：
 
@@ -598,7 +600,7 @@ MCP 数量会同时影响：
 
 | 路径 | 生效模式 | 作用 |
 |---|---|---|
-| `workspace/{brain,worker}/` | 全部 | 默认 managed 工作区；账号启动时自动创建，0700 |
+| `workspace/{brain,worker}/` | 全部 | 默认工作区（`workspace.mode=default` 指向这里）；账号启动时自动创建，0700 |
 | `workspace.json` | 全部（按需） | brain / worker 的默认工作区覆盖；唯一权威；只在 `workspace set` 时创建 |
 | `session-cwd.json` | 全部（按需） | `<agent>:<sessionId> → cwd`；恢复会话时校验；首次记录会话 cwd 时创建 |
 | `agent-overrides/<agent>.json` | 全部（按需） | 微信侧 overlay，只支持 `mcp.disable` / `mcp.extra`；目录随账号创建，文件首次写入时生成 |
@@ -835,7 +837,7 @@ wemind env capture [--key <key>] [--dry-run]
 | 命令 | 作用 |
 |---|---|
 | `wemind config show [--key <key|label>]` | 显示 homeMode、真实配置目录、overlay 目录、workspace、env 快照键与 `managed` 的 MCP 激活集文件 |
-| `wemind config home-mode [direct|managed]` | 查看/写入 `<账号>/runtime.json`；重启 daemon 后生效 |
+| `wemind config home-mode [direct|managed]` | 查看/写入 `<账号>/runtime.json`；CLI 提示「重启 daemon 后生效」，实际是**新起的 agent 进程**按新值、常驻 brain 要重连或重启才换 home（见 §18.2.2 C） |
 | `wemind config reload [--key <key|label>]` | 经控制桥让常驻 brain 重建进程，空闲时执行 |
 | `wemind config reply-style [concise|off] [--key <key|label>]` | 查看/设置微信侧回复风格（写 `<账号>/wechat-settings.json`）；每轮现读，下一条消息生效，不改 Agent 配置 |
 | `wemind config agent show|get|set|unset|edit <agent> [<键路径>] [值] [--file <相对路径>]` | 默认修改真实 Agent 配置；写入前备份并做并发校验 |
@@ -915,7 +917,7 @@ wemind env capture [--key <key>] [--dry-run]
 - `inherit`：链接/复制/清单清理；kiro v3 `permissions.yaml` 不穿透 junction。
 - `OverlayStore`：路径 patch、删除、数组替换、未知键告警。
 - `McpPolicy`：brain 空集、显式加载持久、worker 全量、wechat 排除、disable/extra。
-- `WorkspaceManager`：managed/external、危险路径、缺失路径、session cwd。
+- `WorkspaceManager`：default/external、危险路径、缺失路径、session cwd。
 - `AgentConfigWriter`：备份、mtime/size/hash 冲突拒绝、密钥字面值拒绝、原子写、含注释 JSONC 拒绝。
 - `MediaStore`：`direct` 走 `<账号>/media/inbound`，迁移与清理不越界。
 - `EnvProvider`：白名单、密钥过滤、0600；快照覆盖 PATH 后能解析到任意安装方式的 Agent，未捕获变量仍继承；不依赖 fnm。

@@ -49,7 +49,7 @@ export function normalizeHomeMode(value: unknown): HomeMode | null {
   return migrateLegacyMode(v);
 }
 
-/** 读账号级 homeMode；环境变量 `WEMIND_HOME_MODE` 是一次性覆盖，缺失/损坏/旧值回落 `direct`。 */
+/** 读账号级 homeMode；环境变量 `WEMIND_HOME_MODE` 是一次性覆盖，缺失/损坏回落 `direct`、旧值 `sandbox` 按 `managed` 处理并告警一次。 */
 export function readHomeMode(dir: string = DATA_DIR): HomeMode {
   const env = normalizeHomeMode(process.env.WEMIND_HOME_MODE);
   if (env) return env;
