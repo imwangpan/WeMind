@@ -51,10 +51,11 @@
 - [docs/设计文档/文档守卫设计.md](docs/设计文档/文档守卫设计.md): current design of the three documentation guards (`doc-impact`, `check-agent-docs`, `gen-docs-tables`) — architecture, 13 rules, entry points, limits, maintenance guide.
 - [docs/设计文档/源码目录分层设计.md](docs/设计文档/源码目录分层设计.md): implemented design layering `packages/wechat-daemon/src/` into 8 subsystem directories with 6 subdirectories, splitting data/stateless modules, and the per-directory doc-sync workflow.
 - [docs/设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md](docs/设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md): current design and implementation notes for terminal-equivalent local-agent mode — direct (default) / sandbox homes, WeChat-only overlays, workspace, MCP policy, yolo, session sharing, admin MCP, migration and acceptance.
+- [docs/设计文档/远程任务-human-in-the-loop设计与实现.md](docs/设计文档/远程任务-human-in-the-loop设计与实现.md): current design and implementation of remote tasks (human-in-the-loop) — controlled ACP worker processes, multi-task table + process pool, message routing and task state machine, session resume, config/permission/MCP policy, progress feedback, dual WeChat/CLI entry, restart discipline, invariants.
 
 ## Historical (archived, not current behavior)
 
-- [docs/设计文档/](docs/设计文档/): Plan C design, MVP, CLI-ization design (historical); the current doc-guard design is listed above.
+- [docs/设计文档/](docs/设计文档/): Plan C master design and CLI-ization design (historical); the current doc-guard / remote-task / local-agent-mode designs are listed above.
 - [docs/审查与质量记录/](docs/审查与质量记录/): 2026-11-02 audit snapshot, 2026-11-04 archive list, 2026-11-05 source-layout refactor design (not implemented), and the 2026-11-05 audit lessons.
 - [docs/待办与后续计划/](docs/待办与后续计划/): deferred work — task numbering and record size (describes current behavior), quote-message text cache (`ref_msg` often carries only `svr_id`), and `wemind start` inheriting `WECHAT_DATA_DIR` (known bug, fix designed but not applied).
 

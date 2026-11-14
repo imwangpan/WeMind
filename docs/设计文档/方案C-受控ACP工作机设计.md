@@ -1,10 +1,10 @@
 # 方案 C：受控 ACP 工作机（设计文档）
 
-> **历史文档（2026-11-04 标注）**：本文记录当时的方案设计与实施过程，**不作为现行实现的说明**；现行行为以 [README.md](../../README.md)、[repowiki/07-远程任务-Worker.md](../repowiki/07-远程任务-Worker.md) 与源码为准。文中与现行不一致之处已在正文标注。
+> **历史文档（2026-11-04 标注；2026-11-14 定界）**：本文只作**方案选型与分阶段落地**的记录（为什么选方案 C 而不是 A / B、阶段 0–3 的顺序与剩余项、当时的残余风险），**不作为现行实现的说明**。现行架构、消息路由、状态机与流程一律以 [远程任务-human-in-the-loop设计与实现.md](远程任务-human-in-the-loop设计与实现.md) 与 [repowiki/07-远程任务-Worker.md](../repowiki/07-远程任务-Worker.md) 为准；文中与现行不一致之处已在正文标注。
 >
 > **路径说明（2026-11-06 补）**：文中源码路径是当时的平铺路径；`src/` 分层后对应位置见 [`docs/ai/代码地图.md`](../ai/代码地图.md)。
 
-> 状态：**MVP 已实现** ✅（2026-06-17，真机跑通，见 [方案C-MVP-远程human-in-the-loop.md](方案C-MVP-远程human-in-the-loop.md)）。本文为总设计与方案对比（A/B/C）；MVP 落地细节（worker-acp / task-manager / 消息路由 / typing）见 MVP 文档。
+> 状态：**MVP 已实现** ✅（2026-06-17，真机跑通）。本文为总设计与方案对比（A/B/C），属历史文档；现行设计与实现（worker-acp / worker-pool / task-manager / 消息路由 / typing）见 [远程任务-human-in-the-loop设计与实现.md](远程任务-human-in-the-loop设计与实现.md) 与 [repowiki/07](../repowiki/07-远程任务-Worker.md)。
 >
 > **阶段 2 已落地**：受控工作机**多任务化**——单 worker → **多 worker 进程池 + 任务编号 + 派发时选 agent + 重启后续跑**（详见 §10）。实现文件：`worker-pool.ts`（进程池：复用/回收/并发上限）、`worker-acp.ts`（`class WorkerConn`，一条任务一条 ACP 连接）、`task-manager.ts`（任务表与派发路由）、`task-store.ts`（任务表写入磁盘、重启后按能力续跑）、`control-bridge.ts`（CLI 与微信走同一段实现的双入口）。
 >
