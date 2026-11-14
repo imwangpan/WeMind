@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { stripAllDshMcpEntries, stripDshEntries } from "./sandbox/dsh-mcp.js";
+import { stripAllDshMcpEntries, stripDshEntries } from "./managed/dsh-mcp.js";
 
 /**
  * 真实 profile 用户层（`<realHome>/profiles/<profile>/cordis.patch.yml`）的三件事：
  * ① 读默认模型（`readProfileDefaultModel`）；② 缺 `- id: acp` 时给用户提示（`acpOverrideHint`）；
- * ③ 复制进沙箱前处理 MCP 条目：`mcpDelivery: "acp"` 时**全部剥离**（避免与 ACP 注入重复），
+ * ③ 复制进副本前处理 MCP 条目：`mcpDelivery: "acp"` 时**全部剥离**（避免与 ACP 注入重复），
  *    否则只剔除「微信 MCP」条目（`stripWechatMcpEntries`，防回环）。
  * 文件是桌面端维护的 YAML 用户层，结构是一个 patch 列表。这里只做定点抽取（块式与 flow 式映射都认），不引入 YAML 依赖。
  */
@@ -38,10 +38,10 @@ export function readProfileDefaultModel(realHome: string, profile: string): stri
 }
 
 /**
- * 复制进沙箱前剔除「微信 MCP」条目（真实文件不动）。DSH 自己的 MCP 也写在 profile 里
+ * 复制进副本前剔除「微信 MCP」条目（真实文件不动）。DSH 自己的 MCP 也写在 profile 里
  * （`- id: mcp-xxx` + `name: '@deepseek-ai/dsh-mcp-client'`）；如果用户在自己的 dsh 配置里挂过微信 MCP，
  * 原样复制会让 agent 用同一个 bot token 起第二个收消息实例（抢消息/回环）。
- * `sandbox` 且 `mcpDelivery: "acp"` 时由 `copyProfilePatch({ stripAllMcp: true })` 走 `stripAllDshMcpEntries()` 全剥
+ * `managed` 且 `mcpDelivery: "acp"` 时由 `copyProfilePatch({ stripAllMcp: true })` 走 `stripAllDshMcpEntries()` 全剥
  * （集合由 WeMind 经 ACP 注入）；这里只负责「微信 MCP」这一种，其余条目原样保留。
  * 没有命中时返回**原文**（逐字节复制不受影响）。
  */
@@ -63,7 +63,7 @@ function isWechatMcpEntry(body: string): boolean {
   );
 }
 
-/** 把真实 profile 用户层复制进某个沙箱 home：`stripAllMcp` 时剥离全部 MCP 条目，否则只剔除微信 MCP 条目；
+/** 把真实 profile 用户层复制进某个副本 home：`stripAllMcp` 时剥离全部 MCP 条目，否则只剔除微信 MCP 条目；
  *  没有命中时逐字节原样——调用方共用同一段路径与剔除逻辑。
  *  `src` 不存在时抛错，调用方按 best-effort 包 try/catch。返回被剔除的条目（供调用方记日志）。 */
 export function copyProfilePatch(

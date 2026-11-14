@@ -145,7 +145,7 @@ describe("passMcpToggleToBrain（direct 下 MCP 增删交给 Agent）", () => {
     expect(passMcpToggleToBrain({ kind: "remove", name: "github" }, true)).toBe(true);
   });
 
-  it("sandbox：仍由 daemon 维护激活集", () => {
+  it("managed：仍由 daemon 维护激活集", () => {
     expect(passMcpToggleToBrain({ kind: "add", name: "github" }, false)).toBe(false);
     expect(passMcpToggleToBrain({ kind: "remove", name: "github" }, false)).toBe(false);
   });

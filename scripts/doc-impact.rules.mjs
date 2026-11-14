@@ -132,7 +132,7 @@ export const RULES = [
           /(acp-brain|acp-connection|acp-reverse|acp-switch|acp-quiet)\.ts$/.test(line.slice(2).trim()),
       ),
     docs: [
-      'docs/repowiki/06-ACP-大脑与沙箱.md',
+      'docs/repowiki/06-ACP-大脑与副本.md',
       'docs/ai/已知坑.md 热切换大脑',
       'docs/ai/recipes/run-e2e.md brain check 验收',
     ],
@@ -147,7 +147,7 @@ export const RULES = [
           /^[MAD] /.test(line) &&
           /(agent-slot|brain-config|brain-state|brain-check)\.ts$/.test(line.slice(2).trim()),
       ),
-    docs: ['docs/repowiki/06-ACP-大脑与沙箱.md 大脑配置', 'AGENTS.md §4.12'],
+    docs: ['docs/repowiki/06-ACP-大脑与副本.md 大脑配置', 'AGENTS.md §4.12'],
   },
   {
     id: 'script',

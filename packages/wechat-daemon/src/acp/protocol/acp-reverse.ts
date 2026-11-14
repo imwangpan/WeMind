@@ -6,7 +6,7 @@
  * 三处都必须用同一套语义，否则会出现「微信能跑、自检超时」或「worker 与 brain 行为不同」的漂移。
  *
  * 默认 yolo：微信侧无人值守，权限请求自动选 `allow_once` / `allow_always`（「每次自动点允许」，
- * 不放宽 Agent 自己的沙箱）。要恢复逐次拒绝，设 `WEMIND_ACP_AUTO_ALLOW=0`。
+ * 不放宽 Agent 自己的副本）。要恢复逐次拒绝，设 `WEMIND_ACP_AUTO_ALLOW=0`。
  * 未知 method 回 `-32601`。
  */
 export type AcpWriter = (payload: Record<string, unknown>) => void;

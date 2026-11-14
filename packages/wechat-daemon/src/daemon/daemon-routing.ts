@@ -340,7 +340,7 @@ export function isFastLane(text: string, tasks: TaskFacts, attachmentCount = 0):
 
 /**
  * direct 模式下「加载/卸载 MCP」没有 WeMind 侧可写的激活集：不拦截，原样交给 Agent 自己处理。
- * `sandbox` 仍由 daemon 维护激活集。
+ * `managed` 仍由 daemon 维护激活集。
  */
 export function passMcpToggleToBrain(cmd: ChatCommand | null, direct: boolean): boolean {
   return direct && !!cmd && (cmd.kind === "add" || cmd.kind === "remove");

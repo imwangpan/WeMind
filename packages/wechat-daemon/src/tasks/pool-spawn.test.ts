@@ -17,8 +17,8 @@ fs.mkdirSync(dataDir, { recursive: true });
 process.env.WECHAT_DATA_DIR = dataDir;
 process.env.WEMIND_MAX_WORKERS = "2"; // 便于测「第三条被拒」
 process.env.WEMIND_MCP_CATALOG = path.join(root, "no-such-catalog.json");
-// 本文件断言的是沙箱路径（data/worker-home）；默认已是 direct，这里显式固定 sandbox。
-process.env.WEMIND_HOME_MODE = "sandbox";
+// 本文件断言的是副本路径（data/worker-home）；默认已是 direct，这里显式固定 managed。
+process.env.WEMIND_HOME_MODE = "managed";
 const savedNodeOptions = process.env.NODE_OPTIONS;
 process.env.NODE_OPTIONS = ""; // 子进程会继承它；调试器注入会让假 agent 卡在握手
 vi.setConfig({ testTimeout: 20_000 });
@@ -80,7 +80,7 @@ const agent = (name: string): ResolvedAgent =>
     available: true,
     binPath: process.execPath,
     args_placeholder: undefined,
-    // acquire 每次都会按这条任务的 agent 备 worker 沙箱：字段给全（空集合=不继承），别让它抛
+    // acquire 每次都会按这条任务的 agent 备 worker 副本：字段给全（空集合=不继承），别让它抛
     inherit: false,
     inheritDirs: [],
     inheritFiles: [],
@@ -170,7 +170,7 @@ describe("worker 进程池（真进程）", () => {
     expect(await g2.conn.ask("第二轮", "task-2@u1")).toContain("收到:第二轮");
   });
 
-  it("按这条任务的 agent 备沙箱：派到非默认 agent 时它自己的 settings 也进 worker 沙箱", async () => {
+  it("按这条任务的 agent 备副本：派到非默认 agent 时它自己的 settings 也进 worker 副本", async () => {
     const realHome = path.join(root, "real-pi");
     fs.mkdirSync(realHome, { recursive: true });
     fs.writeFileSync(

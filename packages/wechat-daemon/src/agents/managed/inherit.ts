@@ -4,15 +4,15 @@ import path from "node:path";
 import type { ResolvedAgent } from "../brain-agents.js";
 
 /**
- * 把 agent 真实配置目录里的「记忆/规则/技能」链入沙箱配置目录，并在**换 agent** 时清掉上一个 agent 留下的条目。
- * 仅在 `sandbox` 模式调用；`direct` 直接读真实配置、不生成任何副本，不走本模块。
+ * 把 agent 真实配置目录里的「记忆/规则/技能」链入副本配置目录，并在**换 agent** 时清掉上一个 agent 留下的条目。
+ * 仅在 `managed` 模式调用；`direct` 直接读真实配置、不生成任何副本，不走本模块。
  *
- * 为什么需要清单：kiro / deepseek / pi 的 `configSubdir` 都是空（配置目录就是沙箱根），共用同一个目录。
+ * 为什么需要清单：kiro / deepseek / pi 的 `configSubdir` 都是空（配置目录就是副本根），共用同一个目录。
  * 热切换后若只做「不存在才建」，新 agent 会继续读到上一个 agent 的 `skills` 链接与 `AGENTS.md`——
  * 表现为「切到 pi 了，但回答仍按 kiro 的记忆来」。清单记录上次由 WeMind 链入/拷贝的名字，只清理这些，
- * 真实配置目录永远不动（沙箱里的非链接目录也保留，避免误删 agent 自建数据）。
+ * 真实配置目录永远不动（副本里的非链接目录也保留，避免误删 agent 自建数据）。
  *
- * brain 与 worker 共用（两边的沙箱布局相同，只是根目录不同）。
+ * brain 与 worker 共用（两边的副本布局相同，只是根目录不同）。
  */
 
 const MANIFEST = ".wemind-inherited.json";
@@ -62,7 +62,7 @@ function pointsTo(link: string, target: string): boolean {
 }
 
 /**
- * `root` = 沙箱根（安全校验用），`dir` = 该 agent 的配置目录（通常是 root 或 root/<subdir>）。
+ * `root` = 副本根（安全校验用），`dir` = 该 agent 的配置目录（通常是 root 或 root/<subdir>）。
  * 调用前 `dir` 不存在也没关系。
  */
 export function syncInherited(root: string, dir: string, ag: ResolvedAgent): void {

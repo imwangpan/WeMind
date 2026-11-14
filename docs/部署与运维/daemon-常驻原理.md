@@ -1,6 +1,6 @@
 # Daemon 后台常驻原理（详解）
 
-> **最后核对**：2026-11-08
+> **最后核对**：2026-11-14
 >
 > ⚠️ **三套常驻外壳，同一账号只用一套**：
 >
@@ -191,7 +191,7 @@ if (-not $createdNew) { 记日志「已有实例在跑」; exit 0 }   # 抢不�
 
 而退出。一旦退出 → 第①层守护进程在 5 秒后重拉。
 
-启动时 daemon 还会：写 `daemon.pid`；注册 `exit`/`SIGINT`/`SIGTERM` 清理 pid；`ensureBrainHome()` 准备大脑沙箱；`notifyStart()` 通知 iLink 上线。
+启动时 daemon 还会：写 `daemon.pid`；注册 `exit`/`SIGINT`/`SIGTERM` 清理 pid；`ensureBrainHome()` 准备大脑副本；`notifyStart()` 通知 iLink 上线。
 
 ---
 

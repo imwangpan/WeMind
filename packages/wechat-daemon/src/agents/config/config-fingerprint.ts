@@ -34,7 +34,7 @@ export function configFingerprint(
   dir: string = DATA_DIR,
 ): string {
   if (!ag.homeEnvVar) return "";
-  // sandbox 的副本只在重建时更新，所以统一盯**真实配置**：终端改完，下一次 spawn 才会重新复制。
+  // managed 的副本只在重建时更新，所以统一盯**真实配置**：终端改完，下一次 spawn 才会重新复制。
   const base = ag.realHome || rt.configDir;
   if (!base) return "";
   const h = crypto.createHash("sha1");

@@ -23,10 +23,10 @@ import {
   syncProfilePatch,
   warnUnwritableRealHome,
   writeSettingsBase,
-} from "./sandbox-common.js";
-import { syncInherited } from "./sandbox-inherit.js";
+} from "./managed-common.js";
+import { syncInherited } from "./inherit.js";
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
-import { agentRuntime, sandboxRoot, type AgentRuntime } from "../config/runtime.js";
+import { agentRuntime, managedRoot, type AgentRuntime } from "../config/runtime.js";
 import {
   overlayDisableSet,
   overlayExtraServers,
@@ -39,8 +39,8 @@ const log = createLogger("wechat-daemon/mcp");
  * brain 的 MCP 策略：
  * - `direct`（默认）：Agent 直接加载自己的完整真实配置，WeMind 不写文件、不改 MCP；
  *   只有用户显式配置的 `overlay.mcp.extra` 会经 ACP 补进会话（且仅 `acpMcpServers` 的 Agent），**不重发 catalog**。
- * - `sandbox`：从真实目录复制出账号沙箱，MCP 只用「激活集」（默认空，对话中按需加载）；
- *   `mcpDelivery: "acp"` 的 Agent 随会话下发，其余 Agent 写沙箱配置文件。
+ * - `managed`：从真实目录复制出账号副本，MCP 只用「激活集」（默认空，对话中按需加载）；
+ *   `mcpDelivery: "acp"` 的 Agent 随会话下发，其余 Agent 写副本配置文件。
  *
  * 格式知识集中在 `mcp-adapters.ts` 的 `McpAdapter`（顶层 JSON / 嵌套 JSON / TOML / DSH profile YAML），
  * 这里只算激活集、排除集与投递方式，不再按 agent 名或格式分支。
@@ -48,8 +48,8 @@ const log = createLogger("wechat-daemon/mcp");
  * agent 不再存成模块常量：每个函数显式收 `ag`，或在入口用 `getAgent("brain")` 取一次当前大脑。
  */
 
-/** sandbox 模式的 brain 沙箱根目录。 */
-export const BRAIN_HOME = process.env.WECHAT_BRAIN_HOME?.trim() || sandboxRoot("brain", DATA_DIR);
+/** managed 模式的 brain 副本根目录。 */
+export const BRAIN_HOME = process.env.WECHAT_BRAIN_HOME?.trim() || managedRoot("brain", DATA_DIR);
 
 /** 该 agent 的「配置目录」（kiro=home 根；opencode=<home>/opencode）。 */
 function brainConfigDir(ag: ResolvedAgent, rt?: AgentRuntime): string {
@@ -70,10 +70,10 @@ function activeFile(dir: string = DATA_DIR): string {
 let legacyActiveNoticed = false;
 
 /**
- * 让 sandbox 继承所用 agent 真实配置目录的「知识/记忆/技能」：
+ * 让 managed 继承所用 agent 真实配置目录的「知识/记忆/技能」：
  * - 目录式（inheritDirs）用目录 junction（Windows）/ symlink 指向真实目录；
  * - 单文件式（inheritFiles）直接拷入配置目录。
- * **MCP 与会话不照搬**：MCP 必须走沙箱的激活集（排除 wechat，防它把消息发回自己）。
+ * **MCP 与会话不照搬**：MCP 必须走副本的激活集（排除 wechat，防它把消息发回自己）。
  */
 function linkRealKnowledge(ag: ResolvedAgent, rt: AgentRuntime): void {
   syncInherited(rt.home, brainConfigDir(ag, rt), ag);
@@ -120,10 +120,10 @@ export function nativeMcpServers(ag: ResolvedAgent): Record<string, unknown> {
   }
 }
 
-/** 启动检查要看的文件（存在才查）：sandbox 看副本，direct 看真实文件。 */
+/** 启动检查要看的文件（存在才查）：managed 看副本，direct 看真实文件。 */
 function nativeScanFiles(ag: ResolvedAgent, rt?: AgentRuntime): string[] {
   const out = new Set<string>();
-  const base = rt?.mode === "sandbox" ? rt.configDir : ag.realHome;
+  const base = rt?.mode === "managed" ? rt.configDir : ag.realHome;
   if (ag.realProfile && base) {
     for (const name of ["cordis.patch.yml", "cordis.yml"]) {
       out.add(path.join(base, "profiles", ag.realProfile, name));
@@ -264,8 +264,8 @@ function saveActive(
   writeJsonAtomic(activeFile(dir), { version: 2, active: map });
 }
 
-/** 按激活集从 catalog 取定义，写入沙箱 MCP 配置（默认空）。保留配置里其它键（如 opencode 的 model）。 */
-function applySandbox(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = DATA_DIR): void {
+/** 按激活集从 catalog 取定义，写入副本 MCP 配置（默认空）。保留配置里其它键（如 opencode 的 model）。 */
+function applyBrainCopy(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = DATA_DIR): void {
   if (ag.mcpDelivery === "acp") return;
   const target = rt ?? agentRuntime("brain", ag, dir);
   if (!canWriteAgentConfig(ag, target)) {
@@ -306,7 +306,7 @@ export function overlayExtraAcpServers(
 /**
  * brain 当前应挂载的 ACP mcpServers。
  * - `direct`：**不重发** Agent 已经原生加载的 catalog，只下发 overlay.mcp.extra（微信独享项）；
- * - `sandbox`：curated 激活集（默认空），并排除微信 MCP。
+ * - `managed`：curated 激活集（默认空），并排除微信 MCP。
  * 跳过不可转换的坏条目并记日志——官方 DSH 的 session/new 遇到起不来的 MCP 会回滚整个会话。
  */
 export function activeMcpServers(
@@ -336,9 +336,9 @@ function syncFormatSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
   adapter.inheritSettings(ag, ag.realHome, brainConfigDir(ag, rt));
 }
 
-/** 继承真实配置目录的「非 MCP」设置（模型/免确认等）；MCP 段保持沙箱权威。 */
+/** 继承真实配置目录的「非 MCP」设置（模型/免确认等）；MCP 段保持副本权威。 */
 function syncSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
-  if (rt.mode === "sandbox") syncProfilePatch(ag, rt.home, "大脑");
+  if (rt.mode === "managed") syncProfilePatch(ag, rt.home, "大脑");
   if (ag.mcpDelivery === "acp") return;
   if (ag.settingsBase && ag.realHome) {
     if (!canWriteAgentConfig(ag, rt)) {
@@ -354,7 +354,7 @@ function syncSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
 }
 
 /**
- * 启动前准备：direct 原样返回（不写任何文件）；sandbox 才同步设置、MCP、技能/记忆与凭据。
+ * 启动前准备：direct 原样返回（不写任何文件）；managed 才同步设置、MCP、技能/记忆与凭据。
  * `forAgent` 可显式指定 agent（切换流程启动新大脑用，此刻槽位还指着旧大脑）。
  */
 export function ensureBrainHome(forAgent?: ResolvedAgent, dir: string = DATA_DIR): AgentRuntime {
@@ -365,7 +365,7 @@ export function ensureBrainHome(forAgent?: ResolvedAgent, dir: string = DATA_DIR
   linkRealKnowledge(ag, rt);
   syncCredentials(ag, brainConfigDir(ag, rt));
   stripWechatFromConfigCopy(ag, rt);
-  applySandbox(ag, rt, dir);
+  applyBrainCopy(ag, rt, dir);
   applySettingsDefaults(ag, brainConfigDir(ag, rt));
   if (ag.kiroV3) ensureKiroV3Permissions(ag, path.join(rt.configDir, "settings"));
   return rt;
@@ -429,7 +429,7 @@ export function addMcp(
     if (!next.mcp?.disable?.length && !next.mcp?.extra) delete (next as { mcp?: unknown }).mcp;
     writeOverlay(ag.name, next, dir);
   }
-  applySandbox(ag, rt, dir);
+  applyBrainCopy(ag, rt, dir);
   return {
     ok: true,
     changed,
@@ -457,7 +457,7 @@ export function removeMcp(
   if (!a.includes(name)) return { ok: false, changed: false, text: `「${name}」当前未激活。` };
   const next = a.filter((x) => x !== name);
   saveActive(next, ag.name, dir);
-  applySandbox(ag, rt, dir);
+  applyBrainCopy(ag, rt, dir);
   return {
     ok: true,
     changed: true,
@@ -485,7 +485,7 @@ export function listMcp(dir: string = DATA_DIR): string {
   );
   const lines = direct
     ? [
-        "当前是 direct 模式：MCP 由 Agent 真实配置决定，下面的激活集仅在 sandbox 生效。",
+        "当前是 direct 模式：MCP 由 Agent 真实配置决定，下面的激活集仅在 managed 生效。",
         `Agent 配置里的 MCP：${avail.join(", ") || "（无）"}`,
       ]
     : [

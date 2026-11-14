@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { parseJsonc } from "../agents/sandbox/agent-mcp.js";
+import { parseJsonc } from "../agents/managed/agent-mcp.js";
+import { mcpAdapterFor } from "../agents/managed/mcp-adapters.js";
 import { agentEnv, authHint, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
 import { copyProfilePatch } from "../agents/profile-model.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
@@ -13,7 +14,7 @@ import { LineDecoder } from "../shared/io/line-decoder.js";
 /**
  * 「大脑连通性自检」：真正起一个 ACP agent 进程并跑完 initialize / session/new 握手，用来证明「这个大脑不只是找得到，而且能说 ACP」——比单纯「文件存在」更硬的证据。
  *
- * 用**临时沙箱目录**（避免污染真实配置与账号沙箱），结束后杀进程、删临时目录。
+ * 用**临时副本目录**（避免污染真实配置与账号副本），结束后杀进程、删临时目录。
  * 供 `wemind brain check` 使用；不影响正在运行的 daemon（各起各的进程）。
  */
 export type CheckResult = { ok: boolean; detail: string; ms: number };
@@ -21,9 +22,9 @@ export type CheckResult = { ok: boolean; detail: string; ms: number };
 export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise<CheckResult> {
   const started = Date.now();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-check-"));
-  const env = agentEnv(ag, home); // 父进程 env → 临时沙箱目录 → 预设 env → 预设 envDefaults（与 daemon 的 spawn 口径一致）
+  const env = agentEnv(ag, home); // 父进程 env → 临时副本目录 → 预设 env → 预设 envDefaults（与 daemon 的 spawn 口径一致）
 
-  // 需要登录的 agent（DSH / Qoder）缺凭据会在 session/new 报认证失败——把凭据带进临时沙箱，否则自检会把「没登录」误报成「二进制不可用」。标识类文件（如 Qoder 的 machine_id）必须一致。
+  // 需要登录的 agent（DSH / Qoder）缺凭据会在 session/new 报认证失败——把凭据带进临时副本，否则自检会把「没登录」误报成「二进制不可用」。标识类文件（如 Qoder 的 machine_id）必须一致。
   const cfgDir = path.join(home, ag.configSubdir);
   for (const f of [...ag.credentialFiles, ...ag.identityFiles]) {
     try {
@@ -36,14 +37,14 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
     }
   }
 
-  // 设置基底（settingsBase：Qoder / gemini 这类「设置与 MCP 同文件」的 agent）：与 daemon 沙箱一致地带模型/认证等非 MCP 设置。
-  // 必须剥掉 mcpServers——自检会在临时目录里真起 agent，带上真实 MCP 等于启动第二个微信收消息实例（回环）。
+  // 设置基底（settingsBase：Qoder / gemini 这类「设置与 MCP 同文件」的 agent）：与 daemon 副本一致地整份带模型/认证等非 MCP 设置。
+  // 必须剥掉 MCP 段——自检会在临时目录里真起 agent，带上真实 MCP 等于启动第二个微信收消息实例（回环）。
   if (ag.settingsBase && ag.realHome) {
     try {
       const parsed = parseJsonc(fs.readFileSync(path.join(ag.realHome, ag.settingsBase), "utf-8"));
       if (parsed) {
         const base = parsed;
-        for (const k of ag.settingsStrip) delete base[k];
+        mcpAdapterFor(ag).stripSettings(base);
         fs.mkdirSync(cfgDir, { recursive: true });
         fs.writeFileSync(
           path.join(cfgDir, ag.settingsBase),
@@ -56,7 +57,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
     }
   }
 
-  // 与 daemon 的大脑沙箱对齐：配了 realProfile 的 agent（DSH）启动时就解析 profiles/<名>/cordis.patch.yml，
+  // 与 daemon 的大脑副本对齐：配了 realProfile 的 agent（DSH）启动时就解析 profiles/<名>/cordis.patch.yml，
   // 语法错误会直接 exit 1（initialize 都不会发生）。不复制的话，坏 profile 上自检仍报 ✅，而 daemon 每条消息都起不来。
   if (ag.inherit && ag.realProfile && ag.realHome) {
     try {

@@ -8,7 +8,7 @@ import { mediaDirFor } from "../../agents/config/runtime.js";
 /**
  * 入站附件落盘。
  *
- * `direct` 放在 `<账号>/media/inbound`；`sandbox` 保持 `<brain-home>/media/inbound`。
+ * `direct` 放在 `<账号>/media/inbound`；`managed` 保持 `<brain-home>/media/inbound`。
  * prompt 里给绝对路径，避免 agent 依赖 cwd 猜位置。
  * 目录/文件权限：POSIX 下 0700/0600；Windows 的 chmod 是 no-op，依赖数据目录本身的权限。
  */

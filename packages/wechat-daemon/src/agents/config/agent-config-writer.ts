@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import type { ResolvedAgent } from "../brain-agents.js";
 import { ACP_AGENT_PRESETS } from "../brain-presets.js";
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
-import { parseJsonc } from "../sandbox/agent-mcp.js";
+import { parseJsonc } from "../managed/agent-mcp.js";
 
 /**
  * 真实 Agent 配置的受控写入层。

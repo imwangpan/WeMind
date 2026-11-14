@@ -47,10 +47,11 @@ import { writeBrainState } from "./agents/brain-state.js";
 import { CLI_PID_MARKERS, findOtherOurProcess } from "./shared/process/proc-identity.js";
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./cli/watchdog-runner.js";
 import { isOwnerOnly } from "./ipc/chat-commands.js";
-import { ensureBrainHome } from "./agents/sandbox/mcp-sandbox.js";
+import { ensureBrainHome } from "./agents/managed/mcp-brain.js";
 import { readHomeMode } from "./agents/config/home-mode.js";
 import { ensureParityAccountDirs } from "./agents/config/account-bootstrap.js";
-import { migrateLegacySandbox } from "./agents/config/migrate-legacy.js";
+import { migrateLegacyHomes } from "./agents/config/migrate-legacy.js";
+import { readWechatSettings, replyStyleHint } from "./agents/config/wechat-settings.js";
 import { syncFromPointerMap } from "./sessions/session-registry.js";
 import { clearControlDirs, markBridgeReady } from "./ipc/control-bridge.js";
 import { ControlInboxRunner } from "./daemon/control-inbox-runner.js";
@@ -107,7 +108,7 @@ import {
 import { clearTaskDirs, writeTaskAck } from "./tasks/task-inbox.js";
 import { scanTaskInbox } from "./daemon/task-inbox-runner.js";
 import { killAll as killWorkerPool, sweep as sweepWorkerPool } from "./tasks/worker-pool.js";
-import { ensureWorkerHome } from "./agents/sandbox/worker-sandbox.js";
+import { ensureWorkerHome } from "./agents/managed/mcp-worker.js";
 import { bindLogger } from "./shared/io/leveled-log.js";
 import { createRepeatLog } from "./shared/io/repeat-log.js";
 import { CLI_VERSION } from "./shared/version.js";
@@ -341,6 +342,9 @@ function createSendPipeline(account: AccountData): SendPipeline {
 
 // 当前进行中回合（worker 串行，只有一个）：记录发往用户与所用 token（token 可被「继续」更新）。
 let activeTurn: { from: string; token: string | undefined; runId: string } | null = null;
+
+// 微信设置的坏文件告警去重：每轮都会读一次设置，坏一次不能每轮刷一行日志。
+let warnedWechatSettingsProblem = "";
 
 /** 从解密后的字节嗅探图片 MIME。 */
 function sniffMime(b: Buffer): string {
@@ -737,7 +741,19 @@ async function handleMessage(
   };
 
   const imagesForBrain = plan.kind === "text-only" ? [] : images; // 大脑不支持看图时别再塞图片（会 -32602）
-  const promptText = [text.trim(), incomingNotes.join("\n")].filter(Boolean).join("\n\n");
+  // 微信侧回复风格：每轮现读一次 `<账号>/wechat-settings.json`，改完下一条消息即生效（不需要 reload / 新会话）。
+  const wxSettings = readWechatSettings(DATA_DIR);
+  if (wxSettings.problem && wxSettings.problem !== warnedWechatSettingsProblem) {
+    warnedWechatSettingsProblem = wxSettings.problem;
+    log.warn(`wechat-settings: ${wxSettings.problem}`);
+  }
+  const promptText = [
+    text.trim(),
+    incomingNotes.join("\n"),
+    replyStyleHint(wxSettings.settings.replyStyle),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   let answer: string;
   let ok = true;
   try {
@@ -1456,9 +1472,9 @@ export async function runDaemon(): Promise<void> {
   });
   try {
     ensureParityAccountDirs();
-    migrateLegacySandbox();
-    ensureBrainHome(); // 准备 brain 配置：direct 直接用真实配置，sandbox 才建账号副本
-    ensureWorkerHome(); // 准备 worker 配置：direct 直接用真实配置，sandbox 才建账号副本
+    migrateLegacyHomes();
+    ensureBrainHome(); // 准备 brain 配置：direct 直接用真实配置，managed 才建账号副本
+    ensureWorkerHome(); // 准备 worker 配置：direct 直接用真实配置，managed 才建账号副本
   } catch (e) {
     // 工作区或 Agent 配置不可用属于“启动前就能发现”的配置错误：明确报错，不带着半份配置跑。
     log.error("agent config/workspace unavailable:", describeError(e, import.meta.url));

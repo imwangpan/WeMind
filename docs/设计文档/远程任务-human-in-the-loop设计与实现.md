@@ -8,7 +8,7 @@
 >
 > **沿革**：前身是 2026-06-17 的《方案 C MVP：远程 human-in-the-loop》设计稿，当时只有**单任务单进程**。现在已经是**多任务 + 进程池 + 重启续跑 + 默认直接使用 Agent 真实配置**。本文于 2026-11-14 按当前实现整体重写为现行设计文档；MVP 时期的历史快照留在 git 历史里。
 >
-> **延伸阅读**：[repowiki 07-远程任务-Worker](../repowiki/07-远程任务-Worker.md)（实现细节与测试清单）、[使用指南-远程任务（worker）](../使用指南/使用指南-远程任务（worker）.md)（面向用户的操作步骤）、[本地双入口-命令派发与查看回复](../机制与协议说明/本地双入口-命令派发与查看回复.md)（CLI ↔ daemon 文件桥）、[WeMind 接入本机 Agent 工作模式设计与实现](WeMind-接入本机-Agent-工作模式设计与实现.md)（`direct` / `sandbox` 总设计）、[方案C-受控ACP工作机设计](方案C-受控ACP工作机设计.md)（方案 A/B/C 对比，历史文档）。
+> **延伸阅读**：[repowiki 07-远程任务-Worker](../repowiki/07-远程任务-Worker.md)（实现细节与测试清单）、[使用指南-远程任务（worker）](../使用指南/使用指南-远程任务（worker）.md)（面向用户的操作步骤）、[本地双入口-命令派发与查看回复](../机制与协议说明/本地双入口-命令派发与查看回复.md)（CLI ↔ daemon 文件桥）、[WeMind 接入本机 Agent 工作模式设计与实现](WeMind-接入本机-Agent-工作模式设计与实现.md)（`direct` / `managed` 总设计）、[方案C-受控ACP工作机设计](方案C-受控ACP工作机设计.md)（方案 A/B/C 对比，历史文档）。
 
 ---
 
@@ -38,7 +38,7 @@
 
 ACP 天生就是为「外部程序控制 agent」设计的：`session/prompt` 下发指令、`session/update` 实时回传、`session/load`（或 `session/resume`）断线续传。worker 本质上就是把对话大脑那套 ACP 客户端能力复用到「第二个及以后的 Agent 进程」上。
 
-但 ACP 是**最小公共方法集**，不是「所有 Agent 都一样」：`session/load` 不是通用能力（如 DSH 只有 `session/resume`），能恢复的会话、能否发图、MCP 怎么投递，都按 Agent 各自的实测结论走（见 `docs/接入方案/接入-*.md` 与 [repowiki 06](../repowiki/06-ACP-大脑与沙箱.md)）。
+但 ACP 是**最小公共方法集**，不是「所有 Agent 都一样」：`session/load` 不是通用能力（如 DSH 只有 `session/resume`），能恢复的会话、能否发图、MCP 怎么投递，都按 Agent 各自的实测结论走（见 `docs/接入方案/接入-*.md` 与 [repowiki 06](../repowiki/06-ACP-大脑与副本.md)）。
 
 ---
 
@@ -56,7 +56,7 @@ ACP 天生就是为「外部程序控制 agent」设计的：`session/prompt` �
 
 **关键洞察**：`ask(instruction)` 的语义就是「发一个 prompt、等这一轮结束、返回拼接文本」——这正是「一轮」的天然单元。ACP 模式下 Agent 每响应完一轮就**明确进入「等待下一条指令」**状态，daemon 一清二楚，不需要靠抓屏去猜它是不是在等人。
 
-**为什么是进程池而不是「一条任务一个临时进程」**：ACP Agent 的冷启动要几秒到几十秒（`initialize` + `session/new` + 沙箱准备），而任务往往是「派发 → 等很久 → 来回几轮」的节奏。跑完即杀会让每一轮都付一次冷启动；常驻复用则把成本摊到第一次。代价是内存——用**并发上限 + 空闲上限 + 空闲回收**三把闸兜住（见 §6）。
+**为什么是进程池而不是「一条任务一个临时进程」**：ACP Agent 的冷启动要几秒到几十秒（`initialize` + `session/new` + 副本准备），而任务往往是「派发 → 等很久 → 来回几轮」的节奏。跑完即杀会让每一轮都付一次冷启动；常驻复用则把成本摊到第一次。代价是内存——用**并发上限 + 空闲上限 + 空闲回收**三把闸兜住（见 §6）。
 
 ---
 
@@ -69,7 +69,7 @@ graph TD
         TM["task-manager.ts<br/>任务表 + 每任务后台循环"]
         POOL["worker-pool.ts<br/>进程池（复用 / 回收 / 上限）"]
         WA["worker-acp.ts<br/>class WorkerConn（一条连接 = 一个进程）"]
-        SB["worker-sandbox.ts<br/>direct 真实配置 / sandbox WORKER_HOME"]
+        SB["mcp-worker.ts<br/>direct 真实配置 / managed WORKER_HOME"]
         LD["task-inbox-runner / control-inbox-runner"]
     end
     Q1["微信消息队列"]
@@ -96,7 +96,7 @@ graph TD
 | `tasks/task-manager.ts` | 任务表（多任务）、编号、每任务的**后台异步循环**、续跑与 push 的依赖注入点 |
 | `tasks/worker-pool.ts` | 进程池：按 agent 复用、空闲回收、并发上限；`planAcquire` / `planReap` / `planSweep` 是纯函数（IO 与判定分离） |
 | `tasks/worker-acp.ts` | `class WorkerConn`：一条连接一个 ACP 进程；协议细节与 brain 共用 `acp/protocol/acp-connection.ts` |
-| `agents/sandbox/worker-sandbox.ts` | 按角色 / 模式准备 Agent 的配置 home 与 MCP、MCP 投递方式 |
+| `agents/managed/mcp-worker.ts` | 按角色 / 模式准备 Agent 的配置 home 与 MCP、MCP 投递方式 |
 | `tasks/task-store.ts` | 任务表落盘 `tasks.json`，只为「重启后能续跑」 |
 | `tasks/task-inbox.ts` | CLI ↔ daemon 的两个文件桥目录与协议（`task-inbox/` / `task-out/`） |
 | `ipc/control-bridge.ts` | 需要**在 daemon 进程里**执行、且 CLI 要当场拿到结果的命令（切脑 / 会话） |
@@ -113,7 +113,7 @@ graph TD
 | `task-inbox/` → `task-out/` | 本地命令通道与「命令真实结果」回执 | CLI 写 / daemon 读+回 |
 | `control-inbox/` → `control-out/` | 切脑 / 会话类的双向控制桥 | CLI 写 / daemon 读+回 |
 
-> 既有约定不变：账号数据按账号隔离（`<数据目录>/<账号>/`），Agent 的真实配置、技能、记忆、会话库是**同一 OS 用户的共享基线**（`direct` 下）；只有 `sandbox` 才按账号隔离 home。
+> 既有约定不变：账号数据按账号隔离（`<数据目录>/<账号>/`），Agent 的真实配置、技能、记忆、会话库是**同一 OS 用户的共享基线**（`direct` 下）；只有 `managed` 才按账号隔离 home。
 
 ---
 
@@ -225,21 +225,21 @@ daemon 里「继续」有三个可能含义，判定顺序保证它们不互相�
 
 默认 `homeMode=direct`：**Agent 直接用真实的配置目录**（`~/.claude` / `~/.cline` / `~/.qoder` / `~/.codex` / `~/.gemini` …）。daemon 启动 / 运行期**不自动写、不复制** Agent 的真实配置；只有用户显式执行 `wemind config agent set|unset|edit` 时才写入并备份。技能、记忆、会话库与终端共用同一份基线——**终端里是什么效果，微信侧就是什么效果**。
 
-`sandbox` 是**显式隔离选项**：这时才用 `WORKER_HOME`（默认 `<数据目录>/worker-home`），由 adapter 复制设置基底、按 `inheritDirs` / `inheritFiles` 选择性继承技能与记忆。
+`managed` 是**显式隔离选项**：这时才用 `WORKER_HOME`（默认 `<数据目录>/worker-home`），由 adapter 复制设置基底、按 `inheritDirs` / `inheritFiles` 选择性继承技能与记忆。
 
 ### 8.2 免审批（yolo）
 
-worker 与 brain 都按「无人值守」跑：ACP 反向请求里的权限默认 yolo（自动选 `allow_once` / `allow_always`），**不放宽 Agent 自己的沙箱**；要恢复逐次拒绝设 `WEMIND_ACP_AUTO_ALLOW=0`。各内置预设再用自己 Agent 的免审批开关（如 `--approval-mode yolo`）。
+worker 与 brain 都按「无人值守」跑：ACP 反向请求里的权限默认 yolo（自动选 `allow_once` / `allow_always`），**不放宽 Agent 自己的副本**；要恢复逐次拒绝设 `WEMIND_ACP_AUTO_ALLOW=0`。各内置预设再用自己 Agent 的免审批开关（如 `--approval-mode yolo`）。
 
 ### 8.3 MCP：worker 与 brain 策略相反
 
 | | brain | worker |
 |---|---|---|
-| `sandbox` 下的 WeMind 托管 MCP 集 | **默认空**，会话中按需「加载 X」 | **默认全量**（catalog 全量 − 排除集），无人值守要开箱即用 |
+| `managed` 下的 WeMind 托管 MCP 集 | **默认空**，会话中按需「加载 X」 | **默认全量**（catalog 全量 − 排除集），无人值守要开箱即用 |
 | `direct` | Agent 自己读真实配置，WeMind 不重发 catalog | 同左 |
 | 微信 MCP（`wechat`） | **永久排除**（防它把消息发回自己） | **永久排除**（同因），另加 `WEMIND_WORKER_MCP_EXCLUDE` |
 
-投递方式按 Agent 分：文件式 Agent 由 sandbox 写配置文件，`mcpDelivery: "acp"` 的 Agent（DSH / Claude Code / Copilot / Codex）不写文件，随 `session/new|resume` 用 ACP 声明下发；`direct` 下只有用户显式配置 `overlay.mcp.extra` 时才补微信独享项。Agent 真实配置里若出现微信 MCP，**只告警、不阻止启动**（用户需自行移除，否则可能形成第二个 poller / 回环）。
+投递方式按 Agent 分：文件式 Agent 由 managed 写配置文件，`mcpDelivery: "acp"` 的 Agent（DSH / Claude Code / Copilot / Codex）不写文件，随 `session/new|resume` 用 ACP 声明下发；`direct` 下只有用户显式配置 `overlay.mcp.extra` 时才补微信独享项。Agent 真实配置里若出现微信 MCP，**只告警、不阻止启动**（用户需自行移除，否则可能形成第二个 poller / 回环）。
 
 ---
 
@@ -300,7 +300,7 @@ worker 与 brain 都按「无人值守」跑：ACP 反向请求里的权限默�
 | `WEMIND_WORKER_CAP_MS` | 1800000 | 单轮硬上限（30min） |
 | `WEMIND_WORKER_FIRST_FRAME_MS` | 30000 | 首帧超时（预设可覆盖） |
 | `WEMIND_WORKER_PROGRESS` | `0` | 是否推全程文字进度 |
-| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | **仅 `sandbox` 模式**的 worker 沙箱目录；`direct` 直接用真实 home |
+| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | **仅 `managed` 模式**的 worker 副本目录；`direct` 直接用真实 home |
 | `WEMIND_WORKER_MCP_EXCLUDE` | `wechat` | 不继承的 MCP（`wechat` 强制排除） |
 | `WEMIND_TASK_SCAN_MS` | 1000 | daemon 扫描 `task-inbox/` 与 `control-inbox/` 的间隔 |
 | `WEMIND_CONTROL_TIMEOUT_MS` | 30000 | CLI 等 daemon 回话的上限（`brain switch` 自动放大） |

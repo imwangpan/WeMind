@@ -6,27 +6,27 @@ import path from "node:path";
 import { parseJsonc } from "./agent-mcp.js";
 
 /**
- * gemini 沙箱：GEMINI_CLI_HOME 指向沙箱根，而 Gemini 的配置目录是 `<沙箱>/.gemini`（实测），
+ * gemini 副本：GEMINI_CLI_HOME 指向副本根，而 Gemini 的配置目录是 `<副本>/.gemini`（实测），
  * MCP 与设置同在 `<配置目录>/settings.json`。
- * - 设置基底只剥 `mcpServers`（保留 model / security / ui），MCP 由沙箱 curated 权威写入；
+ * - 设置基底只剥 `mcpServers`（保留 model / security / ui），MCP 由副本 curated 权威写入；
  * - `.env`（GEMINI_API_KEY / GOOGLE_GEMINI_BASE_URL）作为凭据同步；
- * - skills/ 与 GEMINI.md 是它的全局技能与记忆，继承进沙箱。
- * 模块级常量在 import 时解析，故先设环境再动态导入（同 sandbox-pi.test.ts）。
+ * - skills/ 与 GEMINI.md 是它的全局技能与记忆，继承进副本。
+ * 模块级常量在 import 时解析，故先设环境再动态导入（同 pi.test.ts）。
  */
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-sandbox-gemini-"));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-managed-gemini-"));
 const realHome = path.join(root, "real-gemini");
 const dataDir = path.join(root, "data");
 const brainCfg = path.join(dataDir, "brain-home", ".gemini");
 const workerCfg = path.join(dataDir, "worker-home", ".gemini");
 
-// Gemini CLI 自己用 strip-json-comments 读 settings.json，注释是它支持的合法写法；这里刻意带注释，确保沙箱镜像与 MCP 目录也能解析。
+// Gemini CLI 自己用 strip-json-comments 读 settings.json，注释是它支持的合法写法；这里刻意带注释，确保副本镜像与 MCP 目录也能解析。
 const realSettingsText = `{
   // 用户自己的默认模型
   "model": { "name": "auto/hy3" },
   "security": { "auth": { "selectedType": "gemini-api-key" } },
   "ui": { "theme": "Default Light" },
   "general": { "vimMode": true },
-  /* MCP 必须由沙箱 curated 接管 */
+  /* MCP 必须由副本 curated 接管 */
   "mcpServers": {
     "wechat": { "command": "wemind-mcp" },
     "demo": { "command": "node", "args": ["demo-server.js"] }
@@ -48,7 +48,7 @@ beforeAll(() => {
   process.env.WEMIND_BRAIN = "gemini";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
   process.env.WECHAT_DATA_DIR = dataDir;
-  process.env.WEMIND_HOME_MODE = "sandbox";
+  process.env.WEMIND_HOME_MODE = "managed";
   delete process.env.WEMIND_BRAIN_INHERIT;
 });
 
@@ -60,13 +60,13 @@ afterAll(() => {
   delete process.env.WEMIND_HOME_MODE;
 });
 
-// 真实 settings.json 带注释（JSONC），沙箱写出的仍是严格 JSON；两者都用宽松解析读取。
+// 真实 settings.json 带注释（JSONC），副本写出的仍是严格 JSON；两者都用宽松解析读取。
 const readJson = (f: string): Record<string, any> =>
   parseJsonc(fs.readFileSync(f, "utf-8")) as Record<string, any>;
 
-describe("brain 沙箱（gemini）", () => {
+describe("brain 副本（gemini）", () => {
   it("settings.json 镜像 model/security/ui/general，剥掉 mcpServers 并关自动更新", async () => {
-    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+    const { ensureBrainHome } = await import("./mcp-brain.js");
     ensureBrainHome();
 
     const cfg = readJson(path.join(brainCfg, "settings.json"));
@@ -75,7 +75,7 @@ describe("brain 沙箱（gemini）", () => {
     expect(cfg.ui.theme).toBe("Default Light");
     expect(cfg.general.vimMode).toBe(true); // 用户已有的 general 键不丢
     expect(cfg.general.enableAutoUpdate).toBe(false);
-    expect(cfg.mcpServers).toEqual({}); // 大脑默认空激活集，真实配置里的 server 不进沙箱
+    expect(cfg.mcpServers).toEqual({}); // 大脑默认空激活集，真实配置里的 server 不进副本
     // 真实配置不动
     expect(Object.keys(readJson(path.join(realHome, "settings.json")).mcpServers)).toEqual([
       "wechat",
@@ -83,8 +83,8 @@ describe("brain 沙箱（gemini）", () => {
     ]);
   });
 
-  it(".env 与 OAuth 凭据、skills/ 与 GEMINI.md 都继承进沙箱", async () => {
-    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+  it(".env 与 OAuth 凭据、skills/ 与 GEMINI.md 都继承进副本", async () => {
+    const { ensureBrainHome } = await import("./mcp-brain.js");
     ensureBrainHome();
 
     expect(fs.readFileSync(path.join(brainCfg, ".env"), "utf-8")).toBe(envFile);
@@ -99,7 +99,7 @@ describe("brain 沙箱（gemini）", () => {
   });
 
   it("加载 MCP 后写回同一个 settings.json，且 wechat 仍被拒、设置不被冲掉", async () => {
-    const { addMcp } = await import("./mcp-sandbox.js");
+    const { addMcp } = await import("./mcp-brain.js");
     expect(addMcp("wechat").text).toMatch(/不允许/);
     expect(addMcp("demo").text).toMatch(/已加载/);
 
@@ -109,9 +109,9 @@ describe("brain 沙箱（gemini）", () => {
   });
 });
 
-describe("worker 沙箱（gemini）", () => {
+describe("worker 副本（gemini）", () => {
   it("settings.json 同样镜像，MCP 全量但排除 wechat", async () => {
-    const { ensureWorkerHome } = await import("./worker-sandbox.js");
+    const { ensureWorkerHome } = await import("./mcp-worker.js");
     ensureWorkerHome();
 
     const cfg = readJson(path.join(workerCfg, "settings.json"));

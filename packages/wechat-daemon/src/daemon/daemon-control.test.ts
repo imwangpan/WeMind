@@ -79,7 +79,7 @@ vi.mock("../sessions/session-manager.js", () => ({
   renameSessionCmd: m.renameSessionCmd,
   deleteSessionCmd: m.deleteSessionCmd,
 }));
-vi.mock("../agents/sandbox/mcp-sandbox.js", () => ({
+vi.mock("../agents/managed/mcp-brain.js", () => ({
   addMcp: m.addMcp,
   removeMcp: m.removeMcp,
   listMcp: m.listMcp,

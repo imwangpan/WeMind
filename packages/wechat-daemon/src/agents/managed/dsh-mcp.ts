@@ -13,7 +13,7 @@ import type { McpCatalog } from "./mcp-adapters.js";
  *     args: ["-y", "@modelcontextprotocol/server-github"]
  * ```
  *
- * 这里只做**只读解析**与「复制进沙箱前剥离」两件事，绝不写回真实文件。
+ * 这里只做**只读解析**与「复制进副本前剥离」两件事，绝不写回真实文件。
  * 不引入 YAML 依赖：只认 DSH 这几类字段，容忍块式/flow 式写法；解析不了就当没有。
  */
 
@@ -233,7 +233,7 @@ export function stripDshEntries(
   return { text: body, removed };
 }
 
-/** 剥掉所有 DSH MCP 条目（brain sandbox 默认空、worker 由 ACP 注入全量时用）。 */
+/** 剥掉所有 DSH MCP 条目（brain managed 默认空、worker 由 ACP 注入全量时用）。 */
 export function stripAllDshMcpEntries(text: string): { text: string; removed: string[] } {
   return stripDshEntries(text, (body) => {
     if (!/^\s*-\s+id:/.test(body[0] ?? "")) return null; // 不把 `- insert:` 父项当成 MCP

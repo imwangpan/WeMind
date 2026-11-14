@@ -32,13 +32,20 @@ import {
 } from "../../agents/config/home-mode.js";
 import { overlayPath, readOverlay, writeOverlay } from "../../agents/config/overlay.js";
 import {
+  REPLY_STYLE_VALUES,
+  normalizeReplyStyle,
+  readWechatSettings,
+  saveWechatSettings,
+  wechatSettingsPath,
+} from "../../agents/config/wechat-settings.js";
+import {
   defaultWorkspacePath,
   loadWorkspaceConfig,
   resolveWorkspace,
   updateWorkspace,
   WORKSPACE_CHANGE_NOTICE,
 } from "../../agents/config/workspace.js";
-import { addMcp, catalogNames, loadActive, removeMcp } from "../../agents/sandbox/mcp-sandbox.js";
+import { addMcp, catalogNames, loadActive, removeMcp } from "../../agents/managed/mcp-brain.js";
 import { bridgeReady, pickKey, viaBridge } from "../cli-context.js";
 
 type Opts = { key?: string; file?: string; role?: "brain" | "worker" };
@@ -88,10 +95,11 @@ function showConfig(dir: string, key: string): string {
   const brainWs = resolveWorkspace("brain", dir);
   const workerWs = resolveWorkspace("worker", dir);
   const env = readEnvSnapshot(dir);
+  const wx = readWechatSettings(dir);
   const lines = [
     `账号 ${key}`,
     `homeMode：${mode} — ${homeModeDescription(mode)}`,
-    "说明：direct 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 会写并备份）；需要账号隔离时切 sandbox。",
+    "说明：direct 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 会写并备份）；需要账号隔离时切 managed。",
     `runtime.json：${homeModePath(dir)}`,
     `brain：${brain}；worker：${worker}`,
     `brain realHome：${realHomeOf(brain)}`,
@@ -101,6 +109,7 @@ function showConfig(dir: string, key: string): string {
     `overlay：${path.join(dir, "agent-overrides")}`,
     `env.json：${Object.keys(env).length ? Object.keys(env).join(", ") : "（未捕获，继承 daemon 环境）"}`,
     `brain MCP 激活集：${path.join(dir, "brain-mcps.json")}`,
+    `微信回复风格：${wx.settings.replyStyle ?? "off（与终端一致）"}${wx.problem ? `（${wx.problem}）` : ""}（${wechatSettingsPath(dir)}）`,
   ];
   return lines.join("\n");
 }
@@ -185,7 +194,7 @@ export async function cmdConfig(rest: string[]): Promise<string> {
     if (!raw)
       return `账号 ${key} 的 homeMode：${readHomeMode(dir)}（${homeModeDescription(readHomeMode(dir))}）`;
     const mode = normalizeHomeMode(raw);
-    if (!mode) throw new Error("homeMode 只能是 direct / sandbox");
+    if (!mode) throw new Error("homeMode 只能是 direct / managed");
     writeHomeMode(mode as HomeMode, dir);
     return `账号 ${key} 的 homeMode 已设为 ${mode}。重启 daemon 后生效：wemind stop ${key} && wemind start ${key}`;
   }
@@ -206,7 +215,22 @@ export async function cmdConfig(rest: string[]): Promise<string> {
   if (sub === "mcp") {
     return cmdMcp(rest, key);
   }
-  throw new Error("用法：config show|home-mode|reload|agent|wechat|mcp");
+  if (sub === "reply-style") {
+    const raw = rest.shift();
+    const cur = readWechatSettings(dir);
+    if (!raw)
+      return [
+        `账号 ${key} 的微信回复风格：${cur.settings.replyStyle ?? "off（与终端一致）"}`,
+        `可选值：${REPLY_STYLE_VALUES.join(" / ")} / off（写 ${wechatSettingsPath(dir)}）`,
+        "只影响微信侧措辞（brain 回合），不改 Agent 配置；每轮现读，改完下一条消息即生效。",
+      ].join("\n");
+    const style = normalizeReplyStyle(raw);
+    if (style === undefined)
+      throw new Error(`replyStyle 只能是 ${REPLY_STYLE_VALUES.join(" / ")} 或 off`);
+    saveWechatSettings({ version: 1, replyStyle: style }, dir);
+    return `账号 ${key} 的微信回复风格已设为 ${style ?? "off"}；下一条消息即生效（不需要 reload / 新会话）。`;
+  }
+  throw new Error("用法：config show|home-mode|reload|agent|wechat|reply-style|mcp");
 }
 
 export function cmdWorkspace(rest: string[]): string {

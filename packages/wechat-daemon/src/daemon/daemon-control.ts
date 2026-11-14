@@ -26,8 +26,8 @@ import {
   sessionsCmd,
   type SessionCtx,
 } from "../sessions/session-manager.js";
-import { addMcp, ensureBrainHome, listMcp, removeMcp } from "../agents/sandbox/mcp-sandbox.js";
-import { ensureWorkerHome } from "../agents/sandbox/worker-sandbox.js";
+import { addMcp, ensureBrainHome, listMcp, removeMcp } from "../agents/managed/mcp-brain.js";
+import { ensureWorkerHome } from "../agents/managed/mcp-worker.js";
 import {
   defaultWorkspacePath,
   resolveWorkspace,

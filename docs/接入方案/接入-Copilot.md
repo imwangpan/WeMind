@@ -1,10 +1,10 @@
 # 接入 GitHub Copilot CLI
 
-> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Agent 直接读真实 home，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=sandbox`。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Agent 直接读真实 home，并与终端共享配置、技能、记忆与会话库；本文涉及 `brain-home` / `worker-home` 的描述仅适用于显式 `homeMode=managed`。
 
-> **最后核对**：2026-11-12 ｜ **实测环境**：Windows 11、Node 24.21.0、GitHub Copilot CLI 1.0.107 ｜ **状态**：✅ 已内置预设并通过 ACP 探针；WeChat brain/worker 真机 E2E 待验证。
+> **最后核对**：2026-11-14 ｜ **实测环境**：Windows 11、Node 24.21.0、GitHub Copilot CLI 1.0.107 ｜ **状态**：✅ 已内置预设并通过 ACP 探针；WeChat brain/worker 真机 E2E 待验证。
 
-Copilot CLI 原生支持 ACP，可作为 WeMind 的对话大脑与任务 worker。内置 `copilot` 预设默认 `direct`：不注入 `COPILOT_HOME`，由 Agent 直接读真实配置；`sandbox` 才把 `COPILOT_HOME` 指向账号沙箱，并同步登录配置与个人指令/技能。`direct` 下 MCP 由 Agent 自己加载真实配置（WeMind 不重发），`sandbox` 按 WeMind 激活集提供；WeMind 自己生成的集合永久排除 `wechat`。
+Copilot CLI 原生支持 ACP，可作为 WeMind 的对话大脑与任务 worker。内置 `copilot` 预设默认 `direct`：不注入 `COPILOT_HOME`，由 Agent 直接读真实配置；`managed` 才把 `COPILOT_HOME` 指向账号副本，并同步登录配置与个人指令/技能。`direct` 下 MCP 由 Agent 自己加载真实配置（WeMind 不重发），`managed` 按 WeMind 激活集提供；WeMind 自己生成的集合永久排除 `wechat`。
 
 ## 1. 安装与认证
 
@@ -17,9 +17,9 @@ copilot login
 copilot --version
 ```
 
-`direct` 下不注入 `COPILOT_HOME`，Agent 直接用真实 `~/.copilot`；`sandbox` 才把 `~/.copilot/config.json` 同步到沙箱。无人值守环境也可使用 Copilot CLI 支持的 `COPILOT_GITHUB_TOKEN`、`GH_TOKEN` 或 `GITHUB_TOKEN`，由 daemon 进程继承，**不要写进 brain 配置或源码**。若真实配置目录不是默认的 `~/.copilot`，启动 daemon 前用 `WEMIND_BRAIN_REAL_HOME` 指向该目录。
+`direct` 下不注入 `COPILOT_HOME`，Agent 直接用真实 `~/.copilot`；`managed` 才把 `~/.copilot/config.json` 同步到副本。无人值守环境也可使用 Copilot CLI 支持的 `COPILOT_GITHUB_TOKEN`、`GH_TOKEN` 或 `GITHUB_TOKEN`，由 daemon 进程继承，**不要写进 brain 配置或源码**。若真实配置目录不是默认的 `~/.copilot`，启动 daemon 前用 `WEMIND_BRAIN_REAL_HOME` 指向该目录。
 
-## 2. 预设与 direct / sandbox
+## 2. 预设与 direct / managed
 
 配置预设等价于：
 
@@ -42,7 +42,7 @@ copilot: {
 
 `--allow-all-tools` 让 daemon 无需交互即可批准工具调用；它不等于 `--allow-all`，不会主动放宽路径或 URL 检查。Copilot 不参与 `auto` 探测：二进制存在不代表该运行账号已完成认证，使用 `copilot` 名称显式选择。
 
-`direct` 下 Copilot 自己从 `~/.copilot/mcp-config.json` 加载 MCP，WeMind 不重发 catalog；`sandbox` 下才由 WeMind 把激活集/全量集经 ACP `mcpServers` 传递，按名称和定义排除 `wechat`。Copilot CLI 登录配置在 `config.json`，而 MCP 配置单独存放；WeMind 只同步/生成登录配置，不复制 MCP/插件/hooks。
+`direct` 下 Copilot 自己从 `~/.copilot/mcp-config.json` 加载 MCP，WeMind 不重发 catalog；`managed` 下才由 WeMind 把激活集/全量集经 ACP `mcpServers` 传递，按名称和定义排除 `wechat`。Copilot CLI 登录配置在 `config.json`，而 MCP 配置单独存放；WeMind 只同步/生成登录配置，不复制 MCP/插件/hooks。
 
 ## 3. 探针实测
 
@@ -58,7 +58,7 @@ copilot: {
 
 ## 4. 限制与风险
 
-- Copilot 登录是硬前置；`sandbox` 下 `COPILOT_HOME` 指向新沙箱时若 CLI 报 `Authentication required`，检查 `config.json` 是否同步，或给 daemon 提供 Copilot CLI 支持的 token 环境变量。
+- Copilot 登录是硬前置；`managed` 下 `COPILOT_HOME` 指向新副本时若 CLI 报 `Authentication required`，检查 `config.json` 是否同步，或给 daemon 提供 Copilot CLI 支持的 token 环境变量。
 - 图像由 CLI 与当前模型共同决定。探针里 ACP 接受图像，但实际模型拒绝并退回文本；该结果不保证其它模型相同。
 - 预设不启用 Copilot 自动更新，需按上游方式自行更新 CLI，并重新运行 ACP 探针。
 - 尚未验证 WeChat brain/worker 的完整真实消息链路、多账号隔离、模型切换，以及其它平台的 npm shim 与认证行为。
@@ -77,3 +77,5 @@ wemind brain check copilot
 
 - WeChat brain/worker 真机端到端、重启后会话恢复及 MCP 加载/卸载。
 - Copilot CLI 后续版本的图片模型支持、非 Windows 行为，以及 `COPILOT_HOME` 自定义目录的登录兼容性。
+
+**2026-11-14 实测补充（`direct`）**：worker 真机已跑通（本地任务桥派发 + 多轮追问）。技能目录就是真实 `~/.copilot/skills`：新增 skill 后**新会话**可见 ✅（此前探针报 `SKILLS=none` 只是因为该目录当时是空的），同一会话内新增 skill **不会**即时刷新（需新会话）；微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：`~/.copilot/session-state/<sessionId>/`（目录名 = `session/new` 返回的 sessionId）。来源：设计文档 §18.2.2。

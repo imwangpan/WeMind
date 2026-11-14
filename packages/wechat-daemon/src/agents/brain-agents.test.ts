@@ -162,7 +162,7 @@ describe("ACP 模式参数检查（D）", () => {
 });
 
 describe("resolveAgent agent", () => {
-  it("Copilot：原生 ACP + 独立沙箱、认证元数据和 stdio MCP 目录", () => {
+  it("Copilot：原生 ACP + 独立副本、认证元数据和 stdio MCP 目录", () => {
     clearVars();
     delete process.env.WEMIND_BRAIN_REAL_HOME;
     process.env.WEMIND_BRAIN = "copilot";
@@ -186,7 +186,7 @@ describe("resolveAgent agent", () => {
     expect(AUTO_PROBE_ORDER).not.toContain("copilot");
   });
 
-  it("显式 kiro：沿用 kiro 约定（沙箱根 / settings/mcp.json / 格式 mcpServers）", () => {
+  it("显式 kiro：沿用 kiro 约定（副本根 / settings/mcp.json / 格式 mcpServers）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
     const ag = resolveAgent();
@@ -226,7 +226,7 @@ describe("resolveAgent agent", () => {
     expect(v2.args).toEqual(["acp", "--trust-all-tools", "--agent-engine", "v2"]);
   });
 
-  it("kiro v3 的免审批：沙箱 settings/permissions.yaml 缺失时补 allow-all；已有用户规则不覆盖", () => {
+  it("kiro v3 的免审批：副本 settings/permissions.yaml 缺失时补 allow-all；已有用户规则不覆盖", () => {
     const ag = { ...resolveAgent({ agent: "kiro" }), kiroV3: true };
     const settings = path.join(scratch, "kiro-v3-settings");
     ensureKiroV3Permissions(ag, settings);
@@ -250,7 +250,7 @@ describe("resolveAgent agent", () => {
     expect(ag.args).toEqual(["acp"]);
     expect(ag.shell).toBe(true); // Windows shim 需经 shell
     expect(ag.homeEnvVar).toBe("XDG_CONFIG_HOME"); // 替换 global，实现隔离
-    expect(ag.configSubdir).toBe("opencode"); // 配置落在 <沙箱>/opencode/
+    expect(ag.configSubdir).toBe("opencode"); // 配置落在 <副本>/opencode/
     expect(ag.mcpFormat).toBe("mcp.servers");
     expect(ag.mcpConfigFile).toBe("opencode.json");
     expect(ag.catalogFile).toBe("opencode.json");
@@ -288,7 +288,7 @@ describe("resolveAgent agent", () => {
 
   it("deepseek：dsh.cmd + DSH_HOME + resume/model/images=false", () => {
     clearVars();
-    process.env.WEMIND_HOME_MODE = "sandbox"; // sessionPatch 只在 sandbox 下启用（direct 用真实会话目录）
+    process.env.WEMIND_HOME_MODE = "managed"; // sessionPatch 只在 managed 下启用（direct 用真实会话目录）
     process.env.WEMIND_BRAIN = "deepseek";
     const ag = resolveAgent();
     expect(ag.name).toBe("deepseek");
@@ -307,7 +307,7 @@ describe("resolveAgent agent", () => {
     expect(ag.credentialFiles).toEqual([".credentials.yaml"]);
     expect(ag.model).toBe('["deepseek-account","deepseek-flash"]');
     expect(ag.acpMcpServers).toBe(true); // MCP 能力：接受 session/new|resume 的 mcpServers
-    expect(ag.mcpDelivery).toBe("acp"); // sandbox 下由 WeMind 经 ACP 投递
+    expect(ag.mcpDelivery).toBe("acp"); // managed 下由 WeMind 经 ACP 投递
     expect(ag.mcpFormat).toBe("dshProfileYaml");
     // 免审批默认：DSH 没有 flag 也没有会话级权限配置项，靠官方 bundle 读的 DSH_PERMISSION_MODE
     expect(ag.envDefaults).toEqual({ DSH_PERMISSION_MODE: "danger-full-access" });
@@ -316,7 +316,7 @@ describe("resolveAgent agent", () => {
 
   it("deepseek 会话目录隔离：prepareAgent 落盘 --patch，root 按 brain/worker 分开；用户自己的 --patch 不覆盖", () => {
     clearVars();
-    process.env.WEMIND_HOME_MODE = "sandbox";
+    process.env.WEMIND_HOME_MODE = "managed";
     const fake = {
       sessionPatch: {
         file: path.join(scratch, "dsh-sessions", "session-root-brain.patch.yml"),
@@ -421,7 +421,7 @@ describe("resolveAgent agent", () => {
     expect(resolveAgent({ agent: "deepseek", model: "default" }).model).toBeUndefined();
   });
 
-  it("默认模型跟随真实 profile 的 agent-default-model（ACP 桥不读那个键，值由 WeMind 补进沙箱并下发）", () => {
+  it("默认模型跟随真实 profile 的 agent-default-model（ACP 桥不读那个键，值由 WeMind 补进副本并下发）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "deepseek";
     process.env.WEMIND_BRAIN_REAL_HOME = profileHome;
@@ -444,7 +444,7 @@ describe("resolveAgent agent", () => {
     expect(resolveAgent({ agent: "deepseek", model: "auto" }).model).toBeUndefined();
   });
 
-  it("qoder：原生 qodercli + QODER_CONFIG_DIR 沙箱 + settings.json + 凭据/标识文件", () => {
+  it("qoder：原生 qodercli + QODER_CONFIG_DIR 副本 + settings.json + 凭据/标识文件", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "qoder";
     const ag = resolveAgent();
@@ -452,7 +452,7 @@ describe("resolveAgent agent", () => {
     expect(ag.bin).toMatch(/qodercli(\.exe)?$/); // 原生二进制，直接起（不走 qoder 分发器）
     expect(ag.args).toEqual(["--acp", "--yolo"]);
     expect(ag.shell).toBe(false); // 原生 .exe/.bin，不走 shell
-    expect(ag.homeEnvVar).toBeUndefined(); // 用 env 指到「配置目录」本身，而非沙箱根
+    expect(ag.homeEnvVar).toBeUndefined(); // 用 env 指到「配置目录」本身，而非副本根
     expect(ag.env.QODER_CONFIG_DIR).toMatch(/^%HOME%[\\/]qoder$/);
     // direct：不注入任何 home 覆盖，让 qoder 像终端一样自己读 ~/.qoder
     expect(
@@ -470,7 +470,7 @@ describe("resolveAgent agent", () => {
     expect(ag.acpMcpServers).toBe(false);
   });
 
-  it("cline：原生 cline --acp + CLINE_DIR 沙箱 + mcp.json + providers.json 凭据", () => {
+  it("cline：原生 cline --acp + CLINE_DIR 副本 + mcp.json + providers.json 凭据", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "cline";
     const ag = resolveAgent();
@@ -478,7 +478,7 @@ describe("resolveAgent agent", () => {
     expect(ag.bin).toMatch(/cline(\.cmd)?$/);
     expect(ag.args).toEqual(["--acp", "--auto-approve", "true"]);
     expect(ag.shell).toBe(true); // Windows 上是 npm shim（cline.cmd）
-    expect(ag.homeEnvVar).toBeUndefined(); // 用 env 指到「配置目录」本身，而非沙箱根（与 qoder 同理）
+    expect(ag.homeEnvVar).toBeUndefined(); // 用 env 指到「配置目录」本身，而非副本根（与 qoder 同理）
     expect(ag.env.CLINE_DIR).toMatch(/^%HOME%[\\/]cline$/);
     expect(ag.env.CLINE_DATA_DIR).toMatch(/^%HOME%[\\/]cline[\\/]data$/);
     expect(ag.env.CLINE_MCP_SETTINGS_PATH).toMatch(/^%HOME%[\\/]cline[\\/]mcp\.json$/);
@@ -523,8 +523,8 @@ describe("resolveAgent agent", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "opencode";
     const opencode = resolveAgent();
-    const managed = agentEnv(opencode, path.join(scratch, "sandbox"), [], scratch);
-    expect(managed.XDG_CONFIG_HOME).toBe(path.join(scratch, "sandbox"));
+    const managed = agentEnv(opencode, path.join(scratch, "managed"), [], scratch);
+    expect(managed.XDG_CONFIG_HOME).toBe(path.join(scratch, "managed"));
     expect(managed.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("1");
     const direct = agentEnv(opencode, opencode.realHome!, [], scratch, { direct: true });
     expect(direct.XDG_CONFIG_HOME).toBe(process.env.XDG_CONFIG_HOME);
@@ -558,7 +558,7 @@ describe("resolveAgent agent", () => {
     expect(authHint("qoder", auth)).toBe("");
   });
 
-  it("claude-code：全局适配器 + CLAUDE_CONFIG_DIR 沙箱 + ACP MCP 投递（能力见 docs/接入-ClaudeCode.md）", () => {
+  it("claude-code：全局适配器 + CLAUDE_CONFIG_DIR 副本 + ACP MCP 投递（能力见 docs/接入-ClaudeCode.md）", () => {
     clearVars();
     delete process.env.WEMIND_BRAIN_REAL_HOME; // 本用例要断言预设的 realHome（clearVars 统一指到空目录）
     process.env.WEMIND_BRAIN = "claude-code";
@@ -568,7 +568,7 @@ describe("resolveAgent agent", () => {
     expect(ag.bin).toBe(process.platform === "win32" ? "claude-agent-acp.cmd" : "claude-agent-acp");
     expect(ag.args).toEqual([]); // 适配器本体就是 ACP server，没有模式参数
     expect(ag.shell).toBe(true);
-    // 沙箱：配置目录 <BRAIN_HOME>/claude（用 env 指到目录本身，不用 homeEnvVar）
+    // 副本：配置目录 <BRAIN_HOME>/claude（用 env 指到目录本身，不用 homeEnvVar）
     expect(ag.homeEnvVar).toBeUndefined();
     expect(ag.env.CLAUDE_CONFIG_DIR).toMatch(/^%HOME%[\\/]claude$/);
     expect(ag.configSubdir).toBe("claude");
@@ -595,7 +595,7 @@ describe("resolveAgent agent", () => {
     expect(ag.sessionMode).toBe("bypassPermissions");
   });
 
-  it("pi：pi-acp + PI_CODING_AGENT_DIR 沙箱 + mcp.json（kiro 格式）+ 凭据原样同步", () => {
+  it("pi：pi-acp + PI_CODING_AGENT_DIR 副本 + mcp.json（kiro 格式）+ 凭据原样同步", () => {
     clearVars();
     delete process.env.WEMIND_BRAIN_REAL_HOME; // 本用例要断言预设的 realHome（clearVars 统一指到空目录）
     process.env.WEMIND_BRAIN = "pi";
@@ -607,7 +607,7 @@ describe("resolveAgent agent", () => {
     expect(ag.shell).toBe(true);
     // pi-acp 内部 spawn pi 本体：只装适配器不够，agentProblem 会提前报错
     expect(ag.requiresBins).toEqual(["pi"]);
-    // 沙箱：PI_CODING_AGENT_DIR 指向沙箱根，配置目录就是沙箱根
+    // 副本：PI_CODING_AGENT_DIR 指向副本根，配置目录就是副本根
     expect(ag.homeEnvVar).toBe("PI_CODING_AGENT_DIR");
     expect(agentEnv(ag, path.join("/tmp", "wemind-home")).PI_CODING_AGENT_DIR).toBe(
       path.join("/tmp", "wemind-home"),
@@ -635,7 +635,7 @@ describe("resolveAgent agent", () => {
     expect(ag.sessionMode).toBeUndefined();
   });
 
-  it("gemini：GEMINI_CLI_HOME 沙箱 + <沙箱>/.gemini + settings.json 里的 MCP + --model 走启动参数", () => {
+  it("gemini：GEMINI_CLI_HOME 副本 + <副本>/.gemini + settings.json 里的 MCP + --model 走启动参数", () => {
     clearVars();
     delete process.env.WEMIND_BRAIN_REAL_HOME; // 本用例要断言预设的 realHome（clearVars 统一指到空目录）
     process.env.WEMIND_BRAIN = "gemini";
@@ -644,7 +644,7 @@ describe("resolveAgent agent", () => {
     expect(ag.bin).toBe(process.platform === "win32" ? "gemini.cmd" : "gemini");
     expect(ag.args).toEqual(["--acp", "--approval-mode", "yolo", "--skip-trust"]);
     expect(ag.shell).toBe(true);
-    // 沙箱：GEMINI_CLI_HOME 指向沙箱根，Gemini 的配置目录是 <它>/.gemini（实测）
+    // 副本：GEMINI_CLI_HOME 指向副本根，Gemini 的配置目录是 <它>/.gemini（实测）
     expect(ag.homeEnvVar).toBe("GEMINI_CLI_HOME");
     expect(agentEnv(ag, path.join("/tmp", "wemind-home")).GEMINI_CLI_HOME).toBe(
       path.join("/tmp", "wemind-home"),
@@ -660,9 +660,8 @@ describe("resolveAgent agent", () => {
     expect(ag.mcpConfigFile).toBe("settings.json");
     expect(ag.catalogFile).toBe("settings.json");
     expect(ag.acpMcpServers).toBe(false);
-    // 设置基底只剥 mcpServers：model/security 是用户自己的选择，必须保留
+    // 设置基底：整份复制，只按格式剥 MCP 段（model/security 等用户自己的选择必须保留）
     expect(ag.settingsBase).toBe("settings.json");
-    expect(ag.settingsStrip).toEqual(["mcpServers"]);
     expect(ag.settingsDefaults).toEqual({});
     // 能力：load 恢复但会异步回放历史；图片可收；模型走 --model；无 set_config_option
     expect(ag.restore).toBeUndefined();
@@ -690,18 +689,20 @@ describe("resolveAgent agent", () => {
     expect(follow.args).toEqual(["--acp", "--approval-mode", "yolo", "--skip-trust"]);
   });
 
-  it("默认 settingsStrip 覆盖 Qoder 的剥离清单（MCP/插件/供应商/模型）", () => {
+  it("设置基底不再按 agent 维护剥离清单：qoder / gemini 都只声明 settingsBase", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "qoder";
-    expect(resolveAgent().settingsStrip).toEqual([
-      "mcpServers",
-      "enabledPlugins",
-      "providers",
-      "model",
-    ]);
+    const qoder = resolveAgent();
+    expect(qoder.settingsBase).toBe("settings.json");
+    expect(qoder as unknown as Record<string, unknown>).not.toHaveProperty("settingsStrip");
+    delete process.env.WEMIND_BRAIN;
+    process.env.WEMIND_BRAIN = "gemini";
+    const gemini = resolveAgent();
+    expect(gemini.settingsBase).toBe("settings.json");
+    expect(gemini as unknown as Record<string, unknown>).not.toHaveProperty("settingsStrip");
   });
 
-  it("kiro/opencode：默认不投递 ACP MCP（仍走沙箱配置文件）", () => {
+  it("kiro/opencode：默认不投递 ACP MCP（仍走副本配置文件）", () => {
     clearVars();
     process.env.WEMIND_BRAIN = "kiro";
     expect(resolveAgent().acpMcpServers).toBe(false);

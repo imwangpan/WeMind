@@ -1,8 +1,8 @@
 # 配方：接入一个新的 ACP Agent
 
-> **最后核对**：2026-11-12
+> **最后核对**：2026-11-14
 >
-> 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)。
+> 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与副本.md`](../../repowiki/06-ACP-大脑与副本.md)。
 
 ---
 
@@ -48,7 +48,7 @@ node scripts/acp-probe.mjs
 | 正文非逐 token / 无 activity 帧                                                         | 预设加 `firstFrameMs`（首帧超时）与 `heartbeatMs`（静默期心跳），见 §4                                                                                                                                                                                                                                                                                                                                                            |
 | `session/new` 先要求 `authenticate`（`-32000 Authentication required`）                 | 先看能否靠**复制凭据**自动恢复（`credentialFiles`；Cline 只自动恢复它自己的 3 种 OAuth provider）；不能就**从 agent 自己的配置派生环境变量**（`credentialEnv`，参考 Cline 的 `clineCredentialEnv()`：只读、显式 env 优先），或要求部署方提供 agent 官方文档里的环境变量。**不要**在 daemon 里实现交互式 `authenticate`——无头环境会卡在浏览器/输入上；把可执行的提示写进 `brain check` 与失败回复（参考 `authHint()`）             |
 | 默认模型路由需要 API key / 桌面登录要切 account                                         | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖                                                                                                                                                                                                                          |
-| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：`direct` 直接用真实 `profiles/`，`sandbox` 才复制那份用户层（否则沙箱是空壳 `[]`、路由都不存在；provider/模型条目原样，`mcpDelivery: "acp"` 时剥离全部 MCP 条目）；并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
+| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：`direct` 直接用真实 `profiles/`，`managed` 才复制那份用户层（否则副本是空壳 `[]`、路由都不存在；provider/模型条目原样，`mcpDelivery: "acp"` 时剥离全部 MCP 条目）；并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
 
 ---
 
@@ -60,7 +60,7 @@ node scripts/acp-probe.mjs
 | --- | ---------------------- | ---------------------------------------------------------------- | ---------------------- |
 | 1   | 预设                   | `brain-presets.ts` 的 `ACP_AGENT_PRESETS`                        | 单测                   |
 | 2   | 预设单测               | `brain-agents.test.ts`                                           | `npm test`             |
-| 3   | 沙箱单测（涉及沙箱时） | `sandbox-<name>.test.ts`                                         | `npm test`             |
+| 3   | 副本单测（涉及副本时） | `agents/managed/<name>.test.ts`                                         | `npm test`             |
 | 4   | 接入文档               | `docs/接入方案/接入-<Name>.md`，含 §0.6 的五类小节 + `## 待实测` | `check-agent-docs.mjs` |
 | 5   | 通用表加一行           | `docs/接入方案/接入其它-ACP-Agent.md` §5                         | `check-agent-docs.mjs` |
 | 6   | 已知坑加一条           | [`docs/ai/已知坑.md`](../已知坑.md)                              | `check-agent-docs.mjs` |
@@ -91,7 +91,7 @@ node scripts/acp-probe.mjs
 | --- | ----------------------- | ---------------------------------------------------------------------------------------------- | --------------------- |
 | 1   | 二进制/路径             | PATH 名或绝对路径                                                                              | `dsh` / `dsh.cmd`     |
 | 2   | ACP 启动参数            | 进入 ACP server over stdio                                                                     | `--profile acp`       |
-| 3   | 配置目录环境变量        | 该 agent 读取配置/数据目录的 env 名；WeMind 仅在 `sandbox` 下指向沙箱；`direct` 不注入 | `DSH_HOME`            |
+| 3   | 配置目录环境变量        | 该 agent 读取配置/数据目录的 env 名；WeMind 仅在 `managed` 下指向副本；`direct` 不注入 | `DSH_HOME`            |
 | 4   | 配置目录布局 / MCP 格式 | `configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile`                                    | 空 / ACP `mcpServers` |
 
 > 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
@@ -110,7 +110,7 @@ acme: {
   args: ["serve", "--acp"],
   shell: true,                   // .cmd/.bat/npx 必须；.exe 可 false
   // requiresBins: ["acme"],     // 适配器内部还要 spawn 的运行时（只装适配器不够）；缺失时 agentProblem() 提前报错
-  homeEnvVar: "ACME_HOME",       // 仅 sandbox 指向沙箱根；没有就删掉
+  homeEnvVar: "ACME_HOME",       // 仅 managed 指向副本根；没有就删掉
   realHome: path.join(os.homedir(), ".acme"),
   inheritDirs: ["skills"],       // 目录式记忆/技能
   inheritFiles: ["AGENTS.md"],   // 单文件记忆
@@ -124,13 +124,12 @@ acme: {
   // modelArg: "--model",               // 不支持 session/set_config_option 时模型走启动参数（gemini）
   // replayOnLoad: true,                // load/resume 返回后仍异步回放历史：恢复后先等帧流安静，否则旧历史会拼进本轮答复（gemini）
   // sessionMode: "bypassPermissions",  // 会话建立/恢复后经 session/set_mode 切模式（claude-code / codex）
-  // env: { CLAUDE_CONFIG_DIR: "%HOME%/claude" },                  // 仅 sandbox 强制注入（值里 %HOME% → 沙箱根）
+  // env: { CLAUDE_CONFIG_DIR: "%HOME%/claude" },                  // 仅 managed 强制注入（值里 %HOME% → 副本根）
   // envDefaults: { DSH_PERMISSION_MODE: "danger-full-access" }, // 审批类默认值：父进程已设同名变量时以父进程为准
   // credentialEnv: (realHome, parentEnv) => ({ ... }),            // 从 agent 凭据文件派生 env（仅父进程未提供时；Cline 的 CLINE_PROVIDER/CLINE_API_KEY）
   // isolateSessions: true,             // 会话持久化 root 用 agent 自己的 --patch 指到账号数据目录（DSH）
   // fallbackBinPaths: [path.join(os.homedir(), ".acme", "bin", "acme-agent")], // 官方安装不在 PATH
-  // settingsBase: "settings.json",       // 以真实配置为基底（剥离 MCP/插件/providers/model、关自动更新）
-  // settingsStrip: ["mcpServers"],       // settingsBase 里要删的键（默认 DEFAULT_SETTINGS_STRIP；gemini 只剥 mcpServers，保留 model/security）
+  // settingsBase: "settings.json",       // managed 下把该文件整份复制进副本（只按格式剥 MCP 段、关自动更新）
   // settingsDefaults: { quietStartup: true }, // 生成副本的 settings.json 缺省补键（用户显式设过则保留用户的值；真实文件不动）
   // credentialFiles: [".auth/user"],     // 登录态（新者胜）
   // identityFiles: [".auth/machine_id"], // 必须与真实目录一致（内容不同即覆盖）
@@ -154,13 +153,13 @@ acme: {
 
 ## 3. 配置目录 / MCP / 记忆
 
-- `homeEnvVar` 仅在 `sandbox` 下指向 `BRAIN_HOME`/`WORKER_HOME`；`direct` 不注入，Agent 直接用真实 home。`env` 同样只在 `sandbox` 注入。`configSubdir` 决定配置目录在沙箱根中的位置。
-- `mcpFormat`：`mcpServers`（顶层）、`mcp.servers`（嵌套）或 `dshProfileYaml`（DSH profile patch）；`acpMcpServers` 只声明能力，`mcpDelivery: "acp"` 才表示 sandbox 下由 WeMind 经 ACP 投递。
-- 记忆/技能：`direct` 完全使用真实目录；`sandbox` 才按 `inheritDirs`（junction/symlink）与 `inheritFiles`（复制）选择性继承。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
-- 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时沙箱。
-- 设置继承：`settingsBase` 只在 `sandbox` 下生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）；`settingsStrip` 可改剥离键（gemini 只剥 `mcpServers`，保留用户的 `model`/`security`），`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。
-- **profile**（`realProfile`，可选）：`direct` 直接用真实 `profiles/`；`sandbox` 模式把真实 `<realHome>/profiles/<名>/cordis.patch.yml` 复制进沙箱（provider/模型条目原样，`mcpDelivery: "acp"` 时剥离全部 MCP 条目）——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在。默认模型从真实 profile 读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
-- `sandbox` 下 brain 默认空 MCP、按 agent 持久激活；worker 真实全量。两者都永久禁止 `wechat`（防它把消息发回自己）。`direct` 完全由 Agent 自己的配置决定。
+- `homeEnvVar` 仅在 `managed` 下指向 `BRAIN_HOME`/`WORKER_HOME`；`direct` 不注入，Agent 直接用真实 home。`env` 同样只在 `managed` 注入。`configSubdir` 决定配置目录在副本根中的位置。
+- `mcpFormat`：`mcpServers`（顶层）、`mcp.servers`（嵌套）或 `dshProfileYaml`（DSH profile patch）；`acpMcpServers` 只声明能力，`mcpDelivery: "acp"` 才表示 managed 下由 WeMind 经 ACP 投递。
+- 记忆/技能：`direct` 完全使用真实目录；`managed` 才按 `inheritDirs`（junction/symlink）与 `inheritFiles`（复制）选择性继承。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
+- 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时副本。
+- 设置继承：`settingsBase` 只在 `managed` 下生效——把真实文件**整份**复制进副本，**只剥掉 MCP 段**（键名按 `mcpFormat` 定，由 `mcpAdapterFor().stripSettings()` 处理）并强制 `general.enableAutoUpdate=false`；`model` / `providers` / `security` 等键一律原样保留（不替用户改配置：上游一改键名就静默剥错，表现成「终端能用、微信不能用」）。`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。**不要**再引入 per-agent 的剥离清单。
+- **profile**（`realProfile`，可选）：`direct` 直接用真实 `profiles/`；`managed` 模式把真实 `<realHome>/profiles/<名>/cordis.patch.yml` 复制进副本（provider/模型条目原样，`mcpDelivery: "acp"` 时剥离全部 MCP 条目）——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在。默认模型从真实 profile 读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
+- `managed` 下 brain 默认空 MCP、按 agent 持久激活；worker 真实全量。两者都永久禁止 `wechat`（防它把消息发回自己）。`direct` 完全由 Agent 自己的配置决定。
 - **每个 agent 只读自己的 catalog**；不要把 kiro 的文件指给 DSH。
 
 验证：
@@ -206,7 +205,7 @@ wemind brain check
 3. 长任务 >30s → 不因首帧误杀；进度不刷屏；
 4. 发图 → 按 image 能力正确处理；
 5. 越界写 → 有权限请求则应答，不卡死；
-6. 两个账号 → 沙箱隔离；
+6. 两个账号 → 副本隔离；
 7. **热切换**（1.2.0）：从别的配置里的 `wemind brain switch acme` → 答复两段、daemon pid 不变、下一条消息由 acme 答；再切回去，旧上下文能 load 回来；
 8. **当 worker 用**（1.2.0）：`wemind task "…" --agent acme` → 任务跑通；跑完进程**留着复用**（`wemind list` 可见），5 分钟后回收。
 
@@ -233,7 +232,7 @@ wemind brain check
 
 - [`docs/接入方案/接入-OpenCode.md`](../../接入方案/接入-OpenCode.md) — 原生 ACP 的实测样板
 - [`docs/接入方案/接入-DeepSeek.md`](../../接入方案/接入-DeepSeek.md) — 缺 load、`image:false`、committed-only 的反例
-- [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) — 需适配器的样板（全局安装、`CLAUDE_CONFIG_DIR` 沙箱、ACP MCP 投递、`sessionMode`）
+- [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) — 需适配器的样板（全局安装、`CLAUDE_CONFIG_DIR` 副本、ACP MCP 投递、`sessionMode`）
 - [`docs/接入方案/接入-pi.md`](../../接入方案/接入-pi.md) — 适配器 + 运行时依赖（`requiresBins`）、文件式 MCP（`mcp.json`）、无审批开关的样板
 - [`docs/接入方案/接入其它-ACP-Agent.md`](../../接入方案/接入其它-ACP-Agent.md) — 通用 ACP 指南
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md) — worker 侧（进程池、任务表）对新 agent 的要求

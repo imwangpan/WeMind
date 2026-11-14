@@ -198,7 +198,7 @@ describe("resolveAttachment（读取与安全闸）", () => {
     expect(resolveAttachment({ src: url }).data.toString()).toBe("v");
   });
 
-  it("isSensitiveFilePath 识别控制桥/任务目录与沙箱 settings", () => {
+  it("isSensitiveFilePath 识别控制桥/任务目录与副本 settings", () => {
     expect(isSensitiveFilePath(path.join(DATA_DIR, "control-in", "x.json"))).toBe(true);
     expect(isSensitiveFilePath(path.join(DATA_DIR, "task-out", "x.json"))).toBe(true);
     expect(isSensitiveFilePath(path.join(DATA_DIR, "worker-home", "settings.json"))).toBe(true);

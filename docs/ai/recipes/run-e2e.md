@@ -1,6 +1,6 @@
 # 配方：端到端验收
 
-> **最后核对**：2026-11-12
+> **最后核对**：2026-11-14
 >
 > 目标：用最短路径证明「微信 → daemon → ACP 大脑 → 微信」真的通，而不是只看编译通过。
 > 前置：已构建、已登录一个 bot、`allowFrom` 包含你的微信（登录时自动写入，通常无需手动加）、至少一个 ACP agent 可用。
@@ -36,8 +36,8 @@ node scripts/acp-probe.mjs
 ```
 
 > **2026-11-03 两个回归点**（改 kiro/DSH 相关代码后重跑）：
-> - **kiro v3**：临时 `KIRO_HOME` 的 `settings/cli.json` 写 `{"acp.agentEngine":"v3"}`，`wemind brain check` 应通过；看 `sandbox` 模式的 `brain-home/settings/permissions.yaml`（`direct` 直接用真实 `~/.kiro`）是 allow-all，且解析出的 args 已没有 `--trust-all-tools`（多了 `--agent-engine v3`）。真实设置已有 `permissions.yaml` 时不得被覆盖。
-> - **DSH 会话隔离（仅 `sandbox` 模式）**：看 `<账号目录>/agent-sessions/deepseek/session-root-{brain,worker}.patch.yml` 与两个 root 目录；要复现旧故障，先在 `brain-home/sessions/` 放一个平铺会话文件再跑 `wemind brain check`（修复后 DSH 不再读那个目录）。`direct` 不追加 `--patch`，用 DSH 真实会话库。模型过期用 `wemind brain` 看是否给出 `no configured model` 的替换提示。
+> - **kiro v3**：临时 `KIRO_HOME` 的 `settings/cli.json` 写 `{"acp.agentEngine":"v3"}`，`wemind brain check` 应通过；看 `managed` 模式的 `brain-home/settings/permissions.yaml`（`direct` 直接用真实 `~/.kiro`）是 allow-all，且解析出的 args 已没有 `--trust-all-tools`（多了 `--agent-engine v3`）。真实设置已有 `permissions.yaml` 时不得被覆盖。
+> - **DSH 会话隔离（仅 `managed` 模式）**：看 `<账号目录>/agent-sessions/deepseek/session-root-{brain,worker}.patch.yml` 与两个 root 目录；要复现旧故障，先在 `brain-home/sessions/` 放一个平铺会话文件再跑 `wemind brain check`（修复后 DSH 不再读那个目录）。`direct` 不追加 `--patch`，用 DSH 真实会话库。模型过期用 `wemind brain` 看是否给出 `no configured model` 的替换提示。
 
 Claude Code 的 L3 示例（需要先 `npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；用临时 `CLAUDE_CONFIG_DIR`，别碰真实 `~/.claude`）：
 
@@ -193,9 +193,9 @@ wemind task-stop 2                                         # 单条；task-stop 
 
 - 发一张图 → 支持 image 的 agent 应能描述；不支持（如 DSH 官方）应被友好拦截，而不是反复 `-32602` 重试。
 - 看 `promptCapabilities.image`：`wemind brain check` 不打印能力，跑 `scripts/acp-probe.mjs` 看 `initialize`。
-- **文件/视频/无转写语音（2026-11-09）**：给 bot 发一个文件、一段视频、一条语音 → prompt 里应带 `<账号>/media/inbound/`（`sandbox` 才是 `<sandbox>/media/inbound/`）下的本地绝对路径；文件确实存在且大小正确（语音是 **WAV**，24kHz 单声道）。有微信转写的语音不发附件，直接按文本进 prompt。
+- **文件/视频/无转写语音（2026-11-09）**：给 bot 发一个文件、一段视频、一条语音 → prompt 里应带 `<账号>/media/inbound/`（`managed` 才是 `<managed>/media/inbound/`）下的本地绝对路径；文件确实存在且大小正确（语音是 **WAV**，24kHz 单声道）。有微信转写的语音不发附件，直接按文本进 prompt。
 - **引用消息（2026-11-09）**：回复某条文本消息 → prompt 里应有 `[引用消息] 标题 | 正文`；只带 `svr_id` 的引用给「内容未缓存」占位，不报错（引用正文缓存暂未实现）。**只引用、不输入正文**（2026-11-10）→ 微信应收到一条明确提示「请把要说的话一起打出来」，不是零反馈；`daemon.log` 有 `message without usable content`，且不会多烧一个模型回合。
-- **出站文件/视频（2026-11-09）**：让大脑回复一行 `[附件](file:///<绝对路径>)`（或 `[文件](...)` / `[视频](...)`；路径含 `)` 用 `[附件](<...>)`）→ 微信应收到对应文件/视频；路径不存在、是目录、超过 `WECHAT_OUTBOUND_FILE_MAX_MB`、命中敏感文件 denylist（`account.json`/`state.json`/`.env`/密钥/沙箱里的凭据副本（如 `brain-home/.credentials.yaml`）/`.auth/user`/`~/.claude/settings.json` 等），或是 `file://host/...`/UNC 网络路径（含软链接目标）、Windows `account.json::$DATA` 数据流时，回复里应有失败说明而不是静默丢附件。
+- **出站文件/视频（2026-11-09）**：让大脑回复一行 `[附件](file:///<绝对路径>)`（或 `[文件](...)` / `[视频](...)`；路径含 `)` 用 `[附件](<...>)`）→ 微信应收到对应文件/视频；路径不存在、是目录、超过 `WECHAT_OUTBOUND_FILE_MAX_MB`、命中敏感文件 denylist（`account.json`/`state.json`/`.env`/密钥/副本里的凭据副本（如 `brain-home/.credentials.yaml`）/`.auth/user`/`~/.claude/settings.json` 等），或是 `file://host/...`/UNC 网络路径（含软链接目标）、Windows `account.json::$DATA` 数据流时，回复里应有失败说明而不是静默丢附件。
 - **敏感文件临时放行（2026-11-09）**：先让大脑发 `account.json` → 被拒，回复附注「被敏感文件名单拦下（回复「允许敏感文件」可补发）」；回「允许敏感文件」→ 之前那个附件直接补发（日志 `sent pending attachment (... 敏感文件已临时放行)`），无需大脑重发；也可以先发「允许敏感文件」再让大脑发（日志 `sent attachment (... 敏感文件已临时放行)`）。窗口过期或重启 daemon 后再发 → 恢复 `拒绝发送敏感文件`。窗口内 `file://attacker/...`、`::$DATA`、超 25MB 仍应被拒。
 - **工具进度（2026-11-09）**：让大脑跑一条慢命令（例如连续几次 PowerShell `Start-Sleep`）→ 微信里应看到**文本**「🔧 步骤 N 开始」；只有耗时 ≥10s 的工具才会再出现「✅ 步骤 N 完成」，短命令只有开始一条。结构化 item（`TOOL_CALL_START=11`/`TOOL_CALL_RESULT=12`）默认关闭：官方虽然定义了它，但微信客户端不渲染（服务端 200/空响应/不分配 `message_id`，第三方 SDK 与 galley 均复现）；设 `WECHAT_TOOL_PROGRESS_ITEMS=1` 可提前启用（代码已对齐 `FINISH` + `run_id`，且不占连发额度、不顶替 5s/15s 固定提示；item 发送失败回退的文本仍计一条额度）。
 - **「正在输入」续命（2026-11-10）**：跑一个长回合 → 微信里「正在输入」应持续可见；`index.ts` 的 keepAlive 与 `task-manager.ts` 的每轮续命都是每 5s 一次（1.6.0 曾用 3s，已改回），发消息顶掉 typing 后送达即补一次。**发消息后的瞬时闪烁不可避免**，验收时不要把它当成回归。
@@ -238,7 +238,7 @@ MCP
 | 18 | 会话四件套 | 列表 / 恢复 / 重命名 / 删除 与权限都对 |
 | 19 | 交接 | 摘要只带上一次，切回来源不带上 |
 | 20 | CLI 热切换 | `wemind brain switch` 在 daemon 运行时免重启生效 |
-| 21 | 入站富媒体 | 文件/视频/无转写语音落盘到 `<账号>/media/inbound/`（`sandbox` 才是 `<sandbox>/media/inbound/`），prompt 带绝对路径；有转写语音按文本处理 |
+| 21 | 入站富媒体 | 文件/视频/无转写语音落盘到 `<账号>/media/inbound/`（`managed` 才是 `<managed>/media/inbound/`），prompt 带绝对路径；有转写语音按文本处理 |
 | 22 | 引用消息 | 引用后 prompt 带 `[引用消息] 标题 | 正文`（或占位），不中断回合；只引用不输入正文时收到明确提示，不零反馈 |
 | 23 | 出站附件 | `[附件]`/`[文件]`/`[视频]` 送达；非法/敏感/超限路径有失败说明 |
 | 24 | 工具进度 | 默认发文本「步骤 N」；`WECHAT_TOOL_PROGRESS_ITEMS=1` 才发结构化 11/12（客户端目前不渲染） |
@@ -247,7 +247,7 @@ MCP
 | 27 | 终端等效 | 在终端改真实 Agent 配置/技能/记忆后，下一条微信消息可见；会话历史与终端共用（默认 `homeMode=direct`） |
 | 28 | 微信侧 overlay | `wemind config wechat edit <agent>` 只改 `<账号>/agent-overrides/<agent>.json`（`mcp.disable` / `mcp.extra`），真实配置不变；新会话生效 |
 | 29 | 默认工作区 | brain/worker 分别使用 `<账号>/workspace/{brain,worker}`；`wemind workspace set <绝对路径> --role brain\|worker` 后已有会话 cwd 不变、新会话用新目录 |
-| 30 | worker MCP 有效集（sandbox） | 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；`direct` 由 Agent 自己加载真实配置，WeMind 不写 `mcp.json` |
+| 30 | worker MCP 有效集（managed） | 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；`direct` 由 Agent 自己加载真实配置，WeMind 不写 `mcp.json` |
 | 31 | 配置热重载 | `wemind config reload` 重新读取 Agent 配置并重启大脑；brain 有回合在跑时日志记「等当前回合结束再重启」，回复不中断；daemon 未运行时命令返回非零 |
 
 ### 7.1 控制面九项（1.2.0 新增，手工）
@@ -321,7 +321,7 @@ MCP
 | 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 watchdog + daemon + worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
 | 6 | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。 |
 | 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑已实测（2026-10-27，1.1.78：`session/load ok`，STEP-A/STEP-B 产物齐全，见 `docs/接入方案/接入-Qoder.md` M3-3）。 |
-| 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 声明 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**声明 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 预设 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进沙箱（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
+| 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 声明 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**声明 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 预设 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进副本（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
 
 ### 7.4 真机踩到的坑：重启后旧 `context_token`（2026-10-29 已修）
 
@@ -383,7 +383,7 @@ wemind brain set kiro --restart <key>   # 老写法：写入磁盘 + 重启 daem
 
 清空对话记忆（**不是**回滚，是重置）：
 
-- 删 `<数据目录>/brain-sessions.json`（当前会话表，权威）+ `<数据目录>/session-registry.json`（登记表，派生）+ **该 agent 的真实会话库**：`direct` 去预设的 `realHome`；`sandbox` 才在 `<沙箱>/<configSubdir>`（kiro 为空=沙箱根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`、pi 空=沙箱根）。DSH 的会话库 `direct` 下是真实 `~/.dsh`，`sandbox` 下另在 `<账号目录>/agent-sessions/deepseek/`（`isolateSessions`）；要清就按对应模式去真实位置清；
+- 删 `<数据目录>/brain-sessions.json`（当前会话表，权威）+ `<数据目录>/session-registry.json`（登记表，派生）+ **该 agent 的真实会话库**：`direct` 去预设的 `realHome`；`managed` 才在 `<副本>/<configSubdir>`（kiro 为空=副本根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`、pi 空=副本根）。DSH 的会话库 `direct` 下是真实 `~/.dsh`，`managed` 下另在 `<账号目录>/agent-sessions/deepseek/`（`isolateSessions`）；要清就按对应模式去真实位置清；
 - 单个会话不用删文件：微信里 `删除会话 <序号>` 即可（只删登记项，agent 侧存档仍在磁盘上）。
 
 清空任务侧：
@@ -400,7 +400,7 @@ wemind brain set kiro --restart <key>   # 老写法：写入磁盘 + 重启 daem
 - [`docs/使用指南/新手教程.md`](../../使用指南/新手教程.md)
 - [`docs/使用指南/使用指南-远程任务（worker）.md`](../../使用指南/使用指南-远程任务（worker）.md)（多任务、编号、续跑）
 - [`docs/repowiki/05-daemon.md`](../../repowiki/05-daemon.md)
-- [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)（槽位 / 热切换 / 会话管理 / 进程身份）
+- [`docs/repowiki/06-ACP-大脑与副本.md`](../../repowiki/06-ACP-大脑与副本.md)（槽位 / 热切换 / 会话管理 / 进程身份）
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md)（进程池 / 任务编号）
 - [`docs/机制与协议说明/本地双入口-命令派发与查看回复.md`](../../机制与协议说明/本地双入口-命令派发与查看回复.md)（控制桥）
 - [`docs/ai/recipes/debug-daemon.md`](debug-daemon.md)

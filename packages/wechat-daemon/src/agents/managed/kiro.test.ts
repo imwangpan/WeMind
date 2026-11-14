@@ -4,12 +4,12 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * kiro 沙箱：v2 / v3 的免审批落点不同。
+ * kiro 副本：v2 / v3 的免审批落点不同。
  * - v2：启动参数 `--trust-all-tools`（不写 settings/permissions.yaml）。
  * - v3：v3 会拒绝 v2 的信任参数，改用 `settings/permissions.yaml` 的 allow-all 规则；真实配置里已有这份文件时原样同步、不覆盖用户的规则。
  */
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-sandbox-kiro-"));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-managed-kiro-"));
 const v3Home = path.join(root, "kiro-v3");
 const v2Home = path.join(root, "kiro-v2");
 const dataDir = path.join(root, "data");
@@ -26,8 +26,8 @@ const writeSettings = (home: string, acpEngine: string) => {
   );
 };
 
-let ensureBrainHome: typeof import("./mcp-sandbox.js").ensureBrainHome;
-let ensureWorkerHome: typeof import("./worker-sandbox.js").ensureWorkerHome;
+let ensureBrainHome: typeof import("./mcp-brain.js").ensureBrainHome;
+let ensureWorkerHome: typeof import("./mcp-worker.js").ensureWorkerHome;
 let resolveAgent: typeof import("../brain-agents.js").resolveAgent;
 let resetSlotsForTest: typeof import("../agent-slot.js").resetSlotsForTest;
 
@@ -37,10 +37,10 @@ beforeAll(async () => {
   process.env.WEMIND_BRAIN = "kiro";
   process.env.WEMIND_BRAIN_REAL_HOME = v3Home;
   process.env.WECHAT_DATA_DIR = dataDir;
-  process.env.WEMIND_HOME_MODE = "sandbox";
+  process.env.WEMIND_HOME_MODE = "managed";
   delete process.env.WEMIND_BRAIN_INHERIT;
-  ({ ensureBrainHome } = await import("./mcp-sandbox.js"));
-  ({ ensureWorkerHome } = await import("./worker-sandbox.js"));
+  ({ ensureBrainHome } = await import("./mcp-brain.js"));
+  ({ ensureWorkerHome } = await import("./mcp-worker.js"));
   ({ resolveAgent } = await import("../brain-agents.js"));
   ({ resetSlotsForTest } = await import("../agent-slot.js"));
 });
@@ -54,8 +54,8 @@ afterAll(() => {
   delete process.env.WEMIND_BRAIN_INHERIT;
 });
 
-describe("kiro 沙箱（v3 免审批）", () => {
-  it("v3：brain/worker 沙箱都补上 allow-all 的 permissions.yaml", () => {
+describe("kiro 副本（v3 免审批）", () => {
+  it("v3：brain/worker 副本都补上 allow-all 的 permissions.yaml", () => {
     ensureBrainHome();
     ensureWorkerHome();
     const body = "rules:\n  - capability: all\n    effect: allow\n";

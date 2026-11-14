@@ -1,8 +1,8 @@
 # 接入 OpenAI Codex（探针 + 真机 E2E）
 
-> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Codex 直接读真实 `~/.codex`；`cwd` 是账号工作区（brain/worker）或任务 `--cwd`。Codex 的配置目录无法由 WeMind 重定向，`sandbox` 也不隔离 `~/.codex`。本文涉及 `brain-home` / `worker-home` 的描述仅适用于其他可重定向 Agent 的配置落点。
+> **2026-11-13 口径**：默认 `homeMode=direct`，WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Codex 直接读真实 `~/.codex`；`cwd` 是账号工作区（brain/worker）或任务 `--cwd`。Codex 的配置目录无法由 WeMind 重定向，`managed` 也不隔离 `~/.codex`。本文涉及 `brain-home` / `worker-home` 的描述仅适用于其他可重定向 Agent 的配置落点。
 
-> **最后核对**：2026-11-12 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / `session/load` 恢复 / 图片 / `set_mode` / `set_config_option(model)` / stdio MCP）；**真机 E2E 已通过**（2026-11-01：worker 通道任务 #21 + brain 通道微信单轮，回复均送达）；**适配器 2.6.0 探针复测通过**（2026-11-12，见 §2.1）。
+> **最后核对**：2026-11-14 ｜ **状态**：✅ 已内置预设、**探针级实测**（ACP 握手 / 一轮 prompt / `session/load` 恢复 / 图片 / `set_mode` / `set_config_option(model)` / stdio MCP）；**真机 E2E 已通过**（2026-11-01：worker 通道任务 #21 + brain 通道微信单轮，回复均送达）；**适配器 2.6.0 探针复测通过**（2026-11-12，见 §2.1）。
 >
 > 实测环境：Windows 11、Node 24.21.0、`@agentclientprotocol/codex-acp` **2.6.0**（**ACP 项目维护，非 OpenAI 官方**）、Codex CLI 0.167.2。2.5.0 的结论仍保留在 §2，2.6.0 的复测见 §2.1；升级后请按 §2 重新跑探针。
 > **相关文档**：[接入其它-ACP-Agent.md](接入其它-ACP-Agent.md) · [ai/recipes/add-acp-agent.md](../ai/recipes/add-acp-agent.md) · [接入-Qoder.md](接入-Qoder.md)（原生 ACP 样板）
@@ -13,8 +13,8 @@
 
 - Codex CLI **本身不实现 ACP**，必须经适配器 `@agentclientprotocol/codex-acp`（npm 包，bin = `codex-acp`）桥接。
 - **能力完整，协议层零改动**：`initialize` 报 `loadSession:true`、`promptCapabilities.image:true`、`sessionCapabilities` 含 `resume/close/fork/list/delete/additionalDirectories/subagents/systemPrompt`；`session/load`、`session/set_mode`、`session/set_config_option(model)` 全部实测通过；图片能进模型；工具调用**不发反向请求**。
-- **MCP（2026-11-12 复测修正，2.5.0 与 2.6.0 均通过）**：`mcpCapabilities: { acp:false, http:true, sse:false }` 里的 `acp` 指 **MCP-over-ACP 传输**，**不表示 stdio 不支持**。实测 `codex-acp 2.5.0` / `2.6.0` 都能接收 `session/new` 的 stdio `mcpServers`：模型实际调用了探针的 `fake_ping` 并返回 `FAKE_PONG`。因此 WeMind 的 `codex` 预设标注 `acpMcpServers: true`，并在 sandbox 托管 MCP 时用 `mcpDelivery: "acp"`。Codex 自己的 `~/.codex/config.toml` 始终由 Codex 原生加载；`direct` 下 WeMind 不重发 catalog，同名 server 由 Codex 条目优先。
-- 免审批：预设注入 `INITIAL_AGENT_MODE=agent-full-access`，并在会话建立/恢复后调 `session/set_mode {modeId:"agent-full-access"}`（适配器的 mode = 审批策略 + 文件沙箱的合成档；`agent-full-access` = 全放行）。
+- **MCP（2026-11-12 复测修正，2.5.0 与 2.6.0 均通过）**：`mcpCapabilities: { acp:false, http:true, sse:false }` 里的 `acp` 指 **MCP-over-ACP 传输**，**不表示 stdio 不支持**。实测 `codex-acp 2.5.0` / `2.6.0` 都能接收 `session/new` 的 stdio `mcpServers`：模型实际调用了探针的 `fake_ping` 并返回 `FAKE_PONG`。因此 WeMind 的 `codex` 预设标注 `acpMcpServers: true`，并在 managed 托管 MCP 时用 `mcpDelivery: "acp"`。Codex 自己的 `~/.codex/config.toml` 始终由 Codex 原生加载；`direct` 下 WeMind 不重发 catalog，同名 server 由 Codex 条目优先。
+- 免审批：预设注入 `INITIAL_AGENT_MODE=agent-full-access`，并在会话建立/恢复后调 `session/set_mode {modeId:"agent-full-access"}`（适配器的 mode = 审批策略 + 文件副本的合成档；`agent-full-access` = 全放行）。
 - **模型不预设**：适配器把 Codex 自己的 `model` 作为 `configOption` 暴露（`session/set_config_option` 可用），但 WeMind **不下发**——让微信大脑跟着用户 `~/.codex` 的日常配置走（§4.14「用 agent，不改造它」）。要固定就用 `wemind brain set codex --model "<modelId>"`。
 
 ---
@@ -105,9 +105,9 @@ codex: {
   realHome: path.join(os.homedir(), ".codex"), // 只用于配置指纹/危险路径；不传给适配器
   catalogFile: "config.toml",  // 原生 MCP 由 Codex 自己加载；WeMind 只读解析它用于列出/指标（不写回、无法 unload）
   acpMcpServers: true,         // 支持客户端经 ACP 传入 stdio MCP（2026-11-12 实测）
-  mcpDelivery: "acp",          // 仅 sandbox 托管 MCP 时经 ACP 投递
+  mcpDelivery: "acp",          // 仅 managed 托管 MCP 时经 ACP 投递
   // 不设 model：跟随用户 ~/.codex 的默认（要用就 `wemind brain set codex --model …`）
-  // 不设 homeEnvVar：适配器不读 WeMind 沙箱，凭据/配置全用 Codex 自己的
+  // 不设 homeEnvVar：适配器不读 WeMind 副本，凭据/配置全用 Codex 自己的
 }
 ```
 
@@ -120,14 +120,14 @@ codex: {
 ## 4. 已知限制
 
 1. **MCP 有两条来源，别混为一谈**（C7）：
-   - **Codex 原生 MCP**：`~/.codex/config.toml` 里定义的 server 由 Codex 自己加载；WeMind 只读解析 `[mcp_servers.*]` 用于 `列出`/指标，**不会写回、也无法 unload**。终端 Codex 能用的原生 MCP，微信侧 codex 也能用；因此即使 `sandbox` 下 brain 默认空 MCP，也管不住这部分。原生条目里出现 `wechat`（或任何会跑 `wemind-mcp` 的定义）时**只告警、不阻止启动**（`warnForbiddenNativeMcp`），由用户自行删除；同时启动第二个 poller 会有回环风险。
-   - **WeMind 动态 MCP**：`sandbox` 下 `mcpDelivery: "acp"` 时，微信侧 `加载/卸载` 通过 ACP `session/new|load|resume` 的 `mcpServers` 下发给 codex；`direct` 下 WeMind 不重发 catalog，`加载/卸载` 原样转给 Codex 自己处理。原生 config.toml 里的名字不会出现在 `加载` 的候选列表里。
+   - **Codex 原生 MCP**：`~/.codex/config.toml` 里定义的 server 由 Codex 自己加载；WeMind 只读解析 `[mcp_servers.*]` 用于 `列出`/指标，**不会写回、也无法 unload**。终端 Codex 能用的原生 MCP，微信侧 codex 也能用；因此即使 `managed` 下 brain 默认空 MCP，也管不住这部分。原生条目里出现 `wechat`（或任何会跑 `wemind-mcp` 的定义）时**只告警、不阻止启动**（`warnForbiddenNativeMcp`），由用户自行删除；同时启动第二个 poller 会有回环风险。
+   - **WeMind 动态 MCP**：`managed` 下 `mcpDelivery: "acp"` 时，微信侧 `加载/卸载` 通过 ACP `session/new|load|resume` 的 `mcpServers` 下发给 codex；`direct` 下 WeMind 不重发 catalog，`加载/卸载` 原样转给 Codex 自己处理。原生 config.toml 里的名字不会出现在 `加载` 的候选列表里。
    - **同名冲突**：Codex 原生条目优先，适配器会跳过同名的客户端条目（并记日志）；不会出现两个同名 server。
-   - **`sandbox` 下 brain 默认空** 只控制 WeMind 下发的 ACP 集合；`direct` 下 WeMind 不重发 catalog（只补 `overlay.mcp.extra`）。两种模式下 Codex 原生 `config.toml` 的 MCP 都仍会被 Codex 加载。这是 codex 没有独立配置目录带来的边界，不是 WeMind 静默忽略。
-2. **不走 WeMind 的凭据沙箱**：Codex 的登录态在 `~/.codex`，适配器直接用；WeMind 不同步、不改写（§4.14）。
+   - **`managed` 下 brain 默认空** 只控制 WeMind 下发的 ACP 集合；`direct` 下 WeMind 不重发 catalog（只补 `overlay.mcp.extra`）。两种模式下 Codex 原生 `config.toml` 的 MCP 都仍会被 Codex 加载。这是 codex 没有独立配置目录带来的边界，不是 WeMind 静默忽略。
+2. **不走 WeMind 的凭据副本**：Codex 的登录态在 `~/.codex`，适配器直接用；WeMind 不同步、不改写（§4.14）。
 3. **模型/推理档位由 Codex 决定**：WeMind 默认不下发；需要固定时 `wemind brain set codex --model "<modelId>"`（`session/set_config_option`，幂等）。
 4. **真机 E2E 已过一轮**（2026-11-01）：**worker 通道**——`wemind brain switch codex --worker` 后 `wemind task "…"` 由 codex 执行，`prompt ok 4436ms`，回话「2」正常产出（`set_mode agent-full-access` 生效，0 反向请求）；**brain 通道**——微信发「你好，自我介绍一句」，`turn start` → `session/prompt` → `prompt ok 2962ms` → `final send`（3 段），回复送达。**发图 / 冷重启 `session/load` 待复测**；切脑回切已随 pi↔codex 双向热切换验证（2026-11-01，见 `docs/接入方案/接入-pi.md`）。
-5. **没有独立配置目录**：codex 适配器不认 `KIRO_HOME`/`CLAUDE_CONFIG_DIR` 之类，WeMind 只能把 **cwd** 指到角色默认工作区（`<账号>/workspace/{brain,worker}`，`sandbox` 模式也不改 cwd）。所以微信里 codex 看到的「当前目录」是工作区，**不一定是你正在开发的项目**；要它处理某个项目请在消息里点明路径，或把工作区切到该项目（worker 侧也可用 `wemind task --cwd`）。
+5. **没有独立配置目录**：codex 适配器不认 `KIRO_HOME`/`CLAUDE_CONFIG_DIR` 之类，WeMind 只能把 **cwd** 指到角色默认工作区（`<账号>/workspace/{brain,worker}`，`managed` 模式也不改 cwd）。所以微信里 codex 看到的「当前目录」是工作区，**不一定是你正在开发的项目**；要它处理某个项目请在消息里点明路径，或把工作区切到该项目（worker 侧也可用 `wemind task --cwd`）。
 6. **版本敏感**：`codex-acp` 的 capabilities 与 mode id 随版本变化；升级后重跑 §2 的探针（本文当前基线 2.6.0）。
 
 ---
@@ -160,5 +160,7 @@ $env:ACP_BIN = "codex-acp.cmd"; $env:ACP_SHELL = "1"; node scripts/acp-probe.mjs
 - **冷重启后续聊**：杀掉 daemon 再起、追问上一轮上下文（`session/load`）**待复测**（§4 第 4 条）。
 - **`taskkill /T /F` 强杀恢复**：探针只验证了正常 `session/load`，强杀后的恢复 E2E **未做**（§2 C9；对应 [`docs/ai/已知坑.md`](../ai/已知坑.md)「仍未单独测」条）。
 - **适配器升级后重跑探针**：`codex-acp` 的 capabilities 与 mode id 随版本变化（本文实测基线 2.6.0、Codex CLI 0.167.2；2.5.0 的旧结果保留在 §2）。升级后需按 §2 重新验证 `loadSession`、`image`、`availableModes` 含 `agent-full-access` 等结论是否仍成立（状态行与 §4 第 6 条）。
+
+**2026-11-14 实测补充（`direct`）**：记忆读的是真实 `~/.codex/RTK.md` ✅；外部新增 skill 后**新会话**可见 ✅；同一会话内新增 skill **即时**可见 ✅（热加载）；微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：`~/.codex/sessions/**/rollout-*.jsonl`。来源：设计文档 §18.2.2。
 
 > **日志格式说明（2026-11-11，历史实测记录不改正文）**：本文记录的日志线索沿用当时的写法；现行运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部 stderr。ACP 帧级关键线索（`spawn` / `initialized` / `session/new` / `prompt ok`）归 **INFO**（排障必须可见），`prompt FAIL` 与自愈归 **WARN**。CLI 用户输出走 stdout 的 `print()`，无前缀无级别；`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。详见 [`AGENTS.md`](../../AGENTS.md) 与 [`repowiki/11`](../repowiki/11-开发指南.md)。

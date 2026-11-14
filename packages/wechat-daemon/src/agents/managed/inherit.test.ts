@@ -4,10 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import type { ResolvedAgent } from "../brain-agents.js";
-import { syncInherited } from "./sandbox-inherit.js";
+import { syncInherited } from "./inherit.js";
 
 /*
- * 共用沙箱根（kiro / deepseek / pi 的 configSubdir 都为空）：换 agent 后必须换成新 agent 的 skills/AGENTS.md，
+ * 共用副本根（kiro / deepseek / pi 的 configSubdir 都为空）：换 agent 后必须换成新 agent 的 skills/AGENTS.md，
  * 不能继续读上一个 agent 的。真实配置目录永远不动。
  */
 const fake = (
@@ -41,7 +41,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("syncInherited（共用沙箱根的继承）", () => {
+describe("syncInherited（共用副本根的继承）", () => {
   it("换 agent：同名 skills 链接与 AGENTS.md 换成新 agent 的", () => {
     syncInherited(root, cfg, fake("deepseek", homeA, ["skills"], ["AGENTS.md"]));
     expect(fs.readFileSync(path.join(cfg, "AGENTS.md"), "utf-8")).toBe("A");
@@ -61,10 +61,10 @@ describe("syncInherited（共用沙箱根的继承）", () => {
     expect(fs.readFileSync(path.join(homeA, "skills", "s.md"), "utf-8")).toBe("A-skills");
   });
 
-  it("同一 agent 重跑不覆盖沙箱里的单文件记忆（保留 agent 自己写的）", () => {
+  it("同一 agent 重跑不覆盖副本里的单文件记忆（保留 agent 自己写的）", () => {
     syncInherited(root, cfg, fake("deepseek", homeA, [], ["AGENTS.md"]));
-    fs.writeFileSync(path.join(cfg, "AGENTS.md"), "sandbox-edit");
+    fs.writeFileSync(path.join(cfg, "AGENTS.md"), "copy-edit");
     syncInherited(root, cfg, fake("deepseek", homeA, [], ["AGENTS.md"]));
-    expect(fs.readFileSync(path.join(cfg, "AGENTS.md"), "utf-8")).toBe("sandbox-edit");
+    expect(fs.readFileSync(path.join(cfg, "AGENTS.md"), "utf-8")).toBe("copy-edit");
   });
 });

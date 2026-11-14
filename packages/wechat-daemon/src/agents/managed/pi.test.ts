@@ -4,12 +4,12 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * pi 沙箱：配置目录就是沙箱根（PI_CODING_AGENT_DIR），MCP 是 <沙箱根>/mcp.json（kiro 格式）。
+ * pi 副本：配置目录就是副本根（PI_CODING_AGENT_DIR），MCP 是 <副本根>/mcp.json（kiro 格式）。
  * settings.json / auth.json / models*.json 由 credentialFiles 原样同步；预设再补 quietStartup——
  * pi-acp 会把 pi 的启动信息（## Context / ## Skills …）当 agent_message_chunk 发出来，进微信回复就是噪声。
- * 模块级常量在 import 时解析，故先设环境再动态导入（同 sandbox-cline.test.ts）。
+ * 模块级常量在 import 时解析，故先设环境再动态导入（同 cline.test.ts）。
  */
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-sandbox-pi-"));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-managed-pi-"));
 const realHome = path.join(root, "real-pi");
 const dataDir = path.join(root, "data");
 const brainCfg = path.join(dataDir, "brain-home");
@@ -48,7 +48,7 @@ beforeAll(() => {
   process.env.WEMIND_BRAIN = "pi";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
   process.env.WECHAT_DATA_DIR = dataDir;
-  process.env.WEMIND_HOME_MODE = "sandbox";
+  process.env.WEMIND_HOME_MODE = "managed";
   delete process.env.WEMIND_BRAIN_INHERIT;
 });
 
@@ -62,9 +62,9 @@ afterAll(() => {
 
 const readJson = (f: string): Record<string, any> => JSON.parse(fs.readFileSync(f, "utf-8"));
 
-describe("brain 沙箱（pi）", () => {
+describe("brain 副本（pi）", () => {
   it("settings/auth/models 原样同步，并补上 quietStartup（用户没显式设过时）", async () => {
-    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+    const { ensureBrainHome } = await import("./mcp-brain.js");
     ensureBrainHome();
 
     const cfg = readJson(path.join(brainCfg, "settings.json"));
@@ -78,7 +78,7 @@ describe("brain 沙箱（pi）", () => {
   });
 
   it("大脑 MCP 仍走激活集（默认空）：wechat 与未加载的目录项都不出现", async () => {
-    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+    const { ensureBrainHome } = await import("./mcp-brain.js");
     ensureBrainHome();
     expect(Object.keys(readJson(path.join(brainCfg, "mcp.json")).mcpServers)).toEqual([]);
   });
@@ -87,7 +87,7 @@ describe("brain 沙箱（pi）", () => {
     writeRealSettings({ quietStartup: false });
     const future = new Date(Date.now() + 5_000);
     fs.utimesSync(path.join(realHome, "settings.json"), future, future); // 「新者胜」才会重新同步
-    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+    const { ensureBrainHome } = await import("./mcp-brain.js");
     ensureBrainHome();
     expect(readJson(path.join(brainCfg, "settings.json")).quietStartup).toBe(false);
     expect(readJson(path.join(realHome, "settings.json")).quietStartup).toBe(false);
@@ -95,9 +95,9 @@ describe("brain 沙箱（pi）", () => {
   });
 });
 
-describe("worker 沙箱（pi）", () => {
-  it("settings/models 进沙箱、补 quietStartup，MCP 全量但排除 wechat/disabled", async () => {
-    const { ensureWorkerHome } = await import("./worker-sandbox.js");
+describe("worker 副本（pi）", () => {
+  it("settings/models 进副本、补 quietStartup，MCP 全量但排除 wechat/disabled", async () => {
+    const { ensureWorkerHome } = await import("./mcp-worker.js");
     ensureWorkerHome();
 
     const cfg = readJson(path.join(workerCfg, "settings.json"));

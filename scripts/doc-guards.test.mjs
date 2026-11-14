@@ -50,10 +50,10 @@ describe("doc-impact 解析", () => {
 
   it("中文路径即使被 git 加引号也能还原，规则才能对上", () => {
     const quoted =
-      '"docs/repowiki/06-ACP-\\345\\244\\247\\350\\204\\221\\344\\270\\216\\346\\262\\231\\347\\256\\261.md"';
-    expect(unquoteGitPath(quoted)).toBe("docs/repowiki/06-ACP-大脑与沙箱.md");
+      '"docs/repowiki/06-ACP-\\345\\244\\247\\350\\204\\221\\344\\270\\216\\345\\211\\257\\346\\234\\254.md"';
+    expect(unquoteGitPath(quoted)).toBe("docs/repowiki/06-ACP-大脑与副本.md");
     expect(parseNameStatus(`M\t${quoted}`)).toEqual([
-      { status: "M", path: "docs/repowiki/06-ACP-大脑与沙箱.md" },
+      { status: "M", path: "docs/repowiki/06-ACP-大脑与副本.md" },
     ]);
   });
 

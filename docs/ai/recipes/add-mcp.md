@@ -1,6 +1,6 @@
 # 配方：新增 / 调试 MCP 挂载
 
-> **最后核对**：2026-11-12
+> **最后核对**：2026-11-14
 >
 > 目标：让 brain 能在微信里通过「加载/卸载 MCP」动态获得工具，同时不破坏隔离、不引入 `wechat` 回环。
 
@@ -9,7 +9,7 @@
 ## 0. 先理解三条链路
 
 ```text
-catalog（定义从哪来；一律读 Agent 的**真实**配置目录，不读 sandbox 副本）
+catalog（定义从哪来；一律读 Agent 的**真实**配置目录，不读 managed 副本）
   └─ 按 agent 各自约定读取（不要跨 agent 借文件）：
        kiro     ~/.kiro/settings/mcp.json                 { "mcpServers": { ... } }
        opencode ~/.config/opencode/opencode.json          { "mcp": { "servers": { ... } } }
@@ -24,31 +24,31 @@ catalog（定义从哪来；一律读 Agent 的**真实**配置目录，不读 s
   └─ 可用 WEMIND_MCP_CATALOG / WECHAT_MCP_CATALOG 覆盖
 
 激活集（哪些允许给 brain）
-  └─ <数据目录>/brain-mcps.json  { "version": 2, "active": { "<agent>": ["name", ...] } }（仅 sandbox）
+  └─ <数据目录>/brain-mcps.json  { "version": 2, "active": { "<agent>": ["name", ...] } }（仅 managed）
   └─ 微信指令「加载 <名>」/「卸载 <名>」修改；按 agent 分键，wechat 永久禁止
 
 transport（怎么让 agent 看到）
-  └─ brain：`sandbox` 下文件式 Agent 由 applySandbox() 写沙箱配置；mcpDelivery=acp 的 Agent（DSH / claude-code / copilot / codex）走 session/new|resume，传激活集
+  └─ brain：`managed` 下文件式 Agent 由 applyBrainCopy() 写副本配置；mcpDelivery=acp 的 Agent（DSH / claude-code / copilot / codex）走 session/new|resume，传激活集
   └─ `direct`：所有 MCP 都由 Agent 自己读真实配置；WeMind 不重发 catalog，只补 overlay.mcp.extra；`加载/卸载` 原样转给 Agent
-  └─ worker：`sandbox` 下 applyWorkerSandbox() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）；`direct` 由 Agent 自己加载
+  └─ worker：`managed` 下 applyWorkerCopy() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）；`direct` 由 Agent 自己加载
 
 微信独享增删（不改真实配置）
   └─ <账号>/agent-overrides/<agent>.json 的 mcp.extra / mcp.disable
-  └─ `sandbox` 全量生效；`direct` 只有 acpMcpServers 的 Agent 能收到 extra（其余仍由 Agent 自己的配置决定）
-  └─ `sandbox` 的 curated 集里 mcp.disable 最后生效；wechat 永远进不了 curated 集
+  └─ `managed` 全量生效；`direct` 只有 acpMcpServers 的 Agent 能收到 extra（其余仍由 Agent 自己的配置决定）
+  └─ `managed` 的 curated 集里 mcp.disable 最后生效；wechat 永远进不了 curated 集
 ```
 
-> 注意「catalog 读真实、transport 写沙箱」：`sandbox` 下 `加载 <名>` 只把定义**写进 WeMind 生成的沙箱配置**（brain 默认空、worker 全量），真实配置文件一律不动；`direct` 下不生成任何副本，`加载/卸载` 原样转给 Agent。
+> 注意「catalog 读真实、transport 写副本」：`managed` 下 `加载 <名>` 只把定义**写进 WeMind 生成的副本配置**（brain 默认空、worker 全量），真实配置文件一律不动；`direct` 下不生成任何副本，`加载/卸载` 原样转给 Agent。
 
 关键代码：
 
 | 文件                                                          | 作用                                                                          |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `packages/wechat-daemon/src/agents/config/overlay.ts`         | 微信独享 `mcp.extra` / `mcp.disable`                                          |
-| `packages/wechat-daemon/src/agents/sandbox/mcp-sandbox.ts`    | brain 沙箱、catalog、激活集、`加载/卸载`                                      |
-| `packages/wechat-daemon/src/agents/sandbox/worker-sandbox.ts` | worker 全量继承、排除集                                                       |
-| `packages/wechat-daemon/src/agents/sandbox/mcp-adapters.ts`   | 按文件格式的 MCP 适配器：路径、读写、剥离、ACP 转换、原生只读（Codex TOML）   |
-| `packages/wechat-daemon/src/agents/sandbox/agent-mcp.ts`      | MCP 格式纯函数（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）与 wechat 判定 |
+| `packages/wechat-daemon/src/agents/managed/mcp-brain.ts`    | brain 副本、catalog、激活集、`加载/卸载`                                      |
+| `packages/wechat-daemon/src/agents/managed/mcp-worker.ts` | worker 全量继承、排除集                                                       |
+| `packages/wechat-daemon/src/agents/managed/mcp-adapters.ts`   | 按文件格式的 MCP 适配器：路径、读写、剥离、ACP 转换、原生只读（Codex TOML）   |
+| `packages/wechat-daemon/src/agents/managed/agent-mcp.ts`      | MCP 格式纯函数（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）与 wechat 判定 |
 | `packages/wechat-daemon/src/cli/subcommands/cli-config.ts`    | `wemind mcp list/enable/disable/add/remove` 的 CLI 入口（`config mcp` 只是兼容别名） |
 | `packages/wechat-daemon/src/index.ts`                         | 指令拦截；加载/卸载后 `restart()`                                             |
 | `packages/wechat-daemon/src/acp/acp-brain.ts`                 | 重启 ACP，重建后恢复 session                                                  |
@@ -91,7 +91,7 @@ transport（怎么让 agent 看到）
 
 ### DSH
 
-> **状态：已实现并实测（2026-10-29 复核，2026-11-13 校正）。** DSH 自己读 profile YAML 里的 `@deepseek-ai/dsh-mcp-client` 条目；WeMind 只读解析用于列出/指标/微信检测。`sandbox` 下副本里的 MCP 条目全部剥离，再按 brain 激活集 / worker 全量集经 `session/new|resume` 下发（`acpMcpServers: true` + `mcpDelivery: "acp"`）。`addMcp` 会预校验定义（无 command/url 拒绝加载；结构不认识/残缺的条目跳过并记日志，不拖挂整个会话）。**stdio 已真机实测可用；HTTP 由 agent 声明可用（`mcpCapabilities.http:true`）但未单独真机实测；SSE 不被 ACP 支持**（`toAcpMcpServers` 只输出 stdio / `type:"http"`）。claude-code / copilot / codex 同样走 ACP 投递；Codex 原生 `~/.codex/config.toml` 仍由 Codex 自己加载且同名优先，`direct` 不重发。
+> **状态：已实现并实测（2026-10-29 复核，2026-11-13 校正）。** DSH 自己读 profile YAML 里的 `@deepseek-ai/dsh-mcp-client` 条目；WeMind 只读解析用于列出/指标/微信检测。`managed` 下副本里的 MCP 条目全部剥离，再按 brain 激活集 / worker 全量集经 `session/new|resume` 下发（`acpMcpServers: true` + `mcpDelivery: "acp"`）。`addMcp` 会预校验定义（无 command/url 拒绝加载；结构不认识/残缺的条目跳过并记日志，不拖挂整个会话）。**stdio 已真机实测可用；HTTP 由 agent 声明可用（`mcpCapabilities.http:true`）但未单独真机实测；SSE 不被 ACP 支持**（`toAcpMcpServers` 只输出 stdio / `type:"http"`）。claude-code / copilot / codex 同样走 ACP 投递；Codex 原生 `~/.codex/config.toml` 仍由 Codex 自己加载且同名优先，`direct` 不重发。
 
 DSH 的 MCP 写在 profile 用户层；`WEMIND_MCP_CATALOG` 仍可覆盖「微信侧可选目录」的来源（JSON 格式会按 JSON 解析）：
 
@@ -132,7 +132,7 @@ MCP                 # 列出可选与已激活
 
 看 `~/.wemind/<账号>/daemon.log`：
 
-- 仅当回复里 `changed=true`（激活集真变了）时，`applySandbox` 后才出现 ACP 重启：`acp exited` → `spawn ...` → `initialized` → `session/load|resume`；重复加载已激活项或卸载未激活项都不重启；
+- 仅当回复里 `changed=true`（激活集真变了）时，`applyBrainCopy` 后才出现 ACP 重启：`acp exited` → `spawn ...` → `initialized` → `session/load|resume`；重复加载已激活项或卸载未激活项都不重启；
 - 如果 MCP 启动失败，kiro/opencode 通常在下一次 ACP 启动时报错；DSH 的 `session/new` 会回滚整个会话。
 
 ---
@@ -162,7 +162,7 @@ MCP                 # 列出可选与已激活
 
 ## 5. DSH 的 ACP MCP 投递（已实现，2026-11-13 校正）
 
-- `acpMcpServers` 是纯能力；`mcpDelivery: "acp"` 表示 `sandbox` 下由 WeMind 把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入（`deepseek`、`claude-code`、`copilot`、`codex`）；
+- `acpMcpServers` 是纯能力；`mcpDelivery: "acp"` 表示 `managed` 下由 WeMind 把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入（`deepseek`、`claude-code`、`copilot`、`codex`）；
 - `direct` 不重发真实 catalog：Agent 自己加载的 MCP 不会被 WeMind 再传一遍；
 - `toAcpMcpServers()`：两种 JSON 键路径 → `{ name, command, args, env }` / `{ name, type:"http", url, headers }`；
 - 官方不支持 SSE；HTTP 已声明（未单独真机实测）；stdio 已真机实测；
@@ -173,6 +173,6 @@ MCP                 # 列出可选与已激活
 
 ## 6. 参考
 
-- [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md) §6.3
+- [`docs/repowiki/06-ACP-大脑与副本.md`](../../repowiki/06-ACP-大脑与副本.md) §6.3
 - [`docs/接入方案/接入-OpenCode.md`](../../接入方案/接入-OpenCode.md) §3.4 Step 3
 - [`docs/接入方案/接入-DeepSeek.md`](../../接入方案/接入-DeepSeek.md) §5.3 M3

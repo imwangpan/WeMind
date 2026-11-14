@@ -24,6 +24,7 @@ import {
   cmdTaskStatus,
   cmdTaskStop,
   parseTaskId,
+  parseTaskReplyArgs,
 } from "./subcommands/cli-task.js";
 import {
   cmdAdopt,
@@ -41,7 +42,7 @@ import { renderHelp } from "../ipc/chat-commands.js";
 export { pickKey } from "./cli-context.js";
 export { agentLabel } from "./subcommands/cli-brain.js";
 export { createLoginStagingDir } from "./subcommands/cli-login.js";
-export { resolveTaskCwd, taskAckOutcome } from "./subcommands/cli-task.js";
+export { parseTaskReplyArgs, resolveTaskCwd, taskAckOutcome } from "./subcommands/cli-task.js";
 // 测试与旧调用方按 `manage.ts` 取这些进程辅助函数；实现已移到 process-lifecycle.ts。
 export { brainRecord, descendantPids, stopSummary, deleteGuard } from "./process-lifecycle.js";
 
@@ -148,13 +149,9 @@ export async function runManage(argv: string[]): Promise<void> {
       print(await cmdTask(rest[0], cwd, rest[1], agentKey));
       break;
     case "task-reply": {
-      // 兼容两种写法：`task-reply "#3 内容"` 与 `task-reply 3 "内容"`
-      const first = rest[0] ?? "";
-      const m = first.match(/^[#＃](\d+)\s*([\s\S]*)$/);
-      if (m) print(await cmdTaskReply(m[2], rest[1], parseTaskId(m[1])));
-      else if (rest.length >= 2 && /^\d+$/.test(first))
-        print(await cmdTaskReply(rest[1], rest[2], parseTaskId(first)));
-      else print(await cmdTaskReply(first, rest[1]));
+      // 编号与正文可同参数也可分开：`"#3 内容"` / `"#3" "内容"` / `3 "内容"` / `"内容"`。
+      const { text, sel, id } = parseTaskReplyArgs(rest);
+      print(await cmdTaskReply(text, sel, id));
       break;
     }
     case "task-list":
@@ -253,7 +250,9 @@ export function helpText(): string {
                                  改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--extra-args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用；--extra-args 追加在预设参数后，不会漏掉 ACP 子命令）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
   config show|home-mode|reload [--key <key|label>]
-                                 查看/设置 homeMode（direct/sandbox）与运行时路径
+                                 查看/设置 homeMode（direct/managed）与运行时路径
+  config reply-style [concise|off] [--key <key|label>]
+                                 微信侧回复风格（写 <账号>/wechat-settings.json；只影响措辞，不改 Agent 配置）
   config agent show|get|set|unset|edit <agent> [<file#键路径>] [值] [--file <相对路径>]
                                  默认改**真实 Agent 配置**（JSON/JSONC；写前备份）
   config wechat show|edit <agent>

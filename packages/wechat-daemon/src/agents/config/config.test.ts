@@ -20,7 +20,7 @@ import {
   validateWorkspacePath,
 } from "./workspace.js";
 import { mutateConfigFile, setConfigPath, snapshotConfigFile } from "./agent-config-writer.js";
-import { addMcp, catalogNames, loadActive } from "../sandbox/mcp-sandbox.js";
+import { addMcp, catalogNames, loadActive } from "../managed/mcp-brain.js";
 import { configFingerprint } from "./config-fingerprint.js";
 import { homeModePath, normalizeHomeMode, readHomeMode, writeHomeMode } from "./home-mode.js";
 
@@ -57,7 +57,6 @@ function fakeAgent(realHome: string): ResolvedAgent {
     envDefaults: {},
     credentialFiles: [],
     identityFiles: [],
-    settingsStrip: [],
     settingsDefaults: {},
     acpMcpServers: false,
     mcpDelivery: "config",
@@ -205,7 +204,7 @@ describe("session cwd 与配置写入", () => {
   });
 });
 
-describe("MCP 激活集（sandbox）", () => {
+describe("MCP 激活集（managed）", () => {
   it("按账号目录隔离，不共用全局 brain-mcps.json", () => {
     const accountA = tmp();
     const accountB = tmp();
@@ -218,7 +217,7 @@ describe("MCP 激活集（sandbox）", () => {
     const ag = fakeAgent(realHome);
 
     expect(catalogNames(ag, accountA)).toContain("demo");
-    process.env.WEMIND_HOME_MODE = "sandbox";
+    process.env.WEMIND_HOME_MODE = "managed";
     try {
       expect(addMcp("demo", ag, accountA).ok).toBe(true);
     } finally {
@@ -254,7 +253,7 @@ describe("configFingerprint", () => {
   });
 });
 
-describe("homeMode：direct / sandbox", () => {
+describe("homeMode：direct / managed", () => {
   function withoutEnv<T>(fn: () => T): T {
     const saved = process.env.WEMIND_HOME_MODE;
     delete process.env.WEMIND_HOME_MODE;
@@ -274,17 +273,33 @@ describe("homeMode：direct / sandbox", () => {
         fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: unknown }));
         expect(readHomeMode(dir)).toBe("direct");
       }
-      fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: "sandbox" }));
-      expect(readHomeMode(dir)).toBe("sandbox");
+      fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: "managed" }));
+      expect(readHomeMode(dir)).toBe("managed");
     });
     expect(normalizeHomeMode("legacy-a")).toBeNull();
     expect(normalizeHomeMode("legacy-b")).toBeNull();
     expect(normalizeHomeMode("legacy-c")).toBeNull();
     expect(normalizeHomeMode("direct")).toBe("direct");
-    expect(normalizeHomeMode("sandbox")).toBe("sandbox");
+    expect(normalizeHomeMode("managed")).toBe("managed");
     expect(normalizeHomeMode("nope")).toBeNull();
-    withoutEnv(() => writeHomeMode("sandbox", dir));
-    expect(JSON.parse(fs.readFileSync(homeModePath(dir), "utf-8")).homeMode).toBe("sandbox");
+    withoutEnv(() => writeHomeMode("managed", dir));
+    expect(JSON.parse(fs.readFileSync(homeModePath(dir), "utf-8")).homeMode).toBe("managed");
+  });
+
+  it("旧值 sandbox 按 managed 处理（2026-11-14 改名，老账号不被静默降级成 direct）", () => {
+    const dir = tmp();
+    withoutEnv(() => {
+      fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: "sandbox" }));
+      expect(readHomeMode(dir)).toBe("managed");
+    });
+    expect(normalizeHomeMode("sandbox")).toBe("managed");
+    expect(normalizeHomeMode(" SANDBOX ")).toBe("managed");
+    process.env.WEMIND_HOME_MODE = "sandbox";
+    try {
+      expect(readHomeMode(dir)).toBe("managed");
+    } finally {
+      delete process.env.WEMIND_HOME_MODE;
+    }
   });
 
   it("direct 直接使用真实配置目录，不生成任何副本", () => {
@@ -324,10 +339,10 @@ describe("homeMode：direct / sandbox", () => {
     expect(loadActive("kiro", dir)).toEqual([]);
   });
 
-  it("direct 的入站媒体在账号目录；sandbox 在沙箱目录", () => {
+  it("direct 的入站媒体在账号目录；managed 在副本目录", () => {
     const dir = tmp();
     expect(mediaDirFor("brain", "direct", dir)).toBe(path.join(dir, "media", "inbound"));
-    expect(mediaDirFor("worker", "sandbox", dir)).toBe(
+    expect(mediaDirFor("worker", "managed", dir)).toBe(
       path.join(dir, "worker-home", "media", "inbound"),
     );
   });

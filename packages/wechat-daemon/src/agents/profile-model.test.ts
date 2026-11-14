@@ -264,7 +264,7 @@ describe("acpModelHint（- id: acp 的模型已被桌面端模型目录淘汰）
   });
 });
 
-describe("stripWechatMcpEntries（复制进沙箱前剔除微信 MCP，防回环）", () => {
+describe("stripWechatMcpEntries（复制进副本前剔除微信 MCP，防回环）", () => {
   it("没有微信 MCP → 原文返回（逐字节复制不受影响）", () => {
     const text = ["# header", "- id: a", "  config:", "    model: x", ""].join("\n");
     expect(stripWechatMcpEntries(text)).toEqual({ text, removed: [] });

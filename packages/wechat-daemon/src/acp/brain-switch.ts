@@ -3,7 +3,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { getAgent, setAgent } from "../agents/agent-slot.js";
 import { resolvePresetByName, type ResolvedAgent } from "../agents/brain-agents.js";
 import { loadBrainConfig, updateBrainConfig } from "../agents/brain-config.js";
-import { ensureBrainHome } from "../agents/sandbox/mcp-sandbox.js";
+import { ensureBrainHome } from "../agents/managed/mcp-brain.js";
 import { writeBrainState } from "../agents/brain-state.js";
 import { beginSwitch, drainTurn, endSwitch, restart, warmup } from "./acp-brain.js";
 
@@ -187,7 +187,7 @@ async function runSwitch(
 
     const t0 = Date.now();
     try {
-      ensureBrainHome(target); // 先备沙箱（只往新 agent 的配置目录里加东西，失败退回无需撤销）
+      ensureBrainHome(target); // 先备副本（只往新 agent 的配置目录里加东西，失败退回无需撤销）
       restart(); // 杀掉旧进程；旧会话在磁盘上，切回来时 session/load 恢复
       await withTimeout(warmup(target, opts.userId ?? ""), TIMEOUT_MS, warmupTimeoutMsg());
       // 先落盘再更新槽位：写盘失败时槽位仍是旧大脑，答复「已退回原来那个」才是真的。

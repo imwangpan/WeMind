@@ -110,7 +110,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     id: "mcp.add",
     section: "mcp",
     zh: "加载 <名字>",
-    brief: "加载一个 MCP（sandbox：下条消息生效；direct：原样转给 Agent 处理）",
+    brief: "加载一个 MCP（managed：下条消息生效；direct：原样转给 Agent 处理）",
     match: (t) => {
       const m = t.match(/^(?:加载|load)\s+(\S+)$/i);
       return m ? { kind: "add", name: m[1] } : null;
@@ -120,7 +120,7 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     id: "mcp.remove",
     section: "mcp",
     zh: "卸载 <名字>",
-    brief: "卸载一个 MCP（sandbox：下条消息生效；direct：原样转给 Agent 处理）",
+    brief: "卸载一个 MCP（managed：下条消息生效；direct：原样转给 Agent 处理）",
     match: (t) => {
       const m = t.match(/^(?:卸载|unload)\s+(\S+)$/i);
       return m ? { kind: "remove", name: m[1] } : null;

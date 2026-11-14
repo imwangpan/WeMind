@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseTomlMcpServers } from "./toml-mcp.js";
-import { nativeMcpServers, warnForbiddenNativeMcp } from "./mcp-sandbox.js";
+import { nativeMcpServers, warnForbiddenNativeMcp } from "./mcp-brain.js";
 
 const tmpDirs: string[] = [];
 function codexHomeWith(toml: string) {

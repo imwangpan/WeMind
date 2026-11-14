@@ -15,7 +15,7 @@ const log = createLogger("wechat-daemon/config");
  * 一次 Agent 启动所需的全部路径。
  *
  * - `direct`：`home` / `configDir` 都是 Agent 的真实配置目录；WeMind 不注入 homeEnvVar，也不写任何文件。
- * - `sandbox`：`home` 是账号沙箱根，`configDir` 是它下面的 Agent 配置子目录。
+ * - `managed`：`home` 是账号副本根，`configDir` 是它下面的 Agent 配置子目录。
  *
  * `cwd` 是 ACP session 的工作目录，`mediaDir` 是入站媒体落点；三者刻意分开。
  */
@@ -29,7 +29,7 @@ export type AgentRuntime = {
   overlay: AgentOverlay;
 };
 
-export function sandboxRoot(role: AgentRole, dir: string = DATA_DIR): string {
+export function managedRoot(role: AgentRole, dir: string = DATA_DIR): string {
   const env =
     role === "brain"
       ? process.env.WECHAT_BRAIN_HOME?.trim()
@@ -39,7 +39,7 @@ export function sandboxRoot(role: AgentRole, dir: string = DATA_DIR): string {
 
 /** 媒体目录是纯路径计算，不在每次收到附件时做任何 IO。 */
 export function mediaDirFor(role: AgentRole, mode: HomeMode, dir: string = DATA_DIR): string {
-  if (mode === "sandbox") return path.join(sandboxRoot(role, dir), "media", "inbound");
+  if (mode === "managed") return path.join(managedRoot(role, dir), "media", "inbound");
   return path.join(dir, "media", "inbound");
 }
 
@@ -76,8 +76,8 @@ export function agentRuntime(
     warnedOverlay.add(ag.name);
     log.warn(`微信侧 overlay 无效（${ag.name}）：${read.problems.join("；")}（坏键已忽略）`);
   }
-  if (mode === "sandbox") {
-    const home = sandboxRoot(role, dir);
+  if (mode === "managed") {
+    const home = managedRoot(role, dir);
     return {
       role,
       mode,

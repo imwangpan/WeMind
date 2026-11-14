@@ -20,9 +20,9 @@ export function isRealHomeTarget(ag: ResolvedAgent, dir: string): boolean {
   return !!ag.realHome && path.resolve(dir) === path.resolve(ag.realHome);
 }
 
-/** 只有 sandbox 才由 WeMind 写 Agent 配置；direct 一律不写。 */
+/** 只有 managed 才由 WeMind 写 Agent 配置；direct 一律不写。 */
 export function canWriteAgentConfig(_ag: ResolvedAgent, rt: AgentRuntime): boolean {
-  return rt.mode === "sandbox";
+  return rt.mode === "managed";
 }
 
 /** direct 模式不写 Agent 配置：只告警一次，绝不写真实配置。 */
@@ -32,7 +32,7 @@ export function warnUnwritableRealHome(ag: ResolvedAgent, what: string): void {
   warnedRealHome.add(key);
   log.warn(
     `agent「${ag.name}」当前按 direct 运行，不会改写真实配置（跳过${what}）；` +
-      `MCP/设置以 Agent 自己的配置为准。需要 WeMind 托管请设 homeMode=sandbox。`,
+      `MCP/设置以 Agent 自己的配置为准。需要 WeMind 托管请设 homeMode=managed。`,
   );
 }
 
@@ -46,10 +46,10 @@ export function readJsonConfig(file: string): Record<string, unknown> | null {
 }
 
 /**
- * 把 agent 的凭据文件同步进沙箱（如 DSH 的 `.credentials.yaml`、Qoder 的 `.auth/user`）。
- * - `newer`：首次复制；真实 home 的 token 刷新后覆盖沙箱；沙箱自己刷新过则保留沙箱版本。
+ * 把 agent 的凭据文件同步进副本（如 DSH 的 `.credentials.yaml`、Qoder 的 `.auth/user`）。
+ * - `newer`：首次复制；真实 home 的 token 刷新后覆盖副本；副本自己刷新过则保留副本版本。
  * - `always`：内容不同即覆盖（标识类文件，如 Qoder 的 `.auth/machine_id`——agent 在缺凭据时会自造一个，它比真实文件新，「新者胜」会把错的留下，导致永远认证失败）。
- * 这是敏感文件，仅放在账号沙箱内；Windows 无 POSIX 600，建议专用账号 + 目录 ACL。
+ * 这是敏感文件，仅放在账号副本内；Windows 无 POSIX 600，建议专用账号 + 目录 ACL。
  */
 function syncCredentialFile(
   ag: ResolvedAgent,
@@ -82,7 +82,7 @@ export function syncCredentials(ag: ResolvedAgent, configDir: string): void {
   for (const file of ag.identityFiles) syncCredentialFile(ag, configDir, file, "always");
 }
 
-/** 把预设的默认设置项补进沙箱 settings.json：只补缺失键（用户显式设过就保留用户的值）。 */
+/** 把预设的默认设置项补进副本 settings.json：只补缺失键（用户显式设过就保留用户的值）。 */
 export function applySettingsDefaults(ag: ResolvedAgent, configDir: string): void {
   if (Object.keys(ag.settingsDefaults).length === 0) return;
   if (isRealHomeTarget(ag, configDir)) {
@@ -107,19 +107,17 @@ export function applySettingsDefaults(ag: ResolvedAgent, configDir: string): voi
   }
 }
 
-/** 「设置与 MCP 同文件」的 agent：以真实 settings.json 为基底生成沙箱副本。
- *  剥离必须由沙箱权威决定的键（`ag.settingsStrip`，默认 DEFAULT_SETTINGS_STRIP）：
- *  - `mcpServers`：MCP 只能来自沙箱的 curated 激活集（防 wechat 回环）；
- *  - `enabledPlugins`：插件可自带 MCP，且沙箱不继承 `plugins/`；
- *  - `providers` / `model`：自定义供应商（BYOK）含明文密钥，`model` 又可能指向已剥离的供应商。
- *  gemini 只剥 `mcpServers`——它的 model/security 是用户自己的选择，必须原样保留。
- *  并强制 `general.enableAutoUpdate=false`：否则每个沙箱都会各下一份约 210 MB 的 CLI。 */
+/** 「设置与 MCP 同文件」的 agent：把真实 settings.json **整份**复制进副本，只拿掉 MCP 段。
+ *  唯一必须由副本权威决定的键就是 MCP：MCP 只能来自 curated 激活集（防 wechat 回环），键名按格式不同（`mcpServers` / `mcp`），
+ *  由 `mcpAdapterFor().stripSettings()` 处理。其余键（`model` / `providers` / `security` / 插件…）**一律原样保留**：
+ *  剥它们等于替用户改配置，上游一改键名就静默剥错，表现成「终端能用、微信不能用」；凭据本来也会随 `credentialFiles` 进副本
+ *  （如 Cline 的 `data/settings/providers.json`），单独剥 `providers` 反而口径不一致。
+ *  并强制 `general.enableAutoUpdate=false`：否则每个副本都会各下一份约 210 MB 的 CLI。 */
 export function settingsBaseFor(ag: ResolvedAgent): Record<string, unknown> {
   const base =
     ag.settingsBase && ag.realHome
       ? (readJsonConfig(path.join(ag.realHome, ag.settingsBase)) ?? {})
       : {};
-  for (const key of ag.settingsStrip) delete base[key];
   mcpAdapterFor(ag).stripSettings(base); // 不同格式的 MCP 段键名不同（mcpServers / mcp）
   const general = base.general;
   base.general = {
@@ -144,13 +142,13 @@ export function writeSettingsBase(ag: ResolvedAgent, configDir: string): boolean
 }
 
 /**
- * 把沙箱副本里由真实 home 复制来的 MCP 文件再清一遍：
+ * 把副本副本里由真实 home 复制来的 MCP 文件再清一遍：
  *  - DSH：`profiles/<realProfile>/cordis.patch.yml`（mcpDelivery=acp，MCP 条目在复制时已剥离）；
  *  - Copilot 这类「catalog 文件在配置目录」的 agent：JSON 里的微信条目逐条剔除。
- *  只改沙箱副本，不碰真实文件。
+ *  只改副本副本，不碰真实文件。
  */
 export function stripWechatFromConfigCopy(ag: ResolvedAgent, rt: AgentRuntime): void {
-  if (rt.mode !== "sandbox") return;
+  if (rt.mode !== "managed") return;
   const base = rt.configDir;
   if (ag.realProfile) {
     for (const name of ["cordis.patch.yml", "cordis.yml"]) {
@@ -161,11 +159,11 @@ export function stripWechatFromConfigCopy(ag: ResolvedAgent, rt: AgentRuntime): 
         if (!removed.length) continue;
         writeFileAtomic(file, text);
         log.warn(
-          `沙箱副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
+          `副本副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
         );
       } catch (e) {
         log.error(
-          `沙箱副本清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
+          `副本副本清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
         );
       }
     }
@@ -184,11 +182,11 @@ export function stripWechatFromConfigCopy(ag: ResolvedAgent, rt: AgentRuntime): 
     adapter.writeCatalog(file, kept);
     const removed = Object.keys(servers).filter((n) => !(n in kept));
     log.warn(
-      `沙箱副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
+      `副本副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
     );
   } catch (e) {
     log.error(
-      `沙箱副本 MCP 清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
+      `副本副本 MCP 清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
     );
   }
 }
@@ -206,12 +204,12 @@ function isRegularFile(file: string): boolean {
 /**
  * 继承真实 profile 的用户层（DSH：`profiles/<名>/cordis.patch.yml`，桌面端写 provider 目录与默认模型）：
  * provider/模型等非 MCP 条目**原样复制**，WeMind 不合成（`- id: acp` 由用户自己维护，缺失时 CLI 提示怎么补）。
- * MCP 条目按投递方式处理：`mcpDelivery: "acp"` 时**全部剥离**（沙箱里的集合由 WeMind 经 ACP 注入，避免重复）；
+ * MCP 条目按投递方式处理：`mcpDelivery: "acp"` 时**全部剥离**（副本里的集合由 WeMind 经 ACP 注入，避免重复）；
  * 否则只剔除用户自己挂的微信 MCP 条目（防回环）。
  */
 export function syncProfilePatch(ag: ResolvedAgent, targetHome: string, label: string): void {
   if (!ag.realProfile || !ag.realHome || !ag.inherit) return;
-  if (path.resolve(targetHome) === path.resolve(ag.realHome)) return; // 沙箱就是真实目录时不自我覆盖
+  if (path.resolve(targetHome) === path.resolve(ag.realHome)) return; // 副本就是真实目录时不自我覆盖
   const src = path.join(ag.realHome, "profiles", ag.realProfile, "cordis.patch.yml");
   try {
     if (!fs.existsSync(src)) return;
@@ -221,8 +219,8 @@ export function syncProfilePatch(ag: ResolvedAgent, targetHome: string, label: s
     if (removed.length) {
       log.warn(
         ag.mcpDelivery === "acp"
-          ? `${label}沙箱副本里的 MCP 条目已剥离（由 WeMind 按${label === "大脑" ? "激活集" : "全量集"}经 ACP 注入，真实文件未改）：${removed.join(", ")}`
-          : `真实 profile 里的微信 MCP 已从${label}沙箱副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
+          ? `${label}副本副本里的 MCP 条目已剥离（由 WeMind 按${label === "大脑" ? "激活集" : "全量集"}经 ACP 注入，真实文件未改）：${removed.join(", ")}`
+          : `真实 profile 里的微信 MCP 已从${label}副本副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
       );
     }
   } catch {

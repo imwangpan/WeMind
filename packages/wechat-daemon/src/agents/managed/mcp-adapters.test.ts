@@ -162,8 +162,8 @@ describe("adapter 选择与路径", () => {
     const ag = agent();
     process.env.WEMIND_MCP_CATALOG = path.join("D:", "catalog", "mcp.json");
     expect(mcpCatalogPath(ag)).toBe(process.env.WEMIND_MCP_CATALOG);
-    expect(mcpConfigPath(ag, path.join("sandbox", "demo"))).toBe(
-      path.join("sandbox", "demo", "settings", "mcp.json"),
+    expect(mcpConfigPath(ag, path.join("managed", "demo"))).toBe(
+      path.join("managed", "demo", "settings", "mcp.json"),
     );
   });
 });

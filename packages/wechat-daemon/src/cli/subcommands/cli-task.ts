@@ -100,8 +100,35 @@ export function parseTaskId(raw: string): number {
   return n;
 }
 
+/**
+ * `task-reply` 的位置参数解析：编号与正文**可以分开写，也可以挤在一个参数里**。
+ *   ① `task-reply "#3 内容"`   → 编号 3 + 正文「内容」
+ *   ② `task-reply "#3" "内容"` → 同上（2026-11-14 放宽：以前这种拆法会把「内容」当成账号名，再报「正文为空」）
+ *   ③ `task-reply 3 "内容"`    → 同上
+ *   ④ `task-reply "内容"`      → 不给编号（回唯一那条任务）
+ * 只给编号、没给正文时直接报错并写出正确写法：旧行为会把 `#3` 本身当正文发给唯一那条任务（静默错发）。
+ */
+export function parseTaskReplyArgs(rest: string[]): { text: string; sel?: string; id?: number } {
+  const [first = "", second, third] = rest;
+  const m = first.match(/^[#＃](\d+)\s*([\s\S]*)$/);
+  if (!m) {
+    if (second !== undefined && /^\d+$/.test(first))
+      return { text: second, sel: third, id: parseTaskId(first) };
+    return { text: first, sel: second };
+  }
+  const id = parseTaskId(m[1]);
+  if (m[2].trim()) return { text: m[2], sel: second, id };
+  if (second !== undefined) return { text: second, sel: third, id };
+  throw new Error(
+    `task-reply：只给了编号 ${first}、没给正文。写成 \`task-reply ${first} "正文"\` 或 \`task-reply "${first} 正文"\`。`,
+  );
+}
+
 export async function cmdTaskReply(text: string, sel?: string, id?: number): Promise<string> {
-  if (!text) throw new Error('用法: task-reply ["#编号"] "<内容>" [<key|label>]');
+  if (!text)
+    throw new Error(
+      'task-reply 需要非空正文。可用：task-reply <编号> "正文" ｜ task-reply "#编号 正文" ｜ task-reply "#编号" "正文" ｜ task-reply "正文"（回唯一那条任务）',
+    );
   const key = pickKey(sel);
   requireDaemonAlive(key);
   const ackId = writeTaskCmd(key, { kind: "reply", text, ...(id ? { id } : {}) });

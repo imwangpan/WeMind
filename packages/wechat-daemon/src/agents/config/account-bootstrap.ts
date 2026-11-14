@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
-import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
+import { ensureWechatSettings } from "./wechat-settings.js";
 
 /**
  * 新账号的 parity 目录骨架。
@@ -15,6 +15,5 @@ export function ensureParityAccountDirs(dir: string = DATA_DIR): void {
   for (const rel of ["agent-overrides", "media/inbound", "workspace/brain", "workspace/worker"]) {
     fs.mkdirSync(path.join(dir, rel), { recursive: true, mode: 0o700 });
   }
-  const wechatSettings = path.join(dir, "wechat-settings.json");
-  if (!fs.existsSync(wechatSettings)) writeJsonAtomic(wechatSettings, { version: 1 });
+  ensureWechatSettings(dir);
 }

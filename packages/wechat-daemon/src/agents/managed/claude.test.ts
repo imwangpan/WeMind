@@ -6,12 +6,12 @@ import path from "node:path";
 import type { ResolvedAgent } from "../brain-agents.js";
 
 /**
- * Claude Code 沙箱：配置目录在 <沙箱>/claude（预设用 CLAUDE_CONFIG_DIR 指到目录本身），
+ * Claude Code 副本：配置目录在 <副本>/claude（预设用 CLAUDE_CONFIG_DIR 指到目录本身），
  * MCP 走 ACP session/new|load 的 mcpServers（mcpDelivery=acp）——**不写** settings.json / mcp.json；
  * 目录取真实 ~/.claude.json（与 realHome 同级，预设 catalogFile="../.claude.json"）。
- * 模块级常量在 import 时解析，故先设环境再动态导入（同 sandbox-cline.test.ts）。
+ * 模块级常量在 import 时解析，故先设环境再动态导入（同 cline.test.ts）。
  */
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-sandbox-claude-"));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-managed-claude-"));
 const realHome = path.join(root, "real-claude");
 const dataDir = path.join(root, "data");
 const brainCfg = path.join(dataDir, "brain-home", "claude");
@@ -42,7 +42,7 @@ beforeAll(() => {
   process.env.WEMIND_WORKER_BRAIN = "claude-code";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
   process.env.WECHAT_DATA_DIR = dataDir;
-  process.env.WEMIND_HOME_MODE = "sandbox";
+  process.env.WEMIND_HOME_MODE = "managed";
   delete process.env.WEMIND_BRAIN_INHERIT;
   delete process.env.WEMIND_MCP_CATALOG;
 });
@@ -58,9 +58,9 @@ afterAll(() => {
 
 const readJson = (f: string): Record<string, any> => JSON.parse(fs.readFileSync(f, "utf-8"));
 
-describe("brain 沙箱（Claude Code）", () => {
-  it("CLAUDE.md/skills/agents/commands 与日常共用；OAuth 凭据进沙箱", async () => {
-    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+describe("brain 副本（Claude Code）", () => {
+  it("CLAUDE.md/skills/agents/commands 与日常共用；OAuth 凭据进副本", async () => {
+    const { ensureBrainHome } = await import("./mcp-brain.js");
     ensureBrainHome();
 
     expect(fs.readFileSync(path.join(brainCfg, "CLAUDE.md"), "utf-8")).toBe("# memory\n");
@@ -79,7 +79,7 @@ describe("brain 沙箱（Claude Code）", () => {
 
   it("ACP MCP 投递：不写 settings.json / mcp.json；catalog 来自真实 ~/.claude.json，wechat 被拒", async () => {
     const { ensureBrainHome, addMcp, catalogNames, activeMcpServers } =
-      await import("./mcp-sandbox.js");
+      await import("./mcp-brain.js");
     ensureBrainHome();
 
     expect(fs.existsSync(path.join(brainCfg, "settings.json"))).toBe(false);
@@ -130,9 +130,9 @@ describe("brain 沙箱（Claude Code）", () => {
   });
 });
 
-describe("worker 沙箱（Claude Code）", () => {
+describe("worker 副本（Claude Code）", () => {
   it("全量 MCP（除 wechat / disabled）走 ACP；记忆共享", async () => {
-    const { ensureWorkerHome, workerMcpServers } = await import("./worker-sandbox.js");
+    const { ensureWorkerHome, workerMcpServers } = await import("./mcp-worker.js");
     ensureWorkerHome();
 
     expect(workerMcpServers().map((s: any) => s.name)).toEqual(["demo"]);

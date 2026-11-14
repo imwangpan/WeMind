@@ -4,11 +4,11 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * Cline 沙箱：配置目录在 <沙箱>/cline（CLINE_DIR/CLINE_DATA_DIR/CLINE_MCP_SETTINGS_PATH 三个 env 由预设给出），
- * MCP 文件是 <沙箱>/cline/mcp.json（CLINE_MCP_SETTINGS_PATH），目录来源是真实的 data/settings/cline_mcp_settings.json。
- * 模块级常量在 import 时解析，故先设环境再动态导入（同 sandbox-qoder.test.ts）。
+ * Cline 副本：配置目录在 <副本>/cline（CLINE_DIR/CLINE_DATA_DIR/CLINE_MCP_SETTINGS_PATH 三个 env 由预设给出），
+ * MCP 文件是 <副本>/cline/mcp.json（CLINE_MCP_SETTINGS_PATH），目录来源是真实的 data/settings/cline_mcp_settings.json。
+ * 模块级常量在 import 时解析，故先设环境再动态导入（同 qoder.test.ts）。
  */
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-sandbox-cline-"));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-managed-cline-"));
 const realHome = path.join(root, "real-cline");
 const dataDir = path.join(root, "data");
 const brainCfg = path.join(dataDir, "brain-home", "cline");
@@ -56,7 +56,7 @@ beforeAll(() => {
   process.env.WEMIND_BRAIN = "cline";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
   process.env.WECHAT_DATA_DIR = dataDir;
-  process.env.WEMIND_HOME_MODE = "sandbox";
+  process.env.WEMIND_HOME_MODE = "managed";
   delete process.env.WEMIND_BRAIN_INHERIT;
 });
 
@@ -70,9 +70,9 @@ afterAll(() => {
 
 const readJson = (f: string): Record<string, any> => JSON.parse(fs.readFileSync(f, "utf-8"));
 
-describe("brain 沙箱（Cline）", () => {
-  it("登录态 providers.json + 模型缓存 models.json 进沙箱（data/settings 布局）", async () => {
-    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+describe("brain 副本（Cline）", () => {
+  it("登录态 providers.json + 模型缓存 models.json 进副本（data/settings 布局）", async () => {
+    const { ensureBrainHome } = await import("./mcp-brain.js");
     ensureBrainHome();
     const copied = readJson(path.join(brainCfg, "data", "settings", "providers.json"));
     expect(copied.lastUsedProvider).toBe("openai-compatible");
@@ -81,17 +81,17 @@ describe("brain 沙箱（Cline）", () => {
   });
 
   it("rules/skills/agents 以链接共享真实目录（大脑写入即落到真实目录）", async () => {
-    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+    const { ensureBrainHome } = await import("./mcp-brain.js");
     ensureBrainHome();
-    const sandboxRules = path.join(brainCfg, "rules");
-    expect(fs.readFileSync(path.join(sandboxRules, "sample.md"), "utf-8")).toBe("# rules\n");
-    fs.writeFileSync(path.join(sandboxRules, "written-by-brain.md"), "x");
+    const copyRules = path.join(brainCfg, "rules");
+    expect(fs.readFileSync(path.join(copyRules, "sample.md"), "utf-8")).toBe("# rules\n");
+    fs.writeFileSync(path.join(copyRules, "written-by-brain.md"), "x");
     expect(fs.existsSync(path.join(realHome, "rules", "written-by-brain.md"))).toBe(true);
     fs.rmSync(path.join(realHome, "rules", "written-by-brain.md"));
   });
 
   it("MCP 默认空；目录来自 data/settings/cline_mcp_settings.json；wechat 被拒，加载 demo 写入 cline/mcp.json", async () => {
-    const { addMcp, catalogNames, ensureBrainHome } = await import("./mcp-sandbox.js");
+    const { addMcp, catalogNames, ensureBrainHome } = await import("./mcp-brain.js");
     ensureBrainHome();
 
     const empty = readJson(path.join(brainCfg, "mcp.json"));
@@ -108,9 +108,9 @@ describe("brain 沙箱（Cline）", () => {
   });
 });
 
-describe("worker 沙箱（Cline）", () => {
+describe("worker 副本（Cline）", () => {
   it("继承全量 MCP（除 wechat/disabled），并同步 providers.json + models.json", async () => {
-    const { ensureWorkerHome } = await import("./worker-sandbox.js");
+    const { ensureWorkerHome } = await import("./mcp-worker.js");
     ensureWorkerHome();
 
     const cfg = readJson(path.join(workerCfg, "mcp.json"));

@@ -1,10 +1,10 @@
 # 5. daemon（wemind）
 
-> 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md)
+> 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与副本](06-ACP-大脑与副本.md)
 >
-> **最后核对**：2026-11-12
+> **最后核对**：2026-11-14
 
-daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。本章聚焦 daemon 本体（`index.ts`）的运行逻辑；大脑、worker、沙箱在后续章节展开。
+daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。本章聚焦 daemon 本体（`index.ts`）的运行逻辑；大脑、worker、副本在后续章节展开。
 
 ## 5.1 模块全景
 
@@ -39,7 +39,7 @@ packages/wechat-daemon/src/
 │       ├── acp-connection.ts # 帧处理、请求与回合超时、模型/模式、load 后回放静默（→ 第 6 章）
 │       ├── acp-reverse.ts    # 反向请求应答器（权限默认 yolo 放行；WEMIND_ACP_AUTO_ALLOW=0 恢复拒绝；未知 method 回 -32601）
 │       └── acp-quiet.ts      # 恢复会话后等回放帧安静（200ms 静默窗口 / 最多 3s）
-├── agents/                   # agent 预设、配置状态、direct / sandbox 运行时
+├── agents/                   # agent 预设、配置状态、direct / managed 运行时
 │   ├── brain-presets.ts      # AcpAgentPreset 类型与 10 个内置预设（纯数据，无 IO）
 │   ├── brain-agents.ts       # resolveAgent、agentProblem、派生配置落盘（→ 第 6 章）
 │   ├── brain-config.ts       # brain.json 读写
@@ -47,18 +47,18 @@ packages/wechat-daemon/src/
 │   ├── agent-slot.ts         # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
 │   ├── profile-model.ts      # 真实 profile 的默认模型读取与「缺 - id: acp」提示
 │   ├── cline-credentials.ts  # 从 Cline providers.json 派生 CLINE_PROVIDER/CLINE_API_KEY
-│   ├── config/               # homeMode(direct/sandbox)、overlay、工作区、环境快照
-│   │   ├── home-mode.ts      # runtime.json：direct（默认）/ sandbox
+│   ├── config/               # homeMode(direct/managed)、overlay、工作区、环境快照
+│   │   ├── home-mode.ts      # runtime.json：direct（默认）/ managed
 │   │   ├── runtime.ts        # 一次启动的 home/configDir/cwd/mediaDir 总装
 │   │   ├── overlay.ts        # agent-overrides/<agent>.json（仅微信侧）
 │   │   ├── workspace.ts      # workspace.json + 默认工作区
 │   │   └── agent-config-writer.ts # 真实配置备份、并发校验、原子写
-│   └── sandbox/              # sandbox 的 MCP 策略与记忆/技能继承
-│       ├── mcp-sandbox.ts    # brain：direct 不重发 / sandbox 激活集（→ 第 6 章）
-│       ├── worker-sandbox.ts # worker：direct 不重发 / sandbox 全量 − wechat − EXCLUDE − disabled + overlay（→ 第 7 章）
+│   └── managed/              # managed 的 MCP 策略与记忆/技能继承
+│       ├── mcp-brain.ts    # brain：direct 不重发 / managed 激活集（→ 第 6 章）
+│       ├── mcp-worker.ts # worker：direct 不重发 / managed 全量 − wechat − EXCLUDE − disabled + overlay（→ 第 7 章）
 │       ├── mcp-adapters.ts   # 按文件格式的 MCP 适配器（读写/剥离/ACP 转换/原生只读）
 │       ├── agent-mcp.ts      # MCP 格式纯函数、wechat 判定与 ACP 转换
-│       └── sandbox-inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单）
+│       └── inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单）
 ├── tasks/                    # 任务（worker）
 │   ├── worker-acp.ts         # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
 │   ├── worker-pool.ts        # worker 进程池：复用/回收/上限（→ 第 7 章）
@@ -112,7 +112,7 @@ graph TD
     B2 --> C["loadAccount（未登录则 exit 1）"]
     C --> D["解析登录者 owner（WECHAT_OWNER_ID 或扫码登录者）<br/>→ addAllowFrom(owner) 种入白名单（迁移老账号）"]
     D --> E["写 daemon.pid + 注册 exit/SIGINT/SIGTERM 清理<br/>+ 全局 unhandledRejection / uncaughtException（只记录不退出）"]
-    E --> F["ensureParityAccountDirs() + migrateLegacySandbox()<br/>+ ensureBrainHome() + ensureWorkerHome()<br/>两种模式都准备 workspace/{brain,worker}；direct 的 ensure*Home() 直接返回；sandbox 才准备 brain-home/worker-home 配置副本；按 TTL/总量清理 media/inbound"]
+    E --> F["ensureParityAccountDirs() + migrateLegacyHomes()<br/>+ ensureBrainHome() + ensureWorkerHome()<br/>两种模式都准备 workspace/{brain,worker}；direct 的 ensure*Home() 直接返回；managed 才准备 brain-home/worker-home 配置副本；按 TTL/总量清理 media/inbound"]
     F --> G["notifyStart 通知上线"]
     G --> H["接入 setTaskPush / setTaskTyping / setTaskStateSink / setTaskAckSink"]
     H --> I["clearTaskDirs + 启动 task-inbox 扫描定时器(1s)"]
@@ -208,15 +208,15 @@ graph TD
 
 **命令层（1.2.0 起）**：解析与帮助**同表驱动**（`chat-command-specs.ts` 的 `COMMAND_SPECS`），中文与斜杠双轨、`/ai` 是统一入口前缀（`/ai` 列可选、`/ai brain X`、`/ai task X`），中文（`切换大脑`、`切换任务大脑`）与旧斜杠（`/brain`、`/worker`）是等价别名。`帮助`/`/help` 按角色裁剪（非登录者看不到「仅登录者」命令）。
 
-**权限模型**：指令按**作用范围**分两档——**整个账号**（`MCP` 列出；`加载`/`卸载` 在 `sandbox` 下换全账号激活集、`direct` 下原样转给 Agent；`AI`/`切换大脑`/`切换任务大脑`/`交接`/工作区/`微信配置 查看` 操作的是全账号状态）与**登录者自己的**（会话与任务类：按 `userId` 隔离，别人的会话永远不出现在你的列表里，任务也按人隔离）。其中 **7 类 owner-only**（`AI` / `切换大脑` / `切换任务大脑` / `交接` / `允许敏感文件` / `工作区` 三条 / `微信配置 查看`）在代码里额外校验（非登录者发只会得到一句短提示、**不转发给大脑**，避免它「意外回答」一条自己无权执行的命令）——这是**兜底校验**：微信平台只把消息发送给登录者本人，所以正常不会触发。`帮助` 对所有人开放。
+**权限模型**：指令按**作用范围**分两档——**整个账号**（`MCP` 列出；`加载`/`卸载` 在 `managed` 下换全账号激活集、`direct` 下原样转给 Agent；`AI`/`切换大脑`/`切换任务大脑`/`交接`/工作区/`微信配置 查看` 操作的是全账号状态）与**登录者自己的**（会话与任务类：按 `userId` 隔离，别人的会话永远不出现在你的列表里，任务也按人隔离）。其中 **7 类 owner-only**（`AI` / `切换大脑` / `切换任务大脑` / `交接` / `允许敏感文件` / `工作区` 三条 / `微信配置 查看`）在代码里额外校验（非登录者发只会得到一句短提示、**不转发给大脑**，避免它「意外回答」一条自己无权执行的命令）——这是**兜底校验**：微信平台只把消息发送给登录者本人，所以正常不会触发。`帮助` 对所有人开放。
 
-「登录者」（owner）= **扫码登录这个 bot 的那个微信号**（`WECHAT_OWNER_ID` 可覆盖；启动时被种进 `allowFrom`，见 §5.2）。它跟「账号之间」没有关系——**每个账号各有自己的 daemon 与登录者，不存在能管别的账号的「主号」**；多账号下换大脑的范围与两个入口（微信 / 本机 CLI）的区别见 [6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md#多账号下的范围两个入口) 与 README 的「多账号管理」。
+「登录者」（owner）= **扫码登录这个 bot 的那个微信号**（`WECHAT_OWNER_ID` 可覆盖；启动时被种进 `allowFrom`，见 §5.2）。它跟「账号之间」没有关系——**每个账号各有自己的 daemon 与登录者，不存在能管别的账号的「主号」**；多账号下换大脑的范围与两个入口（微信 / 本机 CLI）的区别见 [6. ACP 大脑与副本](06-ACP-大脑与副本.md#多账号下的范围两个入口) 与 README 的「多账号管理」。
 
 | 指令 | 作用 | 作用范围 |
 |------|------|------|
 | `MCP` / `列出 MCP` / `/mcp` / `mcp list` | 列出可选与已激活的 MCP | 整个账号 |
-| `加载 <名>` / `load <名>` | `sandbox`：激活某 MCP（激活集真变了才重启 ACP 进程；切脑中先等切换结束）；`direct`：原样转给 Agent | `sandbox` 整个账号 / `direct` 由 Agent 处理 |
-| `卸载 <名>` / `unload <名>` | `sandbox`：移除某 MCP；`direct`：原样转给 Agent | `sandbox` 整个账号 / `direct` 由 Agent 处理 |
+| `加载 <名>` / `load <名>` | `managed`：激活某 MCP（激活集真变了才重启 ACP 进程；切脑中先等切换结束）；`direct`：原样转给 Agent | `managed` 整个账号 / `direct` 由 Agent 处理 |
+| `卸载 <名>` / `unload <名>` | `managed`：移除某 MCP；`direct`：原样转给 Agent | `managed` 整个账号 / `direct` 由 Agent 处理 |
 | `工作区` | 查看 brain 默认工作区 | 整个账号（仅登录者） |
 | `设置工作区 <绝对路径>` | 设置 brain 默认工作区（新会话生效） | 整个账号（仅登录者） |
 | `重置工作区` | 恢复 brain 默认 managed 工作区 | 整个账号（仅登录者） |
@@ -335,7 +335,7 @@ graph TD
 | `VIDEO` | 同上，文件名固定 `video.mp4`，prompt 写「大小/时长/本地路径」 |
 | 其它 / 工具 item 11/12 | 未知类型计入 `unsupportedTypes`；只有未知类型时明确告知用户；入站工具 item 直接忽略（它们只用于出站进度） |
 
-- **落盘位置**：默认 `direct` 是 `<账号>/media/inbound`，`sandbox` 才是 `<sandbox>/media/inbound`。prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
+- **落盘位置**：默认 `direct` 是 `<账号>/media/inbound`，`managed` 才是 `<managed>/media/inbound`。prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
 - **文件名安全**：`safeMediaFileName()` 去掉路径分隔符/控制字符、替换 Windows 非法字符、给保留名（`CON`/`NUL`/`COM1`…）加后缀、保留扩展名；同名用 `-1`/`-2` 后缀，绝不覆盖。
 - **清理**：`saveInboundMedia()` 每次写入后问一次 `pruneInboundMediaIfDue()`，daemon 启动时也调一次（时钟为「从未清理」→ 必执行）；真正清理至少间隔 1 小时，避免同一批附件重复扫目录（挂在 poller 主循环上没有必要，目录只在写入时才增长）。每次先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 30 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 1GB）从最旧开始删；best-effort，失败不影响消息处理。
 - **大小上限**：入站文件/视频/语音默认 `WECHAT_INBOUND_MEDIA_MAX_MB=100`；图片仍走图片专用链路（20MB 上限）。
@@ -382,4 +382,4 @@ daemon 通过两个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s�
 
 ---
 
-接下来：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md) 详解常驻大脑如何工作。
+接下来：[6. ACP 大脑与副本](06-ACP-大脑与副本.md) 详解常驻大脑如何工作。

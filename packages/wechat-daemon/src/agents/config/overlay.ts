@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
-import { findForbiddenMcpEntries, normalizeMcpName } from "../sandbox/agent-mcp.js";
+import { findForbiddenMcpEntries, normalizeMcpName } from "../managed/agent-mcp.js";
 
 /**
  * 微信侧独享配置：`<账号>/agent-overrides/<agent>.json`。

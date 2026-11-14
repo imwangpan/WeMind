@@ -81,7 +81,6 @@ async function agentOf(name: string, overrides: Record<string, unknown>): Promis
     credentialFiles: [],
     identityFiles: [],
     settingsBase: p.settingsBase,
-    settingsStrip: p.settingsStrip ?? [],
     settingsDefaults: p.settingsDefaults ?? {},
     acpMcpServers: !!p.acpMcpServers,
     mcpDelivery: p.mcpDelivery ?? "config",
@@ -98,7 +97,7 @@ async function agentOf(name: string, overrides: Record<string, unknown>): Promis
 
 describe("direct（默认）", () => {
   it("ensureBrainHome 不写真实 settings.json，也不生成任何副本", async () => {
-    const { ensureBrainHome } = await import("./mcp-sandbox.js");
+    const { ensureBrainHome } = await import("./mcp-brain.js");
     const ag = await agentOf("qoder", { realHome: qoderHome });
     const before = fs.readFileSync(path.join(qoderHome, "settings.json"), "utf-8");
 
@@ -110,7 +109,7 @@ describe("direct（默认）", () => {
   });
 
   it("真实配置含微信 MCP 时只告警，不阻止启动", async () => {
-    const { warnForbiddenNativeMcp } = await import("./mcp-sandbox.js");
+    const { warnForbiddenNativeMcp } = await import("./mcp-brain.js");
     const ag = await agentOf("qoder", { realHome: qoderHome });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -122,7 +121,7 @@ describe("direct（默认）", () => {
   });
 
   it("direct 不把 Agent 已原生加载的 catalog 再经 ACP 下发；只发微信独享 extra", async () => {
-    const { activeMcpServers } = await import("./mcp-sandbox.js");
+    const { activeMcpServers } = await import("./mcp-brain.js");
     const { overlayPath, writeOverlay } = await import("../config/overlay.js");
     const ag = await agentOf("copilot", { realHome: copilotHome });
     const rt = agentRuntime("brain", ag, account);
@@ -146,15 +145,38 @@ describe("direct（默认）", () => {
   });
 });
 
-describe("sandbox", () => {
-  it("copilot 沙箱读真实 catalog，但绝不激活微信 MCP", async () => {
-    const { ensureBrainHome, addMcp, activeMcpServers, catalogNames } =
-      await import("./mcp-sandbox.js");
-    const ag = await agentOf("copilot", { realHome: copilotHome });
-    process.env.WEMIND_HOME_MODE = "sandbox";
+describe("managed", () => {
+  it("settingsBase 是整份复制：只剥 MCP 段，model / providers 原样带进副本", async () => {
+    const { ensureBrainHome } = await import("./mcp-brain.js");
+    const ag = await agentOf("qoder", { realHome: qoderHome });
+    process.env.WEMIND_HOME_MODE = "managed";
     try {
       const rt = ensureBrainHome(ag, account);
-      expect(rt.mode).toBe("sandbox");
+      expect(rt.mode).toBe("managed");
+      const copied = JSON.parse(
+        fs.readFileSync(path.join(account, "brain-home", "qoder", "settings.json"), "utf-8"),
+      ) as Record<string, unknown>;
+      // 用户自己的选择原样保留（不再按 agent 维护 providers/model 剥离清单）
+      expect(copied.model).toEqual({ name: "byok-model" });
+      expect(copied.providers).toEqual(qoderSettings.providers);
+      // MCP 段由 curated 集权威决定：真实文件里的 wechat / demo 都不进副本
+      expect(Object.keys((copied.mcpServers as Record<string, unknown>) ?? {})).toEqual([]);
+      // 真实文件一个字节不动
+      const real = JSON.parse(fs.readFileSync(path.join(qoderHome, "settings.json"), "utf-8"));
+      expect(Object.keys(real.mcpServers)).toEqual(["wechat", "demo"]);
+    } finally {
+      delete process.env.WEMIND_HOME_MODE;
+    }
+  });
+
+  it("copilot 副本读真实 catalog，但绝不激活微信 MCP", async () => {
+    const { ensureBrainHome, addMcp, activeMcpServers, catalogNames } =
+      await import("./mcp-brain.js");
+    const ag = await agentOf("copilot", { realHome: copilotHome });
+    process.env.WEMIND_HOME_MODE = "managed";
+    try {
+      const rt = ensureBrainHome(ag, account);
+      expect(rt.mode).toBe("managed");
       expect(catalogNames(ag, account)).toEqual(["ok"]);
       expect(addMcp("wechat", ag, account).ok).toBe(false);
       expect(addMcp("ok", ag, account).ok).toBe(true);

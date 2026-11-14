@@ -5,7 +5,7 @@ import path from "node:path";
 
 /**
  * 槽位是**懒解析**的（模块加载期不读配置），而 DATA_DIR 在 core 模块加载时就定死了——
- * 所以必须在任何相关模块 import 之前先设好 WECHAT_DATA_DIR（与 sandbox-qoder.test.ts 同一手法）。
+ * 所以必须在任何相关模块 import 之前先设好 WECHAT_DATA_DIR（与 qoder.test.ts 同一手法）。
  */
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-slot-"));
 const dataDir = path.join(root, "data");

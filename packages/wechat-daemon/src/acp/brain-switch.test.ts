@@ -11,7 +11,7 @@ import path from "node:path";
  * 测不出「旧进程真的死了、没残留、新进程真的能用 ACP 说话」；恢复同理（load 失败/成功的分支在 ACP 往返上）。
  *
  * 环境变量必须在 import 前设好：`DATA_DIR`（core 模块加载期定死）与 `WEMIND_SWITCH_DRAIN_MS`
- * （brain-switch 模块加载期读）都是模块级常量（与 agent-slot.test.ts / sandbox-qoder.test.ts 同一手法）。
+ * （brain-switch 模块加载期读）都是模块级常量（与 agent-slot.test.ts / qoder.test.ts 同一手法）。
  */
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-switch-"));
 const dataDir = path.join(root, "data");
@@ -19,7 +19,7 @@ fs.mkdirSync(dataDir, { recursive: true });
 process.env.WECHAT_DATA_DIR = dataDir;
 process.env.WEMIND_MCP_CATALOG = path.join(root, "no-such-catalog.json"); // 别去读用户真实的 MCP 配置
 process.env.WEMIND_SWITCH_DRAIN_MS = "400"; // drain 门缩短，好测超时分支
-// 本文件会真实构建 sandbox 副本；不覆盖 realHome 的话，默认预设会去读写当前用户真实的 ~/.kiro 等目录。
+// 本文件会真实构建 managed 副本；不覆盖 realHome 的话，默认预设会去读写当前用户真实的 ~/.kiro 等目录。
 const realHome = path.join(root, "real-home");
 fs.mkdirSync(realHome, { recursive: true });
 const savedRealHome = process.env.WEMIND_BRAIN_REAL_HOME;

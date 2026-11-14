@@ -13,9 +13,9 @@ import {
   syncProfilePatch,
   warnUnwritableRealHome,
   writeSettingsBase,
-} from "./sandbox-common.js";
-import { syncInherited } from "./sandbox-inherit.js";
-import { overlayExtraAcpServers } from "./mcp-sandbox.js";
+} from "./managed-common.js";
+import { syncInherited } from "./inherit.js";
+import { overlayExtraAcpServers } from "./mcp-brain.js";
 import { agentRuntime, type AgentRuntime } from "../config/runtime.js";
 import { overlayDisableSet, overlayExtraServers, readOverlay } from "../config/overlay.js";
 const log = createLogger("wechat-daemon/mcp");
@@ -25,10 +25,10 @@ const log = createLogger("wechat-daemon/mcp");
  * 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。
  *
  * - `direct`（默认）：Agent 用自己的完整真实配置，WeMind 不写任何文件；
- * - `sandbox`：完整复制到账号目录；全量集（除排除集）按 `mcpDelivery` 写进沙箱副本或随 ACP 会话下发。
+ * - `managed`：完整复制到账号目录；全量集（除排除集）按 `mcpDelivery` 写进副本副本或随 ACP 会话下发。
  */
 
-/** sandbox 模式的 worker 沙箱根。 */
+/** managed 模式的 worker 副本根。 */
 export const WORKER_HOME =
   process.env.WEMIND_WORKER_HOME?.trim() || path.join(DATA_DIR, "worker-home");
 
@@ -61,8 +61,8 @@ function loadCatalog(ag: ResolvedAgent, dir: string = DATA_DIR): Record<string, 
   return { ...base, ...overlayExtraServers(overlay) };
 }
 
-/** worker 继承全量 MCP：复制 catalog 全部 server，去掉排除集与 disabled:true 的（sandbox 写文件）。 */
-function applyWorkerSandbox(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = DATA_DIR): void {
+/** worker 继承全量 MCP：复制 catalog 全部 server，去掉排除集与 disabled:true 的（managed 写文件）。 */
+function applyWorkerCopy(ag: ResolvedAgent, rt?: AgentRuntime, dir: string = DATA_DIR): void {
   if (ag.mcpDelivery === "acp") return;
   const target = rt ?? agentRuntime("worker", ag, dir);
   if (!canWriteAgentConfig(ag, target)) {
@@ -106,7 +106,7 @@ export function workerMcpServers(forAgent?: ResolvedAgent, dir: string = DATA_DI
 /**
  * worker 建立/恢复会话时应随 ACP 下发的集合。
  * - `direct`：Agent 自己加载真实配置，只补 overlay.mcp.extra（微信独享项）；
- * - `sandbox`：mcpDelivery=acp 的 Agent 拿全量集（除 wechat），其余 Agent 自己读沙箱配置文件。
+ * - `managed`：mcpDelivery=acp 的 Agent 拿全量集（除 wechat），其余 Agent 自己读副本配置文件。
  */
 export function workerSessionMcpServers(
   ag: ResolvedAgent = getAgent("worker"),
@@ -150,7 +150,7 @@ function linkRealKnowledge(ag: ResolvedAgent, rt: AgentRuntime): void {
 /**
  * 确保 worker 配置就绪：
  * - `direct`：原样返回，不写任何文件；
- * - `sandbox`：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 预设默认设置项 → 链入记忆/技能与凭据。
+ * - `managed`：继承 settings（除 mcp）→ 写全量 MCP（除排除集）→ 预设默认设置项 → 链入记忆/技能与凭据。
  * 每次派发新 worker 前（`worker-pool.ts` 的 `acquire`）按**这条任务的 agent** 调一次。
  */
 export function ensureWorkerHome(
@@ -163,7 +163,7 @@ export function ensureWorkerHome(
   if (rt.mode === "direct") return rt;
   syncSettings(ag, rt);
   stripWechatFromConfigCopy(ag, rt);
-  applyWorkerSandbox(ag, rt, dir);
+  applyWorkerCopy(ag, rt, dir);
   linkRealKnowledge(ag, rt);
   syncCredentials(ag, workerConfigDir(ag, rt));
   applySettingsDefaults(ag, workerConfigDir(ag, rt));

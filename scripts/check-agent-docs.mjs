@@ -5,7 +5,7 @@
  * 对 packages/wechat-daemon/src/agents/brain-presets.ts 里的每个内置预设，断言：
  *   1. docs/接入方案/ 下有一篇接入文档（正文提到预设名）；
  *   2. 文档头部有「最后核对」「实测环境」「状态」三个字段；
- *   3. 有五类二级标题：安装/准备、预设/沙箱、探针/实测、限制（或风险）、验证/复现/验收；
+ *   3. 有五类二级标题：安装/准备、副本/预设、探针/实测、限制（或风险）、验证/复现/验收；
  *   4. 有独立的 `## 待实测` 小节（没有待测项就写「无」）；
  *   5. 预设名或文档名出现在四处索引：接入其它-ACP-Agent.md、docs/ai/已知坑.md、docs/README.md、llms.txt。
  *
@@ -32,7 +32,7 @@ const INDEX_FILES = [
 const HEADER_FIELDS = ["最后核对", "实测环境", "状态"];
 const REQUIRED_SECTIONS = [
   { key: "安装", patterns: /安装|准备/ },
-  { key: "预设", patterns: /预设|沙箱/ },
+  { key: "预设", patterns: /预设|副本/ },
   { key: "探针", patterns: /探针|实测/ },
   { key: "限制", patterns: /限制|坑|风险|待实测/ },
   { key: "验证", patterns: /验证|复现|验收/ },

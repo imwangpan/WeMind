@@ -4,12 +4,12 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * DSH 沙箱：把真实 `~/.dsh/profiles/<profile>/cordis.patch.yml`（桌面端维护的用户层，含 provider 目录与默认模型）同步进 sandbox。
+ * DSH 副本：把真实 `~/.dsh/profiles/<profile>/cordis.patch.yml`（桌面端维护的用户层，含 provider 目录与默认模型）同步进 managed。
  * provider/模型条目**原样复制**，MCP 条目全部剥离（由 WeMind 经 ACP 注入）。`- id: acp` 这类覆盖由用户自己在真实 profile 里维护（缺了 `wemind brain` 会提示），WeMind 不替 agent 合成配置，
- * 这样「终端 dsh」与「微信大脑」行为一致。模块级常量（DATA_DIR/沙箱根）在 import 时解析，故先设环境再动态导入（同 sandbox-qoder.test.ts）。
+ * 这样「终端 dsh」与「微信大脑」行为一致。模块级常量（DATA_DIR/副本根）在 import 时解析，故先设环境再动态导入（同 qoder.test.ts）。
  */
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-sandbox-dsh-"));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-managed-dsh-"));
 const realHome = path.join(root, "real-dsh");
 const dataDir = path.join(root, "data");
 const realPatch = path.join(realHome, "profiles", "acp", "cordis.patch.yml");
@@ -30,10 +30,10 @@ const patch = (model: string) =>
     "",
   ].join("\n");
 
-let ensureBrainHome: typeof import("./mcp-sandbox.js").ensureBrainHome;
-let ensureWorkerHome: typeof import("./worker-sandbox.js").ensureWorkerHome;
-let workerMcpServers: typeof import("./worker-sandbox.js").workerMcpServers;
-let catalogNames: typeof import("./mcp-sandbox.js").catalogNames;
+let ensureBrainHome: typeof import("./mcp-brain.js").ensureBrainHome;
+let ensureWorkerHome: typeof import("./mcp-worker.js").ensureWorkerHome;
+let workerMcpServers: typeof import("./mcp-worker.js").workerMcpServers;
+let catalogNames: typeof import("./mcp-brain.js").catalogNames;
 let resetSlotsForTest: typeof import("../agent-slot.js").resetSlotsForTest;
 
 beforeAll(async () => {
@@ -44,12 +44,12 @@ beforeAll(async () => {
   process.env.WEMIND_WORKER_BRAIN = "deepseek";
   process.env.WEMIND_BRAIN_REAL_HOME = realHome;
   process.env.WECHAT_DATA_DIR = dataDir;
-  process.env.WEMIND_HOME_MODE = "sandbox";
+  process.env.WEMIND_HOME_MODE = "managed";
   delete process.env.WEMIND_BRAIN_INHERIT;
-  ({ ensureBrainHome } = await import("./mcp-sandbox.js"));
-  ({ catalogNames } = await import("./mcp-sandbox.js"));
-  ({ ensureWorkerHome } = await import("./worker-sandbox.js"));
-  ({ workerMcpServers } = await import("./worker-sandbox.js"));
+  ({ ensureBrainHome } = await import("./mcp-brain.js"));
+  ({ catalogNames } = await import("./mcp-brain.js"));
+  ({ ensureWorkerHome } = await import("./mcp-worker.js"));
+  ({ workerMcpServers } = await import("./mcp-worker.js"));
   ({ resetSlotsForTest } = await import("../agent-slot.js"));
 });
 
@@ -63,8 +63,8 @@ afterAll(() => {
   delete process.env.WEMIND_BRAIN_INHERIT;
 });
 
-describe("DSH 沙箱（profile 用户层同步）", () => {
-  it("brain：provider/模型条目原样进沙箱（MCP 条目另有剥离用例；WeMind 不追加任何条目）", () => {
+describe("DSH 副本（profile 用户层同步）", () => {
+  it("brain：provider/模型条目原样进副本（MCP 条目另有剥离用例；WeMind 不追加任何条目）", () => {
     ensureBrainHome();
     const text = fs.readFileSync(brainPatch, "utf-8");
     expect(text).toBe(patch("auto/deepseek-v4.1-flash"));
@@ -73,12 +73,12 @@ describe("DSH 沙箱（profile 用户层同步）", () => {
     expect(fs.existsSync(path.join(dataDir, "brain-home", ".credentials.yaml"))).toBe(true);
   });
 
-  it("worker：同一份用户层也进 worker 沙箱（provider/模型原样）", () => {
+  it("worker：同一份用户层也进 worker 副本（provider/模型原样）", () => {
     ensureWorkerHome();
     expect(fs.readFileSync(workerPatch, "utf-8")).toBe(patch("auto/deepseek-v4.1-flash"));
   });
 
-  it("用户在真实 profile 里加了 - id: acp → 原样带进沙箱（终端与微信大脑同一个模型）", () => {
+  it("用户在真实 profile 里加了 - id: acp → 原样带进副本（终端与微信大脑同一个模型）", () => {
     const own = `${patch("auto/from-default")}- id: acp\n  config:\n    provider: magpie\n    model: auto/from-acp\n`;
     fs.writeFileSync(realPatch, own);
     resetSlotsForTest(); // 真实 daemon 里由重启/切脑重新解析；测试手动模拟
@@ -87,14 +87,14 @@ describe("DSH 沙箱（profile 用户层同步）", () => {
     expect(fs.readFileSync(realPatch, "utf-8")).toBe(own); // 真实文件不动
   });
 
-  it("桌面端更新（比如换了默认模型）→ 下一次 ensure 覆盖沙箱里的旧副本", () => {
+  it("桌面端更新（比如换了默认模型）→ 下一次 ensure 覆盖副本里的旧副本", () => {
     fs.writeFileSync(realPatch, patch("auto/glm-5.3"));
     resetSlotsForTest();
     ensureBrainHome();
     expect(fs.readFileSync(brainPatch, "utf-8")).toBe(patch("auto/glm-5.3"));
   });
 
-  it("sandbox 下 profile 副本剥离全部 MCP，由 WeMind 按激活集/全量集经 ACP 注入（真实文件不动）", () => {
+  it("managed 下 profile 副本剥离全部 MCP，由 WeMind 按激活集/全量集经 ACP 注入（真实文件不动）", () => {
     const withMcp = [
       patch("auto/with-mcp"),
       "- id: mcp-wemind # 我自己的微信 MCP",

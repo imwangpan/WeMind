@@ -7,7 +7,7 @@ import {
   ensureBrainHome,
   nativeMcpServers,
   warnForbiddenNativeMcp,
-} from "../agents/sandbox/mcp-sandbox.js";
+} from "../agents/managed/mcp-brain.js";
 import { agentRuntime } from "../agents/config/runtime.js";
 import { configFingerprint } from "../agents/config/config-fingerprint.js";
 import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
@@ -55,7 +55,7 @@ const log = createLogger("wechat-daemon/acp");
  * - 每用户一个 ACP session（原生多轮记忆）；session 映射持久化到磁盘。
  * - 自愈：session/prompt 超时/失败 → 杀进程重建；重建后用 session/load 恢复上下文。
  * - 诊断日志（统一走 `createLogger("wechat-daemon/acp")`，格式 `[wemind/wechat-daemon/acp][INFO|WARN|ERROR] …`，全部 stderr、进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差；`spawn`/`initialized`/`session/new`/`prompt ok` 等帧级关键线索归 INFO（排障必须可见），失败与自愈归 WARN/ERROR。
- * `direct`（默认）直接用 Agent 真实 home；`sandbox` 才跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
+ * `direct`（默认）直接用 Agent 真实 home；`managed` 才跑在 brain 副本目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
  * 协议细节（帧处理、请求/回合超时、模型与模式、回放静默）与 worker 共用 `acp-connection.ts`；本模块只保留常驻单例与会话持久化。
  *
  * **agent 显式传参**：本模块不再持有「当前 agent」常量（改造前是 import 时解析的 `AGENT`，
@@ -250,9 +250,9 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
   }
   reset();
   const kept: string[] = [];
-  const rt = ensureBrainHome(ag); // direct 不写文件；sandbox 才准备副本
+  const rt = ensureBrainHome(ag); // direct 不写文件；managed 才准备副本
   warnForbiddenNativeMcp(ag, rt); // 只告警：agent 自己配置里有微信 MCP 时提示回环风险
-  const env = agentEnv(ag, rt.home, kept, DATA_DIR, { direct: rt.mode === "direct" }); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
+  const env = agentEnv(ag, rt.home, kept, DATA_DIR, { direct: rt.mode === "direct" }); // 父进程 env → 副本目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
   if (kept.length) log.info(`env defaults kept from parent: ${kept.join(",")}`); // 部署方显式设置的审批类开关
   prepareAgent(ag); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
   const fp = configFingerprint(ag, rt);
@@ -300,7 +300,7 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
   if (existing) return existing;
   const rt = agentRuntime("brain", ag);
   // direct：Agent 自己加载真实配置，只补 overlay.mcp.extra；
-  // sandbox：mcpDelivery=acp 的 Agent 拿 curated 激活集，其余 Agent 自己读沙箱配置文件。
+  // managed：mcpDelivery=acp 的 Agent 拿 curated 激活集，其余 Agent 自己读副本配置文件。
   const mcpServers = activeMcpServers(ag, rt);
   const map = loadSessionMap(ag);
   const saved = map[keyOf(ag, userId)];
