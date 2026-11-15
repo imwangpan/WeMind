@@ -798,7 +798,7 @@ wemind env capture [--key <key>] [--dry-run]
 | 已取消项 | 原计划 | 取消理由 |
 |---|---|---|
 | `wechat_config` / `agent_config` admin MCP | Phase 3：自建本地 MCP server 暴露受控写入口 | 默认 `direct` 下"把修改交给 Agent 侧模型"就够，不需要再造写入口。想法并入 [待办：自带管理 MCP](../待办与后续计划/待办-自带管理-MCP.md) |
-| `wemind config promote`、冲突提示、overlay diff | Phase 3 | promote（副本副本提升回真实配置）在默认 `direct` 下没有主场景；overlay 只剩 MCP 增删，diff 价值低 |
+| `wemind config promote`、冲突提示、overlay diff | Phase 3 | promote（副本提升回真实配置）在默认 `direct` 下没有主场景；overlay 只剩 MCP 增删，diff 价值低 |
 | `wemind doctor` | Phase 2/3：逐 Agent 打印 bin 解析来源、权限检查 | 启动日志 + `scripts/doctor.ps1` + 接入文档已覆盖；再加一个子命令属于重复投入 |
 | `sharedHome: unsupported` 标记 | §13.3：代码层能力标记与失败回退 | 默认 `direct` 且接受代价；限制写在对应接入文档里就够，不需要代码分支 |
 | 混合配置文件三路合并 | Phase 2 | 为"WeMind 替用户改配置"服务；现在改配置交给 Agent 自己 |

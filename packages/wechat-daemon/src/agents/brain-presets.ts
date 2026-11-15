@@ -266,7 +266,7 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
   // - 模型跟随用户 pi 配置（settings.json 的 defaultProvider/defaultModel；managed 下随凭据原样同步，direct 直接用真实目录）；覆盖用 `wemind brain set pi --model "<provider>/<model>"`（session/set_config_option 的 configId 就叫 model）；
   // - MCP：pi 读 <PI_CODING_AGENT_DIR>/mcp.json（`pi mcp list` 实测；不是 settings/mcp.json），格式与 kiro 相同 {mcpServers:{名:{command,args,env}}}；不设 acpMcpServers（pi-acp 只把 mcpServers 存进会话、从不读取）；
   // - 适配器只是桥：真正进程是 PATH 上的 pi 本体（requiresBins 会在缺 pi 时提前报错，而不是等 session/new 才炸）。
-  // - 适配器的会话映射表固定写在真实 home 的 ~/.pi/pi-acp/session-map.json（不随副本走）：跨账号共享的只是 id→会话文件的映射，会话本体仍在各自 home（direct 是真实 ~/.pi/agent/sessions，managed 是账号副本副本）的 sessions/ 下。
+  // - 适配器的会话映射表固定写在真实 home 的 ~/.pi/pi-acp/session-map.json（不随副本走）：跨账号共享的只是 id→会话文件的映射，会话本体仍在各自 home（direct 是真实 ~/.pi/agent/sessions，managed 是账号副本）的 sessions/ 下。
   // - 适配器类不参与 auto 探测（装好适配器 ≠ 已登录/配好模型），用 `wemind brain set|switch pi` 显式选用。
   pi: {
     name: "pi",

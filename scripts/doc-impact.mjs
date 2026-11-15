@@ -6,6 +6,11 @@
  *   npm run doc-impact           打印本次改动触发了哪些规则、每条规则要求同步哪些文档（只读、不失败）
  *   npm run doc-impact:check  断言这些文档确实也在本次 diff 里；缺一个就 exit 1
  *
+ * 两层检查（--check 都跑，互不替代）：
+ *   路径层    RULES 判断「该改的文档有没有出现在 diff 里」，只看路径不看内容；
+ *   内容层    STALE_FACTS 读工作树里文档的最终内容，逐行找已登记为废弃的旧结论，报「文件:行号」。
+ *             这一层与 diff 无关，也不受豁免影响：文档改了但结论没改到位，是路径层抓不到的假绿。
+ *
  * 对比范围：
  *   默认        当前分支相对 main 的 merge-base（含工作区未提交改动）
  *   --staged    暂存区（pre-commit 用）
@@ -18,13 +23,14 @@
  *   - 最近一次提交信息**只在对比范围恰好包含一个提交时**生效；多提交分支不能用 HEAD 的
  *     「Comment only」把整条分支的文档检查一起跳过
  *   允许的理由只有 Pure refactor / Comment only / Test update，见规则表末尾。
+ *   豁免只放行 RULES 的路径检查，绝不放行 STALE_FACTS 的内容检查。
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { RULES, VALID_ESCAPE_HATCH_REASONS } from "./doc-impact.rules.mjs";
+import { RULES, STALE_FACTS, VALID_ESCAPE_HATCH_REASONS } from "./doc-impact.rules.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -134,6 +140,101 @@ export function docPathOf(entry) {
 export function docChanged(entry, changedPaths) {
   const p = docPathOf(entry);
   return changedPaths.has(p);
+}
+
+/**
+ * 内容级校验只扫「结论会写在里面」的文件：仓库文档 + 包源码（日志文案也算结论）。
+ * 刻意排除 scripts/：STALE_FACTS 的 pattern 字面量自身就写在 scripts/doc-impact.rules.mjs 里，
+ * 扫到会自命中；同理排除依赖目录与构建产物。
+ */
+const STALE_SCAN_EXCLUDE = /^(?:\.worktrees\/|\.agents\/|\.git\/|scripts\/|node_modules\/)|(?:^|\/)node_modules\/|(?:^|\/)dist\//;
+
+export function isStaleScanPath(rel) {
+  if (!rel || rel.endsWith("/") || STALE_SCAN_EXCLUDE.test(rel)) return false;
+  if (/^(?:AGENTS\.md|README\.md|llms\.txt)$/.test(rel)) return true;
+  if (/^docs\/.*\.(?:md|txt)$/.test(rel)) return true;
+  if (/^packages\/[^/]+\/README\.md$/.test(rel)) return true;
+  return /^packages\/.*\.ts$/.test(rel);
+}
+
+/** 读工作树里文件的最终内容（含未跟踪文件）；删掉/读不到的文件跳过。 */
+export function collectDocContents() {
+  const tracked = (tryGit(["ls-files"]) ?? "").split(/\r?\n/);
+  const untracked = (tryGit(["ls-files", "--others", "--exclude-standard"]) ?? "").split(/\r?\n/);
+  const files = [];
+  for (const rel of new Set([...tracked, ...untracked])) {
+    if (!isStaleScanPath(rel)) continue;
+    try {
+      files.push({ path: rel, content: fs.readFileSync(path.join(ROOT, rel), "utf8") });
+    } catch {
+      // 索引里已删除、或临时文件被移走：它没有「仍写在文档里」的结论。
+    }
+  }
+  return files;
+}
+
+/** allow 项的 path 可以是精确字符串，也可以是给一类文件用的正则。 */
+function allowPathMatches(rule, rel) {
+  return typeof rule === "string" ? rule === rel : rule.test(rel);
+}
+
+/**
+ * 命中是否落在「有据可查的保留位置」。四个条件全都要满足：路径、所在章节、该行附加条件、
+ * 以及文件全文里的约定标记。marker 是关键：版本边界声明或补注被删掉，allow 立刻失效。
+ */
+export function isStaleHitAllowed(allow, { rel, content, line, section }) {
+  return allow.some((a) => {
+    if (!a.path || !allowPathMatches(a.path, rel)) return false;
+    if (a.section && !a.section.test(section)) return false;
+    if (a.linePattern && !a.linePattern.test(line)) return false;
+    if (a.marker && !a.marker.test(content)) return false;
+    return true;
+  });
+}
+
+/** 纯函数：逐行找已废弃结论，返回 [{ id, since, why, path, line, text }]。 */
+export function checkStaleFacts(facts, files) {
+  const hits = [];
+  for (const fact of facts) {
+    for (const file of files) {
+      const lines = file.content.split(/\r?\n/);
+      let section = "";
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        if (/^#{1,2} /.test(line)) section = line.trim();
+        fact.pattern.lastIndex = 0;
+        if (!fact.pattern.test(line)) continue;
+        if (
+          isStaleHitAllowed(fact.allow ?? [], {
+            rel: file.path,
+            content: file.content,
+            line,
+            section,
+          })
+        )
+          continue;
+        hits.push({
+          id: fact.id,
+          since: fact.since,
+          why: fact.why,
+          path: file.path,
+          line: i + 1,
+          text: line.trim().slice(0, 120),
+        });
+      }
+    }
+  }
+  return hits;
+}
+
+/**
+ * 内容级结论是否在 --check 下拦住本次执行。
+ * 刻意不接收豁免结果：`Docs-Impact: none — Pure refactor` 是「这次改动不必同步文档」的出口，
+ * 不是「仓库里可以继续留着已推翻的结论」的出口；ca63fcb / 621f0cb 就是靠它跳过整条分支。
+ */
+export function staleBlocksCheck(check, staleHits) {
+  if (!check || !staleHits || staleHits.length === 0) return false;
+  return true;
 }
 
 /** 解析豁免声明。格式：`Docs-Impact: none — Pure refactor`。 */
@@ -297,11 +398,39 @@ function printRule(rule, missing) {
   console.log("");
 }
 
+function printStaleHits(hits, check) {
+  if (hits.length === 0) return;
+  const write = (...args) => (check ? console.error(...args) : console.log(...args));
+  write(
+    check
+      ? `doc-impact 内容校验未通过：${hits.length} 处已废弃结论仍写在文档里。\n`
+      : `doc-impact 内容校验提示：${hits.length} 处已废弃结论仍写在文档里（--check 会失败）。\n`,
+  );
+  for (const h of hits) write(`  ${h.path}:${h.line} [${h.id}（${h.since} 起废弃）] ${h.text}`);
+  write("");
+  const seen = new Set();
+  for (const h of hits) {
+    if (seen.has(h.id)) continue;
+    seen.add(h.id);
+    write(`  ${h.id} 的现行结论：${h.why}`);
+  }
+  write("");
+  write(
+    "豁免（`Docs-Impact: none`）只作用于文档路径规则，不能放行废弃结论；按上面的现行结论改正文，或在 scripts/doc-impact.rules.mjs 的 STALE_FACTS 里登记有据可查的保留位置。",
+  );
+}
+
 function main(argv) {
   const check = argv.includes("--check");
   const staged = argv.includes("--staged");
   const baseIndex = argv.indexOf("--base");
   const base = baseIndex >= 0 ? argv[baseIndex + 1] : undefined;
+
+  // 内容层与 diff 无关：读工作树最终内容，且必须在豁免判断之前独立结论。
+  // 放在 collectDiff 之后是为了复用同一份 git 环境；没有对比基准时这一层仍要跑。
+  const staleHits = checkStaleFacts(STALE_FACTS, collectDocContents());
+  printStaleHits(staleHits, check);
+  if (staleBlocksCheck(check, staleHits)) return 1;
 
   const diff = collectDiff({ staged, base });
   if (!diff) {

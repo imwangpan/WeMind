@@ -25,7 +25,7 @@ const log = createLogger("wechat-daemon/mcp");
  * 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。
  *
  * - `direct`（默认）：Agent 用自己的完整真实配置，WeMind 不写任何文件；
- * - `managed`：完整复制到账号目录；全量集（除排除集）按 `mcpDelivery` 写进副本副本或随 ACP 会话下发。
+ * - `managed`：完整复制到账号目录；全量集（除排除集）按 `mcpDelivery` 写进副本或随 ACP 会话下发。
  */
 
 /** managed 模式的 worker 副本根。 */

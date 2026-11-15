@@ -142,10 +142,10 @@ export function writeSettingsBase(ag: ResolvedAgent, configDir: string): boolean
 }
 
 /**
- * 把副本副本里由真实 home 复制来的 MCP 文件再清一遍：
+ * 把副本里由真实 home 复制来的 MCP 文件再清一遍：
  *  - DSH：`profiles/<realProfile>/cordis.patch.yml`（mcpDelivery=acp，MCP 条目在复制时已剥离）；
  *  - Copilot 这类「catalog 文件在配置目录」的 agent：JSON 里的微信条目逐条剔除。
- *  只改副本副本，不碰真实文件。
+ *  只改副本，不碰真实文件。
  */
 export function stripWechatFromConfigCopy(ag: ResolvedAgent, rt: AgentRuntime): void {
   if (rt.mode !== "managed") return;
@@ -159,12 +159,10 @@ export function stripWechatFromConfigCopy(ag: ResolvedAgent, rt: AgentRuntime): 
         if (!removed.length) continue;
         writeFileAtomic(file, text);
         log.warn(
-          `副本副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
+          `副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
         );
       } catch (e) {
-        log.error(
-          `副本副本清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
-        );
+        log.error(`副本清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`);
       }
     }
   }
@@ -182,12 +180,10 @@ export function stripWechatFromConfigCopy(ag: ResolvedAgent, rt: AgentRuntime): 
     adapter.writeCatalog(file, kept);
     const removed = Object.keys(servers).filter((n) => !(n in kept));
     log.warn(
-      `副本副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
+      `副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
     );
   } catch (e) {
-    log.error(
-      `副本副本 MCP 清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`,
-    );
+    log.error(`副本 MCP 清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`);
   }
 }
 
@@ -219,8 +215,8 @@ export function syncProfilePatch(ag: ResolvedAgent, targetHome: string, label: s
     if (removed.length) {
       log.warn(
         ag.mcpDelivery === "acp"
-          ? `${label}副本副本里的 MCP 条目已剥离（由 WeMind 按${label === "大脑" ? "激活集" : "全量集"}经 ACP 注入，真实文件未改）：${removed.join(", ")}`
-          : `真实 profile 里的微信 MCP 已从${label}副本副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
+          ? `${label}副本里的 MCP 条目已剥离（由 WeMind 按${label === "大脑" ? "激活集" : "全量集"}经 ACP 注入，真实文件未改）：${removed.join(", ")}`
+          : `真实 profile 里的微信 MCP 已从${label}副本剔除（防回环，真实文件未改）：${removed.join(", ")}`,
       );
     }
   } catch {

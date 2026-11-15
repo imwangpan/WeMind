@@ -11,7 +11,7 @@
 > **历史/设计说明（2026-10-24 补）**：文中以 `session/load` 为恢复路径；该能力并非所有 ACP agent 都有（如 DSH 只有 `session/resume`）。当前实现按 agent 能力兜底：`session/load` → `session/resume`，都接不上就**如实报错**（不假装成功、也不静默换新会话）。
 >
 > **路由说明（2026-11-02 起）**：本文的「无前缀回话续跑」是当时 MVP 设计；现在**无前缀消息默认归大脑**，回任务要显式寻址（`#<编号> 正文` / `> 正文` / `任务 …`），只有裸「继续」类短句才可能进任务表，以 [repowiki/07](../repowiki/07-远程任务-Worker.md) 与 README 为准。
-> 关联：MVP 设计文档、[使用指南-远程任务（worker）.md](../使用指南/使用指南-远程任务（worker）.md)、README「远程任务（worker）」、`packages/wechat-daemon/src/{worker-pool,worker-acp,task-manager,task-store,control-bridge,worker-sandbox}.ts`、`acp-brain.ts`、`brain-agents.ts`。
+> 关联：MVP 设计文档（已删除；现行设计见 [远程任务-human-in-the-loop设计与实现.md](远程任务-human-in-the-loop设计与实现.md)）、[使用指南-远程任务（worker）.md](../使用指南/使用指南-远程任务（worker）.md)、README「远程任务（worker）」、`packages/wechat-daemon/src/{worker-pool,worker-acp,task-manager,task-store,control-bridge}.ts`（2026-11-06 目录分层后分别在 `tasks/`、`ipc/` 等子目录；原 `worker-sandbox.ts` 已由 `agents/managed/mcp-worker.ts` 取代）、`acp-brain.ts`、`brain-agents.ts`。
 
 ---
 

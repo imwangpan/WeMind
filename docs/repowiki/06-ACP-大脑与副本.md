@@ -172,7 +172,7 @@ MCP **文件格式**知识集中在 `agents/managed/mcp-adapters.ts` 的 `McpAda
 `direct`（默认）下 MCP 完全由 Agent 自己的真实配置决定：
 
 - 文件式 Agent（kiro / opencode / qoder / cline / gemini / pi / Copilot）由 Agent 启动时读自己的配置文件，WeMind 不写、不删、不注入。
-- `acpMcpServers` 的 Agent（DSH / Claude Code / Codex）同样由自己读真实配置：DSH 读 profile YAML、Claude Code 读 `~/.claude.json`、Codex 读 `config.toml`（同名时原生优先）。WeMind **不重发 catalog**，只把微信侧 overlay 的 `mcp.extra` 补进会话、减去 `mcp.disable`。Copilot 虽然也接受 ACP `mcpServers` 声明，但实测只支持 http/sse（我们 catalog 是 stdio），故按文件式处理。
+- `acpMcpServers` 的 Agent（DSH / Claude Code / Codex）同样由自己读真实配置：DSH 读 profile YAML、Claude Code 读 `~/.claude.json`、Codex 读 `config.toml`（同名时原生优先）。WeMind **不重发 catalog**，只把微信侧 overlay 的 `mcp.extra` 补进会话、减去 `mcp.disable`。Copilot 归文件式不是因为「只支持 http/sse」，而是 1.0.108 实测 `session/new.mcpServers` 的 stdio 条目根本不加载（两种写法都 `toolCalls: 0`）；预设据此设 `acpMcpServers: false` + `mcpDelivery: "config"`，`managed` 下写副本 `mcp-config.json`。
 - 微信里的 `加载 / 卸载 MCP` 在 direct 下**原样转给 Agent**（按普通消息进大脑），由 Agent 自己决定是否/如何改配置。WeMind 不维护 direct 的激活集。
 - Agent 真实配置里出现微信 MCP 时**只告警、不阻止启动**（`warnForbiddenNativeMcp`）：WeMind 不替用户剥离，风险由用户判断。WeMind 自己生成的集合（managed / ACP 下发）仍永久排除 `wechat`。
 
