@@ -284,13 +284,15 @@ describe("homeMode：direct / managed", () => {
     const dir = tmp();
     withoutEnv(() => {
       expect(readHomeMode(dir)).toBe("direct");
-      for (const unknown of ["legacy-a", "legacy-b", "legacy-c"]) {
+      for (const unknown of ["sandbox", "legacy-a", "legacy-b", "legacy-c"]) {
         fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: unknown }));
         expect(readHomeMode(dir)).toBe("direct");
       }
       fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: "managed" }));
       expect(readHomeMode(dir)).toBe("managed");
     });
+    expect(normalizeHomeMode("sandbox")).toBeNull();
+    expect(normalizeHomeMode(" SANDBOX ")).toBeNull();
     expect(normalizeHomeMode("legacy-a")).toBeNull();
     expect(normalizeHomeMode("legacy-b")).toBeNull();
     expect(normalizeHomeMode("legacy-c")).toBeNull();
@@ -299,22 +301,6 @@ describe("homeMode：direct / managed", () => {
     expect(normalizeHomeMode("nope")).toBeNull();
     withoutEnv(() => writeHomeMode("managed", dir));
     expect(JSON.parse(fs.readFileSync(homeModePath(dir), "utf-8")).homeMode).toBe("managed");
-  });
-
-  it("旧值 sandbox 按 managed 处理（2026-11-14 改名，老账号不被静默降级成 direct）", () => {
-    const dir = tmp();
-    withoutEnv(() => {
-      fs.writeFileSync(homeModePath(dir), JSON.stringify({ version: 1, homeMode: "sandbox" }));
-      expect(readHomeMode(dir)).toBe("managed");
-    });
-    expect(normalizeHomeMode("sandbox")).toBe("managed");
-    expect(normalizeHomeMode(" SANDBOX ")).toBe("managed");
-    process.env.WEMIND_HOME_MODE = "sandbox";
-    try {
-      expect(readHomeMode(dir)).toBe("managed");
-    } finally {
-      delete process.env.WEMIND_HOME_MODE;
-    }
   });
 
   it("direct 直接使用真实配置目录，不生成任何副本", () => {

@@ -82,7 +82,7 @@
 | `direct` | 启动路径不生成副本、不注入 `homeEnvVar` / 预设 `env`；Agent 直接读取完整真实配置。WeMind 只保留 `envDefaults`（yolo 默认值）与只读凭据桥接。只有用户显式执行 `wemind config agent ...` 才写真实配置；微信侧 overlay 只由显式 `wemind config wechat ...` 写入，且文件式 Agent 不消费 | **默认**；单机单人；要求“终端怎么配，微信就怎么跑” |
 | `managed` | 完整复制到账号目录，Agent 与真实配置隔离；技能/记忆按 `inheritDirs` / `inheritFiles` 选择性继承 | 多账号不同人、不可信任务、Agent 不支持共享 home、需要回滚 |
 
-**默认：`direct`。** 现有账号迁移后也进入 `direct`；`managed` 保留为显式选项。历史遗留值 `sandbox`（`managed` 的曾用名，2026-11-14 改名）读取时按 `managed` 处理并告警一次；其它无法识别的值回落 `direct`。新写入只写 `direct / managed`。
+**默认：`direct`。** 现有账号迁移后也进入 `direct`；`managed` 保留为显式选项。`homeMode` 是未发布功能（`feat/agent-parity-mode`），没有老账号遗留值要兼容：写入只写 `direct / managed`，读取时无法识别的取值按 `direct` 处理。
 
 ### 2.2 副本隔离的取舍
 
@@ -109,7 +109,7 @@
 
 Phase 1 已落地（本分支）：
 
-- 账号默认 `homeMode = direct`（`agents/config/home-mode.ts`），读取 `<账号>/runtime.json`；缺失/损坏回落 `direct`，旧值 `sandbox` 按 `managed` 处理并告警一次，`WEMIND_HOME_MODE` 只做一次性覆盖。
+- 账号默认 `homeMode = direct`（`agents/config/home-mode.ts`），读取 `<账号>/runtime.json`；缺失/损坏/无法识别的取值回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖。
 - `agentRuntime("brain"|"worker", ag)` 在 `direct` 下直接返回 Agent 的真实配置目录，`configDir === home`；WeMind 不生成任何配置副本、不注入 `homeEnvVar`、不写 settings / MCP / 权限文件。`managed` 才使用 `brain-home` / `worker-home`，由 adapter 生成副本并按 `inheritDirs` / `inheritFiles` 继承。
 - brain 与 worker 的启动/会话 `cwd` 改为账号级默认工作区（`<账号>/workspace/brain`、`<账号>/workspace/worker`，`agents/config/workspace.ts`）；`session-cwd.json` 记录 `<agent>:<sessionId> → cwd`，恢复旧会话时优先使用它。`WEMIND_WORKER_CWD` 与 `task --cwd` 仍是一次性覆盖。
 - `direct` 的 MCP 完全由 Agent 真实配置决定：文件式 Agent 自己读配置，DSH 读 profile YAML 的 `dsh-mcp-client` 条目，Claude Code / Copilot / Codex 读各自的 `.claude.json` / `mcp-config.json` / `config.toml`。WeMind **不重发 catalog**；只有用户显式配置的微信独享 `overlay.mcp.extra` 会通过 ACP 补进会话（仅 `acpMcpServers` 的 Agent）。`加载/卸载 MCP` 在 direct 下原样转给 Agent（由它自己改配置）。`managed` 才是 brain 默认空（激活集按 agent 分键持久化在 `<账号>/brain-mcps.json`，`version: 2`）、worker 真实全量减 `wechat`；`mcpDelivery: "acp"` 的 Agent 由 WeMind 经 ACP 投递，文件式 Agent 写副本配置。
@@ -814,7 +814,7 @@ wemind env capture [--key <key>] [--dry-run]
 ### 15.1 新账号
 
 - 默认 `homeMode = direct`。
-- 创建 `<账号>/workspace/{brain,worker}`、`media/inbound`、`agent-overrides/` 目录与空的 `wechat-settings.json`（`{version:1, replyStyle:null}`；已存在则不覆盖）；不主动写 `workspace.json` / `runtime.json`（缺省分别就是 managed / direct，账号目录搬家后不会留下失效绝对路径）。per-agent 的 `agent-overrides/<agent>.json` 只在首次执行 `wemind config wechat ...` 写入时按需生成，不预创建空文件。
+- 创建 `<账号>/workspace/{brain,worker}`、`media/inbound`、`agent-overrides/` 目录与空的 `wechat-settings.json`（`{version:1, replyStyle:null}`；已存在则不覆盖）；不主动写 `workspace.json` / `runtime.json`（缺省的 workspace 就是账号目录下的默认工作区 `mode=default`、缺省的 `homeMode` 就是 `direct`，账号目录搬家后不会留下失效绝对路径）。per-agent 的 `agent-overrides/<agent>.json` 只在首次执行 `wemind config wechat ...` 写入时按需生成，不预创建空文件。
 - 不创建 `brain-home` / `worker-home`，除非用户选择 `managed`。
 
 ### 15.2 老账号

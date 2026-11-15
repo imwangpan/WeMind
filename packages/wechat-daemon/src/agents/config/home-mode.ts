@@ -1,12 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
+import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
-
-const log = createLogger("wechat-daemon/config");
-let legacyModeWarned = false;
 
 /**
  * homeMode：Agent 的配置/会话/记忆从哪里读。
@@ -25,31 +22,13 @@ export function homeModePath(dir: string = DATA_DIR): string {
   return path.join(dir, "runtime.json");
 }
 
-/**
- * 旧值 `sandbox` 是 `managed` 的曾用名（2026-11-14 改名）：读到就按 `managed` 处理，
- * 避免老账号的 `runtime.json` / `WEMIND_HOME_MODE` 被静默当成 `direct`。
- */
-function migrateLegacyMode(v: string): HomeMode | null {
-  if (v === "sandbox") {
-    if (!legacyModeWarned) {
-      legacyModeWarned = true;
-      log.warn(
-        "homeMode 旧值 sandbox 已改名为 managed：本次按 managed 处理；建议执行 `wemind config home-mode managed` 写回",
-      );
-    }
-    return "managed";
-  }
-  return null;
-}
-
 export function normalizeHomeMode(value: unknown): HomeMode | null {
   if (typeof value !== "string") return null;
   const v = value.trim().toLowerCase();
-  if (v === "direct" || v === "managed") return v;
-  return migrateLegacyMode(v);
+  return v === "direct" || v === "managed" ? v : null;
 }
 
-/** 读账号级 homeMode；环境变量 `WEMIND_HOME_MODE` 是一次性覆盖，缺失/损坏回落 `direct`、旧值 `sandbox` 按 `managed` 处理并告警一次。 */
+/** 读账号级 homeMode；环境变量 `WEMIND_HOME_MODE` 是一次性覆盖，缺失/损坏/无法识别的取值回落 `direct`。 */
 export function readHomeMode(dir: string = DATA_DIR): HomeMode {
   const env = normalizeHomeMode(process.env.WEMIND_HOME_MODE);
   if (env) return env;
