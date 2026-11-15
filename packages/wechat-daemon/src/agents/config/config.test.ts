@@ -83,17 +83,16 @@ describe("workspace", () => {
     expect(loadWorkspaceConfig(dir).config.brain).toMatchObject({ mode: "default" });
   });
 
-  it("旧值 mode=managed 按 default 处理（2026-11-14 改名，避免与 homeMode=managed 撞名）", () => {
+  it("无法识别的 mode 按默认工作区处理并报告（不兼容旧值 managed）", () => {
     const dir = tmp();
     fs.writeFileSync(
       workspaceConfigPath(dir),
-      JSON.stringify({ version: 1, brain: { mode: "managed" }, worker: { mode: "managed" } }),
+      JSON.stringify({ version: 1, brain: { mode: "managed" }, worker: { mode: "default" } }),
     );
-    expect(resolveWorkspace("brain", dir)).toMatchObject({
-      mode: "default",
-      path: defaultWorkspacePath("brain", dir),
-    });
-    expect(resolveWorkspace("brain", dir).problem).toBeUndefined();
+    const ws = resolveWorkspace("brain", dir);
+    expect(ws.mode).toBe("default");
+    expect(ws.path).toBe(defaultWorkspacePath("brain", dir));
+    expect(ws.problem).toMatch(/段无效/);
   });
 
   it("external 必须是已存在目录；账号目录/家目录/Agent 配置目录被拒", () => {

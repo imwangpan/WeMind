@@ -582,7 +582,7 @@ MCP 数量会同时影响：
 
 取值只有两个：`default`（账号目录下的默认工作区，不需要写 `path`，代码按账号目录计算，账号目录整体搬家后仍然有效）与 `external`（必须写绝对路径）。
 
-> 这里的 `mode` 与 `homeMode` 无关：`homeMode=managed` 说的是「Agent 配置用账号副本」，`workspace.mode` 说的是「会话 cwd 放哪儿」。为避免同名误读，工作区取值不使用 `managed` 这个词；旧文件里读到 `mode: "managed"` 按 `default` 处理并告警一次，下次 `wemind workspace set|reset` 写回新值。
+> 这里的 `mode` 与 `homeMode` 无关：`homeMode=managed` 说的是「Agent 配置用账号副本」，`workspace.mode` 说的是「会话 cwd 放哪儿」。为避免同名误读，工作区取值不使用 `managed` 这个词；写成其它取值按「非法」处理——回落默认工作区并在 `wemind workspace show` 里报告，重跑 `wemind workspace set|reset` 即写回。
 
 外部项目：
 

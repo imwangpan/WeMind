@@ -2,13 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
+import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
 import { ACP_AGENT_PRESETS } from "../brain-presets.js";
-
-const log = createLogger("wechat-daemon/config");
-let legacyModeWarned = false;
 
 export type AgentRole = "brain" | "worker";
 /**
@@ -54,32 +51,10 @@ function emptyConfig(): WorkspaceConfig {
   };
 }
 
-/**
- * 旧值 `managed` 是 `default` 的曾用名（2026-11-14 改名，避免与 `homeMode=managed` 撞名）：
- * 读到就按 `default` 处理，老账号不会因为一个取值被当成「配置损坏」。
- */
-function legacyWorkspaceMode(v: unknown): WorkspaceMode | null {
-  if (v === "managed") {
-    if (!legacyModeWarned) {
-      legacyModeWarned = true;
-      log.warn(
-        "workspace.json 的 mode=managed 已改名为 default：本次按默认工作区处理；下次 `wemind workspace set|reset` 会写回新值",
-      );
-    }
-    return "default";
-  }
-  return null;
-}
-
 function normEntry(raw: unknown): WorkspaceEntry | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const j = raw as Record<string, unknown>;
-  const mode =
-    j.mode === "external"
-      ? "external"
-      : j.mode === "default"
-        ? "default"
-        : legacyWorkspaceMode(j.mode);
+  const mode = j.mode === "external" ? "external" : j.mode === "default" ? "default" : null;
   if (!mode) return null;
   const p = typeof j.path === "string" && j.path.trim() ? j.path.trim() : undefined;
   return p ? { mode, path: p } : { mode };

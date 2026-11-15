@@ -223,7 +223,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain-mcps.json`                             | **仅 `managed`**：brain 当前激活的 MCP 集（按 agent 分键，默认空）；`direct` 不读，MCP 完全由 Agent 真实配置决定 |
 | `runtime.json`                                | 账号级 `homeMode`：默认 `direct`；可显式设 `managed`。缺失/损坏回落 `direct`；旧值 `sandbox` 按 `managed` 处理并告警一次，`WEMIND_HOME_MODE` 只做一次性覆盖；按需创建 |
 | `agent-overrides/<agent>.json`                | 微信侧 overlay：只支持 `mcp.disable` / `mcp.extra`（不写 Agent 真实配置）；目录随账号创建，文件在首次写入时生成。默认改 Agent 真实配置，只有明确说“微信侧/仅微信”时才用它 |
-| `workspace.json` / `workspace/{brain,worker}/` | brain / worker 默认工作区配置与默认目录（`workspace.mode` 只有 `default` / `external`，与 `homeMode=managed` 无关）；`workspace/{brain,worker}/` 随账号创建，`workspace.json` 按需创建；改默认值只影响新会话 |
+| `workspace.json` / `workspace/{brain,worker}/` | brain / worker 默认工作区配置与默认目录（`workspace.mode` 只有 `default` / `external`，与 `homeMode=managed` 无关；取值非法时按默认工作区处理并提示）；`workspace/{brain,worker}/` 随账号创建，`workspace.json` 按需创建；改默认值只影响新会话 |
 | `session-cwd.json`                            | `<agent>:<sessionId> → cwd`；恢复旧会话时使用，避免把旧会话搬到新工作区；按需创建 |
 | `env.json`                                    | 可选的非敏感环境快照（PATH/代理/locale）；API key/token 不落盘；按需创建 |
 | `wechat-settings.json`                        | 账号级微信行为设置；目前只有 `replyStyle`（`null` 默认 / `concise` 精简），每轮现读、下一条消息生效 |
