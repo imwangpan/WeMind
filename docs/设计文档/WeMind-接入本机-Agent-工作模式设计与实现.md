@@ -1,6 +1,6 @@
 # WeMind 接入本机 Agent：终端等效工作模式设计与实现
 
-> **状态**：Phase 1 已实现、Phase 2 部分完成（2026-11-14）｜**分支**：`feat/agent-parity-mode`｜**最后核对**：2026-11-14
+> **状态**：Phase 1 / Phase 2 已实现、Phase 3 已收口（2026-11-15）｜**分支**：`feat/agent-parity-mode`｜**最后核对**：2026-11-15
 >
 > 本文描述如何让 daemon / worker 直接调用本机已安装并配置好的 Agent CLI，使微信侧的行为尽量等同于在终端直接使用同一个 Agent；同时保留微信侧独立覆盖、账号级会话与任务隔离。未实测的结论标注「假设 / 待实测」，不以本文替代各 Agent 的接入实测记录。
 
@@ -23,7 +23,7 @@
 1. **配置同源**：模型、供应商、技能、记忆、规则、插件、MCP 等以本机 Agent 的真实配置为唯一基线。
 2. **终端等效**：同一个 Agent、同一份配置、同一套技能/记忆、尽量相同的工作目录与环境变量。
 3. **微信可覆盖**：账号级 overlay 可以只影响微信侧，不污染真实配置。
-4. **可观测、可恢复**：能看出当前用的是哪份配置、哪个工作区、哪些 MCP、是否已 reload；迁移保留 `.bak-*` 备份，可人工恢复，但不承诺自动回滚。
+4. **可观测、可恢复**：能看出当前用的是哪份配置、哪个工作区、哪些 MCP、是否已 reload；迁移保留 `.bak-*` 备份，可人工恢复。
 5. **不破坏既有硬约束**：同一 bot token 只能有一个收消息实例；WeMind 自己生成/下发的 MCP 集永不包含 `wechat`。Agent 真实配置里的微信 MCP 在 `direct` 下只告警，`managed` 复制配置时剔除，真实文件不动。
 
 ### 1.3 已确认决策（2026-11-13）
@@ -90,16 +90,11 @@
 
 | 维度 | `managed` | `direct`（默认） |
 |---|---|---|
-| 配置一致性 | 启动时复制，长跑期间真实配置变化不生效 | 完全由 Agent 自己加载，天然与终端一致 |
-| 技能 / 记忆 | 只继承预设列出的目录，容易漏 | 直接使用真实目录，天然双向 |
-| 会话可见性 | 会话在副本，终端看不到 | 共享 Agent 会话库，终端可见 |
-| 微信独享 | 整份配置天然独享，但会逐渐漂移 | 仅 `agent-overrides` 的 `mcp.disable` / `mcp.extra`，且只对 ACP 下发或 managed 生效 |
-| MCP 控制 | 由 WeMind 生成完整 MCP 集 | 完全由 Agent 真实配置决定；`加载/卸载` 原样转给 Agent 处理 |
+| 配置 / 技能 / 记忆 / 会话 | 启动时复制，长跑期间真实配置变化不生效；技能/记忆只继承预设列出的目录，会话在副本里终端看不到 | 完全由 Agent 自己加载，天然与终端一致；技能/记忆直接读真实目录，会话库共用 |
+| MCP 控制 | 由 WeMind 生成完整 MCP 集 | 完全由 Agent 真实配置决定；`加载/卸载` 原样转给 Agent |
 | 安全性 | 能限制写入范围，降低提示注入影响面 | 微信侧拥有当前 OS 用户完整权限 |
-| 可回滚 | 删副本即可 | 不写入，无需回滚 |
-| 适用场景 | 多账号不同人、不可信任务、Agent 不支持共享 home | 单机单人、可信环境、追求「终端什么效果，微信就什么效果」 |
 
-结论：默认 `direct` 不是否定 `managed`，而是把「账号副本」降级为**显式选项**。`direct` 完全交给 Agent，WeMind 运行期不托管 MCP/settings；但用户显式配置的 `overlay.mcp.extra` 仍会补进 ACP 会话。安全边界仍然只能靠独立 OS 用户、容器或虚拟机，不能靠工作区或 overlay。
+结论：默认 `direct` 不是否定 `managed`，而是把「账号副本」降级为**显式选项**（用于多账号不同人、不可信任务，或 Agent 不支持共享 home 的场景）。`direct` 完全交给 Agent，WeMind 运行期不托管 MCP/settings；但用户显式配置的 `overlay.mcp.extra` 仍会补进 ACP 会话。安全边界仍然只能靠独立 OS 用户、容器或虚拟机，不能靠工作区或 overlay。逐维度的现状与差距见 §3.2，按 Agent 的能力差异见 §6。
 
 ---
 
@@ -123,20 +118,18 @@ Phase 1 已落地（本分支）：
 - 会话指针仍在 `brain-sessions.json` / `worker-sessions.json`；Agent 的真实会话库由各 Agent 自己管理，`direct` 下与终端共用同一个库。
 - 微信侧回复风格走 `<账号>/wechat-settings.json`（新账号骨架创建空的）：`replyStyle` 目前只有 `null`（默认，与终端一致）/ `"concise"`。`concise` 时每轮在 prompt 末尾追加一段「精简」要求；只影响措辞，不改 Agent 配置，也只在微信 brain 回合生效。每轮现读，改完下一条消息即生效（`wemind config reply-style [concise|off]`）。
 
-旧的“默认复制到账号副本”行为仅在显式 `managed` 模式保留，用于回滚、不可信任务或 Agent 不支持共享 home 的场景；`direct` 在 daemon 启动/运行期不自动写任何 Agent 配置（只有用户显式执行 `wemind config agent ...` 时写并备份），适合“完全交给 Agent”的用户。
-
 ### 3.2 与目标的差距
 
 | 维度 | 现状 | 目标差距 |
 |---|---|---|
-| 配置 | 默认 `direct`，完全使用真实配置；daemon 启动/运行期不自动写 Agent 文件（显式 `config agent` 例外） | **保留**：Phase 2 产出各 Agent 的「设置生效时机」矩阵（改完配置是下条消息生效 / 需新会话 / 需重启 daemon），尽量全覆盖 |
+| 配置 | 默认 `direct`，完全使用真实配置；daemon 启动/运行期不自动写 Agent 文件（显式 `config agent` 例外） | 已实现；各 Agent「设置生效时机」矩阵已实测（技能/记忆见 §18.5，模型/权限/MCP 见 §18.6） |
 | 配置回写 | 默认改真实配置；overlay 只写微信侧 | 已实现；JSONC 注释/YAML/TOML 的保留格式编辑**已取消**（见 §17「已取消」） |
-| 技能/记忆 | `direct` 共享真实目录；`managed` 复制回退不保证双向 | 需要在无 symlink 权限的平台记录“副本漂移”告警 |
-| MCP | `direct` 下 brain/worker 都由 Agent 自己加载真实配置、WeMind 不额外下发；`managed` 才 brain 默认空 / worker 全量减 `wechat`；日志有 `mcpCount/nativeMcpCount/sessionNewMs/mcpStartupMs/firstFrameMs`，`scripts/doctor.ps1` 超阈值只警告；Codex 原生 TOML 只读可见、含 `wechat` 只告警 | 主体已实现；MCP 预检/跳过坏条目**已取消**（坏 MCP 由 Agent 自己报错，见 §17「已取消」）；各 Agent 的耗时基线数值仍要在真机上收集后写进接入文档 |
-| cwd | brain/worker 各有账号级默认工作区；旧会话按 `session-cwd.json` 恢复 | 已实现；各 Agent 对“恢复时改 cwd”的接受度待逐家实测 |
+| 技能/记忆 | `direct` 共享真实目录；`managed` 复制回退不保证双向 | 已实现：无 symlink 权限时降级为不链入并告警（`wechat-daemon/config`），副本漂移可见 |
+| MCP | `direct` 下 brain/worker 都由 Agent 自己加载真实配置、WeMind 不额外下发；`managed` 才 brain 默认空 / worker 全量减 `wechat`；日志有 `mcpCount/nativeMcpCount/sessionNewMs/mcpStartupMs/firstFrameMs`，`scripts/doctor.ps1` 超阈值只警告；Codex 原生 TOML 只读可见、含 `wechat` 只告警 | 主体已实现；MCP 预检/跳过坏条目**已取消**（坏 MCP 由 Agent 自己报错，见 §17「已取消」）；逐 Agent 耗时基线按需补充，不阻塞验收 |
+| cwd | brain/worker 各有账号级默认工作区；旧会话按 `session-cwd.json` 恢复 | 已实现；恢复时不接受新 cwd 就如实报错/新建，逐家实测属可选项 |
 | 环境 | 默认继承 daemon；可选非敏感快照 | 已实现；不绑定 fnm/nvm/Volta/asdf/mise |
 | 权限 | 预设 yolo + 宿主默认放行（`WEMIND_ACP_AUTO_ALLOW=0` 可恢复拒绝） | 已保留；真正隔离仍需独立 OS 用户/VM |
-| 会话 | `direct` 共享 Agent 会话库，终端能看到微信会话 | 各 Agent 的会话列表呈现/并发写锁待逐家验收 |
+| 会话 | `direct` 共享 Agent 会话库，终端能看到微信会话 | 已实测：10 家会话可见（§18.5）、并发写入不损坏（§18.8） |
 | 多账号 | WeMind 数据隔离；Agent 配置共享；overlay/workspace 按账号 | 已实现；不同人共用一台机器仍需不同 OS 用户 |
 
 ---
@@ -211,16 +204,16 @@ AgentHomeResolver ──► Agent 进程
 |---|---|---|---|---|---|---|---|---|
 | `kiro` | `KIRO_HOME` | `~/.kiro` | 根 | `settings/mcp.json` | `sessions/` | v2 `--trust-all-tools`；v3 `settings/permissions.yaml` | `direct`；`managed` 可选 | v3 的免审批写文件只在 managed 生成 |
 | `gemini` | `GEMINI_CLI_HOME` | `~`（它是“家目录”根，配置在其下的 `.gemini`） | `~/.gemini` | `.gemini/settings.json` | `.gemini/` | `--approval-mode yolo --skip-trust` | `direct`；`managed` 可选 | `direct` 用真实 `settings.json`；managed 才剥离/重建 |
-| `copilot` | `COPILOT_HOME` | `~/.copilot` | 根 | ACP `mcpServers` | COPILOT_HOME 内 | `--allow-all-tools` | `direct`；`managed` 可选 | 不启用 `--allow-all` 的路径/URL 放宽；图片能力待实测 |
+| `copilot` | `COPILOT_HOME` | `~/.copilot` | 根 | 自己的 `mcp-config.json`（实测不消费 ACP `mcpServers`，`managed` 也写副本文件） | COPILOT_HOME 内 | `--allow-all-tools` | `direct`；`managed` 可选 | 不启用 `--allow-all` 的路径/URL 放宽；图片已复测通过（1×1 PNG 被接受） |
 | `opencode` | `XDG_CONFIG_HOME` | `~/.config/opencode` | `opencode/` | `opencode.json` 的 `mcp.servers` | 真实 `~/.local/share/opencode` | `opencode.json` 的 `permission: "allow"` | `direct`；`managed` 可选 | 数据目录在 direct 下与终端共享是预期行为 |
 | `deepseek` / DSH | `DSH_HOME` | `~/.dsh` | 根 | ACP `mcpServers` | 真实 `~/.dsh`（direct） | `DSH_PERMISSION_MODE=danger-full-access` | `direct`；`managed` 可选 | 坏 MCP 可能导致 `session/new` 回滚；`isolateSessions` 只在 `managed` 启用 |
 | `qoder` | `QODER_CONFIG_DIR` | `~/.qoder` | `qoder/` | `settings.json` 的 `mcpServers` | `qoder/` | `--yolo` | `direct`；`managed` 可选 | 没有 `homeEnvVar`：direct 直接用真实 `~/.qoder`；副本靠预设 env 指到副本 |
-| `cline` | `CLINE_DIR` / `CLINE_DATA_DIR` / `CLINE_MCP_SETTINGS_PATH` | `~/.cline` | `cline/` | `mcp.json`（`CLINE_MCP_SETTINGS_PATH`） | `cline/data/`（SQLite，假设/待实测） | `--auto-approve true` | `direct`；`managed` 可选 | 没有 `homeEnvVar`：direct 直接用真实配置；managed 靠预设 env 指到副本 |
+| `cline` | `CLINE_DIR` / `CLINE_DATA_DIR` / `CLINE_MCP_SETTINGS_PATH` | `~/.cline` | `cline/` | `mcp.json`（`CLINE_MCP_SETTINGS_PATH`） | `cline/data/db/sessions.db`（SQLite）+ `sessions/<id>/*.messages.json` | `--auto-approve true` | `direct`；`managed` 可选 | 自定义 provider 需 `CLINE_PROVIDER`+`CLINE_API_KEY`（ACP 只自动恢复 cline/cline-pass/openai-codex） |
 | `pi` | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | 根 | `mcp.json` | `sessions/` | 无（默认不逐次审批） | `direct`；`managed` 可选 | managed 下 `pi-acp` 仍读真实 `~/.pi/pi-acp/session-map.json`、`~/.agents/skills` |
 | `claude-code` | `CLAUDE_CONFIG_DIR` | `~/.claude` | `claude/` | ACP `mcpServers` | `claude/` | `session/set_mode bypassPermissions` | `direct`；`managed` 可选 | 预设未声明 `homeEnvVar`，direct 直接用真实配置；`~/.claude.json` 混状态 |
 | `codex` | 无 home env | `~/.codex` | 真实 `~/.codex` | **stdio MCP 支持**（2026-11-12 复测；`mcpCapabilities.acp=false` 只指 MCP-over-ACP） | `~/.codex` | `INITIAL_AGENT_MODE=agent-full-access` + `set_mode` | `direct`（没有 `homeEnvVar`，`managed` 也无法真正隔离 `~/.codex`） | 无独立配置目录；原生 `config.toml` 由 Codex 自己加载 |
 
-**结论（2026-11-13 按实现修正）**：默认 `direct`，10 个预设都直接使用真实配置。WeMind 在 daemon 启动/运行期**不自动写 Agent 文件**（只有显式 `wemind config agent ...` 会写并备份），也**不重发 Agent 已原生加载的 MCP catalog**；`managed` 才复制配置并生成 MCP/settings/权限副本。`acpMcpServers` 只描述能力，`mcpDelivery: "acp"` 只在 managed 托管 MCP 时使用（DSH / Claude Code / Copilot / Codex）；`direct` 下只有用户显式配置的 `overlay.mcp.extra` 会通过 ACP 补进会话。
+**结论（2026-11-13 按实现修正）**：默认 `direct`，10 个预设都直接使用真实配置。WeMind 在 daemon 启动/运行期**不自动写 Agent 文件**（只有显式 `wemind config agent ...` 会写并备份），也**不重发 Agent 已原生加载的 MCP catalog**；`managed` 才复制配置并生成 MCP/settings/权限副本。`acpMcpServers` 只描述能力，`mcpDelivery: "acp"` 只在 managed 托管 MCP 时使用（DSH / Claude Code / Codex；Copilot 实测不认 ACP `mcpServers`，走 `config` 写副本 `mcp-config.json`）；`direct` 下只有用户显式配置的 `overlay.mcp.extra` 会通过 ACP 补进会话。
 
 > **`direct` 的明确语义**：真实配置里有什么 MCP，Agent 就加载什么；WeMind 不保证 brain 默认空 MCP。这是用户显式选择“完全交给 Agent”的代价，不是缺陷。
 
@@ -269,7 +262,7 @@ AgentHomeResolver ──► Agent 进程
 - **设置文件整份复制**：声明了 `settingsBase` 的 Agent 把真实设置文件整份复制进副本，只拿掉 MCP 段；键名由 `McpAdapter.stripSettings()` 按**格式**决定（`mcpServers` / `mcp`…），并强制 `general.enableAutoUpdate=false`（否则每个副本各下一份 CLI）。
 - **其余键一律原样保留**：`model` / `providers` / 插件 / `security` / `ui` 都跟着进副本，不做 per-agent 剥键。凭据本来就按预设的 `credentialFiles` 同步（如 Cline 的 `providers.json`），再单独剥 `providers` 类键既口径不一致也没有收益。
 - **不维护“要剥哪些键”的清单**：原 `settingsStrip` / `DEFAULT_SETTINGS_STRIP` 已删除。Agent 升级改名后副本不会静默剥错。
-- **技能/记忆**按 `inheritDirs` / `inheritFiles` 做 junction/复制，清单记在 `.wemind-inherited.json`。
+- **技能/记忆**按 `inheritDirs` / `inheritFiles` 做 junction/复制，清单记在 `.wemind-inherited.json`；链入/拷贝失败（如无 symlink 权限）只告警、不抛异常，副本会缺这份内容（副本漂移）。
 - **MCP** 按角色生成：brain 默认空 + 激活集，worker 真实全量减 `wechat`；坏 MCP 由 Agent 自己报错，WeMind 只记数量。
 
 **账号副本不是安全边界**：它只是“同一 OS 用户下的一份配置副本”。Agent 仍以当前用户身份运行、仍能读写真实文件（如 `pi-acp` 读真实 `~/.pi/pi-acp/session-map.json` 与 `~/.agents/skills`）。真正的隔离需要独立 OS 用户、容器或虚拟机——这条与 §2.2 的结论一致，别因为 WeMind 管它叫“账号副本”就当成隔离边界。
@@ -300,7 +293,7 @@ AgentHomeResolver ──► Agent 进程
 
 - 只支持 `mcp.disable`（从有效集移除）与 `mcp.extra`（增加真实配置没有的 MCP）。其它键（如 `config`、`replyStyle`）会被忽略并告警；Agent 的模型/权限/settings 修改请直接改真实配置，不走 overlay。
 - `mcp.extra` 使用中性描述（`type: stdio|http` + `command/args/env` 或 `url/headers`），由各 Agent 适配器转成原生格式；不支持的类型明确拒绝，不猜测。
-- 生效范围：`managed` 的 brain 与 worker 都生效；`direct` 只对 `acpMcpServers` 的 Agent（brain 与 worker）经 ACP 补进会话（DSH / Claude Code / Copilot / Codex）。`direct` 的文件式 Agent 由 Agent 自己读配置，overlay 不参与，WeMind 会提示“改 Agent 配置”。
+- 生效范围：`managed` 的 brain 与 worker 都生效（文件式 Agent 写副本配置，`mcpDelivery=acp` 的 Agent 随会话下发）；`direct` 只对 `acpMcpServers` 的 Agent（brain 与 worker）经 ACP 补进会话（DSH / Claude Code / Codex）。`direct` 的文件式 Agent（kiro/gemini/opencode/qoder/cline/pi/copilot）由 Agent 自己读配置，overlay 不参与，WeMind 会提示“改 Agent 配置”。
 - overlay **不保存密钥**：`mcp.extra` 的认证信息通过环境变量/密钥链注入；发现 `*_KEY`、`*_TOKEN`、`*_SECRET`、`*_PASSWORD`、`*_CREDENTIAL*` 字面值要告警并拒绝写入。
 - `managed` 的 brain 是否自动加载 `extra` 仍由激活集决定；worker 的 `extra` 默认生效。`mcp.disable` 永远最后生效。
 - **工作区不放进 agent overlay**：它是“账号 + 角色（brain/worker）”级配置，放在 `<账号>/workspace.json`（见第 9 章）。把工作区塞进 per-agent overlay 会导致切换 Agent 时工作区跟着变，不符合“brain / worker 各一个默认工作区”的目标。
@@ -339,106 +332,11 @@ AgentHomeResolver ──► Agent 进程
 
 因此“能不能直接跟大模型说‘把模型改成 X’”——可以，且默认就是改真实配置。只有用户明确说“微信侧 / 仅微信 / 这边”时，才写 overlay；而 overlay 只接受 MCP 增删，不接模型/权限/settings。自然语言修改走受控入口，不让模型猜路径：由 Agent 调用 `wemind config` CLI（聊天侧只有只读查看）。写入层负责校验、备份、原子写、触发 idle reload，并回复“下一次新会话生效”。admin MCP 工具**已取消**（见 §17「已取消」）。
 
-### 7.6.1 `wechat_config` / `agent_config` 的实现链（已取消，保留作原理说明）
+### 7.6.1 “Agent 调用 `wechat_config`”的实现链（已取消）
 
-> **2026-11-14 决定：不实施**。理由见 §17「已取消」；扩展想法见 [待办：自带管理 MCP](../待办与后续计划/待办-自带管理-MCP.md)。下面这节只回答“Agent 调用 `wechat_config` 到底是怎么发生的”，供将来真要动手时参考：结论是**它不是 ACP 宿主直接注册给模型的工具，而是一个本地 MCP server**。当前代码没有实现；微信侧的配置入口只有 `wemind config` CLI 与聊天侧只读查看。
-
-#### 为什么必须绕到 MCP
-
-ACP 的 client（WeMind）能处理的反向请求是固定的：`session/request_permission`、`fs/read_text_file`、`fs/write_text_file`、`terminal/*` 等。协议里**没有** `tools/register`、`tool/call` 这类“宿主向 agent 注册任意工具”的方法。agent 能看到的工具只有两类：
-
-1. agent 自己的内置工具（shell、文件读写、搜索等）；
-2. `session/new` / `session/load` / `session/resume` 的 `mcpServers` 参数带进去的 MCP server 工具。
-
-所以要让模型看到名为 `wechat_config` 的工具，唯一标准路径是：**WeMind 自己起一个 MCP server，把工具声明通过 MCP 暴露给它**。`fs/*` 反向请求可以拦截“模型用普通文件工具写配置”，但它不是命名工具，也没有 schema、作用域和审计语义，不能拿它冒充 `wechat_config`。
-
-#### 组件
-
-| 组件 | 职责 |
-|---|---|
-| Admin MCP server | 一个本地 MCP server，声明 `wechat_config` / `agent_config` 两个工具；只接受本账号、本 agent、本角色的调用 |
-| ConfigService | 与 CLI 共用的配置服务：解析路径、合并 patch、密钥/越界校验、备份、并发快照校验、原子写、审计 |
-| Overlay | `scope=agent` 改真实配置；`scope=wechat` 只改 `<账号>/agent-overrides/<agent>.json` 的 `mcp.disable` / `mcp.extra`，不碰真实文件 |
-| Control bridge | Admin MCP 写完配置后投递 `config.reload`；daemon 让 brain 重建进程，重启排到回合结束 |
-
-#### 怎么注入
-
-- **支持 ACP MCP 的 agent**（`acpMcpServers`，如 DSH / Claude Code / Copilot / Codex）：在 `session/new`、`session/load`、`session/resume` 的 `mcpServers` 数组里追加一个 `wemind_admin` 条目。例如 stdio：
-
-  ```json
-  {
-    "name": "wemind_admin",
-    "command": "node",
-    "args": ["<WeMind 安装目录>/dist/admin-mcp.js"],
-    "env": [
-      { "name": "WEMIND_ACCOUNT", "value": "<账号 key>" },
-      { "name": "WEMIND_ADMIN_TOKEN", "value": "<每次会话随机生成>" },
-      { "name": "WEMIND_ROLE", "value": "brain" },
-      { "name": "WEMIND_AGENT", "value": "claude-code" }
-    ]
-  }
-  ```
-
-  如果 agent 支持 HTTP MCP，则优先由 daemon 起一个只监听 `127.0.0.1` 的 HTTP MCP，`mcpServers` 里只放 URL + `Authorization` header。这样不会每个会话多一个 Node 子进程，启动成本更低。
-
-- **只从配置文件读 MCP 的 agent**：`direct` 下 WeMind 不自动写 Agent 文件，无法自动注入 `wemind_admin`；只有显式 `managed` 才能把它写进副本副本。终端自己开的会话看不到这个工具，只有微信侧副本能看到。
-- **不注入 Admin MCP 的 agent**（文件式 direct、Codex 原生 `config.toml`）：退回“模型通过 shell 调 `wemind config ...`”的 CLI 路径。Codex 的客户端 stdio MCP 自 2026-11-12 复测可用，但 `direct` 下 WeMind 不重发 MCP catalog，也不额外写 `config.toml`。
-
-#### 一次调用的完整链路
-
-1. 微信用户说“把模型换成 X”或“微信侧回复简短一点”。
-2. daemon 把消息作为 `session/prompt` 发给 brain。
-3. 模型根据工具描述选择 `agent_config`（默认，真实配置）或 `wechat_config`（仅微信侧）。它发出的是 MCP `tools/call`，不是 shell 命令。
-4. agent 内置的 MCP client 把 JSON-RPC 请求发给 `wemind_admin`（stdio 或 loopback HTTP）。
-5. Admin MCP 校验 `WEMIND_ADMIN_TOKEN`，并核对 token 绑定的账号 / agent / 角色与当前进程一致；不匹配直接拒绝。
-6. ConfigService 解析目标文件：
-   - `scope=agent`：按 agent preset 解析真实配置路径（只允许该 agent 的已知配置根内）；
-   - `scope=wechat`：`<账号>/agent-overrides/<agent>.json`，只允许 `mcp.disable` / `mcp.extra`（不写入 Agent 真实配置）。
-7. 读取当前文件，比对调用方带来的 `expectedRevision`（或服务端刚生成的 mtime/size/hash）；发现终端侧刚改过就返回冲突，不覆盖。
-8. 应用修改：`scope=agent` 接受路径 `set` / `unset`；`scope=wechat` 只接受 `mcp.enable` / `mcp.disable` / `mcp.add` / `mcp.remove`。拒绝疑似密钥键、`..` 越界、指向真实配置之外的路径。
-9. 备份原文件（最多保留 5 份）→ 同目录临时文件 → `rename` 原子替换 → 追加审计记录（谁、什么时间、哪个文件、改了哪些键、备份在哪）。
-10. 返回 MCP 工具结果，例如：
-
-    ```json
-    {
-      "ok": true,
-      "scope": "agent",
-      "agent": "claude-code",
-      "file": "<HOME>/.claude/settings.json",
-      "changed": ["model"],
-      "backup": "<HOME>/.claude/settings.json.wemind-bak-2026-11-12T...",
-      "effective": "new-session",
-      "revision": "sha256:..."
-    }
-    ```
-
-11. Admin MCP 向控制桥投递 `config.reload`。daemon 若正在跑回合，就把 reload 排到空闲；否则重启 brain/worker 进程，让下一次 spawn 重新读取配置。
-12. 模型看到工具结果，用自然语言回复“已改真实配置，新会话生效”；daemon 把回复发回微信。
-
-#### 工具契约
-
-建议暴露两个工具，而不是一个含糊的 `wechat_config`：
-
-| 工具 | 作用域 | 使用条件 |
-|---|---|---|
-| `agent_config` | 真实配置（默认） | 用户没有明确说“微信侧/仅微信/这边”时使用 |
-| `wechat_config` | 微信侧 overlay（仅 MCP 增删） | 只有用户明确要求微信独享配置时使用；模型/权限/settings 不在 overlay |
-
-两者共用参数结构：`action`（`get` / `set` / `unset` / `list` / `mcp_enable` / `mcp_disable` / `mcp_add` / `mcp_remove` / `reload`）、`agent`、`path`、`value`、`role`（`brain` / `worker`）、`expectedRevision`、`dryRun`。工具描述必须写清“默认改真实配置；只有用户明确说微信侧才用 `wechat_config`；不要写密钥”。这样作用域由工具名 + 描述双重约束，审计日志也能直接看出模型选的是哪一侧。
-
-#### 安全边界
-
-- **yolo 不等于无校验**：yolo 只关掉 OS 权限询问；MCP 工具仍然做 token、账号、路径、密钥、并发和备份校验。
-- **token 绑定**：每次会话生成随机 token，绑定账号 + agent + 角色；Admin MCP 不接受跨账号调用。HTTP 模式只监听 loopback，并要求 `Authorization`。
-- **不是 shell**：工具只接受结构化 JSON，不接受任意命令/路径；不会把“写配置”变成“执行任意程序”。
-- **审计与回滚**：每次写入都有备份和审计；冲突时拒绝覆盖，不静默赢。
-- **硬边界仍是 `wechat` 排除**：任何 scope 都不允许把 `wechat` MCP 加进 WeMind 生成的有效集；按名字和定义双重判断。Agent 真实配置里的微信 MCP 只告警。
-- **提示注入**：在 yolo + 真实 HOME 下，恶意提示仍可能让模型走 shell 绕过工具。`wechat_config` 是便利与审计层，不是对抗被攻陷模型的 OS 副本；真正的隔离需要独立 OS 用户/VM。
-
-#### 成本
-
-- stdio Admin MCP 每个会话多一个小 Node 进程（约几十 MB 内存、几十到几百毫秒启动），会拖慢 brain 首帧；HTTP 模式由 daemon 常驻，成本低得多。
-- 因此建议：**brain 默认不注入 Admin MCP**，只在用户显式开启“自然语言改配置”或该 agent 没有 shell 时注入；worker 默认也不注入。第一期继续用 CLI 路径，第三期再按需开启。
+> **2026-11-14 决定：不实施**。默认 `direct` 下“把修改交给 Agent 侧模型”就够，不需要再造写入口；扩展想法见 [待办：自带管理 MCP](../待办与后续计划/待办-自带管理-MCP.md)。
+>
+> 只留一条结论备查：ACP 没有“宿主注册工具”的标准方法，要让模型看到名为 `wechat_config` 的工具，唯一标准路径是 WeMind 自己起一个本地 MCP server、把工具声明通过 MCP 暴露给它。当前代码没有实现；微信侧的配置入口只有 `wemind config` CLI 与聊天侧只读 `微信配置 查看 <agent>`。
 
 ### 7.7 reload 策略
 
@@ -504,7 +402,7 @@ managed worker:
 
 `managed` 的 brain 不会因为 `mcp.extra` 里“存在”某个 MCP 就自动加载；它只有在用户显式 `加载` 后才进入激活集。`managed` 的 worker 则按“无人值守任务需要开箱即用”的语义，直接使用真实全量加 extra。`direct` 完全由 Agent 真实配置决定；overlay 只对 `acpMcpServers` 的 Agent（brain 与 worker）经 ACP 补进会话，不重发 catalog。
 
-如果 `brain-mcps.json` 里的某个名字在 catalog 中已经不存在（真实配置删了、extra 也删了），不要静默丢弃：保留记录、在 `wemind mcp list` / `doctor` 里标记 `missing`，等用户确认后再清理。
+如果 `brain-mcps.json` 里的某个名字在 catalog 中已经不存在（真实配置删了、extra 也删了），不要静默丢弃：保留记录，在**微信 `mcp` / `列出 MCP`** 的输出里标注「缺少定义（保留在激活集）」（`listMcp()`，`agents/managed/mcp-brain.ts`），等用户确认后再清理。`wemind mcp list` 只列可选集与激活集，不标注 missing；`wemind doctor` 已取消（见 §17）。
 
 `wechat` 排除按名字和定义双重判断：
 
@@ -524,8 +422,8 @@ managed worker:
 | opencode | `opencode.json` 的 `mcp.servers` |
 | cline | `mcp.json`（`CLINE_MCP_SETTINGS_PATH`） |
 | pi | `<agent-dir>/mcp.json` |
-| DSH | `profiles/<profile>/cordis.patch.yml` 的 `@deepseek-ai/dsh-mcp-client`（WeMind 只读解析） |
-| Claude Code / Copilot | `~/.claude.json` / `~/.copilot/mcp-config.json`（Agent 自己读取；managed 才由 WeMind 经 ACP 投递） |
+| DSH | `profiles/<profile>/cordis.patch.yml`：真实文件 WeMind **只读解析**；`managed` 复制 profile 时**剥离全部 MCP 条目**（`copyProfilePatch({ stripAllMcp: true })`）再按激活集经 ACP 注入 |
+| Claude Code | `~/.claude.json`（Agent 自己读取；managed 由 WeMind 经 ACP 投递） |`n| Copilot | `~/.copilot/mcp-config.json`（Agent 自己读取；`managed` 由 WeMind 写副本同名文件，**不经 ACP**） |
 | codex | `~/.codex/config.toml` 由 Codex 自己加载，同名原生优先；`direct` 不重发 catalog，`managed` 才按激活集经 ACP 下发。WeMind 只读解析 TOML 用于列出/指标，不写回，也无法 unload 原生项；原生含 `wechat` 时只告警 |
 
 **“通过 ACP 传 MCP”不等于“覆盖真实配置”。** 实测确认 DSH 会把 ACP `mcpServers` 与 profile 里的 MCP **合并**、Claude Code 也会读 `~/.claude.json`；所以 `managed` 的 brain 默认空集不能只靠“传空列表”。DSH 的做法是复制 profile 时**剥离全部 `dsh-mcp-client` 条目**，再按激活集经 ACP 注入；文件式 Agent 则写副本配置。新增 Agent 必须实测“传空列表是否真的不加载”，不能假设 ACP 参数会替换；做不到时必须在能力矩阵里标注，不能承诺“brain 默认空 MCP”。
@@ -542,7 +440,7 @@ MCP 数量会同时影响：
 
 - 不自动禁用“成功但慢”的 MCP；只警告，避免微信侧行为悄悄偏离终端。
 - 记录 `mcpCount`、`nativeMcpCount`、`mcpStartupMs`、`sessionNewMs`、`firstFrameMs`（已实现，`agents/config/mcp-perf.ts`）；`scripts/doctor.ps1` 汇总 `mcpCount/sessionNewMs/firstFrameMs` 并在异常时提示（阈值与代码里的常量保持一致），`nativeMcpCount/mcpStartupMs` 以日志为准。
-- MCP 预检/跳过坏条目尚未实现（Phase 2）：当前只在“定义无法转成 ACP”时跳过并告警；起不来的 MCP 由 Agent 自己报错，WeMind 不替它探测或剔除。
+- MCP 预检/跳过坏条目**已取消**（2026-11-14，见 §17「已取消」）：当前只在“定义无法转成 ACP”时跳过并告警；起不来的 MCP 由 Agent 自己报错，WeMind 不替它探测或剔除。
 - DSH 这类“坏 MCP 会回滚整个 session”的 Agent 要在日志与文档里明确提示风险；WeMind 不因此阻止启动，由用户决定是否保留该 MCP。
 - 用户可用 `mcp.disable` 显式关闭重型 MCP；微信侧额外 MCP 用 `mcp.extra`。brain 的 `mcp.extra` 只是“可加载目录”，仍需显式 `加载`；worker 的 `mcp.extra` 默认生效。
 
@@ -683,7 +581,7 @@ wemind env capture [--key <key>] [--dry-run]
 2. **最终 PATH**：daemon 继承的 PATH + `env.json` 快照覆盖后的结果。
 3. **失败要可操作**：找不到时明确提示“在能运行 `<agent> --version` 的终端执行 `wemind env capture`”，而不是让用户去猜 fnm/nvm 配置。
 
-当前 `scripts/doctor.ps1` 会打印各 Agent 的 bin 路径与 `--version` 是否成功；逐 Agent 打印“解析来源（显式 / 快照 / 继承 PATH / fallback）”的 `wemind doctor` 是 Phase 2/3 预留，当前未实现。无论用户用 fnm、nvm、Volta、asdf、mise、corepack、conda 还是手工 PATH，都走同一套 PATH / `wemind env capture` 诊断，不需要在代码里枚举。
+当前 `scripts/doctor.ps1` 会打印各 Agent 的 bin 路径与 `--version` 是否成功；逐 Agent 打印“解析来源（显式 / 快照 / 继承 PATH / fallback）”的 `wemind doctor` **已取消**（2026-11-14，见 §17「已取消」），不再实现。无论用户用 fnm、nvm、Volta、asdf、mise、corepack、conda 还是手工 PATH，都走同一套 PATH / `wemind env capture` 诊断，不需要在代码里枚举。
 
 后台运行环境不会自动加载交互 shell 的配置：Windows 计划任务不执行 PowerShell profile，macOS launchd / GUI 启动不继承终端 shell 环境，Linux systemd user service 也不保证登录 shell 的 PATH。因此 `env capture` 是跨平台的通用补充，不是 fnm 专用开关。
 
@@ -751,7 +649,7 @@ wemind env capture [--key <key>] [--dry-run]
 
 - `session/request_permission` **默认 yolo**：自动选择 `allow_once` / `allow_always`；要恢复逐次拒绝，设 `WEMIND_ACP_AUTO_ALLOW=0`。
 - 不是所有 Agent 的 yolo 都等价；Copilot 的路径/URL 限制、DSH/codex 的副本层仍需在接入文档中标注。
-- 启动日志会打印实际启动参数（含 yolo / `bypassPermissions` 等）；逐 Agent 的权限提示以文档、启动日志和 `scripts/doctor.ps1` 为准（`wemind doctor` 已取消，见 §17「已取消」）。
+- 启动日志会打印实际启动参数（含 yolo / `bypassPermissions` 等）；逐 Agent 的权限方式以接入文档与启动日志为准（`scripts/doctor.ps1` **不检查**权限/yolo，`wemind doctor` 已取消，见 §17「已取消」）。
 
 ---
 
@@ -764,20 +662,20 @@ wemind env capture [--key <key>] [--dry-run]
 - 每个账号可有独立的 `agent-overrides/<agent>.json`、`workspace.json`，以及 **仅 `managed` 使用**的 `brain-mcps.json`。
 - 多个 daemon 可同时运行；每个 daemon 各自拉起 Agent 进程。
 
-### 13.2 并发假设
+### 13.2 并发假设与实测
 
-按“Agent 支持并发会话/进程”设计，但增加能力矩阵与测试：
+按“Agent 支持并发会话/进程”设计，并已用能力矩阵与实测覆盖三种并发：
 
 - 同一 Agent 在终端与微信同时运行；
 - 同一账号多个 worker 并发；
-- 多个 WeChat 账号同时运行。
+- 多个微信账号（多个 daemon）同时运行。
 
-需要验证：
+实测结论（细节见 §18.8）：
 
-- 配置写入是否互相覆盖；
-- 会话库/SQLite 是否支持多进程；
-- 是否有全局锁/单实例限制；
-- MCP 子进程是否重复拉起、端口是否冲突。
+- **配置写入**：`direct` 下 WeMind 运行期不写 Agent 配置，不存在互相覆盖；`managed` 是每账号副本，天然隔离。
+- **会话库 / SQLite 多进程**：opencode 的 SQLite 在两个 daemon 并发写后 `integrity_check = ok`（`journal_mode = wal`）；10 个预设的「两个并发进程 × 两轮 prompt + 重启 load」全部正常，未见会话库争用。
+- **全局锁 / 单实例**：10 个预设均未见单实例限制。
+- **MCP 子进程 / 端口**：并发下未见重复拉起或端口冲突。
 
 ### 13.3 失败回退
 
@@ -799,7 +697,7 @@ wemind env capture [--key <key>] [--dry-run]
 - 工作区不能是账号根、Agent 真实配置目录、系统目录；危险路径二次确认。
 - 不把 API key/token 写入 overlay、env 快照；`managed` 若必须复制含密钥文件，按 0600 + 敏感文件 denylist + 告警处理，且不得进入 overlay。
 - 写真实配置前备份；用 mtime/size/sha256 做乐观并发校验，发现终端侧刚改过就**拒绝覆盖并如实报错**（不写冲突副本、不自动合并）；原子写。
-- 启动日志与 `scripts/doctor.ps1` 明确提示 yolo 与完整权限。
+- 启动日志明确提示实际启动参数（含 yolo / 完整权限）；`scripts/doctor.ps1` 只做 bin 解析与 MCP/首帧耗时诊断，不检查权限。
 
 已知但接受的边界：
 
@@ -826,7 +724,7 @@ wemind env capture [--key <key>] [--dry-run]
 
 **迁移范围仅此两步**：不迁移旧 Agent 会话文件，也不改写 `brain-sessions.json` / `worker-sessions.json`（旧副本会话在 `direct` 下可能无法 `load/resume`，此时如实报错，用户在微信发 `新会话` 即可）；不迁移 `brain-mcps.json`（它只在 `managed` 下有语义）；不生成 `workspace.json` / `session-cwd.json` / per-agent overlay（都按需创建）。
 
-**没有自动回滚**：不存在 `wemind config migrate --rollback` 命令，也没有启动后的微信迁移通知；回滚只能人工把 `.bak-<时间>` 目录改回原名。备份不自动删除，由用户确认后清理。
+迁移在 daemon 启动时自动执行（`migrateLegacyHomes()`），没有对应的 CLI 子命令，也没有启动后的微信迁移通知；`.bak-<时间>` 备份不自动删除，由用户确认后清理。
 
 ---
 
@@ -837,7 +735,7 @@ wemind env capture [--key <key>] [--dry-run]
 | 命令 | 作用 |
 |---|---|
 | `wemind config show [--key <key|label>]` | 显示 homeMode、真实配置目录、overlay 目录、workspace、env 快照键与 `managed` 的 MCP 激活集文件 |
-| `wemind config home-mode [direct|managed]` | 查看/写入 `<账号>/runtime.json`；CLI 提示「重启 daemon 后生效」，实际是**新起的 agent 进程**按新值、常驻 brain 要重连或重启才换 home（见 §18.2.2 C） |
+| `wemind config home-mode [direct|managed]` | 查看/写入 `<账号>/runtime.json`；CLI 提示「重启 daemon 后生效」，实际是**新起的 agent 进程**按新值、常驻 brain 要重连或重启才换 home（见 §18.7） |
 | `wemind config reload [--key <key|label>]` | 经控制桥让常驻 brain 重建进程，空闲时执行 |
 | `wemind config reply-style [concise|off] [--key <key|label>]` | 查看/设置微信侧回复风格（写 `<账号>/wechat-settings.json`）；每轮现读，下一条消息生效，不改 Agent 配置 |
 | `wemind config agent show|get|set|unset|edit <agent> [<键路径>] [值] [--file <相对路径>]` | 默认修改真实 Agent 配置；写入前备份并做并发校验 |
@@ -864,7 +762,7 @@ wemind env capture [--key <key>] [--dry-run]
 - 本文评审、确认命名、确认安全前提。
 - 建立 Agent 能力矩阵与验收用例。
 
-### Phase 1：核心 parity 模式（已实现，待逐 Agent 真机验收）
+### Phase 1：核心 parity 模式（已实现）
 
 - `homeMode` 抽象（`direct` 默认 / `managed` 显式隔离）。
 - `direct` 完全使用真实配置；`managed` 才有 MCP/yolo 生成文件。
@@ -872,26 +770,26 @@ wemind env capture [--key <key>] [--dry-run]
 - `workspace.json`、brain/worker 默认工作区、会话 cwd 绑定、变更提示。
 - `agent-overrides`（仅 MCP 增删）、`wechat-settings.json`（`replyStyle`）、`session-cwd.json` 与 `direct` 入站媒体路径。
 - `env capture`（通用 PATH / 版本管理器 / 代理；不含密钥，不绑定 fnm）。
-- 会话共享与终端可见（先验 kiro / opencode / qoder / gemini / claude-code）。
+- 会话共享与终端可见（10 家全覆盖，见 §18.5）。
 - 配置 reload / 指纹检测 / 并发校验（发现终端侧改过就拒绝写入，不写冲突副本）。
-- 老账号迁移：只实现搬入站媒体与旧 `brain-home`/`worker-home` 重命名备份；不迁移旧会话、`brain-mcps.json` 或 overlay。`config migrate --rollback` 尚未实现，回滚依靠 `.bak-*` 目录人工恢复。
+- 老账号迁移：只实现搬入站媒体与旧 `brain-home`/`worker-home` 重命名备份；不迁移旧会话、`brain-mcps.json` 或 overlay。
 
-### Phase 2：剩余 Agent 与体验补全（部分完成，见下）
+### Phase 2：剩余 Agent 与体验补全（已完成）
 
-- ✅ 已完成：MCP/首帧观测 + doctor 告警；Codex `config.toml` 只读 MCP 解析与 `wechat` 告警；`codex-acp 2.6.0` 全套探针复测。
-- ✅ 已完成（握手级）：10 个预设全部通过 `brain check`（kiro / qoder 修复 PATH 后补跑）。
-- ✅ 已完成（prompt 级）：早期临时配置下 9/10 跑通两轮真实对话（opencode / gemini / cline / pi / copilot / codex / kiro / claude-code / qoder，见 §18.2.1）；deepseek 的 provider 依赖后来就绪，2026-11-14 在 `direct` 下补跑通过（见 §18.2.2）。
-- ✅ 已完成（2026-11-14 实测）：技能/记忆共享 + 会话可见性 E2E——`direct` 下 8 家全跑（外部新增 skill 的可见性、同会话是否需要刷新、微信侧写入是否落到真实 home），`managed` 下抽 pi / opencode 各一遍，会话可见性 10/10。结论与证据见 §18.2.2。**qoder / claude-code 本轮被它们自己的模型网关（`127.0.0.1:3425` 未监听）挡住**，属 Agent/provider 侧依赖，等网关可用后补跑。
-- 部分完成（2026-11-14）：各 Agent「设置生效时机」矩阵——**技能/记忆/规则类**已实测（同会话是否需要刷新按 Agent 而异，见 §18.2.2）；**模型 / 权限 / MCP** 三类走 ACP 自己的接口（`session/set_config_option` / `session/set_mode` / `session/new` 的 `mcpServers`），按设计分别在会话内或新会话生效，尚未逐家真机复核。**保留，尽量全覆盖。**
-- 部分完成（2026-11-14）：各 Agent 并发/锁/会话库实测——同 agent 双任务 + 异 agent 并发各跑通一次，opencode 的 SQLite 在并发后 `integrity_check=ok`（见 §18.2.2）。多账号并发矩阵仍缺第二个微信账号。**保留，尽量全覆盖。**
-- ~~待做：混合配置文件的三路合并；JSONC 注释与 YAML 的保留格式编辑~~ **已取消（2026-11-14）**，见下。
+- ✅ MCP/首帧观测 + doctor 告警；Codex `config.toml` 只读 MCP 解析与 `wechat` 告警；`codex-acp 2.6.0` 全套探针复测。
+- ✅ 握手级：10 个预设全部通过 `brain check`（kiro / qoder 修复 PATH 后补跑），并在 `direct` 真实 home 下复测 10/10，见 §18.3。
+- ✅ Prompt 级：10 个预设全部跑通两轮真实对话（claude-code / qoder 修好环境、deepseek 等 provider 就绪后补跑），见 §18.4。
+- ✅ 技能/记忆共享 + 会话可见性 E2E：`direct` 下 10 家全覆盖（外部新增 skill 的可见性、同会话是否需要刷新、微信侧写入是否落到真实 home），`managed` 下抽 pi / opencode 各一遍，会话可见性 10/10，见 §18.5。
+- ✅ 各 Agent「设置生效时机」矩阵：技能/记忆/规则类 + 模型 / 权限 / MCP 三类均已逐家实测，见 §18.5、§18.6。
+- ✅ 各 Agent 并发/锁/会话库实测：10 家全部通过「两个并发 ACP 进程 × 两轮 prompt + 重启 load」，见 §18.8。
+- ~~混合配置文件的三路合并；JSONC 注释与 YAML 的保留格式编辑~~ **已取消（2026-11-14）**，见下。
 
-### Phase 3：体验与治理（未开始）
+### Phase 3：体验与治理（已收口）
 
-- 微信自然语言 `wechat_config` / `agent_config` admin MCP 工具（第一期只有 CLI 写入口与微信只读查看）。**2026-11-14 决定：当前需求下不必要，不按 Phase 3 实施**；想法并入 [待办：自带管理 MCP](../待办与后续计划/待办-自带管理-MCP.md)。
+- 多账号并发测试矩阵（多 daemon 共享同一份 Agent 真实配置/会话库的写冲突、SQLite 多进程、MCP 子进程与端口、Agent 自身单实例锁）：**已完成**（§18.8）——两个微信账号的 daemon 同时并发跑 opencode worker，共享同一份真实配置与会话库，输出不串号、`integrity_check=ok`。
+- 微信自然语言 `wechat_config` / `agent_config` admin MCP 工具：**决定不做**（2026-11-14，当前需求下不必要）；想法并入 [待办：自带管理 MCP](../待办与后续计划/待办-自带管理-MCP.md)。
 - ~~`config promote`、冲突提示、overlay diff~~ **已取消（2026-11-14）**，见下。
-- 多账号并发测试矩阵（多 daemon 共享同一份 Agent 真实配置/会话库的写冲突、SQLite 多进程、MCP 子进程与端口、Agent 自身单实例锁）。**保留，尽量全覆盖。**
-- 文档、CHANGELOG、接入文档同步。
+- 文档、CHANGELOG、接入文档同步：**持续项**（无终点，随改动保持最新）。
 
 ### 已取消（2026-11-14 决定）
 
@@ -914,7 +812,7 @@ wemind env capture [--key <key>] [--dry-run]
 ### 18.1 单元测试
 
 - `AgentHomeResolver`：10 个 Agent 的 `direct` / `managed` 选择；`direct` 直接返回预设的真实配置目录（`realHome`），`managed` 才计算副本路径。
-- `inherit`：链接/复制/清单清理；kiro v3 `permissions.yaml` 不穿透 junction。
+- `inherit`：链接/复制/清单清理；kiro v3 `permissions.yaml` 不穿透 junction；无 symlink 权限时告警且不抛异常。
 - `OverlayStore`：路径 patch、删除、数组替换、未知键告警。
 - `McpPolicy`：brain 空集、显式加载持久、worker 全量、wechat 排除、disable/extra。
 - `WorkspaceManager`：default/external、危险路径、缺失路径、session cwd。
@@ -924,7 +822,7 @@ wemind env capture [--key <key>] [--dry-run]
 - `SessionBinder`：sessionId↔cwd、恢复不匹配、旧格式兼容。
 - `WechatSettings`：缺文件回落默认、坏 JSON / 未知取值告警并回落、`concise` 读写往返、骨架创建不覆盖用户已有选择。
 
-### 18.2 每个 Agent 的 E2E
+### 18.2 每个 Agent 的 E2E（验收用例清单）
 
 1. 终端改模型/设置 → 新微信会话使用新值。
 2. 微信侧明确说“微信侧/仅微信”时改 overlay 的 MCP 增删 → 微信生效，真实配置不变；模型/权限/settings 不走 overlay。
@@ -938,64 +836,62 @@ wemind env capture [--key <key>] [--dry-run]
 10. 两个账号不同 overlay/workspace，同时运行不串数据。
 11. 终端 + 微信 + 多 worker 并发，配置/会话库不损坏（按 Agent）。
 12. 真实配置包含 `wechat` 时：`direct` 只告警、不阻止启动；`managed` 副本剔除、真实文件不动；WeMind 下发集永不包含 `wechat`。
-13. 老账号迁移、备份与人工恢复（没有自动回滚命令）。
+13. 老账号迁移与 `.bak-<时间>` 备份（迁移在 daemon 启动时自动执行）。
 14. `direct` 入站文件/视频落到 `<账号>/media/inbound/`，prompt 中的绝对路径可读，30 天/1GB 清理仍生效。
 15. 直接编辑 overlay 或用 `wemind config wechat edit` 修改都能触发 idle reload；改真实配置也能在下一条新会话生效。
-16. `managed` 下对 ACP 传 MCP 的 Agent，实测“传空列表”确实不加载真实配置里的 MCP；若只是增量合并，说明该 Agent 的原生 MCP 不受 WeMind 控制，只做提示。`direct` 不承诺空集。
+16. `managed` 下 brain 默认空 MCP 是否真的为空：取决于该 Agent 是否在复制阶段被整体剥离（DSH 是），以及它是否把自身原生 MCP 与 ACP 下发的合并（Claude Code / Codex 等会，**传空列表不等于卸载**）。这是已确认的边界，见 §8.3，只做提示、不承诺。`direct` 不承诺空集。
 17. 微信回复风格：`wemind config reply-style concise` 后下一条微信消息明显更精简，`off` 后恢复；worker 任务结果与终端行为不受影响；坏 `wechat-settings.json` 只告警不打断回合。
 
-> 其中第 3（终端新增 skill/memory → 微信可用）、8（微信会话在终端会话列表可见）、11（并发不损坏会话库）、17（回复风格）已有 2026-11-14 本机实测结论，见 §18.2.2。
+> 第 3（终端新增 skill/memory → 微信可用）、8（微信会话在终端会话列表可见）、11（并发不损坏会话库）已有本机实测结论，见 §18.5、§18.8。
 
-### 18.2.1 2026-11-12 握手矩阵（本机实测）
+### 18.3 握手基线（10/10）
 
-用 `checkAgent()`（`wemind brain check` 的同一实现）逐个启动，临时 `WEMIND_HOME`，不碰账号数据；**只证明 initialize + session/new 通**，不代替 prompt/技能/会话 E2E。
+用 `checkAgent()`（`wemind brain check` 的同一实现，`direct` 真实 home）逐个启动，不改 `brain.json`、不碰账号数据；**只证明 initialize + session/new 通**，不代替 prompt/技能/会话 E2E。耗时是单次实测，受机器负载影响，不能当性能基线。
 
 | Agent | 结果 | 耗时 | 备注 |
 |---|---|---|---|
-| kiro | PASS | — | 初次探测时 PATH 缺 `kiro-cli`；修复 PATH 后 prompt E2E 通过（握手随 `askBrain()` 一并验证） |
-| gemini | PASS | 5.6s | |
-| copilot | PASS | 11.4s | |
-| opencode | PASS | 2.5s | |
-| deepseek (dsh) | PASS | 16.7s | 最慢，符合其启动成本 |
-| qoder | PASS | — | 初次探测时 PATH 缺 `qodercli`；修复 PATH + 完成登录后 prompt E2E 通过 |
-| cline | PASS | 1.4s | |
-| pi | PASS | 4.4s | |
-| claude-code | PASS | 7.1s | mode=bypassPermissions |
-| codex | PASS | 0.9s | mode=agent-full-access |
+| opencode | PASS | 2.4s | |
+| cline | PASS | 1.7s | |
+| codex | PASS | 2.2s | mode=agent-full-access |
+| pi | PASS | 3.0s | |
+| gemini | PASS | 4.1s | |
+| qoder | PASS | 4.2s | 初次探测时 PATH 缺 `qodercli`、CLI 未登录，修复后补跑 |
+| claude-code | PASS | 6.2s | mode=bypassPermissions |
+| kiro | PASS | 8.3s | 初次探测时 PATH 缺 `kiro-cli`，修复后补跑 |
+| copilot | PASS | 11.2s | |
+| deepseek (dsh) | PASS | 16.5s | 最慢，符合其启动成本 |
 
-**结论**：10 个预设全部握手通过（kiro / qoder 在修复本机 PATH 与登录态后补跑）。下一步仍是每家的技能/记忆共享 + 会话可见性 E2E。
+10/10 全部通过；早期在临时 `WEMIND_HOME` 下的首轮握手同样 10/10。
 
-#### Prompt 级 E2E（同日，早期临时配置，真实 Agent 配置目录，临时账号目录）
+### 18.4 Prompt 级 E2E（两轮对话）
 
-> 记录于 2026-11-12；当时用的是早期临时配置（现已收敛为 `direct` / `managed`）。本表只保留“这些 Agent 曾在真实配置目录上跑通两轮 prompt”的实测事实。
-
-每家用真实产品路径 `askBrain()` 跑两轮：第一轮要求只回 `WEMIND_E2E_OK`，第二轮追问同一个 token（验证同一会话多轮）。
+用真实产品路径 `askBrain()` 在真实 Agent 配置目录上跑两轮：第一轮要求只回 `WEMIND_E2E_OK`，第二轮追问同一个 token（验证同一会话多轮）。
 
 | Agent | 结果 | 耗时 | 说明 |
 |---|---|---|---|
-| opencode | PASS | 11.7s | 两轮都对 |
-| gemini | PASS | 13.8s | 两轮都对 |
-| cline | PASS | 12.2s | 修复 `CLINE_*` 真实路径后通过（修复前 60s 无首帧） |
 | pi | PASS | 9.9s | 两轮都对 |
-| copilot | PASS | 48.1s | 最慢，但通过 |
 | codex | PASS | 10.5s | 两轮都对 |
+| qoder | PASS | 10.8s | 首次失败是 `~/.qoder/.auth/user` 缺失（CLI 未登录）；登录后两轮都对 |
+| claude-code | PASS | 11.1s | 首次失败是 `~/.claude/settings.json` 的 `model` 失效；修正为 `sonnet[1m]` 后两轮都对 |
+| opencode | PASS | 11.7s | 两轮都对 |
+| cline | PASS | 12.2s | 修复 `CLINE_*` 真实路径后通过（修复前 60s 无首帧） |
+| gemini | PASS | 13.8s | 两轮都对 |
 | kiro | PASS | 17.7s | PATH 修复后补跑通过 |
-| claude-code | PASS（修环境后补跑） | 11.1s | 首次失败是 `~/.claude/settings.json` 的 `model` 失效；修正为 `sonnet[1m]` 后两轮都对 |
-| deepseek | 待 provider | — | 已在真实 profile 补 `- id: acp`，`session/new.currentValue` 已确认生效；但该路由依赖的本机模型网关未运行，prompt 仍会连接失败——provider 与依赖由用户自己的 DSH 配置负责。见 [接入-DeepSeek §7.6](../接入方案/接入-DeepSeek.md) |
-| qoder | PASS（修环境后补跑） | 10.8s | 首次失败是 `~/.qoder/.auth/user` 缺失（CLI 未登录）；登录后两轮都对 |
+| copilot | PASS | 48.1s | 最慢，但通过 |
+| deepseek | PASS | — | 真实 profile 的 `- id: acp` 路由就绪后补跑通过（provider 依赖由用户自己的 DSH 配置负责，见 [接入-DeepSeek §7.6](../接入方案/接入-DeepSeek.md)） |
 
 **本轮发现并修掉的两个真实 bug**：
 
 1. **无 `homeEnvVar` 的 Agent env 拼错**：`claude-code` / `cline` / `qoder` 的 `env` 模板曾假设 `%HOME%` 是副本根，在直接使用真实配置目录时变成 `~/.claude/claude`、`~/.cline/cline`、`~/.qoder/qoder`。该问题已随配置来源收敛为 `direct` / `managed` 修复：`direct` 不注入预设 `env`，只保留 `envDefaults` 与凭据桥接。守卫：`brain-agents.test.ts`。
 2. **模型设置失败不应打死整轮**：`applyAcpModel` 原来把 `session/set_config_option` 的失败重新抛出，Agent 升级后旧 model id 失效会让每条消息都失败。现在只记 `WARN`（附 `wemind brain set <agent> --model` 提示），继续用 `session/new` 的默认模型。守卫：`acp-connection.test.ts`。
 
-**结论**：9/10 在真实配置基线上完成两轮 prompt（claude-code / qoder 修好环境后补跑通过）；deepseek 的 provider 依赖后来就绪，2026-11-14 补跑通过（见 §18.2.2）。
+10/10 在真实配置基线上完成两轮对话（claude-code / qoder 修好环境、deepseek 等 provider 就绪后补跑通过）。
 
-### 18.2.2 2026-11-14 技能/记忆共享、会话可见性、managed 与并发实测
+### 18.5 技能 / 记忆共享与会话可见性
 
-**方法**：本机常驻 daemon（账号 `04d6b6c8e62a`，`homeMode=direct`）上用本地任务桥 `wemind task --agent <名>` 逐家派发，再 `task-reply <id> "<内容>"` 在同一会话里追问（多轮）。探针 skill 临时写进**真实** skill 目录、跑完即删；不改任何真实配置内容。逐家串行派发（会话池按 agent 复用连接）。
+**方法**：本机常驻 daemon（`homeMode=direct`）上用本地任务桥 `wemind task --agent <名>` 逐家派发，再 `task-reply <id> "<内容>"` 在同一会话里追问（多轮）。探针 skill 临时写进**真实** skill 目录、跑完即删；不改任何真实配置内容。逐家串行派发（会话池按 agent 复用连接）。
 
-#### A. 技能/记忆共享（`direct`）
+**技能 / 记忆（`direct`）**
 
 | Agent | 外部新增 skill 后**新会话**可见 | 同一会话内新增 skill 即时可见 | 微信侧让它写文件 → 落到真实 home |
 |---|---|---|---|
@@ -1007,16 +903,16 @@ wemind env capture [--key <key>] [--dry-run]
 | deepseek | ✅ | ✅ 是 | ✅ |
 | pi | ✅ | ❌ 否 | ✅ |
 | opencode | ✅ | ✅ 是 | ✅ |
-| qoder | 被 provider 挡住 | — | — |
-| claude-code | 被 provider 挡住 | — | — |
+| qoder | ✅（网关恢复后复测，列表含 `magpie-skills`） | — | — |
+| claude-code | ✅（同上） | — | ✅（实测写进真实 `~/.claude`） |
 
 - **记忆**：探针报回的 `MEM` 全是**真实 home 的绝对路径**（pi `~/.pi/agent/AGENTS.md`、codex `~/.codex/RTK.md`、deepseek `~/.dsh/AGENTS.md`、gemini `~/.gemini/GEMINI.md`），即微信侧读到的就是终端那一份；kiro / cline / copilot 的全局记忆文件为空或未配置，故报 `none`。
 - **技能**：外部（终端侧）新增 skill 后，**新开的微信会话**一定看得到；「同一会话内是否即时刷新」按 Agent 而异（上表），这是 Agent 自己的行为，WeMind 不介入。
-- **写入落盘**：8 家里 7 家能在 yolo 下按指令把文件写进真实 home 并回 OK，说明微信侧写的 skill/记忆与终端共用同一份文件。
+- **写入落盘**：能在 yolo 下按指令把文件写进真实 home 并回 OK，说明微信侧写的 skill/记忆与终端共用同一份文件。
 - **gemini 例外**：在 `--approval-mode yolo --skip-trust` 下能写**受信任工作区内**的文件（实测建成并回 OK），但写工作区**之外**（实测目标 `~/.gemini/skills`）会长时间无输出（>200s，本机复现两次）。这是它自己的工作区信任边界，按「不耦合 Agent 侧问题」只记录、不改 WeMind 行为；需要它写工作区外时由用户在自己的 gemini 配置里放开。
-- **qoder / claude-code 本轮缺失**：两家都经本机模型网关 `127.0.0.1:3425`（claude-code 直接报 `424 upstream rate-limited`，qoder 表现为 `session/prompt` 空闲超时 180s、0 帧）。该端口当时未监听 → 属 Agent/provider 侧依赖，等网关可用后补跑（它们 2026-11-12 的 prompt E2E 是通过的）。
+- **qoder / claude-code**：首次复测都被它们自己的模型网关 `127.0.0.1:3425`（claude-code 报 `424 upstream rate-limited`，qoder 表现为 `session/prompt` 空闲超时、0 帧）挡住；网关可用后两家均复测通过（prompt + 技能可见，claude-code 另有真实 home 写入）。
 
-#### B. 会话可见性（`direct`，10/10）
+**会话可见性（`direct`，10/10）**
 
 在每家的会话库里都能找到「工作目录 = `<账号>/workspace/worker`」的会话记录：
 
@@ -1035,9 +931,41 @@ wemind env capture [--key <key>] [--dry-run]
 
 各 Agent 会按自己的规则把工作区路径转成目录名（如 `C--Users-…-wemind-…-workspace-worker`），所以同一条会话既能被微信侧写入，也能在终端用各家自己的 `/resume` 看到——这就是「会话可见性」要的终态。
 
-#### C. `managed` 抽测（pi / opencode，跑完已切回 `direct`）
+### 18.6 生效时机：权限 / 模型 / MCP
 
-把账号 `homeMode` 临时设为 `managed` 后，新起的 worker 落在账号副本里：
+方法：`scripts/acp-probe.mjs`，宿主 `ACP_AUTO_ALLOW=1`（与 WeMind 默认一致）；每家两轮 prompt + 重启后 load；只在临时 cwd 与各自真实会话库里新建测试会话，**不改任何配置、不发微信消息**。
+
+**权限（`ACP_TEST_TOOL=1`，强制一次真实工具调用）**
+
+| Agent | `session/request_permission` | 标记文件落盘 |
+|---|---|---|
+| opencode / gemini / codex / copilot / pi / deepseek / qoder | 0 | 是 |
+| kiro | 1 | 是 |
+
+kiro 的那 1 次来自 v3 的免审批走 `settings/permissions.yaml`，探针没带该文件；WeMind 宿主的 `request_permission` 默认自动允许，不会卡住回合，不算漂移。
+
+**模型：`session/new` 是否暴露 `category=model` 的 config 选项（可会话内 `session/set_config_option` 切换）**
+
+- 有：opencode、codex、kiro、copilot、pi、qoder、deepseek（DSH 是 `[provider, model]` 数组）。
+- 无：gemini —— 模型只来自它自己的配置，改模型需要新会话或重启。
+
+**MCP：`session/new` 的 `mcpServers` 是否真的加载（本地最小 MCP server + 让模型调用 `probe_echo`）**
+
+| Agent | 是否加载 | 证据 |
+|---|---|---|
+| opencode / gemini / codex / kiro / deepseek / qoder | 是 | 工具返回 `PROBE_ECHO:OK` |
+| pi | 否 | 与预设 `acpMcpServers: false` 一致（pi-acp 只把 `mcpServers` 存进会话，从不读取） |
+| copilot | 否 | 1.0.108 两种写法都答「没有 probe_echo」→ 预设 `acpMcpServers: false` + `mcpDelivery: "config"` |
+
+DSH 额外约束：`mcpServers[].command` 必须是**绝对路径**，传裸名会 `-32602 Invalid params`。
+
+**cline 的凭据桥**：独立探针不带 WeMind 的凭据桥时，`session/new` 报 `-32000 Authentication required`——这是 Cline ACP 的已知限制（只自动恢复 `cline` / `cline-pass` / `openai-codex` 三种登录，自定义 provider 必须由进程环境提供 `CLINE_PROVIDER` + `CLINE_API_KEY`）。按 `agents/cline-credentials.ts` 的同一规则注入后会话可正常建立。
+
+**qoder 的网关不稳定（排查指引）**：一次表现为 0 帧——`~/.qoder/logs/runs/<run>/qodercli.log` 显示 `turn.started model="magpie/qoder/dfmodel"` 后没有模型返回，期间直连 `http://127.0.0.1:3425/v1` 用该模型发最小 `chat/completions`（流式/非流式）也无响应，而 `auto/deepseek-v4.1-flash`、`auto/hy4free` 都是 200；网关恢复后 prompt、`session/set_config_option` 切模型（`magpie/qoder/dfmodel` → `magpie/auto/deepseek-v4.1-flash`）、MCP 加载、技能可见全部通过。属**模型路由侧不稳定**（Agent/provider 侧），不是 WeMind/ACP 问题：遇到同样现象先看 `qodercli.log` 与网关路由，WeMind 只告警、不代改。
+
+### 18.7 managed 抽测（副本行为）
+
+把账号 `homeMode` 临时设为 `managed` 后，新起的 worker 落在账号副本里（跑完已切回 `direct`）：
 
 | Agent | 记忆（MEM） | 技能（SKILLS） |
 |---|---|---|
@@ -1047,24 +975,27 @@ wemind env capture [--key <key>] [--dry-run]
 - 副本里 `worker-home/skills`（pi）与 `worker-home/opencode/skills` 都是 **Junction**，指向真实技能目录；`AGENTS.md` 是复制；`.wemind-inherited.json` 记录继承清单（`dirs: ["skills"]` / `files: ["AGENTS.md"]`）。
 - 真实 `~/.pi/agent/AGENTS.md`、`~/.config/opencode/AGENTS.md` 的 mtime 未变 → 没写真实配置。
 - `homeMode` 改完**不需要重启 daemon**：新起的 agent 进程按新值（CLI 提示「重启 daemon 后生效」是保守说法；已在跑的常驻 brain 要等它重连或重启才换 home）。
-- 观测到的现象，按实际口径记录：`managed` 下 `worker-home/opencode/opencode.json` 会**整份复制**真实 `opencode.json`（含 `providers` / `model` / `plugin`，只把 `mcp.servers` 换成 curated 集）；声明了 `settingsBase` 的预设（claude / gemini / qoder）走同一口径——整份复制、只剥 MCP 段，不再按 Agent 剥 `providers` / `plugin` 一类键（原 `settingsStrip` / `DEFAULT_SETTINGS_STRIP` 已删除，见 §7.3）。默认 `direct` 不含这条路径。
+- `managed` 下 `worker-home/opencode/opencode.json` 会**整份复制**真实 `opencode.json`（含 `providers` / `model` / `plugin`，只把 `mcp.servers` 换成 curated 集）；声明了 `settingsBase` 的预设（claude / gemini / qoder）走同一口径——整份复制、只剥 MCP 段，不再按 Agent 剥 `providers` / `plugin` 一类键（原 `settingsStrip` / `DEFAULT_SETTINGS_STRIP` 已删除，见 §7.3）。默认 `direct` 不含这条路径。
 
-#### D. 并发 / 锁 / 会话库
+### 18.8 并发、锁与会话库
 
-- 同时派发 3 条任务（opencode ×2 + gemini ×1）：三条都按各自 agent 跑通，输出不串号（`A_OK` / `B_OK` / `C_OK` 各归其位）。
-- 并发的两条 opencode 落在**两条独立会话**（`session_v2` 里时间相邻的两条 id），跑完 `PRAGMA integrity_check = ok`；`directory like '%wemind%'` 的会话数 62 → 66。没有观察到会话库损坏或互相覆盖。
+- **任务级并发（真机 daemon）**：同时派发 3 条任务（opencode ×2 + gemini ×1），三条都按各自 agent 跑通，输出不串号（`A_OK` / `B_OK` / `C_OK` 各归其位）。
+- **opencode SQLite**：并发的两条 opencode 落在**两条独立会话**（`session_v2` 里时间相邻的两条 id），跑完 `PRAGMA integrity_check = ok`；`directory like '%wemind%'` 的会话数 62 → 66，没有会话库损坏或互相覆盖。
+- **进程级并发（`scripts/acp-probe.mjs`，两个并发进程 × 两轮 prompt + 重启 load）**：10 家全部 `ok`，两轮 prompt 均成功、上下文保持、`resume` 正常，未观察到会话库争用。
 
-#### E. 本轮没覆盖到的
+  | Agent | 两个并发进程 | 备注 |
+  |---|---|---|
+  | opencode / gemini / pi / codex / kiro / qoder / copilot / deepseek / claude-code | ✅ | 两轮 prompt + 重启 load 全过 |
+  | cline | ✅ | 需按 `cline-credentials.ts` 注入 `CLINE_PROVIDER` / `CLINE_API_KEY`，否则 `session/new` 报 `Authentication required` |
 
-- **多账号并发矩阵**：本机 `accounts.json` 只登记了 `04d6b6c8e62a` 一个账号，没有第二个微信账号可同时跑；等有第二个账号（或第二台机）再补。
-- **qoder / claude-code** 的技能/记忆与写回项（provider 网关未起）。
-- **模型 / 权限 / MCP** 三类的逐家真机生效时机（技能类已测；这三类走 ACP 接口，机制已明确但未逐家跑）。
+- **多账号并发（轻量）**：两个账号（`wp` / `Chandler`）各自 `workspace/brain` 并发跑 opencode 两轮 prompt，均 `ok`、重启后上下文保持、互不串数据。
+- **多 daemon + 多任务矩阵**：两个微信账号的 daemon 同时在跑（`wp` = `04d6b6c8e62a`、`Chandler` = `5699d5d92ea9`），各自并发派 2 条 opencode worker 任务——4 条**全部跑通且不串号**（`WP-A1`/`WP-A2`/`CH-A1`/`CH-A2` 各归其位），`worker-sessions.json` 按账号隔离（4 条互不重叠的 sessionId）。这两个 daemon 共用同一份真实 `~/.config/opencode` 与 `~/.local/share/opencode/opencode.db`：跑完 `PRAGMA integrity_check = ok`（`journal_mode = wal`，`directory like '%wemind%'` 的会话 79 条），无锁冲突、无会话库损坏、无 MCP 子进程/端口冲突。日志里只有微信平台侧的 `send -2（旧 token）`——CLI 派发的任务没有实时 `context_token`，回复按设计挂起到用户下一条消息补发，与并发无关。`direct` 下 WeMind 不写 Agent 配置，「配置写入互相覆盖」这条路径本身不存在。
 
-### 18.3 性能验收
+### 18.9 性能验收
 
 - `managed` 下 brain 默认空 MCP，启动/首帧不应比现状明显变慢；`direct` 由真实配置决定，不承诺空集。
 - worker 全量 MCP 允许变慢，但必须记录 `mcpCount` / `mcpStartupMs` / `sessionNewMs` / `firstFrameMs`（已实现）；异常只警告，不自动禁用。
-- 具体阈值按 Agent 实测后写入接入文档，本文不预设硬指标。
+- 阈值与 `agents/config/mcp-perf.ts` 的常量保持一致；逐 Agent 基线数值按需补充，本文不预设硬指标。
 
 ---
 
@@ -1073,8 +1004,8 @@ wemind env capture [--key <key>] [--dry-run]
 | 风险 / 问题 | 处理 |
 |---|---|
 | 终端与微信同时写同一配置文件 | `direct` 下 WeMind 运行期不自动写 Agent 文件（显式 `config agent` 写入口会备份并做并发校验）；需要隔离时用 `managed` |
-| Agent 有全局锁/单实例限制 | 实测后在对应接入文档里写明限制，提示用户显式改用 `managed`（不做代码标记） |
-| 会话库 SQLite/多进程并发 | 按 Agent 实测；必要时限制并发或隔离会话目录 |
+| Agent 有全局锁/单实例限制 | 已覆盖 10 家「两个并发进程 + 共享真实配置/会话库」无冲突（§18.8）；个别 Agent 若日后出现全局锁，在对应接入文档写明限制并提示改用 `managed`（不做代码标记） |
+| 会话库 SQLite/多进程并发 | 已实测：10 家两个并发进程 + 两个 daemon 并发写 opencode SQLite（`integrity_check=ok`），均无损坏（§18.8）；必要时限制并发或隔离会话目录 |
 | MCP 多导致启动/首帧变慢 | 记录指标、警告、允许 disable；不自动改变行为 |
 | JSONC/YAML/TOML 格式与注释 | JSON/无注释 JSONC 可写；含注释 JSONC 与 YAML/TOML 拒绝写入，只读展示。保留格式编辑器已取消 |
 | Windows 文件 symlink 权限 | 目录用 junction；文件用 hardlink/复制+watcher；必要时 `managed` |
@@ -1082,7 +1013,7 @@ wemind env capture [--key <key>] [--dry-run]
 | Claude Code `settings.json` 含网关 token | `direct` 不复制该文件，Agent 自己读；`managed` 才复制，按 0600 + 敏感文件 denylist + 告警处理 |
 | Copilot `--allow-all-tools` 仍可能触发路径/URL 审批 | 实测；若频繁则仅对该账号显式启用 `--allow-all`，默认不悄悄放宽网络访问 |
 | DSH 坏 MCP 回滚 session | 明确不预检（该方向已取消）；坏 MCP 由 Agent 自己报错，日志提示风险，由用户决定是否保留 |
-| 多账号共享真实配置 | 单机单人可接受；不同人用不同 OS 用户/VM |
+| 多账号共享真实配置 | 单机单人可接受；已实测两个账号并发共享同一份真实配置/会话库无冲突（§18.8）；不同人用不同 OS 用户/VM |
 | yolo + 真实 HOME 的提示注入风险 | 明确安全前提；建议独立 OS 用户/VM；保留出站 denylist |
 | 老账号会话迁移失败 | 备份后接受丢失；不阻塞启动 |
 

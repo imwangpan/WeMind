@@ -99,9 +99,9 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     replayOnLoad: true,
     shell: true,
   },
-  // GitHub Copilot CLI（原生 ACP，1.0.107 探针实测）。
-  // - COPILOT_HOME 只在 managed 下指向账号副本（direct 不设置，直接用 ~/.copilot）；managed 下只同步 config.json 登录元数据、skills 与 copilot-instructions.md，不继承用户 MCP/插件/hooks。
-  // - 用户 MCP 目录是 ~/.copilot/mcp-config.json；stdio MCP 经 session/new 实测可调用（尽管 initialize 只声明 http/sse）。
+  // GitHub Copilot CLI（原生 ACP，1.0.108 探针实测）。
+  // - COPILOT_HOME 只在 managed 下指向账号副本（direct 不设置，直接用 ~/.copilot）；managed 下只同步 config.json 登录元数据、skills 与 copilot-instructions.md，不继承用户插件/hooks。
+  // - MCP 只读自己的 ~/.copilot/mcp-config.json：initialize 的 mcpCapabilities 只有 http/sse，实测 session/new 传入的 stdio mcpServers 不被加载（1.0.108 普通写法与带 type 写法模型都答「没有这个工具」）。故 managed 写副本 mcp-config.json，不依赖 ACP 投递。
   // - --allow-all-tools 免除工具审批，但不启用 --allow-all 的路径/URL 放宽；默认 auto 不探测，避免「已安装但未登录」导致误选。
   copilot: {
     name: "copilot",
@@ -114,9 +114,9 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
     inheritDirs: ["skills"],
     inheritFiles: ["copilot-instructions.md"],
     credentialFiles: ["config.json"],
+    mcpConfigFile: "mcp-config.json",
     catalogFile: "mcp-config.json",
-    acpMcpServers: true,
-    mcpDelivery: "acp",
+    mcpDelivery: "config",
   },
   // OpenCode：原生 ACP（`opencode acp`）。
   // - Windows 上是 npm shim（PATH 只有 opencode.cmd），故 shell:true + 裸名 binWin。

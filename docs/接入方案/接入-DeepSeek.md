@@ -718,7 +718,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 - 官方后续打开 `image` 后：回归微信收图。
 - resource / prompt 范围：留待后续（§9）。
 
-**2026-11-14 实测补充（`direct`）**：用户自己的 provider 依赖就绪后，**prompt 级 E2E 已补跑通过**（本地任务桥派发，多轮追问）；记忆读的是真实 `~/.dsh/AGENTS.md` ✅，外部新增 skill 在新会话与**同一会话内**都可见 ✅（热加载），微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：`~/.dsh/storages/session_projcache/sessions/<sessionId>.json`（文件名 = `session/new` 返回的 sessionId）。来源：设计文档 §18.2.2。
+**2026-11-14 实测补充（`direct`）**：用户自己的 provider 依赖就绪后，**prompt 级 E2E 已补跑通过**（本地任务桥派发，多轮追问）；记忆读的是真实 `~/.dsh/AGENTS.md` ✅，外部新增 skill 在新会话与**同一会话内**都可见 ✅（热加载），微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：`~/.dsh/storages/session_projcache/sessions/<sessionId>.json`（文件名 = `session/new` 返回的 sessionId）。来源：设计文档 §18.5。
 
 ---
 

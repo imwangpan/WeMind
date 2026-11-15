@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -66,5 +66,22 @@ describe("syncInherited（共用副本根的继承）", () => {
     fs.writeFileSync(path.join(cfg, "AGENTS.md"), "copy-edit");
     syncInherited(root, cfg, fake("deepseek", homeA, [], ["AGENTS.md"]));
     expect(fs.readFileSync(path.join(cfg, "AGENTS.md"), "utf-8")).toBe("copy-edit");
+  });
+
+  it("无 symlink 权限时告警且不抛异常（副本漂移可见）", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const symlink = vi.spyOn(fs, "symlinkSync").mockImplementation(() => {
+      throw new Error("EPERM: operation not permitted");
+    });
+    try {
+      expect(() =>
+        syncInherited(root, cfg, fake("pi", homeA, ["skills"], ["AGENTS.md"])),
+      ).not.toThrow();
+      expect(warn).toHaveBeenCalled();
+      expect(fs.readFileSync(path.join(cfg, "AGENTS.md"), "utf-8")).toBe("A");
+    } finally {
+      symlink.mockRestore();
+      warn.mockRestore();
+    }
   });
 });

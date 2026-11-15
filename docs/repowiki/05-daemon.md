@@ -58,7 +58,7 @@ packages/wechat-daemon/src/
 │       ├── mcp-worker.ts # worker：direct 不重发 / managed 全量 − wechat − EXCLUDE − disabled + overlay（→ 第 7 章）
 │       ├── mcp-adapters.ts   # 按文件格式的 MCP 适配器（读写/剥离/ACP 转换/原生只读）
 │       ├── agent-mcp.ts      # MCP 格式纯函数、wechat 判定与 ACP 转换
-│       └── inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单）
+│       └── inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单；失败告警）
 ├── tasks/                    # 任务（worker）
 │   ├── worker-acp.ts         # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
 │   ├── worker-pool.ts        # worker 进程池：复用/回收/上限（→ 第 7 章）

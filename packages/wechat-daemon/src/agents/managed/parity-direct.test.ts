@@ -123,13 +123,13 @@ describe("direct（默认）", () => {
   it("direct 不把 Agent 已原生加载的 catalog 再经 ACP 下发；只发微信独享 extra", async () => {
     const { activeMcpServers } = await import("./mcp-brain.js");
     const { overlayPath, writeOverlay } = await import("../config/overlay.js");
-    const ag = await agentOf("copilot", { realHome: copilotHome });
+    const ag = await agentOf("claude-code", { realHome: copilotHome });
     const rt = agentRuntime("brain", ag, account);
-    expect(activeMcpServers(ag, rt, account)).toEqual([]); // ok 由 Copilot 自己读 mcp-config.json
+    expect(activeMcpServers(ag, rt, account)).toEqual([]); // 用户自己的 MCP 由 Agent 原生加载
 
     try {
       writeOverlay(
-        "copilot",
+        "claude-code",
         {
           version: 1,
           mcp: { extra: { wxonly: { command: "node", args: ["wx-only.js"] } } },
@@ -140,7 +140,7 @@ describe("direct（默认）", () => {
         { name: "wxonly", command: "node", args: ["wx-only.js"], env: [] },
       ]);
     } finally {
-      fs.rmSync(overlayPath("copilot", account), { force: true });
+      fs.rmSync(overlayPath("claude-code", account), { force: true });
     }
   });
 });
@@ -170,8 +170,7 @@ describe("managed", () => {
   });
 
   it("copilot 副本读真实 catalog，但绝不激活微信 MCP", async () => {
-    const { ensureBrainHome, addMcp, activeMcpServers, catalogNames } =
-      await import("./mcp-brain.js");
+    const { ensureBrainHome, addMcp, catalogNames } = await import("./mcp-brain.js");
     const ag = await agentOf("copilot", { realHome: copilotHome });
     process.env.WEMIND_HOME_MODE = "managed";
     try {
@@ -180,7 +179,9 @@ describe("managed", () => {
       expect(catalogNames(ag, account)).toEqual(["ok"]);
       expect(addMcp("wechat", ag, account).ok).toBe(false);
       expect(addMcp("ok", ag, account).ok).toBe(true);
-      expect(activeMcpServers(ag, rt, account).map((s) => s.name)).toEqual(["ok"]);
+      // Copilot 不消费 ACP mcpServers → 激活集写进副本自己的 mcp-config.json
+      const copy = JSON.parse(fs.readFileSync(path.join(rt.configDir, "mcp-config.json"), "utf-8"));
+      expect(Object.keys(copy.mcpServers)).toEqual(["ok"]);
       const real = JSON.parse(fs.readFileSync(path.join(copilotHome, "mcp-config.json"), "utf-8"));
       expect(Object.keys(real.mcpServers)).toContain("wechat");
     } finally {

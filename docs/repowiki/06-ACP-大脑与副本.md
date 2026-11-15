@@ -171,8 +171,8 @@ MCP **文件格式**知识集中在 `agents/managed/mcp-adapters.ts` 的 `McpAda
 
 `direct`（默认）下 MCP 完全由 Agent 自己的真实配置决定：
 
-- 文件式 Agent（kiro / opencode / qoder / cline / gemini / pi）由 Agent 启动时读自己的配置文件，WeMind 不写、不删、不注入。
-- `acpMcpServers` 的 Agent（DSH / Claude Code / Copilot / Codex）同样由自己读真实配置：DSH 读 profile YAML、Claude Code 读 `~/.claude.json`、Copilot 读 `mcp-config.json`、Codex 读 `config.toml`（同名时原生优先）。WeMind **不重发 catalog**，只把微信侧 overlay 的 `mcp.extra` 补进会话、减去 `mcp.disable`。
+- 文件式 Agent（kiro / opencode / qoder / cline / gemini / pi / Copilot）由 Agent 启动时读自己的配置文件，WeMind 不写、不删、不注入。
+- `acpMcpServers` 的 Agent（DSH / Claude Code / Codex）同样由自己读真实配置：DSH 读 profile YAML、Claude Code 读 `~/.claude.json`、Codex 读 `config.toml`（同名时原生优先）。WeMind **不重发 catalog**，只把微信侧 overlay 的 `mcp.extra` 补进会话、减去 `mcp.disable`。Copilot 虽然也接受 ACP `mcpServers` 声明，但实测只支持 http/sse（我们 catalog 是 stdio），故按文件式处理。
 - 微信里的 `加载 / 卸载 MCP` 在 direct 下**原样转给 Agent**（按普通消息进大脑），由 Agent 自己决定是否/如何改配置。WeMind 不维护 direct 的激活集。
 - Agent 真实配置里出现微信 MCP 时**只告警、不阻止启动**（`warnForbiddenNativeMcp`）：WeMind 不替用户剥离，风险由用户判断。WeMind 自己生成的集合（managed / ACP 下发）仍永久排除 `wechat`。
 
@@ -184,9 +184,9 @@ MCP **文件格式**知识集中在 `agents/managed/mcp-adapters.ts` 的 `McpAda
 | `加载 <名>` / `load <名>` | 加入激活集（`wechat` 永久禁止） |
 | `卸载 <名>` / `unload <名>` | 移除 |
 
-`managed` 下加载/卸载后 daemon 重启 ACP 进程以按新配置重载，下一条消息生效。**只有激活集真的变了才重启**（重复加载/卸载未激活项不会白杀一次进程）；**切脑进行中先等切换结束再重启**；**正在生成的回合不打断**——重启排到当前回合结束（`pendingReload`）。激活集持久化在 `<账号>/brain-mcps.json`，结构 `{version:2, active:{"<agent>":[...]}}`；**只影响该 agent、且只影响之后由 WeMind 新建的 brain 会话**。切到另一个 agent 用它自己的集合（没加载过就是空），切回来恢复原集合。终端自己开的会话不受影响。
+`managed` 下加载/卸载后 daemon 重启 ACP 进程以按新配置重载，下一条消息生效。**只有激活集真的变了才重启**（重复加载/卸载未激活项不会白杀一次进程）；**切脑进行中先等切换结束再重启**；**正在生成的回合不打断**——重启排到当前回合结束（`pendingReload`）。激活集持久化在 `<账号>/brain-mcps.json`，结构 `{version:2, active:{"<agent>":[...]}}`；**只影响该 agent、且只影响之后由 WeMind 新建的 brain 会话**。切到另一个 agent 用它自己的集合（没加载过就是空），切回来恢复原集合。终端自己开的会话不受影响。文件式 Agent（含 Copilot）由 `applyBrainCopy()` 写副本配置，配置式投递的 Agent 才需要重启进程。
 
-**catalog 按 agent 各自约定、从该 agent 的「真实」配置目录读**（`mcpCatalogPath()` 用 `realHome`）：kiro 是 `~/.kiro/settings/mcp.json`，opencode 是 `~/.config/opencode/opencode.json` 的 `mcp.servers`，qoder 是 `~/.qoder/settings.json` 的 `mcpServers`，cline 是 `~/.cline/data/settings/cline_mcp_settings.json`，gemini 是 `~/.gemini/settings.json`（JSONC），pi 是 `~/.pi/agent/mcp.json`（kiro 格式 `{mcpServers}`），DSH 是 `profiles/<profile>/cordis.patch.yml` 的 `@deepseek-ai/dsh-mcp-client` 条目；Claude Code / Copilot / Codex 分别读 `~/.claude.json` / `~/.copilot/mcp-config.json` / `~/.codex/config.toml`（WeMind 只读解析，用于列表、指标与微信检测）。`WEMIND_MCP_CATALOG` 可覆盖成任意路径，**只影响可选清单与「加载」候选**，不改 Agent 自己实际加载的文件。**只有 `managed` 才写副本**：`加载 <名>` 把定义写进账号副本或随 ACP 下发，真实配置文件一律不动；文件式副本写前剔除微信 MCP，`mcpDelivery: "acp"` 的 Agent（DSH / Claude Code / Copilot / Codex）副本里的 MCP 条目**全部剥离**、由 WeMind 按激活集注入；overlay 写入时也拒绝微信 MCP 定义。**不要跨 agent 借配置文件。** 微信侧 overlay 的 `mcp.extra` 扩充可选目录，`mcp.disable` 最后生效；managed 的 worker 同样支持两者。
+**catalog 按 agent 各自约定、从该 agent 的「真实」配置目录读**（`mcpCatalogPath()` 用 `realHome`）：kiro 是 `~/.kiro/settings/mcp.json`，opencode 是 `~/.config/opencode/opencode.json` 的 `mcp.servers`，qoder 是 `~/.qoder/settings.json` 的 `mcpServers`，cline 是 `~/.cline/data/settings/cline_mcp_settings.json`，gemini 是 `~/.gemini/settings.json`（JSONC），pi 是 `~/.pi/agent/mcp.json`（kiro 格式 `{mcpServers}`），Copilot 是 `~/.copilot/mcp-config.json`，DSH 是 `profiles/<profile>/cordis.patch.yml` 的 `@deepseek-ai/dsh-mcp-client` 条目；Claude Code / Codex 分别读 `~/.claude.json` / `~/.codex/config.toml`（WeMind 只读解析，用于列表、指标与微信检测）。`WEMIND_MCP_CATALOG` 可覆盖成任意路径，**只影响可选清单与「加载」候选**，不改 Agent 自己实际加载的文件。**只有 `managed` 才写副本**：`加载 <名>` 把定义写进账号副本或随 ACP 下发，真实配置文件一律不动；文件式副本写前剔除微信 MCP，`mcpDelivery: "acp"` 的 Agent（DSH / Claude Code / Codex）副本里的 MCP 条目**全部剥离**、由 WeMind 按激活集注入；overlay 写入时也拒绝微信 MCP 定义。**不要跨 agent 借配置文件。** 微信侧 overlay 的 `mcp.extra` 扩充可选目录，`mcp.disable` 最后生效；managed 的 worker 同样支持两者。
 
 ### 记忆/规则/技能共享（direct 直接读 / managed 继承）
 
@@ -198,7 +198,7 @@ MCP **文件格式**知识集中在 `agents/managed/mcp-adapters.ts` 的 `McpAda
 
 ### settings 处理
 
-`direct` 下 WeMind **不碰任何 settings 文件**：Agent 用自己完整的真实设置。只有为「微信侧免逐次审批」下发的 `envDefaults`（如 `DSH_PERMISSION_MODE=danger-full-access`）和从 Agent 凭据文件派生的凭证环境变量仍会注入；父进程显式设置的同名变量优先。MCP 也完全由 Agent 自己加载（DSH 读 profile YAML、Claude Code 读 `~/.claude.json`、Copilot 读 `mcp-config.json`、Codex 读 `config.toml`）；`activeMcpServers(ag, rt)` 在 direct 只返回 `overlay.mcp.extra`，**不会重发真实 catalog**。managed 下 `mcpDelivery: "acp"` 的 Agent 才按 brain 激活集下发——**必须传正在启动的那个 agent 与 runtime**。
+`direct` 下 WeMind **不碰任何 settings 文件**：Agent 用自己完整的真实设置。只有为「微信侧免逐次审批」下发的 `envDefaults`（如 `DSH_PERMISSION_MODE=danger-full-access`）和从 Agent 凭据文件派生的凭证环境变量仍会注入；父进程显式设置的同名变量优先。MCP 也完全由 Agent 自己加载（DSH 读 profile YAML、Claude Code 读 `~/.claude.json`、Copilot 读 `mcp-config.json`、Codex 读 `config.toml`）；`activeMcpServers(ag, rt)` 在 direct 只返回 `overlay.mcp.extra`（且仅 `acpMcpServers` 的 Agent），**不会重发真实 catalog**。managed 下文件式 Agent 写副本配置，`mcpDelivery: "acp"` 的 Agent 才按 brain 激活集下发——**必须传正在启动的那个 agent 与 runtime**。
 
 `managed` 才生成副本：`settingsBase` 型 Agent（如 gemini）把真实设置文件**整份**复制进副本——adapter 的 `stripSettings()` 只剥掉该格式的 MCP 段（`mcpServers` / `mcp`），并强制 `general.enableAutoUpdate=false`；`model` / `providers` / `security` 等其余键一律原样保留（**刻意的**：按 agent 维护剥离清单等于替用户改配置，上游一改键名就静默剥错）。MCP 由 adapter 的 `writeCatalog()` 权威覆盖同一文件里的 MCP 段。
 
@@ -227,7 +227,7 @@ MCP **文件格式**知识集中在 `agents/managed/mcp-adapters.ts` 的 `McpAda
 | `claude-code` | Claude Code | 需适配器 | ✅ 探针级实测 + 真机微信单轮 E2E（2026-10-31；重启续聊/MCP/任务待复测） | 全局 `claude-agent-acp`（`npm i -g @agentclientprotocol/claude-agent-acp`，Node ≥22；免审批走 `session/set_mode bypassPermissions`，适配器不解析 CLI flag；Windows `claude-agent-acp.cmd`） |
 | `codex` | OpenAI Codex | 需适配器（ACP 项目维护，非 OpenAI 官方） | ✅ 已内置/已实测（探针级 + 真机 E2E：worker 与 brain 通道均通；load/图片/set_mode/set_config_option ✅；**stdio MCP ✅**，2.5.0 与 2.6.0 均复测模型实际调用 fake MCP；旧结论 `mcpCapabilities.acp=false` 是误读） | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**全局安装**，当前基线 **2.6.0**；Windows 上是 `codex-acp.cmd`；免审批 `INITIAL_AGENT_MODE=agent-full-access` + `session/set_mode`，见 [接入-Codex](../接入方案/接入-Codex.md)） |
 | `pi` | pi coding agent | 需适配器（社区 `pi-acp`） | ✅ 已内置/探针级实测 + 真机 E2E（2026-11-01：brain、热切换、微信任务）；load/图片/工具调用 ✅、0 反向请求 | `pi-acp`（`npm i -g pi-acp`）+ `requiresBins: ["pi"]`（pi 本体 `npm i -g @earendil-works/pi-coding-agent` 并先登录）；`direct` 不注入 `PI_CODING_AGENT_DIR`、用真实目录，`managed` 才指向副本根、MCP 走 `<副本根>/mcp.json`；免审批无需开关；`settingsDefaults: { quietStartup: true }` 关掉 pi-acp 当消息发出来的启动信息（用户显式设过则保留），见 [接入-pi](../接入方案/接入-pi.md) |
-| `copilot` | GitHub Copilot CLI | 原生 ACP | ✅ 探针级实测（1.0.107，Windows，2026-11-09；WeChat E2E 待验证）；强杀后 `session/load` 和 stdio MCP 调用通过；图片模型支持待实测 | `copilot --acp --no-auto-update --allow-all-tools`；`COPILOT_HOME` 副本同步 `config.json`、`skills/`、`copilot-instructions.md`；MCP 经 ACP 激活集；不在 `AUTO_PROBE_ORDER`，需显式选择（见 [接入-Copilot](../接入方案/接入-Copilot.md)） |
+| `copilot` | GitHub Copilot CLI | 原生 ACP | ✅ 探针级 + 真机 E2E（1.0.108，Windows，2026-11-15）；强杀后 `session/load` 通过、图片 1×1 PNG 被接受；`session/new.mcpServers` **不加载**（只认自己的 `mcp-config.json`） | `copilot --acp --no-auto-update --allow-all-tools`；`COPILOT_HOME` 副本同步 `config.json`、`skills/`、`copilot-instructions.md`；MCP `mcpDelivery: "config"`（managed 写副本 `mcp-config.json`）；不在 `AUTO_PROBE_ORDER`，需显式选择（见 [接入-Copilot](../接入方案/接入-Copilot.md)） |
 
 两类区别：**原生 ACP**（CLI 自带 ACP 模式，直接起）vs **需适配器**（CLI 本身不实现 ACP，要起一个桥接进程）。`auto` 只在 6 个原生预设中探测（`opencode → cline → qoder → gemini → deepseek → kiro`）；三个适配器（`claude-code` / `codex` / `pi`）及原生 ACP `copilot` 不参与（安装不代表已登录，误选会让机器启动失败），只能显式选用。
 
@@ -308,7 +308,7 @@ worker 副本详见 [7. 远程任务 Worker](07-远程任务-Worker.md#worker-�
 | `session/load` | 探针实测（`scripts/acp-probe.mjs`）；回包里的 `agentCapabilities` 代码不读 | 不支持 → `-32601` → 当前代码新建会话，**丢多轮上下文** | 预设写 `restore: "resume"` 用 `session/resume` 兜底，再失败才 `new` |
 | `session/resume` | 同上：实测 + 预设字段 | 也没有 → 无法自愈恢复 | 接受「重启即新会话」，或换 agent |
 | `image` | 探针带图跑一次 prompt；结论写进预设的 `images` | 预设 `images: false` → `planImageTurn()` 按「有文字只按文字答、无文字才拒绝」处理；即便漏到 `askBrainTurn`，也只会附一句「当前大脑不支持图片」而不带图 | 友好拒绝，或换 agent |
-| MCP 传输 | 探针传非空 `mcpServers` 实测；结论写进预设的 `acpMcpServers`，managed 托管时再配 `mcpDelivery: "acp"` | 不支持 ACP MCP → 动态 MCP 不可用 | 走 agent 自己配置文件，或先不做 |
+| MCP 传输 | 探针传非空 `mcpServers` 实测；结论写进预设的 `acpMcpServers`，managed 托管时再配 `mcpDelivery` | 不支持 ACP MCP → 动态 MCP 不可用 | 设 `acpMcpServers: false` + `mcpDelivery: "config"`，走 Agent 自己的配置文件（如 Copilot） |
 | 反向请求 | 跑一次 prompt，记录 `method`+`id` | 不应答 → 挂到超时 | 应答器已在 `acp-reverse.ts` 统一（brain/worker/`brain check` 共用），一般无需再写 |
 | 正文粒度 | 看 `agent_message_chunk` 数量 | committed-only → 心跳刷屏、首帧慢 | 调 `firstFrameMs` + `heartbeatMs`（静默期心跳间隔） |
 | Windows 入口 | `Get-Command` / 实际文件 | `.cmd` 未经 shell → 启动失败 | 用 `spawnAgent()`（内部经 shell），`binWin` 写实际文件名 |

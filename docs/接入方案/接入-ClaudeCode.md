@@ -240,4 +240,6 @@ node scripts/acp-probe.mjs
 3. **任务派发**：派一条任务（`任务 claude-code：…`）→ 跑通、结果送达（§5.2）。
 4. **长任务**：>30s 不因首帧误杀；进度不刷屏（§5.2）。
 5. **图片**：能力声明 `image: true`，本机用网关时 1×1 PNG 被上游以 `400 WorkBuddy: … replace the image` 拒绝，需换正常模型/网关再验（§4）。
-**2026-11-14 实测补充（`direct`）**：会话可见性 ✅ ——存量会话在 `~/.claude/projects/<工作区 slug>/*.jsonl`。技能/记忆与写回项**本轮没测到**：claude-code 经本机模型网关 `127.0.0.1:3425`，该端口当时未监听，`session/prompt` 直接回 `424 upstream rate-limited`；属 Agent/provider 侧依赖，等网关可用后补跑（它 2026-11-12 的 prompt E2E 是通过的）。来源：设计文档 §18.2.2。
+**2026-11-14 实测补充（`direct`）**：会话可见性 ✅ ——存量会话在 `~/.claude/projects/<工作区 slug>/*.jsonl`。技能/记忆与写回项**本轮没测到**：claude-code 经本机模型网关 `127.0.0.1:3425`，该端口当时未监听，`session/prompt` 直接回 `424 upstream rate-limited`；属 Agent/provider 侧依赖，网关可用后已复测通过（见下条）。来源：设计文档 §18.5。
+
+**2026-11-15 复测（`direct`，网关已起）**：prompt 恢复 ✅ ——两轮 prompt 都拿到技能列表（`magpie-skills` 等在列），`session/prompt` 正常 `end_turn`、`session/load` 成功，技能可见性成立；**记忆写回 ✅** ——让它把标记文件写进真实 `~/.claude` 成功落盘，说明微信侧写的记忆与终端共用同一份文件。来源：设计文档 §18.5。

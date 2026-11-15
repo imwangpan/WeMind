@@ -244,4 +244,8 @@ syncSettings():
 
 > **日志格式说明（2026-11-11，历史实测记录不改正文）**：本文记录的日志线索沿用当时的写法；现行运行日志统一由 `core/logging.ts` 的 `createLogger(scope)` 输出为 `[wemind/<scope>][INFO|WARN|ERROR|DEBUG] …`，全部 stderr。ACP 帧级关键线索（`spawn` / `initialized` / `session/new` / `prompt ok`）归 **INFO**（排障必须可见），`prompt FAIL` 与自愈归 **WARN**。CLI 用户输出走 stdout 的 `print()`，无前缀无级别；`wemind log --errors` 精确认 `[ERROR]/[WARN]` 标记，升级前写入的旧日志仍按关键词兼容。详见 [`AGENTS.md`](../../AGENTS.md) 与 [`repowiki/11`](../repowiki/11-开发指南.md)。
 
-**2026-11-14 实测补充（`direct`）**：会话可见性 ✅ ——存量会话在 `~/.qoder/projects/<工作区 slug>/*.jsonl` 与 `logs/sessions/<slug>/...` 里（slug 由 WeMind 工作区路径转成）。技能/记忆与写回项**本轮没测到**：Qoder 经本机模型网关 `127.0.0.1:3425`，该端口当时未监听，`session/prompt` 空闲超时 180s、0 帧；属 Agent/provider 侧依赖，等网关可用后补跑（它 2026-11-12 的 prompt E2E 是通过的）。来源：设计文档 §18.2.2。
+**2026-11-14 实测补充（`direct`）**：会话可见性 ✅ ——存量会话在 `~/.qoder/projects/<工作区 slug>/*.jsonl` 与 `logs/sessions/<slug>/...` 里（slug 由 WeMind 工作区路径转成）。技能/记忆与写回项**本轮没测到**：Qoder 经本机模型网关 `127.0.0.1:3425`，该端口当时未监听，`session/prompt` 空闲超时 180s、0 帧；属 Agent/provider 侧依赖，网关可用后已复测通过（见下条；它 2026-11-12 的 prompt E2E 也通过）。来源：设计文档 §18.5。
+
+**2026-11-15 复测：全部通过（`direct`）** ——prompt 正常返回；`session/set_config_option` 在会话内切模型（`magpie/qoder/dfmodel` → `magpie/auto/deepseek-v4.1-flash`）被接受且随后 prompt 正常；MCP 加载 ✅（本地最小 MCP server 的工具返回 `PROBE_ECHO:OK`）；技能可见 ✅（列表含 `magpie-skills`，两轮一致）；权限 0 次请求、工具直接落盘。来源：设计文档 §18.5、§18.6。
+
+**同日早些时候的 0 帧（已排除，留作排查指引）**：当时 `session/prompt` 120s 超时、只收到 `available_commands_update`、0 帧；`~/.qoder/logs/runs/<run>/qodercli.log` 显示 `turn.started model="magpie/qoder/dfmodel"` 后没有模型返回，期间直连 `http://127.0.0.1:3425/v1` 用该模型发最小 `chat/completions`（流式/非流式）也无响应，而 `auto/deepseek-v4.1-flash`、`auto/hy4free` 都是 200。属**模型路由侧不稳定**（Agent/provider 侧）：遇到同样现象先看 `qodercli.log` 和网关路由，WeMind 只告警、不代改。来源：设计文档 §18.6。

@@ -99,4 +99,4 @@ node scripts/acp-probe.mjs
 - **上游升级后复测（触发式）**：pi-acp 定位是 MVP，上游小版本可能快速变化；升级 pi-acp（实测基线 0.0.34）或 pi 本体（实测基线 1.4.0）后，重跑 §3 的探针（含 `ACP_TEST_TOOL=1` 漂移检测与 `ACP_TEST_IMAGE=1`）和 `wemind brain check`。若上游把工具调用改成逐次审批，探针会先红而不是微信第一条消息卡 30s 超时（§5 漂移检测）。
 - **审批机制变化的应对预案（假设，非当前事实）**：§5 的五步预案只在「上游真的改成逐次审批」时才需要验证；当前 pi 官方 security.md 明确不逐次审批，无需执行。
 
-**2026-11-14 实测补充（`direct`）**：记忆读的是真实 `~/.pi/agent/AGENTS.md` ✅；外部新增 skill 后**新会话**可见 ✅；同一会话内新增 skill **不会**即时刷新（需新会话）；微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：`~/.pi/agent/sessions/<工作区 slug>/<时间戳>_<sessionId>.jsonl`。`managed` 抽测通过：`worker-home/skills` 是指向真实目录的 **Junction**、`AGENTS.md` 复制、`.wemind-inherited.json` 记录清单。来源：设计文档 §18.2.2。
+**2026-11-14 实测补充（`direct`）**：记忆读的是真实 `~/.pi/agent/AGENTS.md` ✅；外部新增 skill 后**新会话**可见 ✅；同一会话内新增 skill **不会**即时刷新（需新会话）；微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：`~/.pi/agent/sessions/<工作区 slug>/<时间戳>_<sessionId>.jsonl`。`managed` 抽测通过：`worker-home/skills` 是指向真实目录的 **Junction**、`AGENTS.md` 复制、`.wemind-inherited.json` 记录清单。来源：设计文档 §18.5。

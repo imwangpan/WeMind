@@ -63,41 +63,48 @@ describe("Copilot 副本", () => {
       "# instructions\n",
     );
     expect(fs.readFileSync(path.join(brainHome, "skills", "sample.md"), "utf-8")).toBe("# skill\n");
-    expect(fs.existsSync(path.join(brainHome, "mcp-config.json"))).toBe(false);
+    // MCP 只读 mcp-config.json → 副本必须自带该文件；brain 默认激活集为空
+    expect(JSON.parse(fs.readFileSync(path.join(brainHome, "mcp-config.json"), "utf-8"))).toEqual({
+      mcpServers: {},
+    });
   });
 
-  it("ACP MCP catalog 从 mcp-config.json 读取并按名字/定义排除 wechat", async () => {
-    const { addMcp, activeMcpServers, catalogNames, ensureBrainHome } =
-      await import("./mcp-brain.js");
+  it("MCP catalog 从 mcp-config.json 读取，副本按激活集写入并排除 wechat", async () => {
+    const { addMcp, catalogNames, ensureBrainHome } = await import("./mcp-brain.js");
     const { resolveAgent } = await import("../brain-agents.js");
     const agent = resolveAgent();
-    ensureBrainHome();
+    const rt = ensureBrainHome();
 
     expect(catalogNames()).toEqual([sampleServerName]);
     expect(addMcp("renamed-wechat")).toMatchObject({ ok: false, changed: false });
     expect(addMcp(sampleServerName)).toMatchObject({ ok: true, changed: true });
-    expect(activeMcpServers()).toEqual([
-      {
-        name: sampleServerName,
-        command: "node",
-        args: ["demo-server.js"],
-        env: [{ name: "DEMO", value: "1" }],
+    expect(
+      JSON.parse(fs.readFileSync(path.join(rt.configDir, "mcp-config.json"), "utf-8")),
+    ).toEqual({
+      mcpServers: {
+        [sampleServerName]: {
+          type: "local",
+          command: "node",
+          args: ["demo-server.js"],
+          env: { DEMO: "1" },
+        },
       },
-    ]);
+    });
 
-    const { ensureWorkerHome, workerMcpServers } = await import("./mcp-worker.js");
+    const { ensureWorkerHome } = await import("./mcp-worker.js");
     ensureWorkerHome(agent);
     expect(fs.readFileSync(path.join(workerHome, "config.json"), "utf-8")).toBe(
       JSON.stringify({ loggedInUsers: [] }),
     );
-    expect(workerMcpServers(agent)).toEqual([
-      {
-        name: sampleServerName,
-        command: "node",
-        args: ["demo-server.js"],
-        env: [{ name: "DEMO", value: "1" }],
+    expect(JSON.parse(fs.readFileSync(path.join(workerHome, "mcp-config.json"), "utf-8"))).toEqual({
+      mcpServers: {
+        [sampleServerName]: {
+          type: "local",
+          command: "node",
+          args: ["demo-server.js"],
+          env: { DEMO: "1" },
+        },
       },
-    ]);
-    expect(fs.existsSync(path.join(workerHome, "mcp-config.json"))).toBe(false);
+    });
   });
 });

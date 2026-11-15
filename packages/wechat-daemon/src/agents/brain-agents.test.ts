@@ -180,8 +180,10 @@ describe("resolveAgent agent", () => {
     expect(ag.inheritFiles).toEqual(["copilot-instructions.md"]);
     expect(ag.credentialFiles).toEqual(["config.json"]);
     expect(ag.catalogFile).toBe("mcp-config.json");
-    expect(ag.acpMcpServers).toBe(true);
-    expect(ag.mcpDelivery).toBe("acp");
+    // MCP 只读自己的 mcp-config.json（1.0.108 实测不加载 ACP 传入的 stdio mcpServers）
+    expect(ag.mcpConfigFile).toBe("mcp-config.json");
+    expect(ag.acpMcpServers).toBe(false);
+    expect(ag.mcpDelivery).toBe("config");
     expect(ag.images).toBe(true);
     expect(AUTO_PROBE_ORDER).not.toContain("copilot");
   });

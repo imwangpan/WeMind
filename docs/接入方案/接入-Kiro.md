@@ -121,4 +121,4 @@ wemind brain check
 - **`--agent-engine v1`**：未验证，WeMind 按 v2 处理（保留 v2 参数）。
 - **其余 ACP 能力（会话恢复、图片、MCP、反向请求等）**：本文未记录本机实测结论；升级 kiro 或需要依赖某项能力时，先用一次真实 prompt 复验。
 
-**2026-11-14 实测补充（`direct`）**：外部新增 skill 后**新会话**可见 ✅；同一会话内新增 skill **即时**可见 ✅（热加载）；微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：`~/.kiro/sessions/<hash>/sess_*/`（`session.json` + `messages.jsonl` 内含 WeMind 工作区路径）。来源：设计文档 §18.2.2。
+**2026-11-14 实测补充（`direct`）**：外部新增 skill 后**新会话**可见 ✅；同一会话内新增 skill **即时**可见 ✅（热加载）；微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：`~/.kiro/sessions/<hash>/sess_*/`（`session.json` + `messages.jsonl` 内含 WeMind 工作区路径）。来源：设计文档 §18.5。

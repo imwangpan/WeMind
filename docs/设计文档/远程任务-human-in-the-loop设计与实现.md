@@ -239,7 +239,7 @@ worker 与 brain 都按「无人值守」跑：ACP 反向请求里的权限默�
 | `direct` | Agent 自己读真实配置，WeMind 不重发 catalog | 同左 |
 | 微信 MCP（`wechat`） | **永久排除**（防它把消息发回自己） | **永久排除**（同因），另加 `WEMIND_WORKER_MCP_EXCLUDE` |
 
-投递方式按 Agent 分：文件式 Agent 由 managed 写配置文件，`mcpDelivery: "acp"` 的 Agent（DSH / Claude Code / Copilot / Codex）不写文件，随 `session/new|resume` 用 ACP 声明下发；`direct` 下只有用户显式配置 `overlay.mcp.extra` 时才补微信独享项。Agent 真实配置里若出现微信 MCP，**只告警、不阻止启动**（用户需自行移除，否则可能形成第二个 poller / 回环）。
+投递方式按 Agent 分：文件式 Agent 由 managed 写配置文件，`mcpDelivery: "acp"` 的 Agent（DSH / Claude Code / Codex）不写文件，随 `session/new|resume` 用 ACP 声明下发；`direct` 下只有用户显式配置 `overlay.mcp.extra` 时才补微信独享项。Agent 真实配置里若出现微信 MCP，**只告警、不阻止启动**（用户需自行移除，否则可能形成第二个 poller / 回环）。
 
 ---
 

@@ -113,6 +113,6 @@ node scripts/acp-probe.mjs
 - **OAuth 登录的实机握手**：本机是 API key 用户；OAuth 的 `oauth_creds.json` / `google_accounts.json` 已同步进 brain 与 worker 副本（单测覆盖），实机握手仍待有 Google 登录环境的机器复验（§6）。
 - **加密文件存储下的凭据复用**：显式开启 `GEMINI_FORCE_ENCRYPTED_FILE_STORAGE` 时，凭据可能落在系统钥匙串或 `gemini-credentials.json`，副本能否可靠复用**待实测**；这种部署目前建议改用 API key 或关闭该选项（§4）。
 
-**2026-11-14 实测补充（`direct`）**：记忆读的是真实 `~/.gemini/GEMINI.md` ✅；外部新增 skill 后**新会话**可见 ✅，但同一会话内新增 skill **不会**即时刷新（需新会话）。写入边界：`--approval-mode yolo --skip-trust` 下能写**受信任工作区内**的文件（实测建成并回 OK ✅），写工作区**之外**（实测目标 `~/.gemini/skills`）会长时间无输出（>200s，复现两次）——属它自己的工作区信任边界，WeMind 不介入，需要时由用户在自己的 gemini 配置里放开。会话可见性 ✅：`~/.gemini/tmp/worker/chats/session-*.jsonl` 与 `projects.json`。来源：设计文档 §18.2.2。
+**2026-11-14 实测补充（`direct`）**：记忆读的是真实 `~/.gemini/GEMINI.md` ✅；外部新增 skill 后**新会话**可见 ✅，但同一会话内新增 skill **不会**即时刷新（需新会话）。写入边界：`--approval-mode yolo --skip-trust` 下能写**受信任工作区内**的文件（实测建成并回 OK ✅），写工作区**之外**（实测目标 `~/.gemini/skills`）会长时间无输出（>200s，复现两次）——属它自己的工作区信任边界，WeMind 不介入，需要时由用户在自己的 gemini 配置里放开。会话可见性 ✅：`~/.gemini/tmp/worker/chats/session-*.jsonl` 与 `projects.json`。来源：设计文档 §18.5。
 
 > 升级 Gemini 后先按 §3 的命令重跑 `scripts/acp-probe.mjs`（含 `ACP_TEST_TOOL=1`）与 `wemind brain check`，再按新版本更新本节结论（§4「上游版本会变」）。

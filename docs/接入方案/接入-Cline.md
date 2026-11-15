@@ -212,7 +212,7 @@ wemind brain check           # 真握手；自定义 provider 会自动复用 pr
 - **旧 session transcript 的实际落盘位置**：`direct` 下是真实 `~/.cline/data/sessions/`，`managed` 下是 `<managed>/cline/data/sessions/`；来自 Cline 数据布局的**假设**，本轮未逐个文件核实（§5 第 7 条）。
 - **升级 Cline 后重跑探针**：本文结论（含图片被丢弃、`session/new.mcpServers` 不生效、`session/close` 回 `-32601`）仅适用于 **3.0.74**（状态行），升级后需按 §2 重新验证。
 
-**2026-11-14 实测补充（`direct`）**：外部新增 skill 后**新会话**可见 ✅；同一会话内新增 skill **不会**即时刷新（需新会话）；微信侧让它写文件能落到真实 home ✅。上面「旧 session transcript 的实际落盘位置（假设）」在 `direct` 下已核实：`~/.cline/data/sessions/<id>/*.messages.json` 内含 WeMind 工作区路径 ✅，会话可见性成立。来源：设计文档 §18.2.2。
+**2026-11-14 实测补充（`direct`）**：外部新增 skill 后**新会话**可见 ✅；同一会话内新增 skill **不会**即时刷新（需新会话）；微信侧让它写文件能落到真实 home ✅。上面「旧 session transcript 的实际落盘位置（假设）」在 `direct` 下已核实：`~/.cline/data/sessions/<id>/*.messages.json` 内含 WeMind 工作区路径 ✅，会话可见性成立。来源：设计文档 §18.5。
 
 ---
 

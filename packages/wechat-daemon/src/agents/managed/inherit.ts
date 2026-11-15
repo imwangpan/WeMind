@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { createLogger } from "@wemind/wechat-ilink-core";
+
 import type { ResolvedAgent } from "../brain-agents.js";
+
+const log = createLogger("wechat-daemon/config");
 
 /**
  * 把 agent 真实配置目录里的「记忆/规则/技能」链入副本配置目录，并在**换 agent** 时清掉上一个 agent 留下的条目。
@@ -138,8 +142,11 @@ export function syncInherited(root: string, dir: string, ag: ResolvedAgent): voi
     }
     try {
       fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
-    } catch {
-      /* 权限不足等：best-effort 忽略 */
+    } catch (err) {
+      // 权限不足 / 文件系统不支持链接：best-effort 降级，但必须告警——副本会缺这份继承内容（副本漂移）。
+      log.warn(
+        `继承目录 ${d} 失败（${err instanceof Error ? err.message : String(err)}）；managed 副本将缺少这份内容，微信侧可能与终端不一致`,
+      );
     }
   }
 
@@ -150,8 +157,10 @@ export function syncInherited(root: string, dir: string, ag: ResolvedAgent): voi
     try {
       if (fs.existsSync(src) && (!fs.existsSync(dst) || staleFiles.has(f)))
         fs.copyFileSync(src, dst);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      log.warn(
+        `继承文件 ${f} 失败（${err instanceof Error ? err.message : String(err)}）；managed 副本将缺少这份内容`,
+      );
     }
   }
 

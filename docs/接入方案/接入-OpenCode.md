@@ -357,7 +357,7 @@ npm run build; npm run daemon
 - **Code Mode 工具标题映射**：尚未逐类实测 `tool_call.title` 的 OpenCode 风格文案，`toolSummary()` / `zhTool()` 是否需要映射未验证（M1 只记录到 `call-4516d245-…` 形态）。
 - **同 agent 并发长期风险**：仅 2026-10-29 一轮样本（opencode 两条并发未见互踩），长期是否互踩仍待观察。
 
-**2026-11-14 实测补充（`direct`）**：记忆读的是真实 `~/.config/opencode/AGENTS.md` ✅；外部新增 skill 后**新会话**可见 ✅，且同一会话内新增 skill **即时**可见 ✅（热加载）；微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：自有会话库 `~/.local/share/opencode/opencode.db` 的 `session_v2.directory` 里有 66 条指向 WeMind worker 工作区的会话。同 agent 并发又补了一轮样本：两条并发任务落在两条独立会话、跑完 `PRAGMA integrity_check = ok`，仍未见互踩。`managed` 抽测通过：`worker-home/opencode/skills` 为 Junction、`AGENTS.md` 复制。来源：设计文档 §18.2.2。
+**2026-11-14 实测补充（`direct`）**：记忆读的是真实 `~/.config/opencode/AGENTS.md` ✅；外部新增 skill 后**新会话**可见 ✅，且同一会话内新增 skill **即时**可见 ✅（热加载）；微信侧让它写文件能落到真实 home ✅。会话可见性 ✅：自有会话库 `~/.local/share/opencode/opencode.db` 的 `session_v2.directory` 里有 66 条指向 WeMind worker 工作区的会话。同 agent 并发又补了一轮样本：两条并发任务落在两条独立会话、跑完 `PRAGMA integrity_check = ok`，仍未见互踩。`managed` 抽测通过：`worker-home/opencode/skills` 为 Junction、`AGENTS.md` 复制。来源：设计文档 §18.5。
 
 ---
 

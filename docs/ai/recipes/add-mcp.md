@@ -28,7 +28,7 @@ catalog（定义从哪来；一律读 Agent 的**真实**配置目录，不读 m
   └─ 微信指令「加载 <名>」/「卸载 <名>」修改；按 agent 分键，wechat 永久禁止
 
 transport（怎么让 agent 看到）
-  └─ brain：`managed` 下文件式 Agent 由 applyBrainCopy() 写副本配置；mcpDelivery=acp 的 Agent（DSH / claude-code / copilot / codex）走 session/new|resume，传激活集
+  └─ brain：`managed` 下文件式 Agent（含 Copilot）由 applyBrainCopy() 写副本配置；mcpDelivery=acp 的 Agent（DSH / claude-code / codex）走 session/new|resume，传激活集
   └─ `direct`：所有 MCP 都由 Agent 自己读真实配置；WeMind 不重发 catalog，只补 overlay.mcp.extra；`加载/卸载` 原样转给 Agent
   └─ worker：`managed` 下 applyWorkerCopy() 继承全量（排除 wechat + WEMIND_WORKER_MCP_EXCLUDE）；`direct` 由 Agent 自己加载
 
@@ -91,7 +91,7 @@ transport（怎么让 agent 看到）
 
 ### DSH
 
-> **状态：已实现并实测（2026-10-29 复核，2026-11-13 校正）。** DSH 自己读 profile YAML 里的 `@deepseek-ai/dsh-mcp-client` 条目；WeMind 只读解析用于列出/指标/微信检测。`managed` 下副本里的 MCP 条目全部剥离，再按 brain 激活集 / worker 全量集经 `session/new|resume` 下发（`acpMcpServers: true` + `mcpDelivery: "acp"`）。`addMcp` 会预校验定义（无 command/url 拒绝加载；结构不认识/残缺的条目跳过并记日志，不拖挂整个会话）。**stdio 已真机实测可用；HTTP 由 agent 声明可用（`mcpCapabilities.http:true`）但未单独真机实测；SSE 不被 ACP 支持**（`toAcpMcpServers` 只输出 stdio / `type:"http"`）。claude-code / copilot / codex 同样走 ACP 投递；Codex 原生 `~/.codex/config.toml` 仍由 Codex 自己加载且同名优先，`direct` 不重发。
+> **状态：已实现并实测（2026-10-29 复核，2026-11-13 校正）。** DSH 自己读 profile YAML 里的 `@deepseek-ai/dsh-mcp-client` 条目；WeMind 只读解析用于列出/指标/微信检测。`managed` 下副本里的 MCP 条目全部剥离，再按 brain 激活集 / worker 全量集经 `session/new|resume` 下发（`acpMcpServers: true` + `mcpDelivery: "acp"`）。`addMcp` 会预校验定义（无 command/url 拒绝加载；结构不认识/残缺的条目跳过并记日志，不拖挂整个会话）。**stdio 已真机实测可用；HTTP 由 agent 声明可用（`mcpCapabilities.http:true`）但未单独真机实测；SSE 不被 ACP 支持**（`toAcpMcpServers` 只输出 stdio / `type:"http"`）。claude-code / codex 同样走 ACP 投递；Codex 原生 `~/.codex/config.toml` 仍由 Codex 自己加载且同名优先，`direct` 不重发。Copilot 不同：`session/new.mcpServers` 实测不加载（1.0.108），改走 `mcpDelivery: "config"` 写副本 `mcp-config.json`。
 
 DSH 的 MCP 写在 profile 用户层；`WEMIND_MCP_CATALOG` 仍可覆盖「微信侧可选目录」的来源（JSON 格式会按 JSON 解析）：
 
@@ -162,7 +162,7 @@ MCP                 # 列出可选与已激活
 
 ## 5. DSH 的 ACP MCP 投递（已实现，2026-11-13 校正）
 
-- `acpMcpServers` 是纯能力；`mcpDelivery: "acp"` 表示 `managed` 下由 WeMind 把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入（`deepseek`、`claude-code`、`copilot`、`codex`）；
+- `acpMcpServers` 是纯能力；`mcpDelivery: "acp"` 表示 `managed` 下由 WeMind 把激活集转成 ACP `mcpServers`，在 `session/new` / `session/resume` 传入（`deepseek`、`claude-code`、`codex`）。Copilot 实测不加载 ACP 传的 stdio MCP，走 `mcpDelivery: "config"` 写副本 `mcp-config.json`；
 - `direct` 不重发真实 catalog：Agent 自己加载的 MCP 不会被 WeMind 再传一遍；
 - `toAcpMcpServers()`：两种 JSON 键路径 → `{ name, command, args, env }` / `{ name, type:"http", url, headers }`；
 - 官方不支持 SSE；HTTP 已声明（未单独真机实测）；stdio 已真机实测；
