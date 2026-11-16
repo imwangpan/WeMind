@@ -327,7 +327,7 @@ export type TaskFacts = { awaiting: number; active: boolean; interrupted: number
 /**
  * 这条消息是否走**快车道**：控制指令与任务指令不经过大脑，不该排在一条十几分钟的大脑回合后面。
  * 「继续」类短句在确实有可续跑任务时也走快车道；问大脑前缀永远走大脑。
- * 带附件的消息一律走大脑：控制/任务指令目前不消费附件，放快车道会静默丢掉用户发来的文件。
+ * 带附件的消息一律走大脑：控制/任务指令目前不处理附件，放快车道会静默丢掉用户发来的文件。
  * 注意：切脑 / 会话 / 交接也在快车道，但它们要操作同一个 ACP 连接，仍会在 ACP 门口等当前回合结束——那是语义要求，不是排队阻塞。
  */
 export function isFastLane(text: string, tasks: TaskFacts, attachmentCount = 0): boolean {
@@ -336,6 +336,14 @@ export function isFastLane(text: string, tasks: TaskFacts, attachmentCount = 0):
   if (!t || parseBrainEscape(t)) return false;
   if (parseControl(t) || parseTaskControl(t)) return true;
   return shouldResumeTask(t, tasks);
+}
+
+/**
+ * direct 模式下「加载/卸载 MCP」没有 WeMind 侧可写的激活集：不拦截，原样交给 Agent 自己处理。
+ * `managed` 仍由 daemon 维护激活集。
+ */
+export function passMcpToggleToBrain(cmd: ChatCommand | null, direct: boolean): boolean {
+  return direct && !!cmd && (cmd.kind === "add" || cmd.kind === "remove");
 }
 
 /** 大脑队列里的无编号消息是否该交给任务：只有「继续」类短句 + 确实有可续跑任务；带任何媒体的消息永远给大脑。 */

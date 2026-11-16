@@ -33,7 +33,7 @@ export function nextRestartBudget(
 }
 /**
  * daemon 发现同账号已有另一个实例在跑时用它退出。
- * 这不是配置错误，重拉无益——另一个实例已经在消费同一个 bot token；后台守护进程/pm2 都应停止重拉。
+ * 这不是配置错误，重拉无益——另一个实例已经占用了同一个 bot token；后台守护进程/pm2 都应停止重拉。
  */
 export const DAEMON_ALREADY_RUNNING_EXIT_CODE = 75;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -138,7 +138,7 @@ export async function runWatchdog(): Promise<void> {
       child.on("error", () => resolve(-1));
     });
     if (code === DAEMON_ALREADY_RUNNING_EXIT_CODE) {
-      // 同账号已有另一个 daemon 在消费同一个 bot token：本后台守护进程再拉只会每 5s 撞一次，停在这里。
+      // 同账号已有另一个 daemon 在占用同一个 bot token：本后台守护进程再拉只会每 5s 撞一次，停在这里。
       rotator.writeLine(
         wrapperLine(
           "WARN",

@@ -47,4 +47,17 @@ describe("writeJsonAtomic", () => {
     expect(seen).toHaveLength(2);
     expect(seen[0]).not.toBe(seen[1]);
   });
+
+  it("临时文件按 0600 写入（不回落 umask 默认权限）", () => {
+    const file = path.join(dir, "runtime.json");
+    const real = fs.writeFileSync.bind(fs);
+    const options: unknown[] = [];
+    vi.spyOn(fs, "writeFileSync").mockImplementation(((p: unknown, ...rest: unknown[]) => {
+      options.push(rest[rest.length - 1]);
+      return (real as (...a: unknown[]) => unknown)(p, ...rest);
+    }) as typeof fs.writeFileSync);
+    writeJsonAtomic(file, { homeMode: "managed" });
+    expect(options).toHaveLength(1);
+    expect(options[0]).toMatchObject({ encoding: "utf-8", mode: 0o600 });
+  });
 });

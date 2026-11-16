@@ -1,14 +1,14 @@
 # 5. daemon（wemind）
 
-> 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md)
+> 上一页：[4. MCP Server](04-MCP-Server.md) ｜ 下一页：[6. ACP 大脑与副本](06-ACP-大脑与副本.md)
 >
-> **最后核对**：2026-11-09
+> **最后核对**：2026-11-14
 
-daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。本章聚焦 daemon 本体（`index.ts`）的运行逻辑；大脑、worker、沙箱在后续章节展开。
+daemon 是 WeMind 的「完全体」：一个脱离任何 IDE、自己长轮询收消息、调用常驻 AI 大脑生成回复、自动回发的后台进程。本章聚焦 daemon 本体（`index.ts`）的运行逻辑；大脑、worker、副本在后续章节展开。
 
 ## 5.1 模块全景
 
-`src/` 是 **8 个一级目录 + 6 个二级目录**下的 72 个源文件（另有 70 个与源码同目录的测试）；下表按目录给出每个文件的职责。分层设计与迁移记录见 [`docs/设计文档/源码目录分层设计.md`](../设计文档/源码目录分层设计.md)。
+`src/` 是 **8 个一级目录及其二级目录**下的 93 个非测试源文件（另有 82 个与源码同目录的测试）；下表按目录给出每个文件的职责。分层设计与迁移记录见 [`docs/设计文档/源码目录分层设计.md`](../设计文档/源码目录分层设计.md)。
 
 ```
 packages/wechat-daemon/src/
@@ -37,9 +37,9 @@ packages/wechat-daemon/src/
 │   ├── brain-check.ts        # wemind brain check 的真 ACP 握手
 │   └── protocol/             # brain / worker 共用协议层
 │       ├── acp-connection.ts # 帧处理、请求与回合超时、模型/模式、load 后回放静默（→ 第 6 章）
-│       ├── acp-reverse.ts    # 反向请求应答器（权限默认拒绝；未知 method 回 -32601）
+│       ├── acp-reverse.ts    # 反向请求应答器（权限默认 yolo 放行；WEMIND_ACP_AUTO_ALLOW=0 恢复拒绝；未知 method 回 -32601）
 │       └── acp-quiet.ts      # 恢复会话后等回放帧安静（200ms 静默窗口 / 最多 3s）
-├── agents/                   # agent 预设、配置状态与沙箱
+├── agents/                   # agent 预设、配置状态、direct / managed 运行时
 │   ├── brain-presets.ts      # AcpAgentPreset 类型与 10 个内置预设（纯数据，无 IO）
 │   ├── brain-agents.ts       # resolveAgent、agentProblem、派生配置落盘（→ 第 6 章）
 │   ├── brain-config.ts       # brain.json 读写
@@ -47,11 +47,18 @@ packages/wechat-daemon/src/
 │   ├── agent-slot.ts         # brain/worker 的 agent 槽位（懒解析 + 记忆化，供热切换改写）
 │   ├── profile-model.ts      # 真实 profile 的默认模型读取与「缺 - id: acp」提示
 │   ├── cline-credentials.ts  # 从 Cline providers.json 派生 CLINE_PROVIDER/CLINE_API_KEY
-│   └── sandbox/              # 沙箱与 MCP
-│       ├── mcp-sandbox.ts    # brain 沙箱：MCP 隔离 + 记忆继承（→ 第 6 章）
-│       ├── worker-sandbox.ts # worker 沙箱（继承全量 MCP，排除 wechat）（→ 第 7 章）
-│       ├── agent-mcp.ts      # MCP 激活集与按 agent 的挂载格式
-│       └── sandbox-inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单）
+│   ├── config/               # homeMode(direct/managed)、overlay、工作区、环境快照
+│   │   ├── home-mode.ts      # runtime.json：direct（默认）/ managed
+│   │   ├── runtime.ts        # 一次启动的 home/configDir/cwd/mediaDir 总装
+│   │   ├── overlay.ts        # agent-overrides/<agent>.json（仅微信侧）
+│   │   ├── workspace.ts      # workspace.json + 默认工作区
+│   │   └── agent-config-writer.ts # 真实配置备份、并发校验、原子写
+│   └── managed/              # managed 的 MCP 策略与记忆/技能继承
+│       ├── mcp-brain.ts    # brain：direct 不重发 / managed 激活集（→ 第 6 章）
+│       ├── mcp-worker.ts # worker：direct 不重发 / managed 全量 − wechat − EXCLUDE − disabled + overlay（→ 第 7 章）
+│       ├── mcp-adapters.ts   # 按文件格式的 MCP 适配器（读写/剥离/ACP 转换/原生只读）
+│       ├── agent-mcp.ts      # MCP 格式纯函数、wechat 判定与 ACP 转换
+│       └── inherit.ts # 记忆/技能继承（junction/拷贝 + 继承清单；失败告警）
 ├── tasks/                    # 任务（worker）
 │   ├── worker-acp.ts         # 任务 worker 的 ACP 客户端（class WorkerConn）（→ 第 7 章）
 │   ├── worker-pool.ts        # worker 进程池：复用/回收/上限（→ 第 7 章）
@@ -60,11 +67,11 @@ packages/wechat-daemon/src/
 │   └── task-inbox.ts         # 任务收件箱两个通道（task-inbox/ 命令 + task-out/ 答复）
 ├── sessions/                 # 会话
 │   ├── session-manager.ts    # 会话五条指令的实现层（→ 第 6 章）
-│   ├── session-registry.ts   # 会话登记表门面（改名/删除 + re-export store/view）（→ 第 6 章）
+│   ├── session-registry.ts   # 会话登记表统一入口（改名/删除 + re-export store/view）（→ 第 6 章）
 │   ├── registry-store.ts     # 登记表存储层：读写/裁剪/登记刷新
 │   ├── registry-view.ts      # 登记表视图层：引用解析/名字校验/列表渲染
 │   ├── session-map.ts        # 当前会话表 brain-sessions.json / worker-sessions.json（→ 第 6 章）
-│   └── handoff.ts            # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才消费（→ 第 6 章）
+│   └── handoff.ts            # 交接：摘要写入磁盘 + 作为前缀带上 + 答成才清除（→ 第 6 章）
 ├── cli/                      # 本地 CLI
 │   ├── manage.ts             # 参数解析、switch 分派、帮助文本
 │   ├── account-commands.ts   # list / adopt / logout / delete / start（账号维度）
@@ -81,7 +88,7 @@ packages/wechat-daemon/src/
 ├── ipc/                      # 进程间与文本协议
 │   ├── control-bridge.ts     # CLI↔daemon 控制桥（请求/应答/.bridge 凭据）（→ 第 7 章）
 │   ├── chat-command-specs.ts # 微信/CLI 指令表（类型 + 规格 + owner-only 判定）
-│   └── chat-commands.ts      # 指令解析与帮助渲染（与指令表同表驱动）
+│   └── chat-commands.ts      # 整串锚定匹配与帮助渲染（COMMAND_SPECS 在 specs）
 └── shared/                   # 通用工具
     ├── debug-env.ts          # 摘除 VS Code 调试器注入的 NODE_OPTIONS
     ├── version.ts            # 版本号唯一来源（运行时读 package.json）
@@ -105,7 +112,7 @@ graph TD
     B2 --> C["loadAccount（未登录则 exit 1）"]
     C --> D["解析登录者 owner（WECHAT_OWNER_ID 或扫码登录者）<br/>→ addAllowFrom(owner) 种入白名单（迁移老账号）"]
     D --> E["写 daemon.pid + 注册 exit/SIGINT/SIGTERM 清理<br/>+ 全局 unhandledRejection / uncaughtException（只记录不退出）"]
-    E --> F["ensureBrainHome() + ensureWorkerHome()<br/>准备两个沙箱；按 TTL/总量清理 brain-home/media/inbound"]
+    E --> F["ensureParityAccountDirs() + migrateLegacyHomes()<br/>+ ensureBrainHome() + ensureWorkerHome()<br/>两种模式都准备 workspace/{brain,worker}；direct 的 ensure*Home() 直接返回；managed 才准备 brain-home/worker-home 配置副本；按 TTL/总量清理 media/inbound"]
     F --> G["notifyStart 通知上线"]
     G --> H["接入 setTaskPush / setTaskTyping / setTaskStateSink / setTaskAckSink"]
     H --> I["clearTaskDirs + 启动 task-inbox 扫描定时器(1s)"]
@@ -122,6 +129,8 @@ graph TD
 
 - **全局异常处理器**：任何未捕获的 promise 拒绝/异常（多为瞬时网络 `fetch failed` 或回合内 send 被拒）只记录、不退出。此前的 `code=1` 静默崩溃就源于此类未捕获拒绝，会丢掉在途回合、把用户卡在心跳。
 - **PID 文件**：写 `daemon.pid` 供管理命令精确定位停止；`exit`/`SIGINT`/`SIGTERM` 时清理，并 `killWorkerPool()` 收掉池里全部 worker（Windows 上子进程不随父进程退出，漏掉就是一堆孤儿 agent 进程）。
+
+启动时的配置快照与待重载标记：daemon 启动 `readHomeMode(DATA_DIR)` 把 homeMode 快照成 `homeModeAtBoot`，poller / 快车道 / 微信设置告警只读这份快照，不逐条消息重读；`migrateLegacyHomes()` 改用 `readPersistedHomeMode()` 只看磁盘持久值，不受 `WEMIND_HOME_MODE` 一次性覆盖影响（避免持久 `managed` 账号的 `brain-home`/`worker-home` 被误备份）。启动同时读 `runtime.json` 的 `pendingReload` 标记：新进程已按当前配置启动，读后清掉并 WARN。配置/MCP 变更的重启走三态 `applied | queued | failed`（`restartForMcpChange()`）：有回合在跑就排到回合结束、不打断输出，并落盘 `pendingReload`。
 
 ## 5.3 poller / worker 解耦
 
@@ -141,7 +150,7 @@ while true:
         → 按 isFastLane(text, facts, 附件数) 分拣到 fastQueue / msgQueue → 唤醒对应循环
 ```
 
-`message_id` 是 uint64：poller 用字符串比较（`compareMessageIds`/`maxMessageId`），并把最近处理过的 200 个 ID 存进 `state.seenMessageIds`（防同一批/服务端重放时重复处理；**不要**指望它在旧 number 游标刚迁移时补历史——那时环是空的，防重放主防线是持久化的 `updatesBuf`）。**带附件的消息不进快车道**：控制/任务指令不消费附件，放快车道会静默丢文件，所以 `isFastLane` 收到附件数 > 0 时直接返回 false。
+`message_id` 是 uint64：poller 用字符串比较（`compareMessageIds`/`maxMessageId`），并把最近处理过的 200 个 ID 存进 `state.seenMessageIds`（防同一批/服务端重放时重复处理；**不要**指望它在旧 number 游标刚迁移时补历史——那时环是空的，防重放主防线是持久化的 `updatesBuf`）。**带附件的消息不进快车道**：控制/任务指令不处理附件，放快车道会静默丢文件，所以 `isFastLane` 收到附件数 > 0 时直接返回 false。
 
 poller 对每条消息**先鉴权再处理**，并把所有最新 token 实时写进 `state.contextTokens`，这样即使大脑在处理旧消息，新消息的 token 也不会丢。
 
@@ -182,7 +191,7 @@ graph TD
     L -->|否| BQ["msgQueue → workerLoop"]
     FQ --> C0{"是不是「仅登录者」命令<br/>且发送者不是登录者?"}
     C0 -->|是| H0["短提示拒绝<br/>（**不转发给大脑**）"]
-    C0 -->|否| C1{"parseControl?<br/>MCP / 新会话 / 会话列表 / 恢复 / 重命名 / 删除 / 切脑 / 交接 / 帮助"}
+    C0 -->|否| C1{"parseControl?<br/>MCP / 新会话 / 会话列表 / 恢复 / 重命名 / 删除 / 切脑 / 交接 / 工作区 / 微信配置 / 帮助"}
     C1 -->|是| H1["handleControl<br/>（各自处理；切脑/交接仅登录者）"]
     C1 -->|否| C2{"parseTaskControl?"}
     C2 -->|结束任务/任务列表/#n| H2["stopTask / 列表 / 发给指定编号"]
@@ -197,19 +206,23 @@ graph TD
     C4B -->|否| H6["handleMessage → brain（默认）"]
 ```
 
-三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时存在 interrupted）才交给任务侧（`shouldResumeTask()`，2026-11-02 起）；多条可续跑任务时会回编号清单让你指明，不替你选。任务出完结果后不会再接管日常消息。**带任何附件（图片/文件/视频/无转写语音）的消息一律给 brain**：`shouldResumeInBrainQueue()` 与 `isFastLane()` 都把附件数纳入判断——控制/任务指令目前只消费文本，进快车道或任务侧会静默丢掉用户刚发的文件。**有微信转写的语音是纯文本，不算附件**（`extractInbound` 只把无转写语音放进 `attachments`），所以语音版「结束任务」「继续」照常生效。引用消息作为内联前缀进入 brain prompt（`[引用消息] 标题 | 正文`；只有 `svr_id` 时写「引用消息内容未缓存」）。纯未知 item 类型会收到明确提示（列出 type），不静默丢。
+三种「明确性」：`任务：`/`>`/`#n 正文` 强制发任务、`问大脑` 强制发 brain、**无前缀默认走 brain**；只有裸「继续 / 接着跑 / continue」这类短句、且存在可续跑任务（有 waiting，或没有活跃任务时存在 interrupted）才交给任务侧（`shouldResumeTask()`，2026-11-02 起）；多条可续跑任务时会回编号清单让你指明，不替你选。任务出完结果后不会再接管日常消息。**带任何附件（图片/文件/视频/无转写语音）的消息一律给 brain**：`shouldResumeInBrainQueue()` 与 `isFastLane()` 都把附件数纳入判断——控制/任务指令目前只处理文本，进快车道或任务侧会静默丢掉用户刚发的文件。**有微信转写的语音是纯文本，不算附件**（`extractInbound` 只把无转写语音放进 `attachments`），所以语音版「结束任务」「继续」照常生效。引用消息作为内联前缀进入 brain prompt（`[引用消息] 标题 | 正文`；只有 `svr_id` 时写「引用消息内容未缓存」）。纯未知 item 类型会收到明确提示（列出 type），不静默丢。
 
-**命令层（1.2.0 起）**：解析与帮助**同表驱动**（`chat-commands.ts` 的 `COMMAND_SPECS`），中文与斜杠双轨、`/ai` 是统一入口前缀（`/ai` 列可选、`/ai brain X`、`/ai task X`），中文（`切换大脑`、`切换任务大脑`）与旧斜杠（`/brain`、`/worker`）是等价别名。`帮助`/`/help` 按角色裁剪（非登录者看不到「仅登录者」命令）。
+**命令层（1.2.0 起）**：解析与帮助**同表驱动**（`chat-command-specs.ts` 的 `COMMAND_SPECS`），中文与斜杠双轨、`/ai` 是统一入口前缀（`/ai` 列可选、`/ai brain X`、`/ai task X`），中文（`切换大脑`、`切换任务大脑`）与旧斜杠（`/brain`、`/worker`）是等价别名。`帮助`/`/help` 按角色裁剪（非登录者看不到「仅登录者」命令）。
 
-**权限模型**：指令按**作用范围**分两档——**整个账号**（`MCP`/`加载`/`卸载` 换的是全账号的 MCP 集；`AI`/`切换大脑`/`切换任务大脑`/`交接` 换的是全账号的大脑）与**登录者自己的**（会话与任务类：按 `userId` 隔离，别人的会话永远不出现在你的列表里，任务也按人隔离）。其中四条大脑指令在代码里额外做成 **owner-only**（非登录者发只会得到一句短提示、**不转发给大脑**，避免它「意外回答」一条自己无权执行的命令）——这是**兜底校验**：微信平台只把消息发送给登录者本人，所以正常不会触发。`帮助` 对所有人开放。
+**权限模型**：指令按**作用范围**分两档——**整个账号**（`MCP` 列出；`加载`/`卸载` 在 `managed` 下换全账号激活集、`direct` 下原样转给 Agent；`AI`/`切换大脑`/`切换任务大脑`/`交接`/工作区/`微信配置 查看` 操作的是全账号状态）与**登录者自己的**（会话与任务类：按 `userId` 隔离，别人的会话永远不出现在你的列表里，任务也按人隔离）。其中 **7 类 owner-only**（`AI` / `切换大脑` / `切换任务大脑` / `交接` / `允许敏感文件` / `工作区` 三条 / `微信配置 查看`）在代码里额外校验（非登录者发只会得到一句短提示、**不转发给大脑**，避免它「意外回答」一条自己无权执行的命令）——这是**兜底校验**：微信平台只把消息发送给登录者本人，所以正常不会触发。`帮助` 对所有人开放。
 
-「登录者」（owner）= **扫码登录这个 bot 的那个微信号**（`WECHAT_OWNER_ID` 可覆盖；启动时被种进 `allowFrom`，见 §5.2）。它跟「账号之间」没有关系——**每个账号各有自己的 daemon 与登录者，不存在能管别的账号的「主号」**；多账号下换大脑的范围与两个入口（微信 / 本机 CLI）的区别见 [6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md#多账号下的范围两个入口) 与 README 的「多账号管理」。
+「登录者」（owner）= **扫码登录这个 bot 的那个微信号**（`WECHAT_OWNER_ID` 可覆盖；启动时被种进 `allowFrom`，见 §5.2）。它跟「账号之间」没有关系——**每个账号各有自己的 daemon 与登录者，不存在能管别的账号的「主号」**；多账号下换大脑的范围与两个入口（微信 / 本机 CLI）的区别见 [6. ACP 大脑与副本](06-ACP-大脑与副本.md#多账号下的范围两个入口) 与 README 的「多账号管理」。
 
 | 指令 | 作用 | 作用范围 |
 |------|------|------|
 | `MCP` / `列出 MCP` / `/mcp` / `mcp list` | 列出可选与已激活的 MCP | 整个账号 |
-| `加载 <名>` / `load <名>` | 激活某 MCP（激活集真变了才重启 ACP 进程；切脑中先等切换结束） | 整个账号 |
-| `卸载 <名>` / `unload <名>` | 移除某 MCP | 整个账号 |
+| `加载 <名>` / `load <名>` | `managed`：激活某 MCP（激活集真变了才按三态重启：`applied` 立即 / `queued` 排到回合结束且写 `runtime.json` 的 `pendingReload` / `failed` 切脑中不重启，都**如实回执**）；`direct`：原样转给 Agent | `managed` 整个账号 / `direct` 由 Agent 处理 |
+| `卸载 <名>` / `unload <名>` | `managed`：移除某 MCP（同样三态重启与如实回执）；`direct`：原样转给 Agent | `managed` 整个账号 / `direct` 由 Agent 处理 |
+| `工作区` | 查看 brain 默认工作区 | 整个账号（仅登录者） |
+| `设置工作区 <绝对路径>` | 设置 brain 默认工作区（新会话生效） | 整个账号（仅登录者） |
+| `重置工作区` | 恢复 brain 默认工作区（`workspace.mode=default`） | 整个账号（仅登录者） |
+| `微信配置 查看 <agent>` | 只读查看该 agent 的微信侧 overlay | 整个账号（仅登录者） |
 | `切换大脑 [名]` · `/ai brain` · `/brain` | **热切换**对话大脑（§6.2） | 整个账号（仅登录者） |
 | `切换任务大脑 [名]` · `/ai task` · `/worker` | 设默认任务大脑（**本次运行内一直生效**，不写入磁盘） | 整个账号（仅登录者） |
 | `AI` / `AI 列表` · `/ai` | 列可选 agent + 当前对话大脑 / 默认任务大脑 | 整个账号（仅登录者） |
@@ -260,7 +273,7 @@ graph TD
 | `⏳ 还在处理中…` | 回合满 15s、正文尚未开始，且距上一条非确认进度 ≥5s |
 | `✍️ 正在整理回复…` | 第 15s 第二条时正文已开始（否则该条为 `⏳ 还在处理中…`）；15s 之后不再补发第三条固定提示 |
 
-三档按**最终答案发出时间**分（不是 Agent 首字时间）：`<5s` 只发最终答案；`5–15s` 第 5s 发确认；`≥15s` 第 5s 确认、第 15s 第二条。工具步骤/心跳/图片/重试提示都算「已有可见进度」：5s 前有进度就不发确认，第 15s 第二条要求距上一条非确认进度 ≥5s（不满足则跳过，不延后补发）。最终答案开始发送或回合失败时，两个定时器都会取消，不会在答案后再补进度。
+三档按**最终答案发出时间**分（不是 Agent 首字时间）：`<5s` 只发最终答案；`5–15s` 第 5s 发确认；`≥15s` 第 5s 确认、第 15s 第二条。工具步骤/心跳/图片/重试提示都算「已有可见进度」：5s 前有进度就不发确认，第 15s 第二条要求距上一条非确认进度 ≥5s（不满足则跳过，不延后补发）。最终答案开始发送或回合失败时，两个定时器都会取消，不会在答案后再补进度。`index.ts` 的 15s 心跳在无 activity 帧时持续发，接入 committed-only agent 要看 `handleAcpFrame()` 把 `session/prompt` 的**响应帧**也算首帧（这类 agent 只在回合结束回一帧，不误报 -1），`clearAcpTurn()` 同时归零 `startedAt` / `firstFrameAt` / `sessionId`，回合计时不串到下一轮。
 
 「正在输入中」（typing）每 3 秒续发（客户端约 5–8s 自动过期，3s 给 `getConfig`+`sendTyping` 的网络抖动留余量），**延迟确认和等待期间一直有指示**，且**不计入**连续发送上限；每发出一条进度文本后会**立刻补发一次 typing**（文本消息会把客户端的「正在输入」顶掉，不补发的话快回合全程看不到指示）。
 
@@ -324,9 +337,9 @@ graph TD
 | `VIDEO` | 同上，文件名固定 `video.mp4`，prompt 写「大小/时长/本地路径」 |
 | 其它 / 工具 item 11/12 | 未知类型计入 `unsupportedTypes`；只有未知类型时明确告知用户；入站工具 item 直接忽略（它们只用于出站进度） |
 
-- **落盘位置**：`<BRAIN_HOME>/media/inbound`。brain 的 cwd 就是 `BRAIN_HOME`，所以 prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
+- **落盘位置**：默认 `direct` 是 `<账号>/media/inbound`，`managed` 才是 `<managed>/media/inbound`。prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
 - **文件名安全**：`safeMediaFileName()` 去掉路径分隔符/控制字符、替换 Windows 非法字符、给保留名（`CON`/`NUL`/`COM1`…）加后缀、保留扩展名；同名用 `-1`/`-2` 后缀，绝不覆盖。
-- **清理**：`saveInboundMedia()` 每次写入后问一次 `pruneInboundMediaIfDue()`，daemon 启动时也调一次（时钟为「从未清理」→ 必执行）；真正清理至少间隔 1 小时，避免同一批附件重复扫目录（挂在 poller 主循环上没有必要，目录只在写入时才增长）。每次先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 30 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 1GB）从最旧开始删；best-effort，失败不影响消息处理。
+- **清理**：`saveInboundMedia()` 每次写入后问一次 `pruneInboundMediaIfDue()`，daemon 启动时也调一次（时钟为「从未清理」→ 必执行）；真正清理至少间隔 1 小时，避免同一批附件重复扫目录（挂在 poller 主循环上没有必要，目录只在写入时才增长）。**节流按目录分别记时**（`lastPruneByDir`，`resetInboundMediaPruneClock()` 清整张表）：`direct` 与 `managed` 两份 inbound 目录各自记时，不互相饿死一小时。每次先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 30 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 1GB）从最旧开始删；best-effort，失败不影响消息处理。
 - **大小上限**：入站文件/视频/语音默认 `WECHAT_INBOUND_MEDIA_MAX_MB=100`；图片仍走图片专用链路（20MB 上限）。
 - **降级**：所有附件都下载失败时，有文字就只按文字回答（并注明哪些附件没下来）；没有任何可处理内容才拒绝。**不会**拿空 prompt 白问一回合。
 - **图片能力**：`supportsImages()` 读 agent 预设字段（不解析 `initialize` 回包）；agent 不支持或有图片失败时，`planImageTurn()` 决定「有文字就按文字答 / 没文字才拒绝」。
@@ -334,7 +347,7 @@ graph TD
 ### 出站
 
 - **发图**：`extractImages` 从大脑回复里提取 Markdown `![](src)` 或裸图片 URL → `resolveImageBytes` 下载/读取 → `sendImage` 发出，剩余文本另发。下载带 15s 超时 + 浏览器 UA（规避图床热链 403）、10MB 上限；失败的图把原链接附文本发给用户（不静默丢图）。URL 逐跳过安全闸（`image-url.ts` 的 `assertPublicHttpUrl`）：非 http(s)、本机/私网/CGNAT/链路本地/组播（含 IPv6 与 `::ffff:` 映射）以及解析到这些地址的域名都拒绝；重定向手动跟随、每跳复查、最多 3 跳——防大脑输出被提示注入成内网 SSRF。本地文件绝对路径不受影响（那是大脑自己就能读的文件）。
-- **发文件/视频**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 时写 `[附件](<路径>)`；普通形式遇到 `(` 或 `<` 不猜、整段保留为正文；没有附件链接时正文原样返回，不 trim、不压缩空行）。`extractAttachments()` 只认这三种标签（普通 Markdown 链接保留在正文，不误发）；`file://` 只接受空 host（`localhost` 会被 WHATWG URL 规范化为空 host，等价 `file:///`），**UNC `\\server\share` 与 `file://host/...` 一律拒绝**（避免 `realpath`/`stat` 触发 SMB 认证；软链接/junction 先看链接目标、再看 realpath 结果），Windows 还拒绝 **NTFS 数据流**（`account.json::$DATA` 可绕过按名规则）；必须是绝对路径；`realpathSync` 后过敏感文件 denylist（数据状态文件、agent 登录态与 `.auth/`、brain-home/worker-home 与 preset `realHome` 下的 `settings.json`/`models*.json`、密钥，见 §4.19 与 `attachments.test.ts`）与单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）；按标签或扩展名判 `file`/`video`，`sendFileOrdered` 逐条发出。失败/额度不足的原因会归并成附注写进最终文本（`attachmentFailureNote`），用户仍能看到原路径。需要临时外发敏感文件时，登录者发微信指令 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30）：`sensitive-allow.ts` 在**本进程内**记一个截止时间，窗口内 `resolveAttachment` 只跳过敏感名单，UNC/数据流/大小上限照旧；日志会写「敏感文件已临时放行」。被拦下的附件会按用户记进内存队列（30 分钟 TTL、最多 20 条），回这条指令时先开窗再补发，所以**先开后发、先拦后放两种顺序都成立**。窗口与队列都不落盘，重启即失效。
+- **发文件/视频**：大脑必须显式写 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（路径含 `)` 时写 `[附件](<路径>)`；普通形式遇到 `(` 或 `<` 不猜、整段保留为正文；没有附件链接时正文原样返回，不 trim、不压缩空行）。`extractAttachments()` 只认这三种标签（普通 Markdown 链接保留在正文，不误发）；`file://` 只接受空 host（`localhost` 会被 WHATWG URL 规范化为空 host，等价 `file:///`），**UNC `\\server\share` 与 `file://host/...` 一律拒绝**（避免 `realpath`/`stat` 触发 SMB 认证；软链接/junction 先看链接目标、再看 realpath 结果），Windows 还拒绝 **NTFS 数据流**（`account.json::$DATA` 可绕过按名规则）；必须是绝对路径；`realpathSync` 后过敏感文件 denylist（数据状态文件、agent 登录态与 `.auth/`、数据目录（含 `brain-home` / `worker-home`）与 preset `realHome` 下的 `settings.json`/`models*.json`、密钥，见 §4.19 与 `attachments.test.ts`）与单文件 `WECHAT_OUTBOUND_FILE_MAX_MB`（默认 25MB）；按标签或扩展名判 `file`/`video`，`sendFileOrdered` 逐条发出。失败/额度不足的原因会归并成附注写进最终文本（`attachmentFailureNote`），用户仍能看到原路径。需要临时外发敏感文件时，登录者发微信指令 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30）：`sensitive-allow.ts` 在**本进程内**记一个截止时间，窗口内 `resolveAttachment` 只跳过敏感名单，UNC/数据流/大小上限照旧；日志会写「敏感文件已临时放行」。被拦下的附件会按用户记进内存队列（30 分钟 TTL、最多 20 条），回这条指令时先开窗再补发，所以**先开后发、先拦后放两种顺序都成立**。窗口与队列都不落盘，重启即失效。
 - **发语音**：不做。微信语音回复需要 TTS + SILK，且体验通常不如文本；大脑要表达「语音」时按文件发。
 - **发工具进度**：默认发文本「步骤 N」。结构化 item（`TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12`）需 `WECHAT_TOOL_PROGRESS_ITEMS=1` 才启用；代码已对齐官方 2.4.10（`FINISH` + 本回合 `run_id`，不占连发额度、不顶替固定提示；回退文本计额度），但**微信客户端目前不渲染**（服务端 200/空响应/不分配 `message_id`，多家第三方实测一致），所以默认关闭。等微信端开放后改回默认开启即可。真机异常见 [`docs/ai/已知坑.md`](../ai/已知坑.md) 的「工具进度 item」条。
 
@@ -366,9 +379,9 @@ daemon 通过两个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s�
 - **应答即答复**：`{ id, at, ok, text }`，`ok = !text.startsWith("❌")`；CLI 端 `ok=false` 时置退出码 1，脚本能判成败。超时（默认 30s，`WEMIND_CONTROL_TIMEOUT_MS`）如实报「没等到回复」；`brain.switch` / `brain.handoff` 按各自的长耗时放宽（见 `controlTimeoutMs`）；`session.unpause` 是登录后的尽力而为（上限 3s），旧 daemon 不认识它也不会卡住登录。
 - **应答生命周期**：CLI 读到应答即删；daemon 每秒扫描时清掉超过 1 小时没人读的旧应答（CLI 崩溃/放弃留下的），长期运行不会无限堆积。
 - **`.bridge` 凭据**：daemon 启动时清空两个桥目录并写 `control-out/.bridge`（内容 = 自己的 pid）。CLI 据此判断对方是不是「认识桥的版本」——详见 [7. 远程任务 Worker](07-远程任务-Worker.md) §7.5。
-- **安全边界**：请求字段只有 `target`（agent 名）/`ref`/`name`/`page`/`expiresAt`，**没有 `bin`/`args`/`shell` 的位置**（`parseControlRequest` 是唯一入口校验）。请求/应答 id 只允许 `[A-Za-z0-9._-]`（不含 `..`/盘符）——`control-out/<id>.json` 与 `task-out/<id>.json` 都由它拼成，不校验就能借 `../` 覆盖账号数据。
+- **安全边界**：请求字段只有 `target`（agent 名）/`ref`/`name`/`page`/`expiresAt`，**没有 `bin`/`args`/`shell` 的位置**（`parseControlRequest` 是唯一入口校验）。请求/应答 id 只允许 `[A-Za-z0-9._-]`（不含 `..`/盘符）——`control-out/<id>.json` 与 `task-out/<id>.json` 都由它拼成，不校验就能借 `../` 覆盖账号数据。配置写入的键路径同理走 `parseConfigPath()`：`__proto__` / `constructor` / `prototype` 一律拒绝（防原型污染）；`takeOpt()` 拒绝空值/缺值/下一个是 `--flag`；`config agent edit` 不给不存在的非 JSON/JSONC 文件预建 `{}`（如 `~/.codex/config.toml` 明确报错）。
 - 启动时 `clearTaskDirs()` **同时清空 `task-inbox/` 与 `task-out/`**：作废重启前残留命令（防重放），也清掉没人读的旧答复。
 
 ---
 
-接下来：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md) 详解常驻大脑如何工作。
+接下来：[6. ACP 大脑与副本](06-ACP-大脑与副本.md) 详解常驻大脑如何工作。

@@ -15,6 +15,7 @@ import { cmdLogin, finalizeStaging } from "./subcommands/cli-login.js";
 import { cmdSession, cmdSessionCurrent } from "./subcommands/cli-session.js";
 import { cmdAutostart } from "./subcommands/autostart.js";
 import { cmdLog, LOG_USAGE, parseLogArgs } from "./subcommands/cli-log.js";
+import { cmdConfig, cmdEnv, cmdMcp, cmdWorkspace } from "./subcommands/cli-config.js";
 import { pickKey, resolveKey } from "./cli-context.js";
 import {
   cmdTask,
@@ -23,6 +24,7 @@ import {
   cmdTaskStatus,
   cmdTaskStop,
   parseTaskId,
+  parseTaskReplyArgs,
 } from "./subcommands/cli-task.js";
 import {
   cmdAdopt,
@@ -40,7 +42,7 @@ import { renderHelp } from "../ipc/chat-commands.js";
 export { pickKey } from "./cli-context.js";
 export { agentLabel } from "./subcommands/cli-brain.js";
 export { createLoginStagingDir } from "./subcommands/cli-login.js";
-export { resolveTaskCwd, taskAckOutcome } from "./subcommands/cli-task.js";
+export { parseTaskReplyArgs, resolveTaskCwd, taskAckOutcome } from "./subcommands/cli-task.js";
 // 测试与旧调用方按 `manage.ts` 取这些进程辅助函数；实现已移到 process-lifecycle.ts。
 export { brainRecord, descendantPids, stopSummary, deleteGuard } from "./process-lifecycle.js";
 
@@ -68,7 +70,7 @@ export async function runManage(argv: string[]): Promise<void> {
     const i = rest.indexOf(flag);
     if (i < 0) return undefined;
     const v = rest[i + 1];
-    if (v === undefined || v.startsWith("--")) throw new Error(`${flag} 缺少参数值`);
+    if (v === undefined || v === "" || v.startsWith("--")) throw new Error(`${flag} 缺少参数值`);
     rest.splice(i, 2);
     return v;
   };
@@ -109,6 +111,18 @@ export async function runManage(argv: string[]): Promise<void> {
     case "brain":
       print(await cmdBrain(rest, { startDaemon }));
       break;
+    case "config":
+      print(await cmdConfig(rest));
+      break;
+    case "mcp":
+      print(cmdMcp(rest));
+      break;
+    case "workspace":
+      print(cmdWorkspace(rest));
+      break;
+    case "env":
+      print(cmdEnv(rest));
+      break;
     case "session": {
       const sub = (rest[0] ?? "").toLowerCase();
       if (sub === "current") print(cmdSessionCurrent(pickKey(rest[1])));
@@ -135,13 +149,9 @@ export async function runManage(argv: string[]): Promise<void> {
       print(await cmdTask(rest[0], cwd, rest[1], agentKey));
       break;
     case "task-reply": {
-      // 兼容两种写法：`task-reply "#3 内容"` 与 `task-reply 3 "内容"`
-      const first = rest[0] ?? "";
-      const m = first.match(/^[#＃](\d+)\s*([\s\S]*)$/);
-      if (m) print(await cmdTaskReply(m[2], rest[1], parseTaskId(m[1])));
-      else if (rest.length >= 2 && /^\d+$/.test(first))
-        print(await cmdTaskReply(rest[1], rest[2], parseTaskId(first)));
-      else print(await cmdTaskReply(first, rest[1]));
+      // 编号与正文可同参数也可分开：`"#3 内容"` / `"#3" "内容"` / `3 "内容"` / `"内容"`。
+      const { text, sel, id } = parseTaskReplyArgs(rest);
+      print(await cmdTaskReply(text, sel, id));
       break;
     }
     case "task-list":
@@ -239,6 +249,19 @@ export function helpText(): string {
   brain set <agent 名|auto> [--bin X] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]
                                  改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--extra-args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用；--extra-args 追加在预设参数后，不会漏掉 ACP 子命令）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
+  config show|home-mode|reload [--key <key|label>]
+                                 查看/设置 homeMode（direct/managed）与运行时路径
+  config reply-style [concise|off] [--key <key|label>]
+                                 微信侧回复风格（写 <账号>/wechat-settings.json；只影响措辞，不改 Agent 配置）
+  config agent show|get|set|unset|edit <agent> [<file#键路径>] [值] [--file <相对路径>]
+                                 默认改**真实 Agent 配置**（JSON/JSONC；写前备份）
+  config wechat show|edit <agent>
+                                 只改微信独享 overlay（mcp.disable / mcp.extra，不改真实配置）
+  mcp list|enable|disable|add|remove [--key <key|label>]
+                                 管理 brain MCP 激活集 / overlay disable / extra
+  workspace show|set <绝对路径>|reset [--role brain|worker]
+                                 查看/设置默认工作区；已有会话不变，新会话生效
+  env capture|show|clear [--dry-run]   非敏感环境快照（PATH/代理/locale；不含密钥）
   logout <key|label>             停 daemon + 通知下线 + 清凭证（保留目录，可重登）
   delete <key|label>             停 daemon + 删除目录 + 移除注册
   label <key|label> <新别名>     改别名

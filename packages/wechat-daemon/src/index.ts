@@ -47,7 +47,16 @@ import { writeBrainState } from "./agents/brain-state.js";
 import { CLI_PID_MARKERS, findOtherOurProcess } from "./shared/process/proc-identity.js";
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./cli/watchdog-runner.js";
 import { isOwnerOnly } from "./ipc/chat-commands.js";
-import { ensureBrainHome } from "./agents/sandbox/mcp-sandbox.js";
+import { ensureBrainHome } from "./agents/managed/mcp-brain.js";
+import {
+  clearReloadPending,
+  readHomeMode,
+  readReloadMarker,
+  type HomeMode,
+} from "./agents/config/home-mode.js";
+import { ensureParityAccountDirs } from "./agents/config/account-bootstrap.js";
+import { migrateLegacyHomes } from "./agents/config/migrate-legacy.js";
+import { readWechatSettings, replyStyleHint } from "./agents/config/wechat-settings.js";
 import { syncFromPointerMap } from "./sessions/session-registry.js";
 import { clearControlDirs, markBridgeReady } from "./ipc/control-bridge.js";
 import { ControlInboxRunner } from "./daemon/control-inbox-runner.js";
@@ -104,7 +113,7 @@ import {
 import { clearTaskDirs, writeTaskAck } from "./tasks/task-inbox.js";
 import { scanTaskInbox } from "./daemon/task-inbox-runner.js";
 import { killAll as killWorkerPool, sweep as sweepWorkerPool } from "./tasks/worker-pool.js";
-import { ensureWorkerHome } from "./agents/sandbox/worker-sandbox.js";
+import { ensureWorkerHome } from "./agents/managed/mcp-worker.js";
 import { bindLogger } from "./shared/io/leveled-log.js";
 import { createRepeatLog } from "./shared/io/repeat-log.js";
 import { CLI_VERSION } from "./shared/version.js";
@@ -118,6 +127,7 @@ import {
   extractInbound,
   formatQuote,
   isFastLane,
+  passMcpToggleToBrain,
   parseBrainEscape,
   parseControl,
   parseTaskControl,
@@ -338,6 +348,12 @@ function createSendPipeline(account: AccountData): SendPipeline {
 // 当前进行中回合（worker 串行，只有一个）：记录发往用户与所用 token（token 可被「继续」更新）。
 let activeTurn: { from: string; token: string | undefined; runId: string } | null = null;
 
+// 微信设置的坏文件告警去重：每轮都会读一次设置，坏一次不能每轮刷一行日志。
+let warnedWechatSettingsProblem = "";
+// homeMode 在启动时定一次：运行期改 runtime.json 不该让同一批消息一半按 direct、一半按 managed 处理。
+// `wemind config home-mode` 的回执明确要求重启 daemon，运行期覆盖不属于受支持的用法。
+let homeModeAtBoot: HomeMode = "direct";
+
 /** 从解密后的字节嗅探图片 MIME。 */
 function sniffMime(b: Buffer): string {
   const h = b.subarray(0, 4).toString("hex");
@@ -349,7 +365,7 @@ function sniffMime(b: Buffer): string {
 
 /**
  * 处理一条发给大脑的消息。返回**是否真的答成了**（`brainErrorMessage` 兜底算没答成）——
- * 交接摘要的消费就靠这个返回值：只有答成了才把摘要删掉（失败留着，下次还能用）。
+ * 交接摘要的清除就靠这个返回值：只有答成了才把摘要删掉（失败留着，下次还能用）。
  */
 async function handleMessage(
   account: AccountData,
@@ -592,7 +608,7 @@ async function handleMessage(
       sends.flushDeferredTaskPushes(to, latestToken ? latestToken() : cx(), sendFailed);
       activeTurn = null;
     }
-    return false; // 没有答成：交接摘要不能被消费掉
+    return false; // 没有答成：交接摘要不能被清除
   };
 
   // 收图后怎么走：全部下载失败/大脑不支持时，有文字（或其它附件）就只按文字答，没内容就直接拒绝。
@@ -733,7 +749,24 @@ async function handleMessage(
   };
 
   const imagesForBrain = plan.kind === "text-only" ? [] : images; // 大脑不支持看图时别再塞图片（会 -32602）
-  const promptText = [text.trim(), incomingNotes.join("\n")].filter(Boolean).join("\n\n");
+  // 微信侧回复风格：每轮现读一次 `<账号>/wechat-settings.json`，改完下一条消息即生效（不需要 reload / 新会话）。
+  const wxSettings = readWechatSettings(DATA_DIR);
+  if (wxSettings.problem) {
+    if (wxSettings.problem !== warnedWechatSettingsProblem) {
+      warnedWechatSettingsProblem = wxSettings.problem;
+      log.warn(`wechat-settings: ${wxSettings.problem}`);
+    }
+  } else {
+    // 坏→好时清掉去重串：之后再坏成同一种问题要重新告警，不能被上一次的去重吞掉。
+    warnedWechatSettingsProblem = "";
+  }
+  const promptText = [
+    text.trim(),
+    incomingNotes.join("\n"),
+    replyStyleHint(wxSettings.settings.replyStyle),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   let answer: string;
   let ok = true;
   try {
@@ -1012,8 +1045,10 @@ async function pollerLoop(
           active: hasActiveTask(from),
           interrupted: interruptedTasks(from).length,
         };
-        // 带附件的消息不走快车道：控制/任务指令不消费附件，进快车道会静默丢文件。
-        if (isFastLane(text, facts, parts.attachments.length)) fastQueue.push(queued);
+        // 带附件的消息不走快车道：控制/任务指令不处理附件，进快车道会静默丢文件。
+        const mcpToBrain = passMcpToggleToBrain(parseControl(text), homeModeAtBoot === "direct");
+        if (!mcpToBrain && isFastLane(text, facts, parts.attachments.length))
+          fastQueue.push(queued);
         else msgQueue.push(queued);
         enq = true;
       }
@@ -1120,7 +1155,10 @@ async function handleFastItem(
 
   // 控制指令：单独处理
   const ctrl = item.text ? parseControl(item.text) : null;
-  if (ctrl) {
+  // direct 下「加载/卸载 MCP」不在 daemon 侧处理：原样交给 Agent，由它决定怎么改自己的配置。
+  if (passMcpToggleToBrain(ctrl, homeModeAtBoot === "direct")) {
+    log.info("control: mcp toggle passed through to agent (direct)", JSON.stringify(ctrl));
+  } else if (ctrl) {
     // owner-only（切脑/交接）：非本人 → 短提示拒绝，**不**转发给大脑（否则大脑可能替用户执行越权动作）
     if (isOwnerOnly(ctrl) && from !== owner) {
       const r = "这条指令仅登录者可用。发送「帮助」看你自己的指令。";
@@ -1335,8 +1373,8 @@ async function workerLoop(
         item.createTimeMs,
         latestToken,
       );
-      // 答成才消费：失败/被图片挡下就留着，下次还能用。
-      // 切回来答话（回滚到来源大脑，或切换目标就是它）也不消费——那是它自己写的摘要，留着下次切走时用。
+      // 答成才清除：失败/被图片挡下就留着，下次还能用。
+      // 切回来答话（回滚到来源大脑，或切换目标就是它）也不清除——那是它自己写的摘要，留着下次切走时用。
       const answeredBy = getAgent("brain").name;
       if (htext && answered && answeredBy !== pending?.fromAgent && clearHandoff(DATA_DIR))
         log.info(`handoff consumed by ${answeredBy}`);
@@ -1362,7 +1400,7 @@ function readPidFile(file: string): number | null {
 }
 
 export async function runDaemon(): Promise<void> {
-  // 单实例：同账号只允许一个 daemon 消费同一个 bot token。
+  // 单实例：同账号只允许一个 daemon 占用同一个 bot token。
   // `wimind start` 有 wrapper.pid 守卫；这里挡住直接 `wimind daemon` / `npm run daemon`，以及两套 runner 并存。
   const pidFile = path.join(DATA_DIR, "daemon.pid");
   const recordedPid = readPidFile(pidFile);
@@ -1442,8 +1480,26 @@ export async function runDaemon(): Promise<void> {
   process.on("uncaughtException", (err) => {
     log.error("uncaughtException:", describeError(err, import.meta.url));
   });
-  ensureBrainHome(); // 准备 brain 沙箱（默认空 MCP）
-  ensureWorkerHome(); // 准备 worker 沙箱（继承全量 MCP 除 wechat + 记忆/技能/settings）
+  try {
+    homeModeAtBoot = readHomeMode(DATA_DIR);
+    // 排队重载在旧进程里随 daemon 退出消失：新进程本来就是按当前配置 spawn 的，记一行并清掉标记，
+    // 免得下次启动又误报「上次还有没生效的重载」。
+    const pendingMarker = readReloadMarker();
+    if (pendingMarker) {
+      log.warn(
+        `上次退出前排队的 ${pendingMarker.reason} 未及生效；新进程已按当前配置启动，标记已清。`,
+      );
+      clearReloadPending();
+    }
+    ensureParityAccountDirs();
+    migrateLegacyHomes();
+    ensureBrainHome(); // 准备 brain 配置：direct 直接用真实配置，managed 才建账号副本
+    ensureWorkerHome(); // 准备 worker 配置：direct 直接用真实配置，managed 才建账号副本
+  } catch (e) {
+    // 工作区或 Agent 配置不可用属于“启动前就能发现”的配置错误：明确报错，不带着半份配置跑。
+    log.error("agent config/workspace unavailable:", describeError(e, import.meta.url));
+    throw e;
+  }
   const pruned = pruneInboundMediaIfDue(); // 启动时清一次过期/超额入站附件（并把节流时钟起好）
   if (pruned?.removed)
     log.info(`pruned inbound media: ${pruned.removed} files, ${pruned.bytes}B left`);

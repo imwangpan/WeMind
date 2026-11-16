@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ResolvedAgent } from "../../agents/brain-agents.js";
 import {
+  AcpMethodError,
   applyAcpModel,
   applyAcpSessionMode,
   availableAcpModes,
+  acpTurnFirstFrameMs,
   beginAcpTurn,
+  clearAcpTurn,
   drainAcpReplay,
   feedAcpStdout,
   handleAcpFrame,
@@ -44,6 +47,50 @@ function fakeHost(overrides: Partial<AcpHost> = {}) {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("首帧耗时", () => {
+  it("只统计本回合绑定的会话，并且只记第一帧", () => {
+    vi.useFakeTimers();
+    const { host, turn } = fakeHost();
+    vi.setSystemTime(new Date(1_000));
+    beginAcpTurn(turn, "sid-1");
+    vi.setSystemTime(new Date(1_250));
+    handleAcpFrame(
+      {
+        method: "session/update",
+        params: {
+          sessionId: "other",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "x" } },
+        },
+      },
+      host,
+    );
+    expect(acpTurnFirstFrameMs(turn)).toBe(-1);
+    handleAcpFrame(
+      {
+        method: "session/update",
+        params: {
+          sessionId: "sid-1",
+          update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "x" } },
+        },
+      },
+      host,
+    );
+    expect(acpTurnFirstFrameMs(turn)).toBe(250);
+    vi.setSystemTime(new Date(9_000));
+    handleAcpFrame(
+      {
+        method: "session/update",
+        params: {
+          sessionId: "sid-1",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "y" } },
+        },
+      },
+      host,
+    );
+    expect(acpTurnFirstFrameMs(turn)).toBe(250);
+  });
 });
 
 describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
@@ -85,7 +132,7 @@ describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
     expect(logs.some((l) => l.includes("session/load#3 ERROR"))).toBe(true);
   });
 
-  it("反向请求走共用应答器：权限默认拒绝、未知 method 回 -32601", () => {
+  it("反向请求走共用应答器：权限默认放行、未知 method 回 -32601", () => {
     const { host, written } = fakeHost();
     handleAcpFrame(
       {
@@ -98,7 +145,7 @@ describe("handleAcpFrame（响应 / 反向请求 / session/update）", () => {
     expect(written[0]).toMatchObject({
       jsonrpc: "2.0",
       id: 11,
-      result: { outcome: { outcome: "cancelled" } },
+      result: { outcome: { outcome: "selected", optionId: "a" } },
     });
     handleAcpFrame({ id: 12, method: "fs/read_text_file", params: {} }, host);
     expect(written[1]).toMatchObject({ id: 12, error: { code: -32601 } });
@@ -357,6 +404,15 @@ describe("模型与模式设置", () => {
     await p;
   });
 
+  it("applyAcpModel：agent 拒绝旧 model id 时只告警，不把整轮打成失败", async () => {
+    const { host, logs } = fakeHost();
+    const p = applyAcpModel(host, fakeAgent({ model: "stale" }), "s1", 1000);
+    handleAcpFrame({ id: 1, error: { code: -32602, message: "unknown model option" } }, host);
+    await expect(p).resolves.toBeUndefined();
+    expect(logs.some((l) => l.includes("model set failed"))).toBe(true);
+    expect(logs.some((l) => l.includes("unknown model option"))).toBe(true);
+  });
+
   it("availableAcpModes：无 modes → null；有则取 id", () => {
     expect(availableAcpModes({})).toBeNull();
     expect(availableAcpModes({ modes: { availableModes: [{ id: "a" }, "b"] } })).toEqual([
@@ -422,6 +478,83 @@ describe("drainAcpReplay（load 后等历史回放安静）", () => {
     clearInterval(iv);
     await p;
     expect(logs.some((l) => l.includes("(cap)"))).toBe(true);
+  });
+});
+
+describe("重启 / 超时边界（不再吞连接级失败）", () => {
+  it("AcpMethodError：从 error 帧构造，保留 code 与 message", () => {
+    const e = new AcpMethodError({ code: -32602, message: "unknown model option" });
+    expect(e).toBeInstanceOf(Error);
+    expect(e.name).toBe("AcpMethodError");
+    expect(e.code).toBe(-32602);
+    expect(e.message).toBe("-32602: unknown model option");
+    // 对端没给数字 code 时仍是 AcpMethodError，但没有 code → 调用方不视作「明确拒绝」
+    expect(new AcpMethodError({ message: "no code" }).code).toBeUndefined();
+  });
+
+  it("applyAcpModel：error 帧缺数字 code 时不降级（按连接级口径抛给上层）", async () => {
+    const { host } = fakeHost();
+    const p = applyAcpModel(host, fakeAgent({ model: "m" }), "s1", 1000);
+    handleAcpFrame({ id: 1, error: { message: "no code" } }, host);
+    await expect(p).rejects.toBeInstanceOf(AcpMethodError);
+  });
+
+  it("applyAcpModel：消息文本长得像 JSON-RPC error 的连接级故障也必须抛出（不再按文本判）", async () => {
+    const { host } = fakeHost({
+      write: () => {
+        throw new Error('{"code":-32602,"message":"looks like rpc but is a transport failure"}');
+      },
+    });
+    await expect(applyAcpModel(host, fakeAgent({ model: "m" }), "s1", 1000)).rejects.toThrow(
+      /looks like rpc/,
+    );
+  });
+
+  it("applyAcpModel：无进程这种连接级失败必须抛出，不再被当作模型不兼容吞掉", async () => {
+    const noProc = fakeHost({ hasProcess: () => false });
+    await expect(applyAcpModel(noProc.host, fakeAgent({ model: "m" }), "s1", 1000)).rejects.toThrow(
+      "no acp process",
+    );
+  });
+
+  it("applyAcpModel：超时必须抛出", async () => {
+    vi.useFakeTimers();
+    const { host } = fakeHost();
+    const p = applyAcpModel(host, fakeAgent({ model: "m" }), "s1", 50);
+    const assertion = expect(p).rejects.toThrow(/timeout after 50ms/);
+    await vi.advanceTimersByTimeAsync(60);
+    await assertion;
+  });
+
+  it("session/prompt 的响应帧也记首帧（committed-only agent 不误报 -1）", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(1_000));
+    const { host, turn } = fakeHost();
+    beginAcpTurn(turn, "s1");
+    expect(acpTurnFirstFrameMs(turn)).toBe(-1);
+    host.pending.set(1, {
+      resolve: () => undefined,
+      reject: () => undefined,
+      clear: () => undefined,
+      method: "session/prompt",
+    } as AcpPending);
+    vi.setSystemTime(new Date(1_400));
+    handleAcpFrame({ id: 1, result: {} }, host);
+    expect(acpTurnFirstFrameMs(turn)).toBe(400);
+  });
+
+  it("clearAcpTurn 归零首帧与 startedAt（进程重建后不串回合）", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(5_000));
+    const { turn } = fakeHost();
+    beginAcpTurn(turn, "s1");
+    turn.firstFrameAt = 5_200;
+    expect(acpTurnFirstFrameMs(turn)).toBe(200);
+    clearAcpTurn(turn);
+    expect(turn.startedAt).toBe(0);
+    expect(turn.firstFrameAt).toBe(0);
+    expect(turn.sessionId).toBeNull();
+    expect(acpTurnFirstFrameMs(turn)).toBe(-1);
   });
 });
 

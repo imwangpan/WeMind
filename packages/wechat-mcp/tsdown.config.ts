@@ -11,7 +11,7 @@ export default defineConfig({
   failOnWarn: true,
   // 输出 dist/index.js（而非默认 .mjs）：package.json 已是 type:module，.js 即按 ESM 解析，这样 bin/main 等对 dist/index.js 的引用无需改动。
   outExtensions: () => ({ js: ".js" }),
-  // 该包是可执行 MCP server（有 bin），没有 import 它的类型消费者，不对外暴露类型，故关闭 dts。
+  // 该包是可执行 MCP server（有 bin），没有包 import 它的类型，不对外暴露类型，故关闭 dts。
   // 若未来要开 dts：JIT 源码包下需要单独的 tsconfig.dts.json（include core/src + rootDir 指到 packages/），见 AGENTS.md。
   dts: false,
   // 与 @wemind/cli 对齐：单文件产物的报错只有打包后行号，带 sourcemap 才能映射回 .ts；prepack 守卫会检查 .map 随包。

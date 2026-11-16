@@ -6,25 +6,36 @@
  *   npm run doc-impact           打印本次改动触发了哪些规则、每条规则要求同步哪些文档（只读、不失败）
  *   npm run doc-impact:check  断言这些文档确实也在本次 diff 里；缺一个就 exit 1
  *
+ * 两层检查（--check 都跑，互不替代）：
+ *   路径层    RULES 判断「该改的文档有没有出现在 diff 里」，只看路径不看内容；
+ *   内容层    STALE_FACTS 读工作树里文档的最终内容，逐行找已登记为废弃的旧结论，报「文件:行号」。
+ *             这一层与 diff 无关，也不受豁免影响：文档改了但结论没改到位，是路径层抓不到的假绿。
+ *
  * 对比范围：
  *   默认        当前分支相对 main 的 merge-base（含工作区未提交改动）
  *   --staged    暂存区（pre-commit 用）
  *   --base REF  指定对比基准
  *
  * 豁免：
- *   --check 时认两种来源，任一含 `Docs-Impact: none — <理由>` 即放行。
+ *   --check 时认三种来源，任一含 `Docs-Impact: none — <理由>` 即放行。
  *   - pre-commit 阶段提交信息还不存在，读环境变量 DOCS_IMPACT（如 `DOCS_IMPACT=none — Pure refactor`）
- *   - CI / 本地已提交场景读 `--message`、环境变量 DOCS_IMPACT_MESSAGE 或最近一次提交信息
+ *   - CI / 本地已提交场景读环境变量 DOCS_IMPACT_MESSAGE（显式声明，覆盖整条对比范围）
+ *   - 最近一次提交信息**只在对比范围恰好包含一个提交时**生效；多提交分支不能用 HEAD 的
+ *     「Comment only」把整条分支的文档检查一起跳过
  *   允许的理由只有 Pure refactor / Comment only / Test update，见规则表末尾。
+ *   豁免只放行 RULES 的路径检查，绝不放行 STALE_FACTS 的内容检查。
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { RULES, VALID_ESCAPE_HATCH_REASONS } from "./doc-impact.rules.mjs";
+import { RULES, STALE_FACTS, VALID_ESCAPE_HATCH_REASONS } from "./doc-impact.rules.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/** git 的输出可能超过 Node 默认 1MB maxBuffer（大分支/大文档 diff），显式放宽。 */
+export const GIT_MAX_BUFFER = 64 * 1024 * 1024;
 
 function git(args) {
   // core.quotepath=false：否则中文路径会被写成 `"docs/...\345\244..."`，规则里的文档路径永远对不上。
@@ -32,6 +43,7 @@ function git(args) {
     cwd: ROOT,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: GIT_MAX_BUFFER,
   });
 }
 
@@ -77,7 +89,11 @@ export function parseNameStatus(output) {
     const status = (parts[0] ?? "").trim();
     if (!status) continue;
     if (status.startsWith("R") || status.startsWith("C")) {
-      files.push({ status: status[0], oldPath: unquoteGitPath(parts[1]), path: unquoteGitPath(parts[2]) });
+      files.push({
+        status: status[0],
+        oldPath: unquoteGitPath(parts[1]),
+        path: unquoteGitPath(parts[2]),
+      });
     } else {
       files.push({ status: status[0], path: unquoteGitPath(parts[1]) });
     }
@@ -126,6 +142,134 @@ export function docChanged(entry, changedPaths) {
   return changedPaths.has(p);
 }
 
+/**
+ * 内容级校验只扫「结论会写在里面」的文件：仓库文档 + 包源码（日志文案也算结论）。
+ * 只排除登记 pattern 的三个脚本自身（它们的字面量会自命中），其它 scripts/ 下的 md/txt 仍要扫；
+ * 依赖目录、构建产物、worktree 与 agent 私有目录跳过。
+ */
+const STALE_SCAN_EXCLUDE = /^(?:\.worktrees\/|\.agents\/|\.git\/|node_modules\/|scripts\/doc-impact\.rules\.mjs$|scripts\/doc-guards\.test\.mjs$|scripts\/doc-impact\.mjs$)|(?:^|\/)node_modules\/|(?:^|\/)dist\//;
+
+export function isStaleScanPath(rel) {
+  if (!rel || rel.endsWith("/") || STALE_SCAN_EXCLUDE.test(rel)) return false;
+  if (/^(?:AGENTS\.md|README\.md|llms\.txt)$/.test(rel)) return true;
+  if (/^docs\/.*\.(?:md|txt)$/.test(rel)) return true;
+  if (/^scripts\/.*\.(?:md|txt)$/.test(rel)) return true;
+  if (/^packages\/[^/]+\/README\.md$/.test(rel)) return true;
+  return /^packages\/.*\.ts$/.test(rel);
+}
+
+/** 还原 git ls-files 输出：C 风格引号路径先还原，空行与目录项丢掉。 */
+export function parseLsFiles(raw) {
+  return (raw ?? "")
+    .split(/\r?\n/)
+    .map((line) => unquoteGitPath(line))
+    .filter((p) => p && !p.endsWith("/"));
+}
+
+/**
+ * 读内容级校验要用的文件。默认读工作树最终内容（含未跟踪）；`--staged` 时只读 index blob
+ * 并排除未跟踪文件，与 pre-commit 的路径层口径一致，避免「暂存区干净、工作树草稿却挡住提交」。
+ */
+export function collectDocContents({ staged = false } = {}) {
+  const tracked = parseLsFiles(tryGit(["ls-files"]));
+  const untracked = staged
+    ? []
+    : parseLsFiles(tryGit(["ls-files", "--others", "--exclude-standard"]));
+  const files = [];
+  for (const rel of new Set([...tracked, ...untracked])) {
+    if (!isStaleScanPath(rel)) continue;
+    try {
+      // staged 用 `git show :path` 读暂存区 blob；工作树还没 add 的修改不属于这次提交。
+      const content = staged
+        ? tryGit(["show", `:${rel}`])
+        : fs.readFileSync(path.join(ROOT, rel), "utf8");
+      if (content === null) continue;
+      files.push({ path: rel, content });
+    } catch {
+      // 索引里已删除、或临时文件被移走：它没有「仍写在文档里」的结论。
+    }
+  }
+  return files;
+}
+
+/** 复用同一个 RegExp 时先重置 lastIndex，避免带 g 的规则跨行串状态。 */
+function testRe(re, value) {
+  re.lastIndex = 0;
+  return re.test(value);
+}
+
+/** allow 项的 path 可以是精确字符串，也可以是给一类文件用的正则。 */
+function allowPathMatches(rule, rel) {
+  return typeof rule === "string" ? rule === rel : testRe(rule, rel);
+}
+
+/**
+ * 命中是否落在「有据可查的保留位置」。四个条件全都要满足：路径、所在章节、该行附加条件、
+ * 以及文件全文里的约定标记。marker 是关键：版本边界声明或补注被删掉，allow 立刻失效。
+ */
+export function isStaleHitAllowed(allow, { rel, content, line, section }) {
+  return allow.some((a) => {
+    if (!a.path || !allowPathMatches(a.path, rel)) return false;
+    if (a.section && !testRe(a.section, section)) return false;
+    if (a.linePattern && !testRe(a.linePattern, line)) return false;
+    if (a.marker && !testRe(a.marker, content)) return false;
+    return true;
+  });
+}
+
+/** 纯函数：逐行找已废弃结论，返回 [{ id, since, why, path, line, text }]。 */
+export function checkStaleFacts(facts, files) {
+  const hits = [];
+  for (const fact of facts) {
+    for (const file of files) {
+      const lines = file.content.split(/\r?\n/);
+      let section = "";
+      let inFence = false;
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        // 代码围栏里的 `## [x.y.z]` 只是示例，不能伪造已发布章节让 allow 错误放行。
+        if (/^\s*(?:```|~~~)/.test(line)) {
+          inFence = !inFence;
+          continue;
+        }
+        if (inFence) continue;
+        if (/^#{1,2} /.test(line)) section = line.trim();
+        fact.pattern.lastIndex = 0;
+        if (!fact.pattern.test(line)) continue;
+        if (
+          isStaleHitAllowed(fact.allow ?? [], {
+            rel: file.path,
+            content: file.content,
+            line,
+            section,
+          })
+        )
+          continue;
+        hits.push({
+          id: fact.id,
+          since: fact.since,
+          why: fact.why,
+          path: file.path,
+          line: i + 1,
+          text: line.trim().slice(0, 120),
+        });
+      }
+    }
+  }
+  return hits;
+}
+
+/**
+ * 内容级结论是否在 --check 下拦住本次执行。第三形参只是调用方递来的豁免结果，刻意不读：
+ * `Docs-Impact: none — Pure refactor` 是「这次改动不必同步文档」的出口，不是「仓库里可以继续留着
+ * 已推翻的结论」的出口；ca63fcb / 621f0cb 就是靠它跳过整条分支。main() 在 readEscapeHatch() 之前调用它。
+ */
+export function staleBlocksCheck(check, staleHits, _escapeIgnored) {
+  void _escapeIgnored;
+  if (!check || !staleHits || staleHits.length === 0) return false;
+  return true;
+}
+
 /** 解析豁免声明。格式：`Docs-Impact: none — Pure refactor`。 */
 export function parseEscapeHatch(text) {
   if (!text) return null;
@@ -156,7 +300,12 @@ function collectDiff({ staged, base }) {
   if (staged) {
     const nameStatus = git(["diff", "--cached", "--name-status", "-M"]);
     const content = git(["diff", "--cached", "-U0"]);
-    return { files: parseNameStatus(nameStatus), added: parseAddedLines(content) };
+    return {
+      files: parseNameStatus(nameStatus),
+      added: parseAddedLines(content),
+      commitCount: 0,
+      dirty: false,
+    };
   }
   const resolved = resolveBase(base);
   if (!resolved) return null;
@@ -165,12 +314,20 @@ function collectDiff({ staged, base }) {
   const content = git(["diff", "-U0", mb]);
   const files = parseNameStatus(nameStatus);
   const added = parseAddedLines(content);
+  const commitCount = Number(
+    (tryGit(["rev-list", "--count", `${mb}..HEAD`]) ?? "").trim() || 0,
+  );
+  // dirty 只看已跟踪文件的改动：TASK_NOTES.md 之类的本地未跟踪笔记不该让单提交的提交信息豁免失效。
+  const dirty = Boolean((tryGit(["status", "--porcelain", "--untracked-files=no"]) ?? "").trim());
 
   // `git diff` 不含未跟踪文件；本地 verify 时常还没 git add，漏掉它们会让规则假绿。
   // 未跟踪文件整体当作新增：状态行 A + 每行内容都当新增行。
-  const untracked = (tryGit(["ls-files", "--others", "--exclude-standard"]) ?? "")
-    .split(/\r?\n/)
-    .filter((p) => p && !p.endsWith("/") && !p.startsWith(".worktrees/") && !p.startsWith(".agents/"));
+  const untracked = parseLsFiles(tryGit(["ls-files", "--others", "--exclude-standard"])).filter(
+    (p) => !p.startsWith(".worktrees/") && !p.startsWith(".agents/"),
+  );
+  const untrackedInScope = untracked.some(
+    (p) => isStaleScanPath(p) || /^(?:packages|scripts|docs)\//.test(p),
+  );
   for (const rel of untracked) {
     files.push({ status: "A", path: rel });
     try {
@@ -180,7 +337,7 @@ function collectDiff({ staged, base }) {
       // 读不到就只记录路径，规则仍能看到「新增了这个文件」。
     }
   }
-  return { files, added };
+  return { files, added, commitCount, dirty, untrackedInScope };
 }
 
 /** 接入文档名归一化：大小写与连字符不参与比较（预设 `claude-code` ↔ 文件 `接入-ClaudeCode.md`）。 */
@@ -217,7 +374,9 @@ function inRuleScope(rule, line) {
 export function matchRules(rules, ruleInput, addedLines) {
   const results = [];
   for (const rule of rules) {
-    const scopedInput = rule.files ? ruleInput.filter((line) => inRuleScope(rule, line)) : ruleInput;
+    const scopedInput = rule.files
+      ? ruleInput.filter((line) => inRuleScope(rule, line))
+      : ruleInput;
     if (!rule.trigger(scopedInput)) continue;
     let dynamic = false;
     let dynamicNames = [];
@@ -235,18 +394,34 @@ export function matchRules(rules, ruleInput, addedLines) {
   return results;
 }
 
-function readEscapeHatch({ staged }) {
-  const fromEnv = process.env.DOCS_IMPACT;
-  const fromMessage = process.env.DOCS_IMPACT_MESSAGE;
-  const fromLastCommit = staged ? null : tryGit(["log", "-1", "--format=%B"]);
+export function readEscapeHatch({
+  staged,
+  allowCommitMessage = true,
+  lastCommitMessage,
+  env = process.env,
+} = {}) {
+  const fromEnv = env.DOCS_IMPACT;
+  const fromMessage = env.DOCS_IMPACT_MESSAGE;
+  const fromLastCommit =
+    !staged && allowCommitMessage
+      ? (lastCommitMessage ?? tryGit(["log", "-1", "--format=%B"]))
+      : null;
   for (const parsed of [
     parseEscapeHatchEnv(fromEnv),
-    parseEscapeHatch(fromMessage),
+    parseEscapeHatchEnv(fromMessage),
     parseEscapeHatch(fromLastCommit),
   ]) {
     if (parsed) return parsed;
   }
   return null;
+}
+
+/**
+ * 只有「范围恰好一个提交、已跟踪文件干净、且没有落在文档/源码范围内的未跟踪文件」时，
+ * HEAD 的提交信息才覆盖本次检查的 diff；未跟踪的新文档/源码不是那个提交的一部分。
+ */
+export function commitMessageCoversDiff({ commitCount, dirty, untrackedInScope = false }) {
+  return commitCount === 1 && !dirty && !untrackedInScope;
 }
 
 function printRule(rule, missing) {
@@ -259,11 +434,38 @@ function printRule(rule, missing) {
   console.log("");
 }
 
+function printStaleHits(hits, check) {
+  if (hits.length === 0) return;
+  const write = (...args) => (check ? console.error(...args) : console.log(...args));
+  write(
+    check
+      ? `doc-impact 内容校验未通过：${hits.length} 处已废弃结论仍写在文档里。\n`
+      : `doc-impact 内容校验提示：${hits.length} 处已废弃结论仍写在文档里（--check 会失败）。\n`,
+  );
+  for (const h of hits) write(`  ${h.path}:${h.line} [${h.id}（${h.since} 起废弃）] ${h.text}`);
+  write("");
+  const seen = new Set();
+  for (const h of hits) {
+    if (seen.has(h.id)) continue;
+    seen.add(h.id);
+    write(`  ${h.id} 的现行结论：${h.why}`);
+  }
+  write("");
+  write(
+    "豁免（`Docs-Impact: none`）只作用于文档路径规则，不能放行废弃结论；按上面的现行结论改正文，或在 scripts/doc-impact.rules.mjs 的 STALE_FACTS 里登记有据可查的保留位置。",
+  );
+}
+
 function main(argv) {
   const check = argv.includes("--check");
   const staged = argv.includes("--staged");
   const baseIndex = argv.indexOf("--base");
   const base = baseIndex >= 0 ? argv[baseIndex + 1] : undefined;
+
+  // 内容层与 diff 无关：读最终内容，且必须在豁免判断之前独立结论；没有对比基准时这一层仍要跑。
+  const staleHits = checkStaleFacts(STALE_FACTS, collectDocContents({ staged }));
+  printStaleHits(staleHits, check);
+  if (staleBlocksCheck(check, staleHits)) return 1;
 
   const diff = collectDiff({ staged, base });
   if (!diff) {
@@ -307,11 +509,18 @@ function main(argv) {
   if (!check) {
     console.log(`本次改动触发 ${triggered.length} 条规则：\n`);
     for (const { rule } of triggered) printRule(rule, []);
-    console.log("提交前请同步上述文档，或用 `Docs-Impact: none — <理由>` 豁免（理由仅限 Pure refactor / Comment only / Test update）。");
+    console.log(
+      "提交前请同步上述文档，或用 `Docs-Impact: none — <理由>` 豁免（理由仅限 Pure refactor / Comment only / Test update）。",
+    );
     return 0;
   }
 
-  const escape = readEscapeHatch({ staged });
+  // 最近一次提交信息只对它自己的 diff 负责。分支对比是 merge-base..HEAD，
+  // 多提交时不能拿 HEAD 的一句「Comment only」豁免整条分支。
+  const escape = readEscapeHatch({
+    staged,
+    allowCommitMessage: commitMessageCoversDiff(diff),
+  });
   if (escape?.status === "none") {
     if (escape.valid) {
       console.log(`豁免生效：${escape.status} — ${escape.reason}`);
@@ -335,8 +544,13 @@ function main(argv) {
     console.error("");
   }
   console.error("如确属纯重构/只改注释/只改测试，用 `Docs-Impact: none — <理由>` 豁免：");
-  console.error("  pre-commit：DOCS_IMPACT=\"none — Pure refactor\" git commit ...");
-  console.error("  CI/已提交：在提交信息或 PR 描述里加一行 `Docs-Impact: none — Pure refactor`");
+  console.error('  pre-commit：DOCS_IMPACT="none — Pure refactor" git commit ...');
+  console.error(
+    "  单提交范围：在提交信息里加一行 `Docs-Impact: none — Pure refactor`",
+  );
+  console.error(
+    '  多提交分支/CI：显式设置 DOCS_IMPACT_MESSAGE="none — Pure refactor"（提交信息不会跨提交生效）',
+  );
   return 1;
 }
 

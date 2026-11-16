@@ -7,7 +7,7 @@
 //   $env:ACP_SHELL = "1"
 //   $env:ACP_HOME_ENV = "DSH_HOME"
 //   $env:ACP_HOME = "$env:TEMP\dsh-probe-home"   # optional; keep credentials isolated
-//   $env:ACP_MODEL = '["deepseek-account","deepseek-flash"]'  # optional; session/set_config_option
+//   $env:ACP_MODEL = '["<provider>","<model>"]'  # optional; session/set_config_option（DSH 的真实默认看 profile 的 - id: acp）
 //   $env:ACP_REASONING = "high"                  # optional; session/set_config_option
 //   $env:ACP_PROMPT = "Remember the secret word: PINEAPPLE. Reply with exactly: STORED"
 //   $env:ACP_SECOND = "What was the secret word? Reply with just the word."

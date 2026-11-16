@@ -11,7 +11,7 @@ import path from "node:path";
  * 测不出「旧进程真的死了、没残留、新进程真的能用 ACP 说话」；恢复同理（load 失败/成功的分支在 ACP 往返上）。
  *
  * 环境变量必须在 import 前设好：`DATA_DIR`（core 模块加载期定死）与 `WEMIND_SWITCH_DRAIN_MS`
- * （brain-switch 模块加载期读）都是模块级常量（与 agent-slot.test.ts / sandbox-qoder.test.ts 同一手法）。
+ * （brain-switch 模块加载期读）都是模块级常量（与 agent-slot.test.ts / qoder.test.ts 同一手法）。
  */
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-switch-"));
 const dataDir = path.join(root, "data");
@@ -19,6 +19,11 @@ fs.mkdirSync(dataDir, { recursive: true });
 process.env.WECHAT_DATA_DIR = dataDir;
 process.env.WEMIND_MCP_CATALOG = path.join(root, "no-such-catalog.json"); // 别去读用户真实的 MCP 配置
 process.env.WEMIND_SWITCH_DRAIN_MS = "400"; // drain 门缩短，好测超时分支
+// 本文件会真实构建 managed 副本；不覆盖 realHome 的话，默认预设会去读写当前用户真实的 ~/.kiro 等目录。
+const realHome = path.join(root, "real-home");
+fs.mkdirSync(realHome, { recursive: true });
+const savedRealHome = process.env.WEMIND_BRAIN_REAL_HOME;
+process.env.WEMIND_BRAIN_REAL_HOME = realHome;
 const savedNodeOptions = process.env.NODE_OPTIONS;
 process.env.NODE_OPTIONS = ""; // 子进程会继承它；调试器注入会让假 agent 卡在握手（同 spawn-agent.test.ts）
 
@@ -32,7 +37,9 @@ const {
   restart,
   restartForMcpChange,
   resumeSession,
+  clearQueuedReload,
 } = await import("./acp-brain.js");
+const { markReloadPending, readReloadMarker } = await import("../agents/config/home-mode.js");
 const { getAgent, resetSlotsForTest, seedSlots, setAgent } =
   await import("../agents/agent-slot.js");
 const { loadBrainConfig, saveBrainConfig } = await import("../agents/brain-config.js");
@@ -525,7 +532,16 @@ describe("MCP 变更后的重启门", () => {
     } finally {
       endSwitch();
     }
-    await expect(p).resolves.toBe(true);
+    await expect(p).resolves.toBe("applied");
+  });
+
+  it("回合中配置变更排队并落盘；清掉排队状态后跨 daemon 重启不留痕", async () => {
+    setup();
+    markReloadPending("加载/卸载 MCP", dataDir);
+    expect(readReloadMarker(dataDir)).toMatchObject({ reason: "加载/卸载 MCP" });
+    clearQueuedReload();
+    expect(readReloadMarker(dataDir)).toBeNull();
+    await expect(restartForMcpChange("config.reload")).resolves.toBe("applied");
   });
 });
 
@@ -540,6 +556,8 @@ afterEach(() => {
 });
 // NODE_OPTIONS 放到最后再恢复：本文件每条用例都要起子进程，中途恢复会把调试器注入带回去（同 spawn-agent.test.ts 的顾虑）
 afterAll(() => {
+  if (savedRealHome === undefined) delete process.env.WEMIND_BRAIN_REAL_HOME;
+  else process.env.WEMIND_BRAIN_REAL_HOME = savedRealHome;
   if (savedNodeOptions === undefined) delete process.env.NODE_OPTIONS;
   else process.env.NODE_OPTIONS = savedNodeOptions;
 });

@@ -1,13 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { BRAIN_HOME } from "../../agents/sandbox/mcp-sandbox.js";
+import type { AgentRole } from "../../agents/brain-config.js";
+import { readHomeMode, type HomeMode } from "../../agents/config/home-mode.js";
+import { mediaDirFor } from "../../agents/config/runtime.js";
 
 /**
  * 入站附件落盘。
  *
- * 放在 BRAIN_HOME/media/inbound：brain 的 cwd 就是 BRAIN_HOME，agent 用文件工具可直接按
- * 相对路径 media/inbound/... 找到；prompt 里同时给绝对路径，避免 agent 猜 cwd。
+ * `direct` 放在 `<账号>/media/inbound`；`managed` 保持 `<brain-home>/media/inbound`。
+ * prompt 里给绝对路径，避免 agent 依赖 cwd 猜位置。
  * 目录/文件权限：POSIX 下 0700/0600；Windows 的 chmod 是 no-op，依赖数据目录本身的权限。
  */
 
@@ -77,8 +79,8 @@ export function saveInboundMedia(
 }
 
 /** inbox 目录（绝对路径）。 */
-export function mediaInboxDir(): string {
-  return path.join(BRAIN_HOME, "media", "inbound");
+export function mediaInboxDir(role: AgentRole = "brain", mode: HomeMode = readHomeMode()): string {
+  return mediaDirFor(role, mode);
 }
 
 /**
@@ -138,19 +140,22 @@ export function pruneInboundMedia(
 
 /** 清理只在「写入入站媒体」与 daemon 启动时被问到；真正清理至少间隔 1 小时，避免同一批附件重复 readdir+stat 整个目录。 */
 export const INBOUND_MEDIA_PRUNE_INTERVAL_MS = 60 * 60_000;
-let lastPruneAt: number | null = null;
+/** 每个目录一份时钟：切 homeMode 后 inbound 换目录，新目录不该被旧目录的节流压住一小时。 */
+const lastPruneByDir = new Map<string, number>();
 
 /** 单测用：重置节流时钟（回到「从未清理」）。 */
 export function resetInboundMediaPruneClock(): void {
-  lastPruneAt = null;
+  lastPruneByDir.clear();
 }
 
-/** 启动时的第一次调用必定执行（不依赖时钟纪元）；之后按间隔节流。返回 null 表示这次跳过。 */
+/** 每个目录第一次调用必定执行（不依赖时钟纪元）；之后按间隔节流。返回 null 表示这次跳过。 */
 export function pruneInboundMediaIfDue(
   now: number = Date.now(),
   dir: string = mediaInboxDir(),
 ): { removed: number; bytes: number } | null {
-  if (lastPruneAt !== null && now - lastPruneAt < INBOUND_MEDIA_PRUNE_INTERVAL_MS) return null;
-  lastPruneAt = now;
+  const key = path.resolve(dir);
+  const last = lastPruneByDir.get(key);
+  if (last !== undefined && now - last < INBOUND_MEDIA_PRUNE_INTERVAL_MS) return null;
+  lastPruneByDir.set(key, now);
   return pruneInboundMedia(dir);
 }

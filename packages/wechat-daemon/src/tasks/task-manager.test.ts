@@ -268,7 +268,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     ).toBe("额度/余额不足");
   });
 
-  it("running 期间多次回话全部保留（按序累积，下一轮一并消费）", async () => {
+  it("running 期间多次回话全部保留（按序累积，下一轮一并处理）", async () => {
     const r1 = deferred();
     const r2 = deferred();
     acquire.mockImplementationOnce(async () => {
@@ -810,5 +810,47 @@ describe("本地命令的答复（daemon 说了才算）", () => {
     expect(injectTask("u1", "继续", 9)).toContain("没有 #9 号任务");
     expect(stopTask("u1", 9)).toContain("没有 #9 号在跑的任务");
     expect(acks).toEqual([]);
+  });
+});
+
+describe("结束任务时的收尾容错（AGENTS.md §4.13）", () => {
+  it("等回复的任务：dropSession 抛错也把连接还给池（release），不留 busy 条目", async () => {
+    const r1 = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "做X");
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalledTimes(1));
+    r1.resolve("选 A 还是 B？");
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
+    const conn = conns[0];
+    conn.dropSession = vi.fn((_k: string) => {
+      throw new Error("ENOSPC: session-cwd.json");
+    });
+    expect(() => stopTask("u1", 1)).toThrow(/ENOSPC/);
+    expect(release).toHaveBeenCalledWith(conn);
+    expect(drop).not.toHaveBeenCalled();
+    expect(hasActiveTask("u1")).toBe(false);
+  });
+
+  it("正在跑的任务：dropSession 抛错也力杀（drop 不被跳过）", async () => {
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(deferred<string>().promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "长任务");
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalledTimes(1));
+    const conn = conns[0];
+    conn.dropSession = vi.fn((_k: string) => {
+      throw new Error("ENOSPC: session-cwd.json");
+    });
+    expect(() => stopTask("u1", 1)).toThrow(/ENOSPC/);
+    expect(drop).toHaveBeenCalledWith(conn);
+    expect(hasActiveTask("u1")).toBe(false);
   });
 });

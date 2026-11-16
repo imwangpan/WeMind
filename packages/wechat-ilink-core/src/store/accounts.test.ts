@@ -30,7 +30,7 @@ describe("deriveAccountKey", () => {
 
 /*
  * 注册表的「默认账号」语义：首个登记的账号自动成为默认；`default` 字段缺失时回落第一个账号；删掉默认账号自动轮到下一个。
- * `WEMIND_ROOT` 是模块加载时定死的，所以要在设好 WEMIND_HOME 之后**重新加载模块**（与 sandbox-qoder.test.ts 的手法一致）。
+ * `WEMIND_ROOT` 是模块加载时定死的，所以要在设好 WEMIND_HOME 之后**重新加载模块**（与 qoder.test.ts 的手法一致）。
  */
 describe("账号注册表（默认账号 / 别名）", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-accounts-"));

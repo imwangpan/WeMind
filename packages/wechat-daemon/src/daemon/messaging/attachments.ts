@@ -40,7 +40,7 @@ const SENSITIVE_NAMES = new Set([
 ]);
 
 /**
- * 各 agent 同步进沙箱的登录态/凭据文件名（与 `agents/brain-presets.ts` 的 `credentialFiles` 对齐）。
+ * 各 agent 同步进副本的登录态/凭据文件名（与 `agents/brain-presets.ts` 的 `credentialFiles` 对齐）。
  * 这些文件不在数据目录根下，但同样不能外发：提示注入只要让 brain 写一个附件链接就能把
  * OAuth/API 凭据发到微信里。
  */
@@ -74,7 +74,7 @@ function isUnderRoot(file: string, root: string): boolean {
 }
 
 /**
- * agent 配置文件可能含网关 token / 默认 provider：除了 brain-home/worker-home（都在数据目录下），
+ * agent 配置文件可能含网关 token / 默认 provider：除了数据目录（含 brain-home / worker-home），
  * 各 preset 的 `realHome` 原件同样不能外发（如 `~/.copilot/config.json`、`~/.claude/settings.json`、
  * `~/.pi/agent/models*.json`）。
  */
@@ -110,7 +110,7 @@ export function isSensitiveFilePath(file: string): boolean {
   if (/\.(pem|key|p12|pfx|jks|keystore)$/.test(base)) return true;
   if (/^id_(rsa|dsa|ed25519|ecdsa)(_sk)?(\.|$)/.test(base)) return true;
   if (/(^|[._-])(secrets?|credentials?|creds?|tokens?|passwords?)([._-]|$)/.test(base)) return true;
-  // 沙箱/真实 home 里的 agent 配置可能含默认 provider/网关地址与 token；
+  // 副本/真实 home 里的 agent 配置可能含默认 provider/网关地址与 token；
   // pi 的 settings.json / models*.json、claude 的 settings.json 尤其如此。
   if (
     (base === "config.json" || base === "settings.json" || /^models.*\.json$/.test(base)) &&

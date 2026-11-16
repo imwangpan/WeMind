@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { stripAllDshMcpEntries, stripDshEntries } from "./managed/dsh-mcp.js";
+
 /**
  * 真实 profile 用户层（`<realHome>/profiles/<profile>/cordis.patch.yml`）的三件事：
  * ① 读默认模型（`readProfileDefaultModel`）；② 缺 `- id: acp` 时给用户提示（`acpOverrideHint`）；
- * ③ 复制进沙箱前剔除「微信 MCP」条目（`stripWechatMcpEntries`，防回环）。
+ * ③ 复制进副本前处理 MCP 条目：`mcpDelivery: "acp"` 时**全部剥离**（避免与 ACP 注入重复），
+ *    否则只剔除「微信 MCP」条目（`stripWechatMcpEntries`，防回环）。
  * 文件是桌面端维护的 YAML 用户层，结构是一个 patch 列表。这里只做定点抽取（块式与 flow 式映射都认），不引入 YAML 依赖。
  */
 
@@ -35,34 +38,20 @@ export function readProfileDefaultModel(realHome: string, profile: string): stri
 }
 
 /**
- * 复制进沙箱前剔除「微信 MCP」条目（真实文件不动）。DSH 自己的 MCP 也写在 profile 里
+ * 复制进副本前剔除「微信 MCP」条目（真实文件不动）。DSH 自己的 MCP 也写在 profile 里
  * （`- id: mcp-xxx` + `name: '@deepseek-ai/dsh-mcp-client'`）；如果用户在自己的 dsh 配置里挂过微信 MCP，
- * 原样复制会让沙箱里的 agent 用同一个 bot token 起第二个收消息实例（抢消息/回环）。
- * 大脑与 worker 的 MCP 都由 WeMind 的激活集权威决定（`wechat` 永远不在里面），所以只剔这一种条目，其余原样保留。
+ * 原样复制会让 agent 用同一个 bot token 起第二个收消息实例（抢消息/回环）。
+ * `managed` 且 `mcpDelivery: "acp"` 时由 `copyProfilePatch({ stripAllMcp: true })` 走 `stripAllDshMcpEntries()` 全剥
+ * （集合由 WeMind 经 ACP 注入）；这里只负责「微信 MCP」这一种，其余条目原样保留。
  * 没有命中时返回**原文**（逐字节复制不受影响）。
  */
 export function stripWechatMcpEntries(text: string): { text: string; removed: string[] } {
-  const lines = text.split(/\r?\n/);
-  const starts: number[] = [];
-  for (let i = 0; i < lines.length; i++) if (/^-\s/.test(lines[i])) starts.push(i);
-  const removed: string[] = [];
-  const drop = new Set<number>();
-  for (let b = 0; b < starts.length; b++) {
-    const start = starts[b];
-    const end = b + 1 < starts.length ? starts[b + 1] : lines.length;
-    const body = lines
-      .slice(start, end)
-      .filter((l) => !/^\s*#/.test(l))
-      .join("\n");
-    if (!isWechatMcpEntry(body)) continue;
-    removed.push(lines[start].trim().replace(/^-\s+/, "").split(/\s+#/)[0]);
-    for (let i = start; i < end; i++) drop.add(i);
-  }
-  if (!removed.length) return { text, removed };
-  const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  let out = lines.filter((_, i) => !drop.has(i)).join(eol);
-  if (/(\r\n|\n)$/.test(text) && !out.endsWith(eol)) out += eol; // 剔掉的若是最后一条，别把文件末尾的换行也带走
-  return { text: out, removed };
+  return stripDshEntries(text, (body) => {
+    const visible = body.filter((l) => !/^\s*#/.test(l)).join("\n");
+    if (!isWechatMcpEntry(visible)) return null;
+    const id = /^\s*-\s+(id:\s*.+)$/m.exec(visible);
+    return id ? id[1].trim().replace(/\s+#.*$/, "") : "wechat";
+  });
 }
 
 /** 一条 patch 条目是不是「微信 MCP」：跑 wemind-mcp 的，或 serverName 为 wechat 的 mcp-client。 */
@@ -74,13 +63,21 @@ function isWechatMcpEntry(body: string): boolean {
   );
 }
 
-/** 把真实 profile 用户层复制进某个沙箱 home（复制前剔除微信 MCP 条目；没有命中时逐字节原样）——三个调用方共用同一段路径与剔除逻辑。
+/** 把真实 profile 用户层复制进某个副本 home：`stripAllMcp` 时剥离全部 MCP 条目，否则只剔除微信 MCP 条目；
+ *  没有命中时逐字节原样——调用方共用同一段路径与剔除逻辑。
  *  `src` 不存在时抛错，调用方按 best-effort 包 try/catch。返回被剔除的条目（供调用方记日志）。 */
-export function copyProfilePatch(realHome: string, profile: string, destHome: string): string[] {
+export function copyProfilePatch(
+  realHome: string,
+  profile: string,
+  destHome: string,
+  opts: { stripAllMcp?: boolean } = {},
+): string[] {
   const src = path.join(realHome, "profiles", profile, "cordis.patch.yml");
   const dst = path.join(destHome, "profiles", profile, "cordis.patch.yml");
   const raw = fs.readFileSync(src);
-  const { text, removed } = stripWechatMcpEntries(raw.toString("utf-8"));
+  const { text, removed } = opts.stripAllMcp
+    ? stripAllDshMcpEntries(raw.toString("utf-8"))
+    : stripWechatMcpEntries(raw.toString("utf-8"));
   const out = removed.length ? Buffer.from(text, "utf-8") : raw;
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   const same = fs.existsSync(dst) && fs.readFileSync(dst).equals(out);
@@ -205,7 +202,7 @@ function entryConfig(text: string, head: RegExp): string | null {
   return JSON.stringify([provider, model]);
 }
 
-/** 取 `key: value` 的标量值（去引号与行尾注释）；块式与 flow 式都认（`config: {provider: magpie, model: auto/x}` 也是合法 YAML，DSH 接管）。 */
+/** 取 `key: value` 的标量值（去引号与行尾注释）；块式与 flow 式都认（`config: {provider: gw, model: auto/x}` 也是合法 YAML，DSH 接管）。 */
 function scalar(line: string, key: string): string {
   const block = new RegExp(`^\\s+${key}:\\s+(.+)$`).exec(line);
   const m = block ?? new RegExp(`[{,]\\s*${key}:\\s*("[^"]*"|'[^']*'|[^,}]+)`).exec(line);

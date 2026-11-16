@@ -17,6 +17,8 @@
 //
 // 豁免：提交信息或 PR 描述里写一行 `Docs-Impact: none — <理由>`。
 // pre-commit 阶段还没有提交信息，改用环境变量 DOCS_IMPACT（值只写 `none — Pure refactor` 即可）。
+// 分支级检查（merge-base..HEAD）包含多个提交时，最近一次提交信息不作数；
+// 要豁免整条分支必须显式设置 DOCS_IMPACT_MESSAGE，避免 HEAD 的一句「只改注释」跳过前面提交的缺口。
 // 允许的理由只有 Pure refactor / Comment only / Test update 三种，见文件末尾。
 
 export const RULES = [
@@ -130,7 +132,7 @@ export const RULES = [
           /(acp-brain|acp-connection|acp-reverse|acp-switch|acp-quiet)\.ts$/.test(line.slice(2).trim()),
       ),
     docs: [
-      'docs/repowiki/06-ACP-大脑与沙箱.md',
+      'docs/repowiki/06-ACP-大脑与副本.md',
       'docs/ai/已知坑.md 热切换大脑',
       'docs/ai/recipes/run-e2e.md brain check 验收',
     ],
@@ -145,7 +147,7 @@ export const RULES = [
           /^[MAD] /.test(line) &&
           /(agent-slot|brain-config|brain-state|brain-check)\.ts$/.test(line.slice(2).trim()),
       ),
-    docs: ['docs/repowiki/06-ACP-大脑与沙箱.md 大脑配置', 'AGENTS.md §4.12'],
+    docs: ['docs/repowiki/06-ACP-大脑与副本.md 大脑配置', 'AGENTS.md §4.12'],
   },
   {
     id: 'script',
@@ -257,3 +259,122 @@ export const RULES = [
  * 其它任何理由（如「时间不够」）都不放行。
  */
 export const VALID_ESCAPE_HATCH_REASONS = /^(Pure refactor|Comment only|Test update)$/i;
+
+/**
+ * 内容级校验：已废弃结论登记表（2026-11-15）。
+ *
+ * 为什么需要：`RULES` 只判断「规则要求的文档有没有出现在 diff 里」，不读内容。本次审查出现过两种假绿——
+ * 「文档确实改了，但只换术语、旧结论原封不动」，以及「提交信息写 `Docs-Impact: none — Pure refactor` 跳过整条分支」。
+ * 这里登记「已经被推翻、且现行结论有权威出处」的具体措辞，`--check` 时读工作树最终内容逐行核对。
+ *
+ * 每条字段：
+ *   id       登记项名（出现在输出里）
+ *   since    结论作废日期
+ *   why      现行结论与权威文档位置（报错时打印，告诉人该改成什么）
+ *   pattern  逐行匹配的旧措辞（RegExp，不要带 g；尽量精确，避免否定语境误报）
+ *   allow    允许保留旧措辞的位置，每项：
+ *            path        精确路径或 RegExp
+ *            section     可选；命中行所在最近的一级/二级标题必须匹配（如 CHANGELOG 已发布版本段）
+ *            linePattern 可选；命中行本身必须匹配（如同一行已带补注）
+ *            marker      可选；文件全文必须出现这个标记（约定还在，allow 才生效）
+ *            why         为什么可以保留（必须写，报错时会提示）
+ *
+ * `allow.marker` 是「约定」的机器化表达：CHANGELOG 已发布段能保留旧结论，依据是文件头「版本边界」声明；
+ * 历史归档清单能保留已删文件名，依据是它自己的「只加标注」体例与后续变更注记。声明或注记被删掉，allow 立即失效。
+ * 新增旧措辞时优先改正文；只有确实属于「已发布段 / 归档索引 / 测试反例」才登记 allow。
+ *
+ * 豁免边界：`Docs-Impact: none` 只作用于 `RULES` 的路径检查，不适用于这里（见 doc-impact.mjs 的 staleBlocksCheck）。
+ */
+export const STALE_FACTS = [
+  {
+    id: 'copilot-acp-mcp-old',
+    since: '2026-11-15',
+    why: 'Copilot CLI 1.0.108 实测不加载 ACP session/new.mcpServers 的 stdio 条目，MCP 改走配置文件（acpMcpServers: false + mcpDelivery: "config"），真机微信 E2E 已通过；见 docs/接入方案/接入-Copilot.md 与 CHANGELOG 的 Unreleased/Changed。',
+    pattern: /1\.0\.107(?!\d)|其 stdio MCP 探针实测可用|图片能力仍依赖模型实测|真实微信 brain\/worker E2E 尚待验证|通过 ACP 激活 MCP 并排除/,
+    allow: [
+      {
+        path: 'docs/发布与变更记录/CHANGELOG.md',
+        section: /^## \[(?!Unreleased)/,
+        marker: /\*\*版本边界\*\*/,
+        why: 'CHANGELOG.md:5 版本边界：已发布段只记该版本发布时的行为，不回改；订正写进 Unreleased。',
+      },
+      {
+        path: 'docs/设计文档/文档守卫设计.md',
+        linePattern: /2026-11-15 补注|守卫自身/,
+        marker: /2026-11-15 补注（守卫自身/,
+        why: '守卫设计文档的 2026-11-15 补注引用本规则的正则字面量本身（解释现行口径），不是那条废弃的 Copilot 结论；补注被删掉 allow 立即失效。',
+      },
+      {
+        path: 'docs/审查与质量记录/审查-2026-11-05-经验与约束.md',
+        linePattern: /2026-11-15 补注/,
+        marker: /2026-11-15 补注（守卫自身口径）/,
+        why: '审计记录按体例只加 2026-11-15 补注，同样引用正则字面量说明现行口径；历史正文与表格原样保留，补注被删掉 allow 立即失效。',
+      },
+    ],
+  },
+  {
+    id: 'src-subdir-count-6',
+    since: '2026-11-15',
+    why: '新增 agents/config/ 后 src/ 为 8 个一级 + 7 个二级目录；见 docs/repowiki/01-项目概览.md 与 docs/设计文档/源码目录分层设计.md §13 补注。索引类文档必须写现行值。',
+    pattern: /6 个二级|6 subdirectories/,
+    allow: [
+      {
+        path: 'docs/发布与变更记录/CHANGELOG.md',
+        section: /^## \[(?!Unreleased)/,
+        marker: /\*\*版本边界\*\*/,
+        why: '已发布段按版本边界保留 2026-11-06 当时的统计口径。',
+      },
+      {
+        path: 'docs/设计文档/源码目录分层设计.md',
+        marker: /2026-11-15 补注/,
+        why: '§1 目标与 §13 修订差异表保留 2026-11-06 实施时的统计；文件末尾 2026-11-15 补注已写现行 7 个二级目录。',
+      },
+    ],
+  },
+  {
+    id: 'deleted-mvp-doc-ref',
+    since: '2026-11-15',
+    why: '该 MVP 设计文档已删除；现行设计见 docs/设计文档/远程任务-human-in-the-loop设计与实现.md。历史段/归档索引按各自体例只加标注、不改正文。',
+    pattern: /方案C-MVP-远程human-in-the-loop\.md/,
+    allow: [
+      {
+        path: 'docs/发布与变更记录/CHANGELOG.md',
+        section: /^## \[(?!Unreleased)/,
+        marker: /\*\*版本边界\*\*/,
+        why: '已发布段按版本边界保留发布当时的源码路径与文档指针。',
+      },
+      {
+        path: 'docs/审查与质量记录/历史文档清单-2026-11-04.md',
+        marker: /后续变更（2026-11-15）/,
+        why: '归档索引按「只加标注、不改写当时的设计背景」体例处理；头部 2026-11-15 后续变更注记说明文件已删除与现行设计位置。',
+      },
+    ],
+  },
+  {
+    id: 'empty-config-fingerprint',
+    since: '2026-11-15',
+    why: 'configFingerprint() 现在把 ag.name + rt.mode 与显式配置文件、overlay 一起哈希：没有 homeEnvVar 的 Agent 也返回非空指纹，homeMode 变化会触发进程重建；见 AGENTS.md §4.14 与 docs/repowiki/06-ACP-大脑与副本.md。',
+    // 只拦「旧断言」：正文里说明「不再 / 不返回 / 仍返回非空」的现行口径不参与命中。
+    pattern: /^(?!.*(?:不再|不返回|仍返回非空|不恒为)).*返回空指纹/,
+    allow: [
+      {
+        path: 'docs/发布与变更记录/CHANGELOG.md',
+        section: /^## \[(?!Unreleased)/,
+        marker: /\*\*版本边界\*\*/,
+        why: '已发布段按版本边界保留当时行为，不回改。',
+      },
+    ],
+  },
+  {
+    id: 'doubled-fuben-label',
+    since: '2026-11-15',
+    why: '「沙箱」全局改名为「账号副本」时把运行日志与注释里的「副本」叠成了重复词；现行文案见 managed-common.ts，并由 managed-common.test.ts 静态断言兜底。',
+    pattern: /副本副本/,
+    allow: [
+      {
+        path: /\.test\.ts$/,
+        why: '测试用例故意保留反例字符串，用于断言源码里不再出现它。',
+      },
+    ],
+  },
+];

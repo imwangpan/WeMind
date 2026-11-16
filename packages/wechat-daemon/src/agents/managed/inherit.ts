@@ -1,30 +1,46 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { createLogger } from "@wemind/wechat-ilink-core";
+
 import type { ResolvedAgent } from "../brain-agents.js";
 
+const log = createLogger("wechat-daemon/config");
+
 /**
- * 把 agent 真实配置目录里的「记忆/规则/技能」链入沙箱配置目录，并在**换 agent** 时清掉上一个 agent 留下的条目。
+ * 把 agent 真实配置目录里的「记忆/规则/技能」链入副本配置目录，并在**换 agent** 时清掉上一个 agent 留下的条目。
+ * 仅在 `managed` 模式调用；`direct` 直接读真实配置、不生成任何副本，不走本模块。
  *
- * 为什么需要清单：kiro / deepseek / pi 的 `configSubdir` 都是空（配置目录就是沙箱根），共用同一个目录。
+ * 为什么需要清单：kiro / deepseek / pi 的 `configSubdir` 都是空（配置目录就是副本根），共用同一个目录。
  * 热切换后若只做「不存在才建」，新 agent 会继续读到上一个 agent 的 `skills` 链接与 `AGENTS.md`——
  * 表现为「切到 pi 了，但回答仍按 kiro 的记忆来」。清单记录上次由 WeMind 链入/拷贝的名字，只清理这些，
- * 真实配置目录永远不动（沙箱里的非链接目录也保留，避免误删 agent 自建数据）。
+ * 真实配置目录永远不动（副本里的非链接目录也保留，避免误删 agent 自建数据）。
  *
- * brain 与 worker 共用（两边的沙箱布局相同，只是根目录不同）。
+ * brain 与 worker 共用（两边的副本布局相同，只是根目录不同）。
  */
 
 const MANIFEST = ".wemind-inherited.json";
 
 type Manifest = { agent?: string; dirs: string[]; files: string[] };
 
+/** 清单里的名字只用来在副本目录内删 WeMind 自己建的东西；`../` / 绝对路径必须过滤，否则可删账号目录外文件。 */
+function safeManifestNames(dir: string, list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  const root = path.resolve(dir);
+  return list.filter((x: unknown): x is string => {
+    if (typeof x !== "string" || !x) return false;
+    const rel = path.relative(root, path.resolve(root, x));
+    return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+  });
+}
+
 function readManifest(dir: string): Manifest {
   try {
     const j = JSON.parse(fs.readFileSync(path.join(dir, MANIFEST), "utf-8"));
     return {
       agent: typeof j?.agent === "string" ? j.agent : undefined,
-      dirs: Array.isArray(j?.dirs) ? j.dirs.filter((x: unknown) => typeof x === "string") : [],
-      files: Array.isArray(j?.files) ? j.files.filter((x: unknown) => typeof x === "string") : [],
+      dirs: safeManifestNames(dir, j?.dirs),
+      files: safeManifestNames(dir, j?.files),
     };
   } catch {
     return { dirs: [], files: [] };
@@ -61,7 +77,7 @@ function pointsTo(link: string, target: string): boolean {
 }
 
 /**
- * `root` = 沙箱根（安全校验用），`dir` = 该 agent 的配置目录（通常是 root 或 root/<subdir>）。
+ * `root` = 副本根（安全校验用），`dir` = 该 agent 的配置目录（通常是 root 或 root/<subdir>）。
  * 调用前 `dir` 不存在也没关系。
  */
 export function syncInherited(root: string, dir: string, ag: ResolvedAgent): void {
@@ -137,8 +153,11 @@ export function syncInherited(root: string, dir: string, ag: ResolvedAgent): voi
     }
     try {
       fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
-    } catch {
-      /* 权限不足等：best-effort 忽略 */
+    } catch (err) {
+      // 权限不足 / 文件系统不支持链接：best-effort 降级，但必须告警——副本会缺这份继承内容（副本漂移）。
+      log.warn(
+        `继承目录 ${d} 失败（${err instanceof Error ? err.message : String(err)}）；managed 副本将缺少这份内容，微信侧可能与终端不一致`,
+      );
     }
   }
 
@@ -149,8 +168,10 @@ export function syncInherited(root: string, dir: string, ag: ResolvedAgent): voi
     try {
       if (fs.existsSync(src) && (!fs.existsSync(dst) || staleFiles.has(f)))
         fs.copyFileSync(src, dst);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      log.warn(
+        `继承文件 ${f} 失败（${err instanceof Error ? err.message : String(err)}）；managed 副本将缺少这份内容`,
+      );
     }
   }
 

@@ -9,10 +9,16 @@ import path from "node:path";
  * 但「写 tmp」这一步不是。唯一后缀（pid + 时间 + 随机）保证每个写者各写各的，rename 到同一个目标仍原子。
  */
 export function writeJsonAtomic(filePath: string, data: unknown): void {
+  writeFileAtomic(filePath, JSON.stringify(data, null, 2) + "\n");
+}
+
+/** 原子写任意文本：同目录唯一临时文件 → rename 覆盖（写 YAML/TOML 副本用）。 */
+export function writeFileAtomic(filePath: string, data: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", "utf-8");
+    // 0600：runtime.json / env.json / 账号状态这类文件覆盖写时不能回落到 umask 默认权限。
+    fs.writeFileSync(tmp, data, { encoding: "utf-8", mode: 0o600 });
     fs.renameSync(tmp, filePath);
   } catch (e) {
     try {

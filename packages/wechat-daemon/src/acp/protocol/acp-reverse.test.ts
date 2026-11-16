@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("handleReverseRequest（brain / worker / brain check 共用）", () => {
-  it("权限请求默认拒绝（安全默认）", () => {
+  it("权限请求默认放行（微信侧 yolo，无人值守）", () => {
     const c = capture();
     handleReverseRequest(
       {
@@ -31,13 +31,16 @@ describe("handleReverseRequest（brain / worker / brain check 共用）", () => 
     );
 
     expect(c.written).toEqual([
-      { jsonrpc: "2.0", id: 7, result: { outcome: { outcome: "cancelled" } } },
+      {
+        jsonrpc: "2.0",
+        id: 7,
+        result: { outcome: { outcome: "selected", optionId: "ok" } },
+      },
     ]);
-    expect(c.logs).toContain("permission rejected");
+    expect(c.logs).toContain("permission allowed");
   });
 
-  it("WEMIND_ACP_AUTO_ALLOW=1 时只选 agent 明确提供的 allow 选项", () => {
-    vi.stubEnv("WEMIND_ACP_AUTO_ALLOW", "1");
+  it("只选 agent 明确提供的 allow 选项", () => {
     const c = capture();
     handleReverseRequest(
       {
@@ -60,8 +63,24 @@ describe("handleReverseRequest（brain / worker / brain check 共用）", () => 
     expect(c.logs).toContain("permission allowed");
   });
 
-  it("自动放行开启但选项里没有 allow 时仍然拒绝", () => {
-    vi.stubEnv("WEMIND_ACP_AUTO_ALLOW", "1");
+  it("WEMIND_ACP_AUTO_ALLOW=0 时恢复逐次拒绝", () => {
+    vi.stubEnv("WEMIND_ACP_AUTO_ALLOW", "0");
+    const c = capture();
+    handleReverseRequest(
+      {
+        id: 9,
+        method: "session/request_permission",
+        params: { options: [{ kind: "allow_once", optionId: "ok" }] },
+      },
+      c.write,
+      c.log,
+    );
+
+    expect(c.written[0].result).toEqual({ outcome: { outcome: "cancelled" } });
+    expect(c.logs).toContain("permission rejected");
+  });
+
+  it("选项里没有 allow 时仍然拒绝", () => {
     const c = capture();
     handleReverseRequest(
       {
@@ -87,5 +106,35 @@ describe("handleReverseRequest（brain / worker / brain check 共用）", () => 
       },
     ]);
     expect(c.logs[0]).toContain("fs/read_text_file");
+  });
+
+  it("allow 选项缺 optionId 时回 cancelled 并告警（不回非法 selected）", () => {
+    const c = capture();
+    handleReverseRequest(
+      {
+        id: 11,
+        method: "session/request_permission",
+        params: { options: [{ kind: "allow_once" }] },
+      },
+      c.write,
+      c.log,
+    );
+    expect(c.written[0].result).toEqual({ outcome: { outcome: "cancelled" } });
+    expect(c.logs.join("\n")).toContain("optionId");
+  });
+
+  it("WEMIND_ACP_AUTO_ALLOW 是空白串时仍按默认 yolo", () => {
+    vi.stubEnv("WEMIND_ACP_AUTO_ALLOW", "   ");
+    const c = capture();
+    handleReverseRequest(
+      {
+        id: 12,
+        method: "session/request_permission",
+        params: { options: [{ kind: "allow_once", optionId: "ok" }] },
+      },
+      c.write,
+      c.log,
+    );
+    expect(c.written[0].result).toEqual({ outcome: { outcome: "selected", optionId: "ok" } });
   });
 });

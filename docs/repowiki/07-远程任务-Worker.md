@@ -1,8 +1,8 @@
 # 7. 远程任务 Worker
 
-> 上一页：[6. ACP 大脑与沙箱](06-ACP-大脑与沙箱.md) ｜ 下一页：[8. 数据存储与多账号](08-数据存储与多账号.md)
+> 上一页：[6. ACP 大脑与副本](06-ACP-大脑与副本.md) ｜ 下一页：[8. 数据存储与多账号](08-数据存储与多账号.md)
 >
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-14
 
 除了「对话大脑」，daemon 还能把**漫长任务**交给**受控的 ACP worker 进程**跑 —— 你在电脑上派发任务后离开，它在「需要你决策」（列方案让你选）或「中断」时把情况推到微信，你回一句就能让它续跑。这就是**远程 human-in-the-loop（人在回路）**。
 
@@ -39,7 +39,7 @@
 
 关键洞察：`askWorker(prompt)`「发一个 prompt、等这一轮结束、返回拼接文本」恰好就是「一轮」的天然单元。ACP 模式下 agent 每响应完一轮就明确进入「等待下一条指令」状态，daemon 一清二楚，无需抓屏猜测。
 
-**为什么是进程池而不是「一条任务一个临时进程」**：ACP agent 的冷启动要几秒到几十秒（`initialize` + `session/new` + 沙箱准备），任务往往是「派发 → 等很久 → 来回几轮」的节奏。进程跑完即杀会让每一轮都付一次冷启动；常驻复用则把成本摊到第一次。代价是内存——用**并发上限 + 空闲上限 + 空闲回收**三把闸控制（见 §7.3、§7.8）。
+**为什么是进程池而不是「一条任务一个临时进程」**：ACP agent 的冷启动要几秒到几十秒（`initialize` + `session/new` + 副本准备），任务往往是「派发 → 等很久 → 来回几轮」的节奏。进程跑完即杀会让每一轮都付一次冷启动；常驻复用则把成本摊到第一次。代价是内存——用**并发上限 + 空闲上限 + 空闲回收**三把闸控制（见 §7.3、§7.8）。
 
 ## 7.3 组件构成
 
@@ -50,7 +50,7 @@ graph TD
         TM["task-manager.ts<br/>任务表 + runTask 后台循环"]
         POOL["worker-pool.ts<br/>进程池（复用/回收/上限）"]
         WA["worker-acp.ts<br/>class WorkerConn（每实例一条连接）"]
-        SB["worker-sandbox.ts<br/>WORKER_HOME 沙箱"]
+        SB["mcp-worker.ts<br/>direct 真实配置 / WORKER_HOME 副本"]
     end
     W1["worker agent 进程（任务 1）"]
     W2["worker agent 进程（任务 2）"]
@@ -59,8 +59,8 @@ graph TD
     POOL -->|createConn| WA
     WA <-->|JSON-RPC over stdio| W1
     WA <-->|JSON-RPC over stdio| W2
-    SB -.准备沙箱.-> W1
-    SB -.准备沙箱.-> W2
+    SB -.准备副本.-> W1
+    SB -.准备副本.-> W2
 ```
 
 ### task-manager.ts —— 任务表（多任务）
@@ -93,7 +93,7 @@ stateDiagram-v2
 ```
 
 - `running`：正跑一轮。此时该用户来消息 → 按序压入 `pendingInjects`（**一条不丢**，不是只留最近一条），答复「已记下，等这步跑完处理」。
-- `waiting`：等用户回话。收到即转 `running`；若有暂存的 `pendingInjects`，按顺序合并成下一轮前缀一次消费。
+- `waiting`：等用户回话。收到即转 `running`；若有暂存的 `pendingInjects`，按顺序合并成下一轮前缀一次处理。
 - `interrupted`：**不在 liveTasks 里**——daemon 重启后的遗留任务，或一轮失败于模型/账号侧问题（`providerIssue()`：余额/额度、密钥鉴权、计费、模型不存在）。续跑要用户显式回 `#n 继续`（可续跑任务唯一时裸「继续」也行；多条时任务侧回编号清单，见 `shouldResumeTask()`；§7.4「重启后续跑」）。
 - `runTask` 是后台异步循环：`conn.ask()` → 推送 `🤖【任务】<输出>` → typing 保活（每 5s）→ 等用户回话 → 续跑。**绝不在消息循环里 await 它**，否则长任务会阻塞 poller 入队（含用户回话）。
 
@@ -120,6 +120,8 @@ stateDiagram-v2
 > **命名坑**：空闲**进程**回收是 `WEMIND_WORKER_REAP_MS`；`WEMIND_WORKER_IDLE_MS` 是「单轮 prompt 空闲超时」。同名两义必然踩，所以没复用。
 >
 > 结束**在等你回复**的任务时**进程留着复用**（不杀）；结束**正在跑**的那条只能力杀——ACP 回合没法优雅取消（`task-manager.ts`：`waiting` → `release(conn)`，否则 `drop(conn)`）。「等你回复」的任务在结束前一直占着那条连接，所以它不计入空闲进程、也不受空闲回收影响。只有 `wemind stop` / daemon 进程退出才 `killAll()` 杀光整池（Windows 上子进程不会随父进程退出，漏掉就是一堆孤儿 agent 进程）。
+>
+> **2026-11-15 补注（连接回收的容错）**：`WorkerConn.dropSession()` 整段 try/catch（清 `session-cwd.json` 写盘失败只 WARN），`task-manager.ts` 两处收尾都写成 `try { conn.dropSession(...) } finally { release(conn) / drop(conn); t.conn = undefined }`。此前 `deleteSessionCwd()` 抛错会跳过 `release`/`drop`，把池连接慢慢耗光，且「正在跑的任务」没被力杀。回归用例见 `task-manager.test.ts` 的「结束任务时的收尾容错」。
 
 ### worker-acp.ts —— 独立 ACP 客户端（已类化）
 
@@ -132,23 +134,23 @@ stateDiagram-v2
 | 进程 | 1 个（槽位里的当前大脑） | **N 个**（池，各自一条任务） |
 | 会话 | 每用户一 session | 每任务一 session（键 `<agent>:task-<编号>@<userId>`） |
 | 持久化 | `brain-sessions.json`（键 `<agent>:userId`） | `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`） |
-| cwd | `BRAIN_HOME` 沙箱 | **任务工作目录**（`WEMIND_WORKER_CWD`，默认主目录；本地派发可用 `--cwd`） |
-| 沙箱 home | `BRAIN_HOME`（默认空 MCP） | `WORKER_HOME`（继承全量 MCP 除 wechat） |
+| cwd | 账号 `workspace/brain`（或 `session-cwd.json` 记录；恢复时用 `usableSessionCwd()` 校验 UNC/不存在/非目录并回落） | **任务工作目录**：`--cwd` > `WEMIND_WORKER_CWD` > `<账号>/workspace/worker` |
+| 配置 home | 默认 `direct` 直接用真实 home（`managed` 才是 `BRAIN_HOME`；managed 下 brain 默认空 MCP） | 默认 `direct` 直接用真实 home（`managed` 才是 `WORKER_HOME`；WeMind 生成的 worker 集为真实全量除 wechat） |
 | 超时 | idle 120s / cap 15min / 首帧 25s | idle 180s / cap 30min / 首帧 30s（更宽松） |
 
 子进程 cwd 在 spawn 时固定，**且 cwd 是连接身份的一部分**（`connKey = agent 身份 + 实际生效 cwd`）：换 `--cwd` 会起新进程，绝不会复用停在上一个项目里的旧进程。中断恢复靠 `reset()` 后下次 `ensureSession` 走 `session/load`（不支持时 `session/resume`）。
 
 spawn 失败（cwd 不存在/权限不足）时，`WorkerConn` 把 `error` 事件的真实原因带进 pending 请求的拒绝信息（`进程启动失败：spawn … ENOENT`），不再被笼统的 `worker conn killed` 覆盖，也不会误贴「args 漏了 acp」的提示。
 
-### worker 沙箱
+### worker 配置
 
-`WORKER_HOME`（默认 `<数据目录>/worker-home`）。与 brain 沙箱**策略相反**：worker 是无人值守的任务执行机，继承 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）—— 因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力。写入磁盘方式按 agent：kiro/opencode 由 `applyWorkerSandbox` 写沙箱配置文件；配了 `mcpViaAcp` 的 agent（DSH）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发。记忆/技能（`mirrorRealKiro`）与 settings（`syncSettings`，含模型/信任）继承与 brain 一致；预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`，关掉 pi-acp 当消息发出来的启动横幅）也只补缺失键、用户显式设过就保留。
+默认 `homeMode=direct`：`ensureWorkerHome()` 不写任何文件，Agent 直接用真实配置目录（`claude-code` / `cline` / `qoder` / Codex 分别用 `~/.claude` / `~/.cline` / `~/.qoder` / `~/.codex`）。`managed` 模式才使用 `WORKER_HOME`（默认 `<数据目录>/worker-home`），并走 `syncSettings` / `linkRealKnowledge` 的选择性继承。与 brain **策略相反**：worker 是无人值守的任务执行机，`managed` 下默认加载 catalog 的**全量 MCP**（仅排除 `wechat` 防它把消息发回自己，外加 `WEMIND_WORKER_MCP_EXCLUDE`，跳过 `disabled:true` 的）——因为没人在旁边逐个加载工具，任务需要开箱即用的完整能力；`direct` 由 Agent 自己加载真实配置，WeMind 不重发 catalog。`managed` 下 overlay 的 `mcp.disable` / `mcp.extra` 生效；`direct` 下只有 `acpMcpServers` 的 Agent 能收到 `mcp.extra`，文件式 Agent 由自己读配置。写入磁盘方式按 agent：`managed` 下文件式 MCP（含 Copilot 的 `mcp-config.json`）由 `applyWorkerCopy` 写副本配置文件；`mcpDelivery: "acp"` 的 agent（DSH / Claude Code / Codex）不写文件，由 `workerMcpServers()` 转成 ACP 声明随 `session/new|resume` 下发（仍排除 `wechat`）。DSH 的 profile 副本在 `syncProfilePatch` 时先剥离全部 MCP 条目，避免与 ACP 注入重复。预设的 `settingsDefaults`（如 pi 的 `quietStartup: true`）只补缺失键、用户显式设过就保留。
 
-沙箱按**这条任务的 agent** 准备：daemon 启动时只按默认任务大脑备一次；`worker-pool.ts` 的 `acquire` 在复用/起进程前会再调 `ensureWorkerHome(ag)`，否则派到别的 agent（如 `--agent pi`）时它自己的 settings/凭据/MCP 还没进沙箱，agent 会拿空配置跑。
+配置按**这条任务的 agent** 准备：daemon 启动时只按默认任务大脑备一次；`worker-pool.ts` 的 `acquire` 在复用/起进程前会再调 `ensureWorkerHome(ag)`，否则派到别的 agent（如 `--agent pi`）时它自己的 settings/凭据/MCP 还没进副本，agent 会拿空配置跑。准备失败不会带着旧配置起进程：`ensureWorkerHome` 抛错时 `acquire` 返回失败，任务直接报「准备 worker 配置失败（agent）：…」。`direct` 下不写 MCP/settings；`managed` 副本里的 `wechat` 条目会先被剔除。
 
-> **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个配置目录（2026-10-29 一轮样本未见互踩，长期风险仍在）。
+> **同 agent 并发 = 两个终端在同一个配置目录里跑**：不同 agent 各有 `configSubdir`（天然隔离），但同一 agent 的两条任务共用同一个副本/真实 home（2026-10-29 一轮样本未见互踩，长期风险仍在）。
 >
-> worker 沙箱的 `syncSettings` 与 brain 有少量重复（刻意复制以隔离演进）；记忆/技能继承已抽到 `sandbox-inherit.ts` 共用（含换 agent 时清掉上一个 agent 的 `skills`/`AGENTS.md`）。
+> worker 副本的 `syncSettings` 与 brain 有少量重复（刻意复制以隔离演进）；记忆/技能继承已抽到 `inherit.ts` 共用（含换 agent 时清掉上一个 agent 的 `skills`/`AGENTS.md`）。
 
 ## 7.4 微信入口：消息路由
 
@@ -273,7 +275,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 
 - **微信侧**：**平台只发送登录者本人的消息**（必须扫码登录该 bot 才能给它发消息）；代码里另有 `allowFrom` 登录者白名单兜底（默认拒绝、默认只放行登录者；poller 已对所有消息鉴权）。账号级指令（切脑/交接）由非登录者发会被短提示拒绝、不进大脑（兜底校验）。
 - **本地侧**：能写 `task-inbox/`（或 `control-inbox/`）= 本机当前用户 = 机主，无需额外鉴权；控制桥的额外约束是**只收 agent 名与纯数据**（§7.5），所以「本机用户」这个前提被伪造请求利用时，最坏也只是选一个已装的 agent。
-- `wechat` MCP 在 worker 沙箱**永久禁止**，防它抢自己的连接。
+- WeMind 写入 worker 副本的 MCP 集**永久排除 `wechat`**，防它抢自己的连接；Agent 真实配置里的 `wechat` 只告警，不阻止启动。
 
 ## 7.7 局限
 
@@ -288,7 +290,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `WEMIND_WORKER_CWD` | 用户主目录 | worker 默认工作目录（本地 `task --cwd` 覆盖） |
+| `WEMIND_WORKER_CWD` | `<账号>/workspace/worker` | worker 默认工作目录的一次性覆盖；本地 `task --cwd` 仍优先 |
 | `WEMIND_WORKER_BRAIN` | — | **默认任务大脑**（agent 名）。优先级：`WEMIND_WORKER_BRAIN` → `WEMIND_BRAIN`（env 回落）→ `brain.json` 的 `worker.agent ?? agent` → `auto` |
 | `WEMIND_MAX_WORKERS` | 3 | 同时运行的**任务**数上限 |
 | `WEMIND_IDLE_MAX` | 2 | 池中保留的**空闲** worker 进程数上限 |
@@ -297,7 +299,7 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 | `WEMIND_WORKER_CAP_MS` | 1800000 | 单轮硬上限（30min） |
 | `WEMIND_WORKER_FIRST_FRAME_MS` | 30000 | 首帧超时 |
 | `WEMIND_WORKER_PROGRESS` | `0` | 是否推全程文字进度 |
-| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | worker 沙箱目录 |
+| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | **仅 `managed` 模式**的 worker 副本目录；`direct` 直接用真实 home |
 | `WEMIND_WORKER_MCP_EXCLUDE` | `wechat` | 不继承的 MCP（`wechat` 强制排除） |
 | `WEMIND_TASK_SCAN_MS` | 1000 | daemon 扫描 `task-inbox/` 与 `control-inbox/` 的间隔 |
 | `WEMIND_CONTROL_TIMEOUT_MS` | 30000 | CLI 等 daemon 回话的上限（`brain switch` 自动放大） |

@@ -9,7 +9,7 @@ import {
   type PidState,
 } from "../shared/process/pid-record.js";
 import type { ResolvedAgent } from "../agents/brain-agents.js";
-import { ensureWorkerHome } from "../agents/sandbox/worker-sandbox.js";
+import { ensureWorkerHome } from "../agents/managed/mcp-worker.js";
 const log = createLogger("wechat-daemon/worker");
 
 /**
@@ -197,15 +197,24 @@ export async function acquire(
   taskId?: number,
   cwd?: string,
 ): Promise<{ ok: true; conn: WorkerConn } | { ok: false; problem: string }> {
-  const key = connKey(ag, cwd);
+  let key: string;
+  try {
+    key = connKey(ag, cwd);
+  } catch (e) {
+    // cwd 不存在/不可用是“这条任务不能派”的用户错误，不是 daemon 崩溃；按统一失败结果返回。
+    return { ok: false, problem: e instanceof Error ? e.message : String(e) };
+  }
   const plan = planAcquire(poolInfo(), key, poolLimits(), Date.now());
   if (plan.kind === "reject") return { ok: false, problem: plan.problem };
-  // 为**这条任务的 agent** 备沙箱：daemon 启动时只按默认任务大脑备过一次，派到别的 agent（如 `--agent pi`）时
-  // 它自己的 settings/凭据/MCP 还没进沙箱，agent 会拿空配置跑。复用空闲连接前也补一次，让运行中改过的配置跟得上。
+  // 为**这条任务的 agent** 备副本：daemon 启动时只按默认任务大脑备过一次，派到别的 agent（如 `--agent pi`）时
+  // 它自己的 settings/凭据/MCP 还没进副本，agent 会拿空配置跑。复用空闲连接前也补一次，让运行中改过的配置跟得上。
   try {
     ensureWorkerHome(ag);
   } catch (e) {
-    log.error(`准备沙箱失败（${ag.name}）：${e instanceof Error ? e.message : String(e)}`);
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error(`准备副本失败（${ag.name}）：${msg}`);
+    // 配置没备好就 spawn 只会让 agent 拿半套配置跑（模型/凭据/MCP 缺失）——直接判这条任务失败。
+    return { ok: false, problem: `准备 worker 配置失败（${ag.name}）：${msg}` };
   }
   reapByIds(plan.reap);
 

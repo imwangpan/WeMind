@@ -8,6 +8,7 @@ import {
   descendantPids,
   helpText,
   agentLabel,
+  parseTaskReplyArgs,
   resolveTaskCwd,
   runManage,
   taskAckOutcome,
@@ -143,6 +144,34 @@ describe("CLI 参数校验（缺值 / 非法编号 / 未知 runner）", () => {
     } finally {
       out.mockRestore();
     }
+  });
+});
+
+describe("parseTaskReplyArgs（task-reply 的编号与正文写法）", () => {
+  it("同参数 / 拆两个参数 / 裸编号 + 正文：三种等价", () => {
+    for (const argv of [["#3 内容"], ["#3", "内容"], ["3", "内容"], ["＃3", "内容"]]) {
+      expect(parseTaskReplyArgs(argv)).toEqual({ id: 3, text: "内容", sel: undefined });
+    }
+  });
+
+  it("第三个参数仍然是账号（<key|label>）", () => {
+    expect(parseTaskReplyArgs(["#3", "内容", "wp"])).toEqual({ id: 3, text: "内容", sel: "wp" });
+    expect(parseTaskReplyArgs(["#3 内容", "wp"])).toEqual({ id: 3, text: "内容", sel: "wp" });
+  });
+
+  it("不给编号 = 回唯一那条任务（正文可带空格）", () => {
+    expect(parseTaskReplyArgs(["继续 跑"])).toEqual({ text: "继续 跑", sel: undefined });
+    expect(parseTaskReplyArgs(["继续", "wp"])).toEqual({ text: "继续", sel: "wp" });
+  });
+
+  it("只给编号、没给正文 → 报错并写明正确写法（不再把 #3 当正文发出去）", () => {
+    expect(() => parseTaskReplyArgs(["#3"])).toThrow(/只给了编号/);
+    expect(() => parseTaskReplyArgs(["#3"])).toThrow(/#3 "正文"/);
+  });
+
+  it("0 / 负数编号仍按「必须是正整数」拒绝", () => {
+    expect(() => parseTaskReplyArgs(["#0", "内容"])).toThrow(/正整数/);
+    expect(() => parseTaskReplyArgs(["0", "内容"])).toThrow(/正整数/);
   });
 });
 

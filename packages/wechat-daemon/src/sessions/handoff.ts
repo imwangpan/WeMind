@@ -17,7 +17,7 @@ import { formatWhen } from "./session-registry.js";
  *  - **切回来源大脑不带上**：那是它自己的上下文，塞回去等于对着本人复述；
  *  - **有 TTL**（默认 24h）：过期摘要不带上——几天前的上下文塞给新大脑只会污染判断。
  *
- * 消费语义：注入的那一回合**成功**之后才删（见 index.ts）——失败就留着，下次还能用。
+ * 清除语义：注入的那一回合**成功**之后才删（见 index.ts）——失败就留着，下次还能用。
  * 文本处理全是纯函数（`handoffPrefix`/`stripHandoffPrefix`），可单测；文件读写只有 save/load/clear。
  */
 
@@ -90,7 +90,7 @@ export function clearHandoff(dir: string = DATA_DIR): boolean {
 }
 
 /**
- * 判断这份摘要要不要带给 `agent` 的这次对话（纯函数，调用方负责读盘与消费）。
+ * 判断这份摘要要不要带给 `agent` 的这次对话（纯函数，调用方负责读盘与清除）。
  * 返回正文表示「要带上」，null 表示「不带上」——四种不带上的情形各是一句能对用户解释的话。
  */
 export function takeHandoffFor(

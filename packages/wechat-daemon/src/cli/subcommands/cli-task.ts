@@ -73,20 +73,21 @@ export async function cmdTask(
   if (!text) throw new Error('用法: task "<任务描述>" [--cwd 目录] [--agent <名字>] [<key|label>]');
   const key = pickKey(sel);
   requireDaemonAlive(key);
-  const useCwd = resolveTaskCwd(cwd);
+  // 不传 --cwd 时不要拿 CLI 当前目录顶替：daemon 会使用该账号的 worker 默认工作区。
+  const useCwd = cwd ? resolveTaskCwd(cwd) : undefined;
   // 答复等 daemon：**起进程有结果之后**它才发（达上限/agent 起不来是那时才知道的），
   // 所以这里不能自己编「已派发」——旧写法轮询 task-state.json 的 active，会把「达上限被拒」和
   // 甚至上一条任务的编号报成成功。
   const ackId = writeTaskCmd(key, {
     kind: "dispatch",
     text,
-    cwd: useCwd,
+    ...(useCwd ? { cwd: useCwd } : {}),
     ...(agentKey ? { agent: agentKey } : {}),
   });
   return await taskOutcome(
     key,
     ackId,
-    `已发送任务（cwd=${useCwd}）。看进展用 task-list。`,
+    `已发送任务（cwd=${useCwd ?? "账号默认 worker 工作区"}）。看进展用 task-list。`,
     // 派发的答复要等「起进程有结果」：冷启动一个 agent 可能要几十秒，等得久一点好过说假话
     30_000,
   );
@@ -99,8 +100,35 @@ export function parseTaskId(raw: string): number {
   return n;
 }
 
+/**
+ * `task-reply` 的位置参数解析：编号与正文**可以分开写，也可以挤在一个参数里**。
+ *   ① `task-reply "#3 内容"`   → 编号 3 + 正文「内容」
+ *   ② `task-reply "#3" "内容"` → 同上（2026-11-14 放宽：以前这种拆法会把「内容」当成账号名，再报「正文为空」）
+ *   ③ `task-reply 3 "内容"`    → 同上
+ *   ④ `task-reply "内容"`      → 不给编号（回唯一那条任务）
+ * 只给编号、没给正文时直接报错并写出正确写法：旧行为会把 `#3` 本身当正文发给唯一那条任务（静默错发）。
+ */
+export function parseTaskReplyArgs(rest: string[]): { text: string; sel?: string; id?: number } {
+  const [first = "", second, third] = rest;
+  const m = first.match(/^[#＃](\d+)\s*([\s\S]*)$/);
+  if (!m) {
+    if (second !== undefined && /^\d+$/.test(first))
+      return { text: second, sel: third, id: parseTaskId(first) };
+    return { text: first, sel: second };
+  }
+  const id = parseTaskId(m[1]);
+  if (m[2].trim()) return { text: m[2], sel: second, id };
+  if (second !== undefined) return { text: second, sel: third, id };
+  throw new Error(
+    `task-reply：只给了编号 ${first}、没给正文。写成 \`task-reply ${first} "正文"\` 或 \`task-reply "${first} 正文"\`。`,
+  );
+}
+
 export async function cmdTaskReply(text: string, sel?: string, id?: number): Promise<string> {
-  if (!text) throw new Error('用法: task-reply ["#编号"] "<内容>" [<key|label>]');
+  if (!text)
+    throw new Error(
+      'task-reply 需要非空正文。可用：task-reply <编号> "正文" ｜ task-reply "#编号 正文" ｜ task-reply "#编号" "正文" ｜ task-reply "正文"（回唯一那条任务）',
+    );
   const key = pickKey(sel);
   requireDaemonAlive(key);
   const ackId = writeTaskCmd(key, { kind: "reply", text, ...(id ? { id } : {}) });

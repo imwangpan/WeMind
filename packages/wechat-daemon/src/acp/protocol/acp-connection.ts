@@ -79,6 +79,12 @@ export type AcpTurnState = {
   seenUpdateTypes: Set<string>;
   seenTools: Set<string>;
   endedTools: Set<string>;
+  /** 本回合开始时间（beginAcpTurn 写入）；首帧/首字耗时都以它为基准。 */
+  startedAt: number;
+  /** 本回合收到第一帧的时间；0 = 还没收到（诊断用，不参与超时判定）。 */
+  firstFrameAt: number;
+  /** 本回合绑定的 sessionId；只统计这个会话的帧，避免并发会话互相污染。 */
+  sessionId: string | null;
 };
 
 export type AcpHost = {
@@ -103,6 +109,9 @@ export function newTurnState(): AcpTurnState {
     seenUpdateTypes: new Set(),
     seenTools: new Set(),
     endedTools: new Set(),
+    startedAt: 0,
+    firstFrameAt: 0,
+    sessionId: null,
   };
 }
 
@@ -110,6 +119,9 @@ export function newTurnState(): AcpTurnState {
 export function clearAcpTurn(turn: AcpTurnState): void {
   turn.assembling.clear();
   turn.currentOnProgress = null;
+  turn.startedAt = 0;
+  turn.firstFrameAt = 0;
+  turn.sessionId = null;
 }
 
 export function beginAcpTurn(
@@ -124,6 +136,14 @@ export function beginAcpTurn(
   turn.seenUpdateTypes.clear();
   turn.seenTools.clear();
   turn.endedTools.clear();
+  turn.startedAt = Date.now();
+  turn.firstFrameAt = 0;
+  turn.sessionId = sessionId;
+}
+
+/** 首帧耗时（毫秒）；还没收到任何帧时返回 -1。 */
+export function acpTurnFirstFrameMs(turn: AcpTurnState): number {
+  return turn.firstFrameAt ? turn.firstFrameAt - turn.startedAt : -1;
 }
 
 export function acpTurnText(turn: AcpTurnState, sessionId: string): string {
@@ -157,6 +177,30 @@ export function feedAcpStdout(
 }
 
 /**
+ * agent 回的 JSON-RPC error 帧（如 `-32602` 旧 model id 失效）。这是「agent 明确拒绝了这次请求」的唯一信号，
+ * 必须与连接级故障（超时 / `acp process reset` / 无进程 / 写帧失败）区分：后者没有 `code`、也从不经 error 帧返回，
+ * 只能由上层 kill 重建（AGENTS.md §4.12）。
+ *
+ * 判据是**类型与 `code` 字段**，不要回去解析 `message` 文本——对端错误形状一变就会把「agent 明确拒绝」误判成连接级故障。
+ */
+export class AcpMethodError extends Error {
+  /** JSON-RPC `error.code`；对端没给数字 code 时为 undefined。 */
+  readonly code?: number;
+  constructor(error: { code?: unknown; message?: unknown } | undefined) {
+    const code = typeof error?.code === "number" ? error.code : undefined;
+    const text =
+      typeof error?.message === "string" && error.message
+        ? code === undefined
+          ? error.message
+          : `${code}: ${error.message}`
+        : JSON.stringify(error);
+    super(text ?? "acp error");
+    this.name = "AcpMethodError";
+    if (code !== undefined) this.code = code;
+  }
+}
+
+/**
  * 处理一帧：响应 → 兑现 pending；反向请求 → 走共用应答器；`session/update` → 进度与文本拼接。
  * 调用方负责把本函数挂到 stdout 解析后的每一帧上。
  */
@@ -168,9 +212,13 @@ export function handleAcpFrame(f: Record<string, any>, host: AcpHost): void {
     if (!p) return;
     p.clear();
     host.pending.delete(f.id);
+    // committed-only agent 只回 session/prompt 的结果、从不发 session/update：也记首帧，
+    // 否则 acpTurnFirstFrameMs() 恒为 -1，慢回合诊断会漏报。
+    if (p.method === "session/prompt" && host.turn.sessionId && !host.turn.firstFrameAt)
+      host.turn.firstFrameAt = Date.now();
     if (f.error) {
       host.log(`← ${p.method}#${f.id} ERROR ${JSON.stringify(f.error).slice(0, 200)}`, "warn");
-      p.reject(new Error(JSON.stringify(f.error)));
+      p.reject(new AcpMethodError(f.error));
     } else p.resolve(f.result);
     return;
   }
@@ -184,6 +232,10 @@ export function handleAcpFrame(f: Record<string, any>, host: AcpHost): void {
     return;
   }
   const turn = host.turn;
+  // 只记本回合自己的会话；并发 worker/控制桥的帧不能算进首帧。
+  if (turn.sessionId && f.params?.sessionId === turn.sessionId && !turn.firstFrameAt) {
+    turn.firstFrameAt = Date.now();
+  }
   if (f.method === "session/update") {
     const u = f.params?.update;
     if (u?.sessionUpdate) turn.seenUpdateTypes.add(String(u.sessionUpdate)); // 诊断
@@ -330,6 +382,13 @@ export function promptAcp(host: AcpHost, params: unknown, timeouts: PromptTimeou
   });
 }
 
+/** agent 明确回过带数字 `code` 的 JSON-RPC error 帧（如 -32602 旧 model id 失效）才算「模型值被拒」。
+ *  判据是 `AcpMethodError` + 数字 `code` 两个字段，不再解析 `message` 文本；超时 / 无进程 / 写帧失败这些连接级
+ *  故障既不是这个类型、也没有数字 `code`，必须抛给上层 kill 重建。 */
+function isExplicitAcpError(e: unknown): boolean {
+  return e instanceof AcpMethodError && typeof e.code === "number";
+}
+
 /** 按配置选模型路由（如 DSH 的 deepseek-account）；没有 model 或模型已随启动参数传入的 agent 跳过。 */
 export async function applyAcpModel(
   host: AcpHost,
@@ -347,8 +406,14 @@ export async function applyAcpModel(
     );
     host.log(`model set ${ag.model}`);
   } catch (e) {
-    host.log(`model set failed (${String(e)})`, "warn");
-    throw e;
+    // 只有 agent 明确拒绝这个 model id 才吞：模型是「跟随用户配置」的可选项，旧 id 失效不该把整轮打成失败。
+    // 超时 / `acp process reset` / 无进程 / 写帧失败属于连接级故障，必须抛给上层 kill 重建，
+    // 否则会拖到 prompt 首帧/空闲超时才暴露（AGENTS.md §4.12 只授权「恢复后的模型设置失败只记日志」）。
+    if (!isExplicitAcpError(e)) throw e;
+    host.log(
+      `model set failed (${String(e)}) → 继续用 agent 自己的默认模型；可用 wemind brain set <agent> --model 覆盖`,
+      "warn",
+    );
   }
 }
 

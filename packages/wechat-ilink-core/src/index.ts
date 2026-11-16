@@ -1,7 +1,7 @@
 /**
  * @wemind/wechat-ilink-core
  * iLink 协议内核：HTTP 客户端、类型、会话守卫、账号/状态持久化、收图解密；另有两个 bin 共用的堆栈诊断工具。
- * MCP server 与 daemon 均依赖本包；自身不依赖任何「消费方」代码。
+ * MCP server 与 daemon 均依赖本包；自身不依赖任何使用方代码。
  */
 export * from "./config.js";
 export * from "./pkg-version.js";

@@ -2,7 +2,17 @@ import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_proce
 import path from "node:path";
 
 import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
-import { BRAIN_HOME, activeMcpServers } from "../agents/sandbox/mcp-sandbox.js";
+import {
+  activeMcpServers,
+  ensureBrainHome,
+  nativeMcpServers,
+  warnForbiddenNativeMcp,
+} from "../agents/managed/mcp-brain.js";
+import { agentRuntime } from "../agents/config/runtime.js";
+import { configFingerprint } from "../agents/config/config-fingerprint.js";
+import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
+import { getSessionCwd, setSessionCwd, usableSessionCwd } from "../agents/config/session-cwd.js";
+import { clearReloadPending, markReloadPending } from "../agents/config/home-mode.js";
 import { getAgent } from "../agents/agent-slot.js";
 import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
 import { pidRecordOf, writePidRecords } from "../shared/process/pid-record.js";
@@ -21,6 +31,7 @@ import {
   applyAcpModel,
   applyAcpSessionMode,
   availableAcpModes,
+  acpTurnFirstFrameMs,
   acpTurnChunks,
   acpTurnText,
   beginAcpTurn,
@@ -45,7 +56,7 @@ const log = createLogger("wechat-daemon/acp");
  * - 每用户一个 ACP session（原生多轮记忆）；session 映射持久化到磁盘。
  * - 自愈：session/prompt 超时/失败 → 杀进程重建；重建后用 session/load 恢复上下文。
  * - 诊断日志（统一走 `createLogger("wechat-daemon/acp")`，格式 `[wemind/wechat-daemon/acp][INFO|WARN|ERROR] …`，全部 stderr、进 daemon.log）：发出请求、收帧、超时时已收 chunk 数与最后收帧时间差；`spawn`/`initialized`/`session/new`/`prompt ok` 等帧级关键线索归 INFO（排障必须可见），失败与自愈归 WARN/ERROR。
- * 跑在 brain 沙箱目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
+ * `direct`（默认）直接用 Agent 真实 home；`managed` 才跑在 brain 副本目录下（默认空 MCP），通过 agent 配置的环境变量把该目录传给 agent。
  * 协议细节（帧处理、请求/回合超时、模型与模式、回放静默）与 worker 共用 `acp-connection.ts`；本模块只保留常驻单例与会话持久化。
  *
  * **agent 显式传参**：本模块不再持有「当前 agent」常量（改造前是 import 时解析的 `AGENT`，
@@ -67,9 +78,12 @@ function firstFrameMs(ag: ResolvedAgent): number {
 
 let child: ChildProcessWithoutNullStreams | null = null;
 let initialized = false;
+let configFp = "";
 let idCounter = 0;
 const pending = new Map<number, AcpPending>();
 const userSessions = new Map<string, string>(); // 本进程已建立的 session
+// 会话建立耗时按 sessionId 记，供 prompt 日志带出 mcpCount；进程重建后清空（下次建立会重新记）。
+const sessionPerf = new Map<string, { mcpCount: number; sessionNewMs: number }>();
 const turn = newTurnState(); // 当前回合的拼接缓冲与进度状态
 const rpcState = { lastFrameAt: 0, frameSeq: 0 }; // 最近收帧时间 + 累计序号（首帧/回放判定）
 const stdoutLines = new LineDecoder();
@@ -100,6 +114,7 @@ const host: AcpHost = {
 let turnDepth = 0; // 已入队/正在跑的 ACP 操作数（提问 / 新建会话 / 恢复会话）
 let opChain: Promise<void> = Promise.resolve(); // ACP 操作串行链：同一时刻只有一个操作在碰进程
 let switching = false; // 正在切换大脑
+let pendingReload = false; // 配置变更要求重启，但当前有回合在跑 → 排到最后一个回合结束（并落盘 runtime.json）
 const SWITCH_WAIT_MS = Number(process.env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000; // 回合等切换的上限，与切换自身的启动新大脑的上限一致
 
 export function isTurnInFlight(): boolean {
@@ -116,6 +131,10 @@ function withBrainOp<T>(fn: () => Promise<T>): Promise<T> {
   turnDepth += 1;
   const run = opChain.then(fn, fn).finally(() => {
     turnDepth -= 1;
+    if (turnDepth === 0 && pendingReload) {
+      log.info("回合已结束：应用排队的 MCP/config 变更（重启大脑）");
+      reset(); // reset 会清掉内存标志与落盘标记
+    }
   });
   opChain = run.then(
     () => {},
@@ -171,9 +190,13 @@ function isAlive(): boolean {
 
 /** 杀进程（按 PID 进程树）并清空内部态；不清磁盘 session 映射（留给重建后 load）。 */
 function reset(): void {
+  // 进程被重建就等于配置已生效：无论起因是切脑、排队重载还是回合失败自愈，都不能留着旧标记。
+  pendingReload = false;
+  clearReloadPending();
   const c = child;
   child = null;
   initialized = false;
+  configFp = "";
   if (c?.pid) {
     try {
       if (process.platform === "win32")
@@ -193,6 +216,7 @@ function reset(): void {
   }
   pending.clear();
   userSessions.clear();
+  sessionPerf.clear();
   clearAcpTurn(turn);
   stdoutLines.reset();
 }
@@ -221,15 +245,25 @@ function saveSessionMap(m: Record<string, string>): void {
 }
 
 async function ensureProcess(ag: ResolvedAgent): Promise<void> {
-  if (isAlive() && initialized) return;
+  // 先按当前配置算指纹：终端侧改了配置就让本轮重建进程（不在一轮对话中途换配置）。
+  const before = configFingerprint(ag, agentRuntime("brain", ag));
+  if (isAlive() && initialized && configFp === before) return;
+  if (isAlive() && initialized) {
+    log.info(`config changed (${ag.name}) → rebuild before next turn`);
+  }
   reset();
   const kept: string[] = [];
-  const env = agentEnv(ag, BRAIN_HOME, kept); // 父进程 env → 沙箱目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
+  const rt = ensureBrainHome(ag); // direct 不写文件；managed 才准备副本
+  warnForbiddenNativeMcp(ag, rt); // 只告警：agent 自己配置里有微信 MCP 时提示回环风险
+  const env = agentEnv(ag, rt.home, kept, DATA_DIR, { direct: rt.mode === "direct" }); // 父进程 env → 副本目录 → 预设 env → 预设 envDefaults（父进程已设的不覆盖）
   if (kept.length) log.info(`env defaults kept from parent: ${kept.join(",")}`); // 部署方显式设置的审批类开关
   prepareAgent(ag); // 启动前落盘 agent 需要的派生配置（DSH 的 session-root patch）
-  const proc = spawnAgent(ag, { cwd: BRAIN_HOME, env });
+  const fp = configFingerprint(ag, rt);
+  const proc = spawnAgent(ag, { cwd: rt.cwd, env });
   child = proc;
-  log.info(`spawn ${ag.name} acp pid=${proc.pid} bin=${ag.bin} args=[${ag.args.join(" ")}]`);
+  log.info(
+    `spawn ${ag.name} acp pid=${proc.pid} cwd=${rt.cwd} home=${rt.home} bin=${ag.bin} args=[${ag.args.join(" ")}]`,
+  );
   // 身份记录（JSON）：manage.ts 据此算进程特征串与展示 live 状态，不必猜「配置里的 agent 是不是正在跑的那个」
   writePidRecords(BRAIN_PID_FILE, [pidRecordOf(proc.pid!, ag)]);
   proc.stdout.on("data", (d) => feedAcpStdout(stdoutLines, d, (f) => handleAcpFrame(f, host)));
@@ -260,29 +294,37 @@ async function ensureProcess(ag: ResolvedAgent): Promise<void> {
     throw e;
   }
   initialized = true;
+  configFp = fp;
   log.info("initialized");
 }
 
 async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string> {
   const existing = userSessions.get(userId);
   if (existing) return existing;
-  // 配了 mcpViaAcp 的 agent（DSH）：激活集随 session 下发；其余 agent 传空（走各自沙箱配置文件）
-  const mcpServers = ag.mcpViaAcp ? activeMcpServers(ag) : [];
+  const rt = agentRuntime("brain", ag);
+  // direct：Agent 自己加载真实配置，只补 overlay.mcp.extra；
+  // managed：mcpDelivery=acp 的 Agent 拿 curated 激活集，其余 Agent 自己读副本配置文件。
+  const mcpServers = activeMcpServers(ag, rt);
   const map = loadSessionMap(ag);
   const saved = map[keyOf(ag, userId)];
   if (saved) {
     // agent 指定 resume（DSH）；其余仍先 load，失败再试 resume，最后 new
     const methods: Array<"load" | "resume"> =
       ag.restore === "resume" ? ["resume"] : ["load", "resume"];
+    const savedCwd = getSessionCwd(ag.name, saved);
+    const cwd = usableSessionCwd(savedCwd, rt.cwd, saved);
     for (const method of methods) {
       let restored: any;
+      let establishMs = 0;
       try {
+        const tEstablish = Date.now();
         restored = await requestAcp(
           host,
           `session/${method}`,
-          { sessionId: saved, cwd: BRAIN_HOME, mcpServers },
+          { sessionId: saved, cwd, mcpServers },
           REQ_TIMEOUT,
         );
+        establishMs = Date.now() - tEstablish;
         await drainAcpReplay(host, ag);
       } catch (e) {
         log.warn(`session/${method} failed (${String(e)})`);
@@ -296,30 +338,47 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
         /* 已在 applyModel 内记日志 */
       }
       await applyAcpSessionMode(host, ag, saved, availableAcpModes(restored), REQ_TIMEOUT);
+      // 先完成所有可能抛错的持久化，再改内存指针：写盘失败不能留下「当前会话已变」的假象（AGENTS.md §4.12）。
+      if (!savedCwd) setSessionCwd(ag.name, saved, cwd);
       userSessions.set(userId, saved);
       markUsed(ag.name, userId, saved); // 会话登记表：把它顶到「最近使用」（列表按此排序）
+      const perf = {
+        mcpCount: mcpServers.length,
+        nativeMcpCount: Object.keys(nativeMcpServers(ag)).length,
+        sessionNewMs: establishMs,
+      };
+      sessionPerf.set(saved, perf);
       log.info(
-        `session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`,
+        `session/${method} ok ${saved} mcp=[${mcpServers.map((s: any) => s.name).join(",")}] ${formatMcpPerf(perf)}`,
       );
+      for (const warning of mcpPerfWarnings(perf)) log.warn(warning);
       return saved;
     }
   }
-  const res = (await requestAcp(
-    host,
-    "session/new",
-    { cwd: BRAIN_HOME, mcpServers },
-    REQ_TIMEOUT,
-  )) as {
+  const tNew = Date.now();
+  const res = (await requestAcp(host, "session/new", { cwd: rt.cwd, mcpServers }, REQ_TIMEOUT)) as {
     sessionId?: string;
   };
+  const sessionNewMs = Date.now() - tNew;
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   await applyAcpModel(host, ag, res.sessionId, REQ_TIMEOUT);
   await applyAcpSessionMode(host, ag, res.sessionId, availableAcpModes(res), REQ_TIMEOUT);
-  userSessions.set(userId, res.sessionId);
+  // brain-sessions.json 是「当前会话」的唯一权威：先落盘，再动内存与派生索引。
   map[keyOf(ag, userId)] = res.sessionId;
   saveSessionMap(map);
+  setSessionCwd(ag.name, res.sessionId, rt.cwd);
+  userSessions.set(userId, res.sessionId);
   ensureEntry(ag.name, userId, res.sessionId); // 会话登记表：新会话进列表（turns 从 0 起）
-  log.info(`session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}]`);
+  const perf = {
+    mcpCount: mcpServers.length,
+    nativeMcpCount: Object.keys(nativeMcpServers(ag)).length,
+    sessionNewMs,
+  };
+  sessionPerf.set(res.sessionId, perf);
+  log.info(
+    `session/new ok ${res.sessionId} mcp=[${mcpServers.map((s: any) => s.name).join(",")}] ${formatMcpPerf(perf)}`,
+  );
+  for (const warning of mcpPerfWarnings(perf)) log.warn(warning);
   return res.sessionId;
 }
 
@@ -398,9 +457,14 @@ async function runTurn(
     // 成功回合才登记：轮次 +1、刷新最近使用、首次写入标题（用户消息前 30 字；纯图片消息没有文字 → 留给下一次）
     // 标题取**剥掉交接前缀**后的正文：不然列表里全是「【交接摘要 · 来自 …】」，用户认不出哪条是哪条。
     touchEntry(ag.name, userId, sid, { title: titleOf(stripHandoffPrefix(message)) });
+    const turnPerf = {
+      mcpCount: sessionPerf.get(sid)?.mcpCount ?? 0,
+      firstFrameMs: acpTurnFirstFrameMs(turn),
+    };
     log.info(
-      `prompt ok ${Date.now() - t0}ms chunks=${acpTurnChunks(turn, sid)} updateTypes=[${[...turn.seenUpdateTypes].join(",")}]`,
+      `prompt ok ${Date.now() - t0}ms chunks=${acpTurnChunks(turn, sid)} updateTypes=[${[...turn.seenUpdateTypes].join(",")}] ${formatMcpPerf(turnPerf)}`,
     );
+    for (const warning of mcpPerfWarnings(turnPerf)) log.warn(warning);
     return txt;
   } catch (e) {
     const chunks = acpTurnChunks(turn, sid);
@@ -447,7 +511,10 @@ export async function resumeSession(
     const ag = getAgent("brain");
     const short = sessionId.slice(0, 8);
     await ensureProcess(ag);
-    const mcpServers = ag.mcpViaAcp ? activeMcpServers(ag) : [];
+    const rt = agentRuntime("brain", ag);
+    const mcpServers = activeMcpServers(ag, rt);
+    const savedCwd = getSessionCwd(ag.name, sessionId);
+    const cwd = usableSessionCwd(savedCwd, rt.cwd, sessionId);
     const methods: Array<"load" | "resume"> =
       ag.restore === "resume" ? ["resume"] : ["load", "resume"];
     let lastErr = "";
@@ -456,16 +523,18 @@ export async function resumeSession(
         const restored = await requestAcp(
           host,
           `session/${method}`,
-          { sessionId, cwd: BRAIN_HOME, mcpServers },
+          { sessionId, cwd, mcpServers },
           REQ_TIMEOUT,
         );
         await drainAcpReplay(host, ag);
         await applyAcpModel(host, ag, sessionId, REQ_TIMEOUT);
         await applyAcpSessionMode(host, ag, sessionId, availableAcpModes(restored), REQ_TIMEOUT);
-        userSessions.set(userId, sessionId);
+        // 严格恢复：全部持久化成功才改当前会话；失败时磁盘与内存都保持原样，不回退新建。
         const map = loadSessionMap(ag);
         map[keyOf(ag, userId)] = sessionId;
         saveSessionMap(map);
+        if (!savedCwd) setSessionCwd(ag.name, sessionId, cwd);
+        userSessions.set(userId, sessionId);
         log.info(`resume ok ${sessionId}`);
         return { ok: true };
       } catch (e) {
@@ -496,14 +565,33 @@ export function restart(): void {
   reset();
 }
 
+/** 切脑成功路径用：切脑本身就是一次重建，不能留着旧大脑排队的重载去杀新 warmup 出来的进程。 */
+export function clearQueuedReload(): void {
+  pendingReload = false;
+  clearReloadPending();
+}
+
+export type ReloadState = "applied" | "queued" | "failed";
+
 /**
- * MCP 激活集变更后用：切换进行中先等它结束（有界），再重启——否则会把正在预热的新大脑杀在半路。
- * 返回 false 表示切换在等待上限内仍未结束，这次没有重启（避免留下一个半截的新大脑）。
+ * MCP 激活集 / config.reload 变更后用：切换进行中先等它结束（有界），再重启——否则会把正在预热的新大脑杀在半路。
+ * 三态：`failed` = 切换在等待上限内仍未结束（这次没重启）；`queued` = 有回合在跑，重启排到回合结束；
+ * `applied` = 已当场重启。排队同时写 runtime.json 的 `pendingReload`：进程内布尔会随 daemon 退出消失，
+ * 新 daemon 启动时能发现并清掉（按当前配置重建进程本来就已生效）。调用方必须按三态回话，不能一律说「已生效」。
  */
-export async function restartForMcpChange(): Promise<boolean> {
-  if (switching && !(await drainSwitch(SWITCH_WAIT_MS))) return false;
+export async function restartForMcpChange(
+  reason: string = "MCP/config 变更",
+): Promise<ReloadState> {
+  if (switching && !(await drainSwitch(SWITCH_WAIT_MS))) return "failed";
+  if (isTurnInFlight()) {
+    pendingReload = true;
+    markReloadPending(reason);
+    log.info("MCP/config 已变更：等当前回合结束再重启大脑（不打断正在生成的回复）");
+    return "queued";
+  }
+  clearReloadPending();
   restart();
-  return true;
+  return "applied";
 }
 
 /** 当前大脑是否接受图片输入（配置里的能力；默认 true）。 */

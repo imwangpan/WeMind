@@ -1,8 +1,8 @@
 # 配方：接入一个新的 ACP Agent
 
-> **最后核对**：2026-11-05
+> **最后核对**：2026-11-14
 >
-> 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与沙箱.md`](../../repowiki/06-ACP-大脑与沙箱.md)。
+> 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与副本.md`](../../repowiki/06-ACP-大脑与副本.md)。
 
 ---
 
@@ -25,30 +25,30 @@ $env:ACP_ARGS = '["--profile","acp"]'
 $env:ACP_SHELL = "1"
 $env:ACP_HOME_ENV = "DSH_HOME"
 $env:ACP_HOME = "$env:TEMP\dsh-probe-home"   # 测试用；真实凭据见下
-$env:ACP_MODEL = '["deepseek-account","deepseek-flash"]'  # DSH 必须；否则默认 official 路由要 API key
+$env:ACP_MODEL = '["<provider>","<model>"]'  # 可选覆盖；DSH 的真实默认请用 profile 里的 - id: acp（rc.3 已无 deepseek-account）
 $env:ACP_PROMPT = "Reply with exactly: OK"
 $env:ACP_TEST_IMAGE = "1"   # 第 6 问（带图 prompt 能否接受）→ 决定预设 images
-$env:ACP_TEST_MCP = '[{"name":"fake","command":"node","args":["-e","0"],"env":[]}]'  # 第 6 问（mcpServers 能否被接受）→ 决定 mcpViaAcp
+$env:ACP_TEST_MCP = '[{"name":"fake","command":"node","args":["-e","0"],"env":[]}]'  # 第 6 问（mcpServers 能否被接受）→ 决定 acpMcpServers / mcpDelivery
 $env:ACP_HARD_KILL = "1"   # 模拟 WeMind 自愈：不 close，直接杀进程再 resume
 node scripts/acp-probe.mjs
 ```
 
-> **第 6 问的两个开关必须显式打开**：不设 `ACP_TEST_IMAGE` / `ACP_TEST_MCP`，探针不会带图、也不会传 `mcpServers`，你就永远答不出「`images` 该不该关」「`mcpViaAcp` 该不该开」——而这两项正是接新 agent 时最容易踩的两个坑。
+> **第 6 问的两个开关必须显式打开**：不设 `ACP_TEST_IMAGE` / `ACP_TEST_MCP`，探针不会带图、也不会传 `mcpServers`，你就永远答不出「`images` 该不该关」「`acpMcpServers` 该不该开」——而这两项正是接新 agent 时最容易踩的两个坑。
 
 > 真实凭据：把 `~/.dsh/.credentials.yaml` 复制到 `ACP_HOME`（不要打印内容），或用 `DEEPSEEK_API_KEY`。
 
 ### 决策门
 
-| 探针结果 | 结论 |
-|---|---|
-| 全部符合 WeMind 现有假设 | 加 agent 即可（kiro/opencode 路线） |
-| 无 `session/load`，有 `resume` | 加 `restore: "resume"` + 客户端兜底 |
-| 有反向请求 | 应答器已在 `acp-reverse.ts`（brain / worker / `brain check` 共用），**一般无需再写**；只有在需要放行某类请求时才改那一处 |
-| `image:false`（探针带图 prompt 被拒） | 预设加 `images: false`：`planImageTurn()` 按「有文字只按文字答、无文字才拒绝」处理，不会拿空 prompt 白问；漏到 `askBrainTurn` 也只附一句提示、不带图 |
-| 正文非逐 token / 无 activity 帧 | 预设加 `firstFrameMs`（首帧超时）与 `heartbeatMs`（静默期心跳），见 §4 |
-| `session/new` 先要求 `authenticate`（`-32000 Authentication required`） | 先看能否靠**复制凭据**自动恢复（`credentialFiles`；Cline 只自动恢复它自己的 3 种 OAuth provider）；不能就**从 agent 自己的配置派生环境变量**（`credentialEnv`，参考 Cline 的 `clineCredentialEnv()`：只读、显式 env 优先），或要求部署方提供 agent 官方文档里的环境变量。**不要**在 daemon 里实现交互式 `authenticate`——无头环境会卡在浏览器/输入上；把可执行的提示写进 `brain check` 与失败回复（参考 `authHint()`） |
-| 默认模型路由需要 API key / 桌面登录要切 account | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖 |
-| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：沙箱**原样复制**那份用户层（否则沙箱是空壳 `[]`、路由都不存在），并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
+| 探针结果                                                                                | 结论                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 全部符合 WeMind 现有假设                                                                | 加 agent 即可（kiro/opencode 路线）                                                                                                                                                                                                                                                                                                                                                                                               |
+| 无 `session/load`，有 `resume`                                                          | 加 `restore: "resume"` + 客户端兜底                                                                                                                                                                                                                                                                                                                                                                                               |
+| 有反向请求                                                                              | 应答器已在 `acp-reverse.ts`（brain / worker / `brain check` 共用），**一般无需再写**；只有在需要放行某类请求时才改那一处                                                                                                                                                                                                                                                                                                          |
+| `image:false`（探针带图 prompt 被拒）                                                   | 预设加 `images: false`：`planImageTurn()` 按「有文字只按文字答、无文字才拒绝」处理，不会拿空 prompt 白问；漏到 `askBrainTurn` 也只附一句提示、不带图                                                                                                                                                                                                                                                                              |
+| 正文非逐 token / 无 activity 帧                                                         | 预设加 `firstFrameMs`（首帧超时）与 `heartbeatMs`（静默期心跳），见 §4                                                                                                                                                                                                                                                                                                                                                            |
+| `session/new` 先要求 `authenticate`（`-32000 Authentication required`）                 | 先看能否靠**复制凭据**自动恢复（`credentialFiles`；Cline 只自动恢复它自己的 3 种 OAuth provider）；不能就**从 agent 自己的配置派生环境变量**（`credentialEnv`，参考 Cline 的 `clineCredentialEnv()`：只读、显式 env 优先），或要求部署方提供 agent 官方文档里的环境变量。**不要**在 daemon 里实现交互式 `authenticate`——无头环境会卡在浏览器/输入上；把可执行的提示写进 `brain check` 与失败回复（参考 `authHint()`）             |
+| 默认模型路由需要 API key / 桌面登录要切 account                                         | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖                                                                                                                                                                                                                          |
+| 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：`direct` 直接用真实 `profiles/`，`managed` 才复制那份用户层（否则副本是空壳 `[]`、路由都不存在；provider/模型条目原样，`mcpDelivery: "acp"` 时剥离全部 MCP 条目）；并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
 
 ---
 
@@ -56,30 +56,30 @@ node scripts/acp-probe.mjs
 
 接一个新 agent 必须同时产出下表 10 项。第 4–7 项由 `node scripts/check-agent-docs.mjs` 断言，其余由单测与审校覆盖。
 
-| # | 产出物 | 位置 | 由谁检查 |
-|---|---|---|---|
-| 1 | 预设 | `brain-presets.ts` 的 `ACP_AGENT_PRESETS` | 单测 |
-| 2 | 预设单测 | `brain-agents.test.ts` | `npm test` |
-| 3 | 沙箱单测（涉及沙箱时） | `sandbox-<name>.test.ts` | `npm test` |
-| 4 | 接入文档 | `docs/接入方案/接入-<Name>.md`，含 §0.6 的五类小节 + `## 待实测` | `check-agent-docs.mjs` |
-| 5 | 通用表加一行 | `docs/接入方案/接入其它-ACP-Agent.md` §5 | `check-agent-docs.mjs` |
-| 6 | 已知坑加一条 | [`docs/ai/已知坑.md`](../已知坑.md) | `check-agent-docs.mjs` |
-| 7 | 全库索引 | `docs/README.md`「各 agent 实测」行 + `llms.txt` | `check-agent-docs.mjs` |
-| 8 | AI 事实表 | `docs/ai/README.md` 事实状态表 | 人工 |
-| 9 | 安装提示（适配器类） | `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT` | 单测 |
-| 10 | 探针记录 | 文档「探针实测结论」小节，每条标来源档位 | 人工审校 |
+| #   | 产出物                 | 位置                                                             | 由谁检查               |
+| --- | ---------------------- | ---------------------------------------------------------------- | ---------------------- |
+| 1   | 预设                   | `brain-presets.ts` 的 `ACP_AGENT_PRESETS`                        | 单测                   |
+| 2   | 预设单测               | `brain-agents.test.ts`                                           | `npm test`             |
+| 3   | 副本单测（涉及副本时） | `agents/managed/<name>.test.ts`                                         | `npm test`             |
+| 4   | 接入文档               | `docs/接入方案/接入-<Name>.md`，含 §0.6 的五类小节 + `## 待实测` | `check-agent-docs.mjs` |
+| 5   | 通用表加一行           | `docs/接入方案/接入其它-ACP-Agent.md` §5                         | `check-agent-docs.mjs` |
+| 6   | 已知坑加一条           | [`docs/ai/已知坑.md`](../已知坑.md)                              | `check-agent-docs.mjs` |
+| 7   | 全库索引               | `docs/README.md`「各 agent 实测」行 + `llms.txt`                 | `check-agent-docs.mjs` |
+| 8   | AI 事实表              | `docs/ai/README.md` 事实状态表                                   | 人工                   |
+| 9   | 安装提示（适配器类）   | `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`                      | 单测                   |
+| 10  | 探针记录               | 文档「探针实测结论」小节，每条标来源档位                         | 人工审校               |
 
 ## 0.6 填空：能力结论与来源档位
 
 每条能力结论必须标注来源（三选一），并显式列出未验证项。**不能把三者都写成「实测」**：
 
-- `loadSession`：____（探针观测 / 源码核实 / 文档转述）
-- `image`：____
-- `mcpViaAcp`：____
-- `session/set_mode`：____
-- `replayOnLoad`：____
-- 会话恢复方式（load / resume / 无）：____
-- 未验证项：____（没有写「无」）
+- `loadSession`：\_\_\_\_（探针观测 / 源码核实 / 文档转述）
+- `image`：\_\_\_\_
+- `acpMcpServers` / `mcpDelivery`：\_\_\_\_
+- `session/set_mode`：\_\_\_\_
+- `replayOnLoad`：\_\_\_\_
+- 会话恢复方式（load / resume / 无）：\_\_\_\_
+- 未验证项：\_\_\_\_（没有写「无」）
 
 > 三档能证明的东西不同：**探针观测**只证明「这条消息能跑通、回了什么」；**源码核实**才能回答「它内部怎么处理」；**文档转述**只是上游作者声称的行为。2026-11-05 审计里所有「探针看不到的语义」发现都来自源码核实，没有一条来自探针。
 
@@ -87,12 +87,12 @@ node scripts/acp-probe.mjs
 
 ## 1. 确认 4 件事
 
-| # | 信息 | 说明 | 示例（DSH） |
-|---|---|---|---|
-| 1 | 二进制/路径 | PATH 名或绝对路径 | `dsh` / `dsh.cmd` |
-| 2 | ACP 启动参数 | 进入 ACP server over stdio | `--profile acp` |
-| 3 | 配置目录环境变量 | 该 agent 读取配置/数据目录的 env 名；WeMind 指向沙箱 | `DSH_HOME` |
-| 4 | 配置目录布局 / MCP 格式 | `configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile` | 空 / ACP `mcpServers` |
+| #   | 信息                    | 说明                                                                                           | 示例（DSH）           |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------- | --------------------- |
+| 1   | 二进制/路径             | PATH 名或绝对路径                                                                              | `dsh` / `dsh.cmd`     |
+| 2   | ACP 启动参数            | 进入 ACP server over stdio                                                                     | `--profile acp`       |
+| 3   | 配置目录环境变量        | 该 agent 读取配置/数据目录的 env 名；WeMind 仅在 `managed` 下指向副本；`direct` 不注入 | `DSH_HOME`            |
+| 4   | 配置目录布局 / MCP 格式 | `configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile`                                    | 空 / ACP `mcpServers` |
 
 > 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
 >
@@ -110,7 +110,7 @@ acme: {
   args: ["serve", "--acp"],
   shell: true,                   // .cmd/.bat/npx 必须；.exe 可 false
   // requiresBins: ["acme"],     // 适配器内部还要 spawn 的运行时（只装适配器不够）；缺失时 agentProblem() 提前报错
-  homeEnvVar: "ACME_HOME",       // 指向 BRAIN_HOME；没有就删掉
+  homeEnvVar: "ACME_HOME",       // 仅 managed 指向副本根；没有就删掉
   realHome: path.join(os.homedir(), ".acme"),
   inheritDirs: ["skills"],       // 目录式记忆/技能
   inheritFiles: ["AGENTS.md"],   // 单文件记忆
@@ -119,21 +119,21 @@ acme: {
   // images: false,                     // 图片输入不支持（DSH 靠它关掉）
   // firstFrameMs: 90_000,
   // heartbeatMs: 60_000,
-  // mcpViaAcp: true,
+  // acpMcpServers: true,
+  // mcpDelivery: "acp",
   // modelArg: "--model",               // 不支持 session/set_config_option 时模型走启动参数（gemini）
   // replayOnLoad: true,                // load/resume 返回后仍异步回放历史：恢复后先等帧流安静，否则旧历史会拼进本轮答复（gemini）
   // sessionMode: "bypassPermissions",  // 会话建立/恢复后经 session/set_mode 切模式（claude-code / codex）
-  // env: { CLAUDE_CONFIG_DIR: "%HOME%/claude" },                  // 强制注入（值里 %HOME% → 沙箱根）
+  // env: { CLAUDE_CONFIG_DIR: "%HOME%/claude" },                  // 仅 managed 强制注入（值里 %HOME% → 副本根）
   // envDefaults: { DSH_PERMISSION_MODE: "danger-full-access" }, // 审批类默认值：父进程已设同名变量时以父进程为准
   // credentialEnv: (realHome, parentEnv) => ({ ... }),            // 从 agent 凭据文件派生 env（仅父进程未提供时；Cline 的 CLINE_PROVIDER/CLINE_API_KEY）
   // isolateSessions: true,             // 会话持久化 root 用 agent 自己的 --patch 指到账号数据目录（DSH）
   // fallbackBinPaths: [path.join(os.homedir(), ".acme", "bin", "acme-agent")], // 官方安装不在 PATH
-  // settingsBase: "settings.json",       // 以真实配置为基底（剥离 MCP/插件/providers/model、关自动更新）
-  // settingsStrip: ["mcpServers"],       // settingsBase 里要删的键（默认 DEFAULT_SETTINGS_STRIP；gemini 只剥 mcpServers，保留 model/security）
-  // settingsDefaults: { quietStartup: true }, // 沙箱 settings.json 缺省补键（用户显式设过则保留用户的值；只改沙箱副本）
+  // settingsBase: "settings.json",       // managed 下把该文件整份复制进副本（只按格式剥 MCP 段、关自动更新）
+  // settingsDefaults: { quietStartup: true }, // 生成副本的 settings.json 缺省补键（用户显式设过则保留用户的值；真实文件不动）
   // credentialFiles: [".auth/user"],     // 登录态（新者胜）
   // identityFiles: [".auth/machine_id"], // 必须与真实目录一致（内容不同即覆盖）
-  // realProfile: "acp",                  // 该 agent 的用户层 profile 名——原样复制真实 profiles/<名>/cordis.patch.yml 并从它读默认模型（DSH）
+  // realProfile: "acp",                  // 该 agent 的用户层 profile 名——复制真实 profiles/<名>/cordis.patch.yml（非 MCP 原样、mcpDelivery=acp 时剥离全部 MCP 条目）并从它读默认模型（DSH）
 },
 ```
 
@@ -151,15 +151,15 @@ acme: {
 
 ---
 
-## 3. 沙箱 / MCP / 记忆
+## 3. 配置目录 / MCP / 记忆
 
-- `homeEnvVar` 指向 `BRAIN_HOME`；`configSubdir` 决定配置目录在沙箱内的位置。
-- `mcpFormat`：`kiro`（`mcpServers`）或 `opencode`（`mcp.servers`）；DSH 这类走 ACP 的用 `mcpViaAcp`，不要写文件。
-- 记忆继承：`realHome` + `inheritDirs` / `inheritFiles`；单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
-- 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时沙箱。
-- 设置继承：`settingsBase` 会在 brain/worker 两个沙箱生成剥离后的基底（`mcpServers`/`enabledPlugins`/`providers`/`model` 全删，`general.enableAutoUpdate=false`）；`settingsStrip` 可改剥离键（gemini 只剥 `mcpServers`，保留用户的 `model`/`security`），`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。
-- **profile 继承**（`realProfile`，可选）：把真实 `<realHome>/profiles/<名>/cordis.patch.yml` **原样复制**进两个沙箱——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在；默认模型也从这份读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
-- 默认空 MCP；`wechat` 永久禁止（防它把消息发回自己）。
+- `homeEnvVar` 仅在 `managed` 下指向 `BRAIN_HOME`/`WORKER_HOME`；`direct` 不注入，Agent 直接用真实 home。`env` 同样只在 `managed` 注入。`configSubdir` 决定配置目录在副本根中的位置。
+- `mcpFormat`：`mcpServers`（顶层）、`mcp.servers`（嵌套）或 `dshProfileYaml`（DSH profile patch）；`acpMcpServers` 只声明能力，`mcpDelivery: "acp"` 才表示 managed 下由 WeMind 经 ACP 投递。
+- 记忆/技能：`direct` 完全使用真实目录；`managed` 才按 `inheritDirs`（junction/symlink）与 `inheritFiles`（复制）选择性继承。单文件记忆（`AGENTS.md`、`CLAUDE.md`）用 `inheritFiles`。
+- 登录态：`credentialFiles`（新者胜）+ `identityFiles`（内容不同即覆盖）；`wemind brain check` 会自动复制进临时副本。
+- 设置继承：`settingsBase` 只在 `managed` 下生效——把真实文件**整份**复制进副本，**只剥掉 MCP 段**（键名按 `mcpFormat` 定，由 `mcpAdapterFor().stripSettings()` 处理）并强制 `general.enableAutoUpdate=false`；`model` / `providers` / `security` 等键一律原样保留（不替用户改配置：上游一改键名就静默剥错，表现成「终端能用、微信不能用」）。`settingsDefaults` 只补**缺失**键（用户显式设过就保留，真实配置不动）。**不要**再引入 per-agent 的剥离清单。
+- **profile**（`realProfile`，可选）：`direct` 直接用真实 `profiles/`；`managed` 模式把真实 `<realHome>/profiles/<名>/cordis.patch.yml` 复制进副本（provider/模型条目原样，`mcpDelivery: "acp"` 时剥离全部 MCP 条目）——agent 自己首次启动生成的那份常是空壳 `[]`，不同步就连它的 provider 路由都不存在。默认模型从真实 profile 读（`profile-model.ts`：DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`）。**不追加/合成任何条目**：DSH 的 `- id: acp` 由用户自己在真实 profile 里写（缺时 `wemind brain` 给可粘贴的片段），这正是「终端 dsh 与微信大脑同一个模型」的前提（§4.14）。
+- `managed` 下 brain 默认空 MCP、按 agent 持久激活；worker 真实全量。两者都永久禁止 `wechat`（防它把消息发回自己）。`direct` 完全由 Agent 自己的配置决定。
 - **每个 agent 只读自己的 catalog**；不要把 kiro 的文件指给 DSH。
 
 验证：
@@ -174,15 +174,15 @@ wemind brain check
 
 ## 4. 客户端能力适配（按探针结果）
 
-| 探针结果 | 要改 |
-|---|---|
-| 无 `session/load`，有 `resume` | `acp-brain.ts` + `worker-acp.ts` 的 `ensureSession`：load → resume → new 兜底 |
-| 有反向请求 | 已由 `acp-reverse.ts` 统一应答（brain / worker / `brain check` 共用）：`session/request_permission` 默认拒绝、未知 method 回 `-32601`；改语义只改这一处 |
-| 首帧慢 / 无 activity 帧 | 配置里的 `firstFrameMs`；`index.ts` 心跳/`heartbeatMs` |
-| `image:false` | 预设加 `images: false`（`planImageTurn()` / `askBrainTurn` 据此友好拒绝，不会 `-32602` 重试）；**别只改 daemon 侧的拦截**——能力来自预设字段 |
-| `session/set_config_option` 不支持（`-32601`） | 预设加 `modelArg`（如 gemini 的 `"--model"`）：模型改为拼到启动参数，不再走 ACP 下发；`wemind brain set <名> --model …` 仍是入口 |
-| `session/load\|resume` 返回后仍异步回放历史 | 预设加 `replayOnLoad: true`：恢复后先等帧流安静（`acp-quiet.ts`，200ms 静默窗口、最多 3s）再提问，否则旧历史会被拼进本轮答复 |
-| MCP 走 ACP | `session/new` / `session/resume` 传 `mcpServers`（`mcpViaAcp`）；catalog 按 agent 自己的来源 |
+| 探针结果                                       | 要改                                                                                                                                                    |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 无 `session/load`，有 `resume`                 | `acp-brain.ts` + `worker-acp.ts` 的 `ensureSession`：load → resume → new 兜底                                                                           |
+| 有反向请求                                     | 已由 `acp-reverse.ts` 统一应答（brain / worker / `brain check` 共用）：`session/request_permission` 默认 yolo（`WEMIND_ACP_AUTO_ALLOW=0` 恢复拒绝）、未知 method 回 `-32601`；改语义只改这一处 |
+| 首帧慢 / 无 activity 帧                        | 配置里的 `firstFrameMs`；`index.ts` 心跳/`heartbeatMs`                                                                                                  |
+| `image:false`                                  | 预设加 `images: false`（`planImageTurn()` / `askBrainTurn` 据此友好拒绝，不会 `-32602` 重试）；**别只改 daemon 侧的拦截**——能力来自预设字段             |
+| `session/set_config_option` 不支持（`-32601`） | 预设加 `modelArg`（如 gemini 的 `"--model"`）：模型改为拼到启动参数，不再走 ACP 下发；`wemind brain set <名> --model …` 仍是入口                        |
+| `session/load\|resume` 返回后仍异步回放历史    | 预设加 `replayOnLoad: true`：恢复后先等帧流安静（`acp-quiet.ts`，200ms 静默窗口、最多 3s）再提问，否则旧历史会被拼进本轮答复                            |
+| MCP 走 ACP                                     | `session/new` / `session/resume` 传 `mcpServers`（`acpMcpServers` + `mcpDelivery: "acp"`）；catalog 按 agent 自己的来源                                      |
 
 > `acp-brain.ts` 与 `worker-acp.ts` 的协议层统一在 `acp-connection.ts`，改一处 brain 与 worker 两边生效；进程生命周期与会话持久化仍各自实现。
 
@@ -205,7 +205,7 @@ wemind brain check
 3. 长任务 >30s → 不因首帧误杀；进度不刷屏；
 4. 发图 → 按 image 能力正确处理；
 5. 越界写 → 有权限请求则应答，不卡死；
-6. 两个账号 → 沙箱隔离；
+6. 两个账号 → 副本隔离；
 7. **热切换**（1.2.0）：从别的配置里的 `wemind brain switch acme` → 答复两段、daemon pid 不变、下一条消息由 acme 答；再切回去，旧上下文能 load 回来；
 8. **当 worker 用**（1.2.0）：`wemind task "…" --agent acme` → 任务跑通；跑完进程**留着复用**（`wemind list` 可见），5 分钟后回收。
 
@@ -220,7 +220,7 @@ wemind brain check
 - **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。三处入口（brain / worker / `brain check`）共用 `acp-reverse.ts`，别在某一处另写一份。
 - **committed-only + 15s 心跳 = 烧连发额度**：先调心跳，再考虑首帧。
 - **密钥不要写进 agent**：daemon 进程环境提供。
-- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`mcpViaAcp` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-presets.ts`。
+- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`acpMcpServers`/`mcpDelivery` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-presets.ts`。
 - **冷启动耗时（2026-10-29 已量）**：DSH `initialize` **5.8s** / `session/new` 50ms；opencode ~650ms / ~800ms；qoder 1.7s / 1.5s——均远小于 `REQ_TIMEOUT=30s`，**暂不需要** `reqTimeoutMs`（见 `run-e2e.md` §7.3）。新接入的 agent 仍要先量；若超过 30s，再在 agent 里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
 - **适配器不要用 npx 当默认**：全局安装后 `bin` 写 `claude-agent-acp`（Windows `claude-agent-acp.cmd`）+ `shell: true`；npx 只做兜底。没装时用 `ADAPTER_INSTALL_HINT` 给提示，别只回一句「找不到」。适配器另有运行时依赖（`pi-acp` → `pi`）时用 `requiresBins`；`onPathAny()` 会补试 `.cmd`/`.exe`。
 - **「免审批」要用漂移检测兜住**：`ACP_TEST_TOOL=1` 跑探针——强制一次工具调用（写标记文件），断言「0 个 `session/request_permission` + 文件真的落盘」。只看 stopReason 分不出「被拒绝」和「没执行」；上游改成逐次审批时探针会先红，而不是微信第一条消息卡 30s 超时。
@@ -232,7 +232,7 @@ wemind brain check
 
 - [`docs/接入方案/接入-OpenCode.md`](../../接入方案/接入-OpenCode.md) — 原生 ACP 的实测样板
 - [`docs/接入方案/接入-DeepSeek.md`](../../接入方案/接入-DeepSeek.md) — 缺 load、`image:false`、committed-only 的反例
-- [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) — 需适配器的样板（全局安装、`CLAUDE_CONFIG_DIR` 沙箱、`mcpViaAcp`、`sessionMode`）
+- [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) — 需适配器的样板（全局安装、`CLAUDE_CONFIG_DIR` 副本、ACP MCP 投递、`sessionMode`）
 - [`docs/接入方案/接入-pi.md`](../../接入方案/接入-pi.md) — 适配器 + 运行时依赖（`requiresBins`）、文件式 MCP（`mcp.json`）、无审批开关的样板
 - [`docs/接入方案/接入其它-ACP-Agent.md`](../../接入方案/接入其它-ACP-Agent.md) — 通用 ACP 指南
 - [`docs/repowiki/07-远程任务-Worker.md`](../../repowiki/07-远程任务-Worker.md) — worker 侧（进程池、任务表）对新 agent 的要求

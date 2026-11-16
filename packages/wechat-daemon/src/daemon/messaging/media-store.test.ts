@@ -177,4 +177,14 @@ describe("pruneInboundMediaIfDue（写入/启动时的节流）", () => {
     resetInboundMediaPruneClock();
     expect(pruneInboundMediaIfDue(t, dir)).not.toBeNull();
   });
+
+  it("两个目录各有独立时钟，新目录不会被旧目录的节流压住", () => {
+    const a = tmpDir();
+    const b = tmpDir();
+    const t = 3_000_000;
+    expect(pruneInboundMediaIfDue(t, a)).not.toBeNull();
+    expect(pruneInboundMediaIfDue(t + 1, a)).toBeNull();
+    expect(pruneInboundMediaIfDue(t + 1, b)).not.toBeNull();
+    expect(pruneInboundMediaIfDue(t + 1 + INBOUND_MEDIA_PRUNE_INTERVAL_MS, b)).not.toBeNull();
+  });
 });

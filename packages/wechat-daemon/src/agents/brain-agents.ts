@@ -5,12 +5,14 @@ import { spawnSync } from "node:child_process";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config.js";
 import { readProfileDefaultModel } from "./profile-model.js";
-import { ACP_AGENT_PRESETS, DEFAULT_SETTINGS_STRIP, type AcpAgentPreset } from "./brain-presets.js";
+import { ACP_AGENT_PRESETS, type AcpAgentPreset } from "./brain-presets.js";
+import { readEnvSnapshot, mergeEnvSnapshot } from "./config/env-snapshot.js";
+import { readHomeMode } from "./config/home-mode.js";
 
 /**
  * ACP agent 与解析。
  *
- * WeMind 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动一个 agent CLI。ACP 是通用协议（kiro-cli、gemini-cli 等都支持），因此接入任意兼容 ACP 的 agent 不需要改协议代码——只需告诉我们三件事：① 二进制名；② 进入 ACP 模式的启动参数；③ 该 agent 读取「配置/数据目录」的环境变量名（我们把它指向 brain 沙箱）。
+ * WeMind 的大脑通过**标准 ACP（Agent Client Protocol，JSON-RPC over stdio）**驱动一个 agent CLI。ACP 是通用协议（kiro-cli、gemini-cli 等都支持），因此接入任意兼容 ACP 的 agent 不需要改协议代码——只需告诉我们三件事：① 二进制名；② 进入 ACP 模式的启动参数；③ 该 agent 读取「配置/数据目录」的环境变量名（只在 managed 下指向账号副本；direct 不设置）。
  *
  * 选择与覆盖（优先级从高到低）：
  *  ① 环境变量（一次性覆盖；临时试别的 agent 用它，别写进 profile）：
@@ -35,7 +37,7 @@ import { ACP_AGENT_PRESETS, DEFAULT_SETTINGS_STRIP, type AcpAgentPreset } from "
  * 否则用户点了切换、env 却压着它，会出现「看着成功、实际没生效」。
  */
 
-export { ACP_AGENT_PRESETS, DEFAULT_SETTINGS_STRIP } from "./brain-presets.js";
+export { ACP_AGENT_PRESETS } from "./brain-presets.js";
 export type { AcpAgentPreset } from "./brain-presets.js";
 
 function onPath(exe: string): string | null {
@@ -156,18 +158,20 @@ export type ResolvedAgent = {
   bin: string;
   args: string[];
   homeEnvVar?: string;
+  extraConfigFiles: string[];
   shell: boolean;
   inherit: boolean;
   realHome?: string;
   inheritDirs: string[];
   inheritFiles: string[];
   configSubdir: string;
-  mcpFormat: "kiro" | "opencode";
+  mcpFormat: "mcpServers" | "mcp.servers" | "dshProfileYaml";
   mcpConfigFile: string;
   catalogFile: string;
   env: Record<string, string>;
   /** 预设给的「默认环境变量」：父进程已设同名变量时不覆盖（用于审批类开关，部署方可以收紧）。 */
   envDefaults: Record<string, string>;
+  /** 没有 homeEnvVar 的 agent 在非 direct 场景直接用真实 home 时需要覆盖的 env（见 preset 注释）。 */
   /** 从 agent 自己的凭据文件派生环境变量（父进程未显式提供时；如 Cline 自定义 provider）。 */
   credentialEnv?: (
     realHome: string | undefined,
@@ -182,15 +186,16 @@ export type ResolvedAgent = {
   credentialFiles: string[];
   identityFiles: string[];
   settingsBase?: string;
-  /** settingsBase 基底里要删掉的键（默认 DEFAULT_SETTINGS_STRIP）。 */
-  settingsStrip: string[];
-  /** 沙箱 settings.json 的预设默认键（只补缺失键；用户显式设过则保留用户的值）。 */
+  /** managed settings.json 的预设默认键（只补缺失键；用户显式设过则保留用户的值）。 */
   settingsDefaults: Record<string, unknown>;
   model?: string;
   /** 模型改为追加到启动参数（agent 不支持 session/set_config_option 时；如 gemini 的 "--model"）。 */
   modelArg?: string;
   realProfile?: string;
-  mcpViaAcp: boolean;
+  /** 纯能力：Agent 接受 ACP `session/new|resume` 的 `mcpServers`（不代表它不读自己的配置）。 */
+  acpMcpServers: boolean;
+  /** WeMind 在 managed 托管 MCP 时的投递方式：写 Agent 配置文件，或随 ACP 会话下发。 */
+  mcpDelivery: "config" | "acp";
   /** 会话建立/恢复后切到的模式 id（`session/set_mode`）；「免审批」用，留空=不调用。 */
   sessionMode?: string;
   /** kiro 是否跑在 v3 引擎（决定启动参数与能否用 v3 的 permissions.yaml 免审批）。 */
@@ -213,21 +218,33 @@ export type ResolvedAgent = {
   binOverridden: boolean;
 };
 
-/** 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向沙箱 → 从凭据文件派生的 env（父进程未提供时）→ 预设强制 `env` → 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。 */
+/**
+ * 组装 spawn 用的环境变量：父进程 env → `homeEnvVar` 指向副本（仅 managed）→ 从凭据文件派生的 env（父进程未提供时）→ 预设强制 `env`（仅 managed）→ 预设 `envDefaults`（父进程已设同名变量时保留父进程的，`skipped` 收集这些键供调用方记日志）。
+ *
+ * `direct`（默认）：不注入 `homeEnvVar` / 预设 `env`，
+ * 让 Agent 像在终端直接启动一样读取自己的真实配置；仍保留 `envDefaults`（yolo / 免审批等默认值，父进程显式设置优先）与只读的凭据环境桥接。
+ */
 export function agentEnv(
   ag: ResolvedAgent,
   home: string,
   skipped: string[] = [],
+  dataDir: string = DATA_DIR,
+  opts: { direct?: boolean } = {},
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  if (ag.homeEnvVar) env[ag.homeEnvVar] = home; // 把沙箱目录传给 agent
+  const env: NodeJS.ProcessEnv = mergeEnvSnapshot(process.env, readEnvSnapshot(dataDir));
+  const direct = opts.direct === true;
+  if (ag.homeEnvVar && !direct) env[ag.homeEnvVar] = home; // 把账号副本目录传给 agent（direct 不注入）
   // 从 agent 自己的凭据文件派生（如 Cline 的 CLINE_PROVIDER/CLINE_API_KEY）；helper 内部已保证父进程显式值优先
   for (const [k, v] of Object.entries(ag.credentialEnv?.(ag.realHome, process.env) ?? {})) {
     if (env[k] === undefined) env[k] = v;
   }
-  for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
+  if (!direct) {
+    for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
+  }
+  // envDefaults 是 WeMind 为保证「微信侧免逐次审批」而下发的默认值，不属于 Agent 配置；direct 下仍要保留。
+  // 显式设置的同名变量优先（部署方可用它收紧权限），所以叫 defaults。
   for (const [k, v] of Object.entries(ag.envDefaults ?? {})) {
-    if (process.env[k] !== undefined) {
+    if (env[k] !== undefined) {
       skipped.push(k);
       continue;
     }
@@ -309,7 +326,7 @@ function resolveKiroV3(
   return (kiroCliMajor(binPath) ?? 0) >= 3;
 }
 
-/** v3 拒绝 v2 专属的整会话信任参数；v3 的免审批改由沙箱 `settings/permissions.yaml` 承担。 */
+/** v3 拒绝 v2 专属的整会话信任参数；v3 的免审批改由 managed `settings/permissions.yaml` 承担。 */
 function stripKiroV2TrustArgs(args: readonly string[]): string[] {
   const kept: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -325,7 +342,7 @@ function stripKiroV2TrustArgs(args: readonly string[]): string[] {
   return kept;
 }
 
-/** DSH 会话持久化目录（账号数据目录内，按角色分开；与 kiro/pi 共用的沙箱根隔离开）。
+/** DSH 会话持久化目录（账号数据目录内，按角色分开；与 kiro/pi 共用的副本根隔离开）。
  *  `dataDir` 允许调用方显式指定账号目录：CLI 进程里的 `DATA_DIR` 是**默认账号**的目录，不能拿来替别的账号解析（`brain check`/`list`/`stop` 会用到）。 */
 function dshSessionPatchFor(role: AgentRole, dataDir: string): { file: string; root: string } {
   const dir = path.join(dataDir, "agent-sessions", "deepseek");
@@ -337,7 +354,7 @@ function dshSessionPatchFor(role: AgentRole, dataDir: string): { file: string; r
 
 /**
  * 启动前落盘 agent 需要的派生配置文件（DSH 的 session-root patch）。
- * 与沙箱准备分开：`ensureBrainHome` 只在启动/换脑时调，`brain check` 和 worker 每次起进程也要有这份文件。
+ * 与副本准备分开：`ensureBrainHome` 只在启动/换脑时调，`brain check` 和 worker 每次起进程也要有这份文件。
  */
 export function prepareAgent(ag: ResolvedAgent): void {
   const patch = ag.sessionPatch;
@@ -354,12 +371,12 @@ export function prepareAgent(ag: ResolvedAgent): void {
   }
 }
 
-/** kiro v3 的免审批默认（等价于 v2 的 `--trust-all-tools`）：沙箱 settings/permissions.yaml 缺失时补上。 */
+/** kiro v3 的免审批默认（等价于 v2 的 `--trust-all-tools`）：managed settings/permissions.yaml 缺失时补上。 */
 export function ensureKiroV3Permissions(ag: ResolvedAgent, settingsDir: string): void {
   if (!ag.kiroV3) return;
   try {
     const dst = path.join(settingsDir, "permissions.yaml");
-    if (fs.existsSync(dst)) return; // 真实配置里已有（已同步进沙箱）就尊重用户的规则
+    if (fs.existsSync(dst)) return; // 副本里已有（或用户已同步）就尊重用户的规则
     fs.mkdirSync(settingsDir, { recursive: true });
     fs.writeFileSync(dst, "rules:\n  - capability: all\n    effect: allow\n", "utf-8");
   } catch {
@@ -393,6 +410,7 @@ function resolveAgentCore(
     key = "kiro";
   }
   const preset = ACP_AGENT_PRESETS[key];
+  const homeMode = readHomeMode(opts.dataDir ?? DATA_DIR);
   // 按 agent 名存的启动覆盖：无论谁在用这个 agent 都适用（顶层覆盖只属于「写入磁盘那个 agent」，切走后不该跟过去）。
   const presetOv = cfg?.presets?.[key];
 
@@ -460,7 +478,7 @@ function resolveAgentCore(
   // 会话目录隔离：agent 的 `--patch` 指向账号数据目录下的 per-role 文件（DSH）。
   // 用户自己显式给了 `--patch` 就尊重用户，不追加第二个。
   let sessionPatch: ResolvedAgent["sessionPatch"];
-  if (preset.isolateSessions && !args.includes("--patch")) {
+  if (preset.isolateSessions && homeMode === "managed" && !args.includes("--patch")) {
     sessionPatch = dshSessionPatchFor(role, opts.dataDir ?? DATA_DIR);
     args.push("--patch", sessionPatch.file);
   }
@@ -500,13 +518,14 @@ function resolveAgentCore(
     bin,
     args,
     homeEnvVar,
+    extraConfigFiles: preset.extraConfigFiles ?? [],
     shell,
     inherit,
     realHome,
     inheritDirs,
     inheritFiles: preset.inheritFiles ?? [],
     configSubdir: preset.configSubdir ?? "",
-    mcpFormat: preset.mcpFormat ?? "kiro",
+    mcpFormat: preset.mcpFormat ?? "mcpServers",
     mcpConfigFile: preset.mcpConfigFile ?? "settings/mcp.json",
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},
@@ -520,12 +539,12 @@ function resolveAgentCore(
     credentialFiles: preset.credentialFiles ?? [],
     identityFiles: preset.identityFiles ?? [],
     settingsBase: preset.settingsBase,
-    settingsStrip: preset.settingsStrip ?? DEFAULT_SETTINGS_STRIP,
     settingsDefaults: preset.settingsDefaults ?? {},
     model,
     modelArg: preset.modelArg,
     realProfile: preset.realProfile,
-    mcpViaAcp: preset.mcpViaAcp ?? false,
+    acpMcpServers: preset.acpMcpServers ?? false,
+    mcpDelivery: preset.mcpDelivery ?? "config",
     sessionMode,
     kiroV3,
     sessionPatch,
