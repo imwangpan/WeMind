@@ -8,7 +8,12 @@ import { nativeMcpServers, warnForbiddenNativeMcp } from "../agents/managed/mcp-
 import { configFingerprint } from "../agents/config/config-fingerprint.js";
 import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
 import { agentRuntime, type AgentRuntime } from "../agents/config/runtime.js";
-import { deleteSessionCwd, getSessionCwd, setSessionCwd } from "../agents/config/session-cwd.js";
+import {
+  deleteSessionCwd,
+  getSessionCwd,
+  setSessionCwd,
+  usableSessionCwd,
+} from "../agents/config/session-cwd.js";
 import { ensureWorkspace } from "../agents/config/workspace.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
 import {
@@ -205,14 +210,20 @@ export class WorkerConn {
     log.info(`${this.id}(${this.agent.name}) killed`);
   }
 
-  /** 丢弃某个会话（内存 + 磁盘上的当前会话记录）：任务结束用，下个任务全新开始。 */
+  /** 丢弃某个会话（内存 + 磁盘上的当前会话记录）：任务结束用，下个任务全新开始。
+   * 磁盘写入失败只记日志、绝不抛：调用方要无条件把连接还给进程池（AGENTS.md §4.13）。 */
   dropSession(key: string): void {
     this.sessions.delete(key);
-    const map = loadSessionMap(this.agent);
-    const sid = map[sessionKey(this.agent.name, key)];
-    delete map[sessionKey(this.agent.name, key)];
-    saveSessionMap(map);
-    if (sid) deleteSessionCwd(this.agent.name, sid);
+    try {
+      const map = loadSessionMap(this.agent);
+      const sid = map[sessionKey(this.agent.name, key)];
+      delete map[sessionKey(this.agent.name, key)];
+      saveSessionMap(map);
+      // 同一 sessionId 可能还被别的任务 key 引用；还有引用就别删 cwd 记录。
+      if (sid && !Object.values(map).includes(sid)) deleteSessionCwd(this.agent.name, sid);
+    } catch (e) {
+      log.warn(`${this.id} dropSession 写盘失败（连接仍会归还）：${String(e)}`);
+    }
   }
 
   /** 提前起进程：只做「起进程 + initialize」，不建会话（任务拿到连接时用；失败由调用方处理）。 */
@@ -278,7 +289,11 @@ export class WorkerConn {
     // 指纹盯真实配置：终端改过就让复用的空闲 worker 重建进程。
     const probe = agentRuntime("worker", this.agent, DATA_DIR, { cwd: this.effectiveCwd() });
     const before = configFingerprint(this.agent, probe);
-    if (this.isAlive() && this.initialized && this.configFp === before) return;
+    if (this.isAlive() && this.initialized && this.configFp === before) {
+      // 早退也要刷新 runtime：config.reload 改了 homeMode / overlay 后，复用的连接不能继续按旧模式发 MCP 集。
+      this.runtime = probe;
+      return;
+    }
     if (this.isAlive() && this.initialized)
       log.info(`${this.id}(${this.agent.name}) config changed → rebuild`);
     this.kill();
@@ -358,7 +373,7 @@ export class WorkerConn {
       const methods: Array<"load" | "resume"> =
         this.agent.restore === "resume" ? ["resume"] : ["load", "resume"];
       const savedCwd = getSessionCwd(this.agent.name, saved);
-      const cwd = savedCwd ?? this.effectiveCwd();
+      const cwd = usableSessionCwd(savedCwd, this.effectiveCwd(), saved);
       for (const method of methods) {
         let establishMs = 0;
         try {
@@ -379,8 +394,8 @@ export class WorkerConn {
             availableAcpModes(restored),
             REQ_TIMEOUT,
           );
-          this.sessions.set(key, saved);
           if (!savedCwd) setSessionCwd(this.agent.name, saved, cwd);
+          this.sessions.set(key, saved);
           const perf = {
             mcpCount: mcpServers.length,
             nativeMcpCount: Object.keys(nativeMcpServers(this.agent)).length,
@@ -419,12 +434,13 @@ export class WorkerConn {
       availableAcpModes(res),
       REQ_TIMEOUT,
     );
-    this.sessions.set(key, res.sessionId);
-    setSessionCwd(this.agent.name, res.sessionId, newCwd);
+    // 先落盘再改内存：写盘失败不能留下「当前会话已变」的假象。
     // 重新读改写：多个连接并存时，别用陈旧的记录整张覆盖（会抹掉别的任务刚写的 key）
     const fresh = loadSessionMap(this.agent);
     fresh[mapKey] = res.sessionId;
     saveSessionMap(fresh);
+    setSessionCwd(this.agent.name, res.sessionId, newCwd);
+    this.sessions.set(key, res.sessionId);
     const perf = {
       mcpCount: mcpServers.length,
       nativeMcpCount: Object.keys(nativeMcpServers(this.agent)).length,

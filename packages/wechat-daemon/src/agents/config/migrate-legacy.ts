@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 
-import { readHomeMode } from "./home-mode.js";
+import { readPersistedHomeMode } from "./home-mode.js";
 
 const log = createLogger("wechat-daemon/migrate");
 
@@ -40,9 +40,10 @@ function moveMedia(src: string, dst: string): void {
 /**
  * 老账号从“副本优先”迁到默认 direct：只做尽力迁移 + 备份，不碰真实 Agent home。
  * 副本模式（显式选择或测试）不动；`WECHAT_BRAIN_HOME` / `WEMIND_WORKER_HOME` 显式覆盖也不动。
+ * 只看磁盘上的持久 homeMode：`WEMIND_HOME_MODE` 是一次性覆盖，不能让它把 managed 账号的副本误备份掉。
  */
 export function migrateLegacyHomes(dir: string = DATA_DIR): void {
-  if (readHomeMode(dir) === "managed") return;
+  if (readPersistedHomeMode(dir) === "managed") return;
   const brainHome = path.join(dir, "brain-home");
   const workerHome = path.join(dir, "worker-home");
   const media = path.join(dir, "media", "inbound");

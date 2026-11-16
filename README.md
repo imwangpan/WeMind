@@ -218,13 +218,13 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `allowFrom.json`                              | **登录者白名单**（兜底鉴权，默认拒绝；正常只含登录者一个 userId，**别清空**——清空后除登录者外的发件人全部被拒） |
 | `state.json`                                  | 长轮询游标（记录读到哪条了；`updatesBuf`）、各会话 `context_token`、`lastMessageId`（去重；POSIX 下权限 600） |
 | `qr_login.json` / `qrcode.png` / `qrcode.txt` | 扫码登录临时态与二维码（登录后即失效；`qr_login.json` POSIX 下权限 600）                                    |
-| `brain-sessions.json`                         | `<agent>:<userId> → ACP sessionId` 映射（按大脑分开存，切换 agent 互不覆盖）；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建） |
+| `brain-sessions.json`                         | `<agent>:<userId> → ACP sessionId` 映射（按大脑分开存，切换 agent 互不覆盖）；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建）；「当前是哪个会话」的唯一权威，会话指针一律**先落盘成功再写内存** |
 | `worker-sessions.json`                        | worker（远程任务）`ACP sessionId` 映射（键 `<agent>:task-<编号>@<userId>`），任务中断后据此 `load`/`resume` 续跑 |
 | `brain-mcps.json`                             | **仅 `managed`**：brain 当前激活的 MCP 集（按 agent 分键，默认空）；`direct` 不读，MCP 完全由 Agent 真实配置决定 |
-| `runtime.json`                                | 账号级 `homeMode`：默认 `direct`；可显式设 `managed`。缺失/损坏/无法识别的取值回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖；按需创建 |
+| `runtime.json`                                | 结构 `{version:1, homeMode, pendingReload?}`：账号级 `homeMode` 默认 `direct`、可显式设 `managed`；`pendingReload:{reason,at}` 记「配置/MCP 变更触发的重启排到回合结束」，daemon 重启读到就按当前配置重建并清掉。缺失/损坏/无法识别的取值回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖；按需创建，新账号不预建 |
 | `agent-overrides/<agent>.json`                | 微信侧 overlay：只支持 `mcp.disable` / `mcp.extra`（不写 Agent 真实配置）；目录随账号创建，文件在首次写入时生成。默认改 Agent 真实配置，只有明确说“微信侧/仅微信”时才用它 |
-| `workspace.json` / `workspace/{brain,worker}/` | brain / worker 默认工作区配置与默认目录（`workspace.mode` 只有 `default` / `external`，与 `homeMode=managed` 无关；取值非法时按默认工作区处理并提示）；`workspace/{brain,worker}/` 随账号创建，`workspace.json` 按需创建；改默认值只影响新会话 |
-| `session-cwd.json`                            | `<agent>:<sessionId> → cwd`；恢复旧会话时使用，避免把旧会话搬到新工作区；按需创建 |
+| `workspace.json` / `workspace/{brain,worker}/` | brain / worker 默认工作区配置与默认目录（`workspace.mode` 只有 `default` / `external`，与 `homeMode=managed` 无关；取值非法时按默认工作区处理并提示）；文件损坏时 `config show` / `workspace show` 会显示 `problem`、`workspace set` 拒绝写入并提示修复或 `workspace reset` 重建；`workspace/{brain,worker}/` 随账号创建，`workspace.json` 按需创建；改默认值只影响新会话 |
+| `session-cwd.json`                            | `<agent>:<sessionId> → cwd`；恢复旧会话时优先使用（UNC / 不存在 / 非目录会记 WARN 并回落默认工作区），避免把旧会话搬到新工作区；`writeMap()` 写盘失败只 WARN 不抛（内存指针仍生效、磁盘索引可能滞后）；按需创建 |
 | `env.json`                                    | 可选的非敏感环境快照（PATH/代理/locale）；API key/token 不落盘；按需创建 |
 | `wechat-settings.json`                        | 账号级微信行为设置；目前只有 `replyStyle`（`null` 默认 / `concise` 精简），每轮现读、下一条消息生效 |
 | `media/inbound/`                              | `direct` 的入站文件/视频/无转写语音；`managed` 放当前角色副本下的 `media/inbound`（brain 为 `brain-home/media/inbound`，worker 为 `worker-home/media/inbound`） |
@@ -264,9 +264,11 @@ npm test           # 运行单元测试
 npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（可选）
 ```
 
+本轮修复同时补齐了配置写入边界、三态重启与 `pendingReload`、会话指针落盘、原子写 0600、媒体清理节流、ACP 反向请求/模型回包与文档守卫等回归测试；`npm test` / `npm run verify` 是提交前统一自检（含文档守卫与相对链接检查）。
+
 ## 安全说明
 
-- **凭证存储**：`account.json`（Bot Token）、`state.json`（`context_token`）、`qr_login.json`（扫码态）都是凭证类文件，POSIX 系统会统一设为权限 `600`；**Windows 上 `chmod` 无效，文件以明文存放且不受权限限制**——保存凭证时会有一次性告警。请用文件夹权限或磁盘加密保护 `~/.wemind/default/` 目录。
+- **凭证存储**：`account.json`（Bot Token）、`state.json`（`context_token`）、`qr_login.json`（扫码态）都是凭证类文件，POSIX 系统会统一设为权限 `600`；原子写（先写临时文件再改名）的临时文件也固定 `mode: 0o600`；**Windows 上 `chmod` 无效，文件以明文存放且不受权限限制**——保存凭证时会有一次性告警。请用文件夹权限或磁盘加密保护 `~/.wemind/default/` 目录。
 - **登录者白名单（两种形态都有）**：内置大脑默认**免审批**（每个 agent 用自己的开关，见[「切换大脑 Agent」](#切换大脑-agent通用化)）——**消息一旦被接受**，就能让 AI 在本机执行任意工具。**微信平台的限制决定了：只有扫码登录这个 bot 的那个微信号（「登录者」）能给它发消息**，所以谁在驱动它是一目了然的。代码里另有一道**兜底校验**（每账号一份 `allowFrom.json`，**默认拒绝**、登录时自动写入登录者）：万一发送范围将来变化、或 daemon 被接到别的入口，清单外的发件人一律忽略（`daemon.log` 记 `ignore unauthorized sender`；MCP 形态的 `get_messages` 同样只返回登录者或白名单里的消息）。**不要清空它**；管理命令 `allowlist`/`allow`/`revoke` 是兜底用的，正常无需碰。多账号各有各的白名单与登录者，互不影响。
 - **隐私**：消息经由腾讯 iLink 渠道与本地 Agent 流转，涉及对话内容外发，请自行评估。
 
@@ -379,7 +381,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_ACCOUNT`                                        | 账号 key，决定状态子目录 `~/.wemind/<key>/`（默认 `default`）。**必须是 `wemind login` 登记过的 key**（见上文「多账号」），日常用 `wemind start <key\|label>` 即可 |
 | `WECHAT_DATA_DIR`                                       | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则。**只对 `wemind daemon` 直跑有效**：`wemind start` / `login --start` / pm2 / 自启一律忽略它（并按账号 key 寻址），检测到时会向 stderr 打迁移指引 |
 | `WEMIND_HOME`                                           | 数据根目录（默认 `~/.wemind`）                                                                                                      |
-| `WEMIND_HOME_MODE`                                      | 一次性覆盖账号 `homeMode`：`direct`（默认）/ `managed`。持久值在 `<账号>/runtime.json`，不要写进 profile；缺失/损坏/无法识别的取值回落 `direct` |
+| `WEMIND_HOME_MODE`                                      | 一次性覆盖账号 `homeMode`：`direct`（默认）/ `managed`。持久值在 `<账号>/runtime.json`，不要写进 profile；缺失/损坏/无法识别的取值回落 `direct`。daemon 启动时快照为 `homeModeAtBoot`，运行期只读快照；迁移旧 `brain-home` / `worker-home` 只看磁盘持久值，不被这次一次性覆盖带偏 |
 | `WECHAT_BRAIN_HOME`                                     | **仅 `managed` 模式**的 brain 副本目录（默认 `<数据目录>/brain-home`）；`direct` 直接用真实 home |
 | `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS`          | 大脑单回合空闲/硬超时（默认 120000 / 900000；重任务实测需 ~6.5min）                                                                 |
 | `WECHAT_BRAIN_FIRST_FRAME_MS`                           | 首帧超时：prompt 发出后多久仍无任何帧判「开局即卡死」并快速重试（默认 25000）                                                       |
@@ -527,9 +529,9 @@ iLink 限制 bot 在用户回复前能**连续发送的消息数**（实测约 1
 | `卸载 <名>` / `unload <名>` | `managed`：从激活集移除；`direct`：原样转给 Agent |
 | `新会话 [名字]` / `/new`    | 开启新 ACP 会话（清空多轮上下文）；给名字便于在 `会话列表` 里认出来 |
 
-`managed` 下加载/卸载 MCP 时，**只有激活集真的变了** daemon 才会重启 ACP 进程以按新配置重载，下一条消息生效（重复加载已激活项、卸载未激活项都不会重启；切脑进行中会先等切换结束；有回复正在生成时排到该回合结束，不打断输出）。`direct` 下改 MCP 由 Agent 自己处理（它改完自己的配置后按 Agent 的规则生效）。激活的 MCP 等于对登录者全权开放（内置预设默认免审批），按需加载、用完可卸载。
+`managed` 下加载/卸载 MCP 时，**只有激活集真的变了** daemon 才会重启 ACP 进程以按新配置重载。重启按三态如实回执：`applied` 立即生效、下一条消息生效；`queued` 有回复正在生成时排到该回合结束（不打断输出，明确说「重启已排队到回合结束」），并在账号级 `runtime.json` 写 `pendingReload:{reason,at}`，daemon 重启读到会按当前配置重建后清掉并记 WARN；`failed` 只发生在切脑进行中，不重启并提示重试。重复加载已激活项、卸载未激活项都不会重启。`wemind config reload` 用同一套三态重启，还会重新 seed 槽位；微信「加载/卸载 MCP」与它都按三态如实回执。`direct` 下改 MCP 由 Agent 自己处理（它改完自己的配置后按 Agent 的规则生效）。激活的 MCP 等于对登录者全权开放（内置预设默认免审批），按需加载、用完可卸载。
 
-CLI 管理入口：`wemind config show|home-mode|reload`、`wemind config agent show|get|set|unset|edit`（默认改真实配置）、`wemind config wechat show|edit`（只改微信 overlay）、`wemind config reply-style [concise|off]`（微信侧回复风格）、`wemind workspace show|set|reset`、`wemind mcp list|enable|disable|add|remove`（仅 `managed` 的激活集）、`wemind env capture|show|clear`。直接编辑 `<账号>/agent-overrides/<agent>.json` 或 `<账号>/wechat-settings.json` 也可以；改真实配置前会备份并校验 mtime/hash，发现终端侧刚改过就拒绝覆盖。
+CLI 管理入口：`wemind config show|home-mode|reload`、`wemind config agent show|get|set|unset|edit`（默认改真实配置）、`wemind config wechat show|edit`（只改微信 overlay）、`wemind config reply-style [concise|off]`（微信侧回复风格）、`wemind workspace show|set|reset`、`wemind mcp list|enable|disable|add|remove`（仅 `managed` 的激活集）、`wemind env capture|show|clear`。直接编辑 `<账号>/agent-overrides/<agent>.json` 或 `<账号>/wechat-settings.json` 也可以；改真实配置前会备份并校验 mtime/hash，发现终端侧刚改过就拒绝覆盖。配置写入的边界：键路径经 `parseConfigPath()`，`__proto__` / `constructor` / `prototype` 一律拒绝；`config agent edit` 不给不存在的非 JSON/JSONC 文件（如 `~/.codex/config.toml`）预建 `{}`，只明确报错；`takeOpt()` 拒绝空值 / 缺值 / 下一个是 `--flag`；`config mcp disable` 在 `direct` 下先 `removeMcp()`，失败就不写 overlay、不再假成功，overlay 写失败会尽力把激活集加回去并报错；`config env clear` 区分「已删除」与「不存在」。`workspace.json` 损坏时 `config show` / `workspace show` 显示 `problem`，`workspace set` 拒绝写入并提示修复或 `workspace reset` 重建。daemon 启动时把 homeMode 快照成 `homeModeAtBoot`（poller / 快车道 / 微信设置告警只读快照，不逐条消息重读），迁移旧 `brain-home` / `worker-home` 用 `readPersistedHomeMode()` 只看磁盘持久值、不受 `WEMIND_HOME_MODE` 一次性覆盖影响；`configFingerprint()` 把 agent 名与模式入哈希，指纹不再恒为空、homeMode 变化会触发重建。
 
 ### 切换大脑 Agent（通用化）
 
@@ -559,7 +561,9 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 
 `kiro`（内置）= `kiro-cli acp --trust-all-tools`；`managed` 下 `KIRO_HOME` 指向账号副本，`direct` 不注入、用真实 `~/.kiro`。要接入新 agent，在 `ACP_AGENT_PRESETS` 里加一条、或直接用上面四个变量。持久化选择用 `wemind brain set <agent 名> [--bin ...] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model ...] [--restart]`（写入 `<数据目录>/brain.json`，任何入口重启都复现；`--args` 是**整段替换**、`--extra-args` 追加在末尾——只加开关（如免确认）用后者，漏掉 `acp` 这类模式参数会握手超时，`wemind brain` 会给出警告；只给 agent 名且 daemon 在跑并认控制桥时会**立刻当场应用（不用重启）**，带 `--bin/--args/--extra-args/--shell/--model` 则只写盘——其中 `--bin`/`--args`/`--extra-args`/`--model` 的改动可由随后的 `wemind brain switch <同名 agent>` 当场应用（「是不是同一个」按 name/bin/args/model 判），`--shell` 要重启）。**模型**同样可配：`--model '["provider 路由","模型名"]'` 指定；**`--model auto` = 跟随你日常那个 agent 的默认**——DSH 读真实 `~/.dsh/profiles/acp/cordis.patch.yml`（优先你自己写的 `- id: acp`，否则 `agent-default-model`；具体值由你的 DSH 配置决定；读不到就不下发）。**运行时切换**用 `wemind brain switch <agent 名>` 或微信里发 `切换大脑 <agent 名>`——进程内换、失败自动退回原来那个，见 [`docs/repowiki/06-ACP-大脑与副本.md`](docs/repowiki/06-ACP-大脑与副本.md)。
 
-**内置预设默认免审批**（每个 agent 用自己官方的机制，不是统一开关）：kiro `--trust-all-tools`、gemini `--acp --approval-mode yolo --skip-trust`、qoder `--acp --yolo`、cline `--acp --auto-approve true`、Copilot `--allow-all-tools`（不启用 `--allow-all`）、opencode 在 `managed` 写 `opencode.json` 的 `"permission": "allow"`（它没有 ACP 可用的 `--auto`；`direct` 用真实配置）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code 会话建立后 `session/set_mode bypassPermissions`、codex `agent-full-access`、pi 默认不逐次审批（无开关）。想收紧时**不用改预设**：`--args` 整段替换启动参数，`DSH_PERMISSION_MODE` / `INITIAL_AGENT_MODE` 这类审批开关属于「默认值」（`envDefaults`：daemon 进程环境里同名变量优先），`WEMIND_ACP_SESSION_MODE=0` 可关掉 claude-code / codex 的会话模式切换（其它非空值 = 换成该 modeId）。边缘情况下 agent 仍可能发权限请求（如 claude-code 的 ask 规则），WeMind **默认放行**（`WEMIND_ACP_AUTO_ALLOW=0` 恢复拒绝）。各 agent 的准确参数与出处见 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md) §5。
+**ACP 帧与模型的边界**：`applyAcpModel()` 只吞 agent 明确回的 JSON-RPC error 帧（带数字 `code`）；超时、`acp process reset`、无进程、写帧失败一律抛出，让上层 kill 重建，不把「模型没设上」当成旧进程还能继续用。`session/prompt` 的响应帧也算首帧（只在回合结束回一帧的 agent 不会误报「开局即卡死」），`clearAcpTurn()` 同时归零回合计时，不串到下一轮。`brain check` 起的自检副本在 `mcpDelivery: "acp"` 时同样剥离全部 MCP 条目，按真实投递方式验证。
+
+**内置预设默认免审批**（每个 agent 用自己官方的机制，不是统一开关）：kiro `--trust-all-tools`、gemini `--acp --approval-mode yolo --skip-trust`、qoder `--acp --yolo`、cline `--acp --auto-approve true`、Copilot `--allow-all-tools`（不启用 `--allow-all`）、opencode 在 `managed` 写 `opencode.json` 的 `"permission": "allow"`（它没有 ACP 可用的 `--auto`；`direct` 用真实配置）、DSH `DSH_PERMISSION_MODE=danger-full-access`、claude-code 会话建立后 `session/set_mode bypassPermissions`、codex `agent-full-access`、pi 默认不逐次审批（无开关）。想收紧时**不用改预设**：`--args` 整段替换启动参数，`DSH_PERMISSION_MODE` / `INITIAL_AGENT_MODE` 这类审批开关属于「默认值」（`envDefaults`：daemon 进程环境里同名变量优先），`WEMIND_ACP_SESSION_MODE=0` 可关掉 claude-code / codex 的会话模式切换（其它非空值 = 换成该 modeId）。边缘情况下 agent 仍可能发权限请求（如 claude-code 的 ask 规则），WeMind **默认放行**（`WEMIND_ACP_AUTO_ALLOW=0` 恢复拒绝；空白串 / 未设置都按默认 yolo）。allow 候选项必须有非空字符串 `optionId`，一个合法项都没有就回 `cancelled` 并记 WARN，防非法 `selected` 把回合挂住。各 agent 的准确参数与出处见 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md) §5。
 
 > 详细步骤、各 agent 需确认的 4 件事、MCP 副本差异、验证方法见 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md)。
 >
@@ -579,7 +583,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 
 - **收文本 / 图片 / 语音 / 文件 / 视频**：daemon 支持 iLink 的这五类 item；引用某条消息时，只把微信随消息下发的 `title` / `message_item` 作为 `[引用消息] …` 前缀交给大脑（实测常只给 `svr_id`，此时是「内容未缓存」占位，引用正文缓存暂未实现）；只引用、不输入正文时会明确提示用户补文字，不静默丢也不拿空 prompt 问大脑。表情包、位置、小程序、合并转发等类型协议里没有，会明确告知不支持而不是静默丢。
 - **收图**（用户发图 → 大脑看图）：daemon 下载并 AES-128-ECB 解密入站图片，作为 ACP image 块喂给大脑——**前提是该 agent 真正接受图片**（kiro / opencode / qoder / gemini / claude-code / codex / pi 支持；DSH 官方 0.2.1-rc.2 与 **Cline 3.0.74** 实测不可用，带图会被友好拒绝；Cline 虽声明 `image:true`，但 ACP prompt 只保留 text 块。claude-code 的 ACP `promptCapabilities.image: true`，但本机网关对实测用的 1×1 PNG 报 400，属上游限制）。
-- **收文件 / 视频 / 语音**：文件、视频和无微信转写的语音下载到 `<账号目录>/media/inbound/`（`managed` 模式仍是 `<managed>/media/inbound/`），prompt 里给大脑本地绝对路径。有微信转写的语音直接当文本，**不下载、也不算附件**（语音里的「结束任务」「继续」等指令照常生效）；无转写时用 `silk-wasm` 转 24kHz WAV，失败保留原始 SILK 并如实说明。媒体默认保留 30 天、总量 1GB，可调（见下方环境变量）；启动时清理，之后每次写入媒体时检查（至少间隔 1 小时才真正清理一次）。
+- **收文件 / 视频 / 语音**：文件、视频和无微信转写的语音下载到 `<账号目录>/media/inbound/`（`managed` 模式仍是 `<managed>/media/inbound/`），prompt 里给大脑本地绝对路径。有微信转写的语音直接当文本，**不下载、也不算附件**（语音里的「结束任务」「继续」等指令照常生效）；无转写时用 `silk-wasm` 转 24kHz WAV，失败保留原始 SILK 并如实说明。媒体默认保留 30 天、总量 1GB，可调（见下方环境变量）；目录 0700 / 文件 0600；启动时清理，之后每次写入媒体时检查（至少间隔 1 小时才真正清理一次，**节流按目录分别记时**，`direct` 与 `managed` 两份 inbound 目录不互相饿死）。
 - **发图**（大脑发图 → 用户）：大脑在回复里用 **Markdown 图片语法 `![](图片的 http 链接或本地文件绝对路径)`**，或直接给出**裸图片 URL**，daemon 会自动把它下载/读取后作为图片消息发出，并把剩余文字另发。大脑本身不会文生图，但能发：联网搜到的图、本地已有的图、自己用代码渲染保存的图表。底层走 `getUploadUrl` + AES-128-ECB 加密上传 CDN（`no_need_thumb`，免缩略图）。**URL 只接受公网 http(s)**：本机/内网/回环（`localhost`、私有 IP、链路本地、IPv6 映射）以及重定向到这些地址的请求一律拒绝（重定向逐跳校验、最多 3 跳）；本地文件绝对路径仍然可用。
 - **发文件 / 视频**：大脑回复里写显式 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`，daemon 读取本地文件并作为文件/视频消息发出（不是扫描普通链接；路径含 `)` 时用 `[附件](<路径>)`）。**允许任意本地绝对路径**，但读取前会 `realpath` 并拒绝凭证/状态类文件（`account.json`、`state.json`、`.env`、密钥、控制桥/任务目录，以及各 agent 的登录态：`.credentials.json/.yaml`、`.auth/`、`oauth_creds.json`、`providers.json`，连同 `brain-home`/`worker-home` 与真实 agent home 下的 `settings.json`/`models*.json`），**拒绝 UNC/网络路径**（`\\server\share`、`file://host/...`，含软链接目标）与 **Windows NTFS 数据流**（`文件::$DATA`）；单文件默认上限 25MB。硬链接无法从路径区分，属已接受风险。失败或额度不足时，最终文字里会保留原路径。
 - **发语音**（bot 语音回复）暂不做（需 TTS + SILK，且语音回复体验通常不如文本）；大脑要表达音频时按文件发。
@@ -719,4 +723,4 @@ daemon 的**内置预设默认免审批**（每个 agent 用自己官方的开�
 
 ---
 
-> **最后核对**：2026-11-14 ｜ 本文档描述当前分支的最新代码，已发布版本见 [CHANGELOG](docs/发布与变更记录/CHANGELOG.md) 与 npm；接入类结论请看对应文档的「实测/假设」标注。
+> **最后核对**：2026-11-15 ｜ 本文档描述当前分支的最新代码，已发布版本见 [CHANGELOG](docs/发布与变更记录/CHANGELOG.md) 与 npm；接入类结论请看对应文档的「实测/假设」标注。

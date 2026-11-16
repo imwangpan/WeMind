@@ -130,6 +130,8 @@ graph TD
 - **全局异常处理器**：任何未捕获的 promise 拒绝/异常（多为瞬时网络 `fetch failed` 或回合内 send 被拒）只记录、不退出。此前的 `code=1` 静默崩溃就源于此类未捕获拒绝，会丢掉在途回合、把用户卡在心跳。
 - **PID 文件**：写 `daemon.pid` 供管理命令精确定位停止；`exit`/`SIGINT`/`SIGTERM` 时清理，并 `killWorkerPool()` 收掉池里全部 worker（Windows 上子进程不随父进程退出，漏掉就是一堆孤儿 agent 进程）。
 
+启动时的配置快照与待重载标记：daemon 启动 `readHomeMode(DATA_DIR)` 把 homeMode 快照成 `homeModeAtBoot`，poller / 快车道 / 微信设置告警只读这份快照，不逐条消息重读；`migrateLegacyHomes()` 改用 `readPersistedHomeMode()` 只看磁盘持久值，不受 `WEMIND_HOME_MODE` 一次性覆盖影响（避免持久 `managed` 账号的 `brain-home`/`worker-home` 被误备份）。启动同时读 `runtime.json` 的 `pendingReload` 标记：新进程已按当前配置启动，读后清掉并 WARN。配置/MCP 变更的重启走三态 `applied | queued | failed`（`restartForMcpChange()`）：有回合在跑就排到回合结束、不打断输出，并落盘 `pendingReload`。
+
 ## 5.3 poller / worker 解耦
 
 这是 daemon 内部最重要的架构（动机见 [2. 系统架构](02-系统架构.md#daemon-内部poller--worker-解耦)）。三个并发循环 + 两个内存队列（`msgQueue` / `fastQueue`）+ 两个唤醒回调（`wakeWorker` / `wakeFast`）。
@@ -215,8 +217,8 @@ graph TD
 | 指令 | 作用 | 作用范围 |
 |------|------|------|
 | `MCP` / `列出 MCP` / `/mcp` / `mcp list` | 列出可选与已激活的 MCP | 整个账号 |
-| `加载 <名>` / `load <名>` | `managed`：激活某 MCP（激活集真变了才重启 ACP 进程；切脑中先等切换结束）；`direct`：原样转给 Agent | `managed` 整个账号 / `direct` 由 Agent 处理 |
-| `卸载 <名>` / `unload <名>` | `managed`：移除某 MCP；`direct`：原样转给 Agent | `managed` 整个账号 / `direct` 由 Agent 处理 |
+| `加载 <名>` / `load <名>` | `managed`：激活某 MCP（激活集真变了才按三态重启：`applied` 立即 / `queued` 排到回合结束且写 `runtime.json` 的 `pendingReload` / `failed` 切脑中不重启，都**如实回执**）；`direct`：原样转给 Agent | `managed` 整个账号 / `direct` 由 Agent 处理 |
+| `卸载 <名>` / `unload <名>` | `managed`：移除某 MCP（同样三态重启与如实回执）；`direct`：原样转给 Agent | `managed` 整个账号 / `direct` 由 Agent 处理 |
 | `工作区` | 查看 brain 默认工作区 | 整个账号（仅登录者） |
 | `设置工作区 <绝对路径>` | 设置 brain 默认工作区（新会话生效） | 整个账号（仅登录者） |
 | `重置工作区` | 恢复 brain 默认工作区（`workspace.mode=default`） | 整个账号（仅登录者） |
@@ -271,7 +273,7 @@ graph TD
 | `⏳ 还在处理中…` | 回合满 15s、正文尚未开始，且距上一条非确认进度 ≥5s |
 | `✍️ 正在整理回复…` | 第 15s 第二条时正文已开始（否则该条为 `⏳ 还在处理中…`）；15s 之后不再补发第三条固定提示 |
 
-三档按**最终答案发出时间**分（不是 Agent 首字时间）：`<5s` 只发最终答案；`5–15s` 第 5s 发确认；`≥15s` 第 5s 确认、第 15s 第二条。工具步骤/心跳/图片/重试提示都算「已有可见进度」：5s 前有进度就不发确认，第 15s 第二条要求距上一条非确认进度 ≥5s（不满足则跳过，不延后补发）。最终答案开始发送或回合失败时，两个定时器都会取消，不会在答案后再补进度。
+三档按**最终答案发出时间**分（不是 Agent 首字时间）：`<5s` 只发最终答案；`5–15s` 第 5s 发确认；`≥15s` 第 5s 确认、第 15s 第二条。工具步骤/心跳/图片/重试提示都算「已有可见进度」：5s 前有进度就不发确认，第 15s 第二条要求距上一条非确认进度 ≥5s（不满足则跳过，不延后补发）。最终答案开始发送或回合失败时，两个定时器都会取消，不会在答案后再补进度。`index.ts` 的 15s 心跳在无 activity 帧时持续发，接入 committed-only agent 要看 `handleAcpFrame()` 把 `session/prompt` 的**响应帧**也算首帧（这类 agent 只在回合结束回一帧，不误报 -1），`clearAcpTurn()` 同时归零 `startedAt` / `firstFrameAt` / `sessionId`，回合计时不串到下一轮。
 
 「正在输入中」（typing）每 3 秒续发（客户端约 5–8s 自动过期，3s 给 `getConfig`+`sendTyping` 的网络抖动留余量），**延迟确认和等待期间一直有指示**，且**不计入**连续发送上限；每发出一条进度文本后会**立刻补发一次 typing**（文本消息会把客户端的「正在输入」顶掉，不补发的话快回合全程看不到指示）。
 
@@ -337,7 +339,7 @@ graph TD
 
 - **落盘位置**：默认 `direct` 是 `<账号>/media/inbound`，`managed` 才是 `<managed>/media/inbound`。prompt 同时给绝对路径，agent 用文件工具可直接读。目录 0700、文件 0600（POSIX）。
 - **文件名安全**：`safeMediaFileName()` 去掉路径分隔符/控制字符、替换 Windows 非法字符、给保留名（`CON`/`NUL`/`COM1`…）加后缀、保留扩展名；同名用 `-1`/`-2` 后缀，绝不覆盖。
-- **清理**：`saveInboundMedia()` 每次写入后问一次 `pruneInboundMediaIfDue()`，daemon 启动时也调一次（时钟为「从未清理」→ 必执行）；真正清理至少间隔 1 小时，避免同一批附件重复扫目录（挂在 poller 主循环上没有必要，目录只在写入时才增长）。每次先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 30 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 1GB）从最旧开始删；best-effort，失败不影响消息处理。
+- **清理**：`saveInboundMedia()` 每次写入后问一次 `pruneInboundMediaIfDue()`，daemon 启动时也调一次（时钟为「从未清理」→ 必执行）；真正清理至少间隔 1 小时，避免同一批附件重复扫目录（挂在 poller 主循环上没有必要，目录只在写入时才增长）。**节流按目录分别记时**（`lastPruneByDir`，`resetInboundMediaPruneClock()` 清整张表）：`direct` 与 `managed` 两份 inbound 目录各自记时，不互相饿死一小时。每次先删超过 `WECHAT_MEDIA_TTL_DAYS`（默认 30 天）的文件，再按 `WECHAT_MEDIA_MAX_MB`（默认 1GB）从最旧开始删；best-effort，失败不影响消息处理。
 - **大小上限**：入站文件/视频/语音默认 `WECHAT_INBOUND_MEDIA_MAX_MB=100`；图片仍走图片专用链路（20MB 上限）。
 - **降级**：所有附件都下载失败时，有文字就只按文字回答（并注明哪些附件没下来）；没有任何可处理内容才拒绝。**不会**拿空 prompt 白问一回合。
 - **图片能力**：`supportsImages()` 读 agent 预设字段（不解析 `initialize` 回包）；agent 不支持或有图片失败时，`planImageTurn()` 决定「有文字就按文字答 / 没文字才拒绝」。
@@ -377,7 +379,7 @@ daemon 通过两个独立的扫描定时器（`WEMIND_TASK_SCAN_MS`，默认 1s�
 - **应答即答复**：`{ id, at, ok, text }`，`ok = !text.startsWith("❌")`；CLI 端 `ok=false` 时置退出码 1，脚本能判成败。超时（默认 30s，`WEMIND_CONTROL_TIMEOUT_MS`）如实报「没等到回复」；`brain.switch` / `brain.handoff` 按各自的长耗时放宽（见 `controlTimeoutMs`）；`session.unpause` 是登录后的尽力而为（上限 3s），旧 daemon 不认识它也不会卡住登录。
 - **应答生命周期**：CLI 读到应答即删；daemon 每秒扫描时清掉超过 1 小时没人读的旧应答（CLI 崩溃/放弃留下的），长期运行不会无限堆积。
 - **`.bridge` 凭据**：daemon 启动时清空两个桥目录并写 `control-out/.bridge`（内容 = 自己的 pid）。CLI 据此判断对方是不是「认识桥的版本」——详见 [7. 远程任务 Worker](07-远程任务-Worker.md) §7.5。
-- **安全边界**：请求字段只有 `target`（agent 名）/`ref`/`name`/`page`/`expiresAt`，**没有 `bin`/`args`/`shell` 的位置**（`parseControlRequest` 是唯一入口校验）。请求/应答 id 只允许 `[A-Za-z0-9._-]`（不含 `..`/盘符）——`control-out/<id>.json` 与 `task-out/<id>.json` 都由它拼成，不校验就能借 `../` 覆盖账号数据。
+- **安全边界**：请求字段只有 `target`（agent 名）/`ref`/`name`/`page`/`expiresAt`，**没有 `bin`/`args`/`shell` 的位置**（`parseControlRequest` 是唯一入口校验）。请求/应答 id 只允许 `[A-Za-z0-9._-]`（不含 `..`/盘符）——`control-out/<id>.json` 与 `task-out/<id>.json` 都由它拼成，不校验就能借 `../` 覆盖账号数据。配置写入的键路径同理走 `parseConfigPath()`：`__proto__` / `constructor` / `prototype` 一律拒绝（防原型污染）；`takeOpt()` 拒绝空值/缺值/下一个是 `--flag`；`config agent edit` 不给不存在的非 JSON/JSONC 文件预建 `{}`（如 `~/.codex/config.toml` 明确报错）。
 - 启动时 `clearTaskDirs()` **同时清空 `task-inbox/` 与 `task-out/`**：作废重启前残留命令（防重放），也清掉没人读的旧答复。
 
 ---

@@ -290,13 +290,25 @@ export const STALE_FACTS = [
     id: 'copilot-acp-mcp-old',
     since: '2026-11-15',
     why: 'Copilot CLI 1.0.108 实测不加载 ACP session/new.mcpServers 的 stdio 条目，MCP 改走配置文件（acpMcpServers: false + mcpDelivery: "config"），真机微信 E2E 已通过；见 docs/接入方案/接入-Copilot.md 与 CHANGELOG 的 Unreleased/Changed。',
-    pattern: /1\.0\.107|其 stdio MCP 探针实测可用|图片能力仍依赖模型实测|真实微信 brain\/worker E2E 尚待验证|通过 ACP 激活 MCP 并排除/,
+    pattern: /1\.0\.107(?!\d)|其 stdio MCP 探针实测可用|图片能力仍依赖模型实测|真实微信 brain\/worker E2E 尚待验证|通过 ACP 激活 MCP 并排除/,
     allow: [
       {
         path: 'docs/发布与变更记录/CHANGELOG.md',
         section: /^## \[(?!Unreleased)/,
         marker: /\*\*版本边界\*\*/,
         why: 'CHANGELOG.md:5 版本边界：已发布段只记该版本发布时的行为，不回改；订正写进 Unreleased。',
+      },
+      {
+        path: 'docs/设计文档/文档守卫设计.md',
+        linePattern: /2026-11-15 补注|守卫自身/,
+        marker: /2026-11-15 补注（守卫自身/,
+        why: '守卫设计文档的 2026-11-15 补注引用本规则的正则字面量本身（解释现行口径），不是那条废弃的 Copilot 结论；补注被删掉 allow 立即失效。',
+      },
+      {
+        path: 'docs/审查与质量记录/审查-2026-11-05-经验与约束.md',
+        linePattern: /2026-11-15 补注/,
+        marker: /2026-11-15 补注（守卫自身口径）/,
+        why: '审计记录按体例只加 2026-11-15 补注，同样引用正则字面量说明现行口径；历史正文与表格原样保留，补注被删掉 allow 立即失效。',
       },
     ],
   },
@@ -335,6 +347,21 @@ export const STALE_FACTS = [
         path: 'docs/审查与质量记录/历史文档清单-2026-11-04.md',
         marker: /后续变更（2026-11-15）/,
         why: '归档索引按「只加标注、不改写当时的设计背景」体例处理；头部 2026-11-15 后续变更注记说明文件已删除与现行设计位置。',
+      },
+    ],
+  },
+  {
+    id: 'empty-config-fingerprint',
+    since: '2026-11-15',
+    why: 'configFingerprint() 现在把 ag.name + rt.mode 与显式配置文件、overlay 一起哈希：没有 homeEnvVar 的 Agent 也返回非空指纹，homeMode 变化会触发进程重建；见 AGENTS.md §4.14 与 docs/repowiki/06-ACP-大脑与副本.md。',
+    // 只拦「旧断言」：正文里说明「不再 / 不返回 / 仍返回非空」的现行口径不参与命中。
+    pattern: /^(?!.*(?:不再|不返回|仍返回非空|不恒为)).*返回空指纹/,
+    allow: [
+      {
+        path: 'docs/发布与变更记录/CHANGELOG.md',
+        section: /^## \[(?!Unreleased)/,
+        marker: /\*\*版本边界\*\*/,
+        why: '已发布段按版本边界保留当时行为，不回改。',
       },
     ],
   },

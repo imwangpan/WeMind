@@ -90,8 +90,10 @@ export function writeEnvSnapshot(snapshot: EnvSnapshot, dir: string = DATA_DIR):
 }
 
 export function clearEnvSnapshot(dir: string = DATA_DIR): boolean {
+  const file = envSnapshotPath(dir);
+  if (!fs.existsSync(file)) return false;
   try {
-    fs.rmSync(envSnapshotPath(dir), { force: true });
+    fs.rmSync(file, { force: true });
     return true;
   } catch {
     return false;
@@ -105,5 +107,10 @@ export function mergeEnvSnapshot(
   parent: NodeJS.ProcessEnv,
   snapshot: Record<string, string>,
 ): NodeJS.ProcessEnv {
-  return { ...snapshot, ...parent };
+  // 父进程里显式设成 undefined 的白名单键不能反过来把快照里的有效值抹掉。
+  const kept: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(parent)) {
+    if (v !== undefined) kept[k] = v;
+  }
+  return { ...snapshot, ...kept };
 }

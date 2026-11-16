@@ -70,7 +70,7 @@ export async function runManage(argv: string[]): Promise<void> {
     const i = rest.indexOf(flag);
     if (i < 0) return undefined;
     const v = rest[i + 1];
-    if (v === undefined || v.startsWith("--")) throw new Error(`${flag} 缺少参数值`);
+    if (v === undefined || v === "" || v.startsWith("--")) throw new Error(`${flag} 缺少参数值`);
     rest.splice(i, 2);
     return v;
   };

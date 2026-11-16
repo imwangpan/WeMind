@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ResolvedAgent } from "../../agents/brain-agents.js";
 import {
+  AcpMethodError,
   applyAcpModel,
   applyAcpSessionMode,
   availableAcpModes,
   acpTurnFirstFrameMs,
   beginAcpTurn,
+  clearAcpTurn,
   drainAcpReplay,
   feedAcpStdout,
   handleAcpFrame,
@@ -476,6 +478,83 @@ describe("drainAcpReplay（load 后等历史回放安静）", () => {
     clearInterval(iv);
     await p;
     expect(logs.some((l) => l.includes("(cap)"))).toBe(true);
+  });
+});
+
+describe("重启 / 超时边界（不再吞连接级失败）", () => {
+  it("AcpMethodError：从 error 帧构造，保留 code 与 message", () => {
+    const e = new AcpMethodError({ code: -32602, message: "unknown model option" });
+    expect(e).toBeInstanceOf(Error);
+    expect(e.name).toBe("AcpMethodError");
+    expect(e.code).toBe(-32602);
+    expect(e.message).toBe("-32602: unknown model option");
+    // 对端没给数字 code 时仍是 AcpMethodError，但没有 code → 调用方不视作「明确拒绝」
+    expect(new AcpMethodError({ message: "no code" }).code).toBeUndefined();
+  });
+
+  it("applyAcpModel：error 帧缺数字 code 时不降级（按连接级口径抛给上层）", async () => {
+    const { host } = fakeHost();
+    const p = applyAcpModel(host, fakeAgent({ model: "m" }), "s1", 1000);
+    handleAcpFrame({ id: 1, error: { message: "no code" } }, host);
+    await expect(p).rejects.toBeInstanceOf(AcpMethodError);
+  });
+
+  it("applyAcpModel：消息文本长得像 JSON-RPC error 的连接级故障也必须抛出（不再按文本判）", async () => {
+    const { host } = fakeHost({
+      write: () => {
+        throw new Error('{"code":-32602,"message":"looks like rpc but is a transport failure"}');
+      },
+    });
+    await expect(applyAcpModel(host, fakeAgent({ model: "m" }), "s1", 1000)).rejects.toThrow(
+      /looks like rpc/,
+    );
+  });
+
+  it("applyAcpModel：无进程这种连接级失败必须抛出，不再被当作模型不兼容吞掉", async () => {
+    const noProc = fakeHost({ hasProcess: () => false });
+    await expect(applyAcpModel(noProc.host, fakeAgent({ model: "m" }), "s1", 1000)).rejects.toThrow(
+      "no acp process",
+    );
+  });
+
+  it("applyAcpModel：超时必须抛出", async () => {
+    vi.useFakeTimers();
+    const { host } = fakeHost();
+    const p = applyAcpModel(host, fakeAgent({ model: "m" }), "s1", 50);
+    const assertion = expect(p).rejects.toThrow(/timeout after 50ms/);
+    await vi.advanceTimersByTimeAsync(60);
+    await assertion;
+  });
+
+  it("session/prompt 的响应帧也记首帧（committed-only agent 不误报 -1）", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(1_000));
+    const { host, turn } = fakeHost();
+    beginAcpTurn(turn, "s1");
+    expect(acpTurnFirstFrameMs(turn)).toBe(-1);
+    host.pending.set(1, {
+      resolve: () => undefined,
+      reject: () => undefined,
+      clear: () => undefined,
+      method: "session/prompt",
+    } as AcpPending);
+    vi.setSystemTime(new Date(1_400));
+    handleAcpFrame({ id: 1, result: {} }, host);
+    expect(acpTurnFirstFrameMs(turn)).toBe(400);
+  });
+
+  it("clearAcpTurn 归零首帧与 startedAt（进程重建后不串回合）", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(5_000));
+    const { turn } = fakeHost();
+    beginAcpTurn(turn, "s1");
+    turn.firstFrameAt = 5_200;
+    expect(acpTurnFirstFrameMs(turn)).toBe(200);
+    clearAcpTurn(turn);
+    expect(turn.startedAt).toBe(0);
+    expect(turn.firstFrameAt).toBe(0);
+    expect(turn.sessionId).toBeNull();
+    expect(acpTurnFirstFrameMs(turn)).toBe(-1);
   });
 });
 

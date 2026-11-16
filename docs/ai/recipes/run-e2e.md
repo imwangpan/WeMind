@@ -248,7 +248,7 @@ MCP
 | 28 | 微信侧 overlay | `wemind config wechat edit <agent>` 只改 `<账号>/agent-overrides/<agent>.json`（`mcp.disable` / `mcp.extra`），真实配置不变；新会话生效 |
 | 29 | 默认工作区 | brain/worker 分别使用 `<账号>/workspace/{brain,worker}`；`wemind workspace set <绝对路径> --role brain\|worker` 后已有会话 cwd 不变、新会话用新目录 |
 | 30 | worker MCP 有效集（managed） | 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；`direct` 由 Agent 自己加载真实配置，WeMind 不写 `mcp.json` |
-| 31 | 配置热重载 | `wemind config reload` 重新读取 Agent 配置并重启大脑；brain 有回合在跑时日志记「等当前回合结束再重启」，回复不中断；daemon 未运行时命令返回非零 |
+| 31 | 配置热重载（三态，2026-11-15） | `wemind config reload` 重新读取 Agent 配置、重新 seed 槽位并重启大脑；无回合时回执「常驻大脑已重启」并当场生效；brain 有回合在跑时日志记「等当前回合结束再重启大脑」、回执明确说「重启已排队到回合结束」、回复不中断，`<账号>/runtime.json` 出现 `pendingReload:{reason,at}`，回合结束后标记被清；切脑进行中回执说「没有重启」并提示重试；daemon 未运行时命令返回非零 |
 
 ### 7.1 控制面九项（1.2.0 新增，手工）
 

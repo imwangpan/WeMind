@@ -84,4 +84,24 @@ describe("syncInherited（共用副本根的继承）", () => {
       warn.mockRestore();
     }
   });
+
+  it("清单里的 ../ 与绝对路径被过滤（不删副本目录外的文件）", () => {
+    fs.mkdirSync(cfg, { recursive: true });
+    const outside = path.join(root, "outside.txt");
+    fs.writeFileSync(outside, "keep", "utf-8");
+    const inside = path.join(cfg, "inside.txt");
+    fs.writeFileSync(inside, "drop-me", "utf-8");
+    fs.writeFileSync(
+      path.join(cfg, ".wemind-inherited.json"),
+      JSON.stringify({
+        agent: "old",
+        dirs: ["../outside-dir"],
+        files: ["../outside.txt", outside, "inside.txt"],
+      }),
+      "utf-8",
+    );
+    syncInherited(root, cfg, fake("pi", homeB, [], []));
+    expect(fs.readFileSync(outside, "utf-8")).toBe("keep");
+    expect(fs.existsSync(inside)).toBe(false);
+  });
 });

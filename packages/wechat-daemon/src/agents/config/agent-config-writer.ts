@@ -135,7 +135,12 @@ export function parseConfigPath(expr: string): Array<string | number> {
   for (const part of text.split(".")) {
     const m = part.match(/^([^[\]]*)((?:\[\d+\])*)$/);
     if (!m) throw new Error(`无法解析配置路径：${expr}`);
-    if (m[1]) out.push(m[1]);
+    if (m[1]) {
+      // 原型污染：setConfigPath 直接给普通对象赋键，__proto__ 会写进 Object.prototype。
+      if (m[1] === "__proto__" || m[1] === "constructor" || m[1] === "prototype")
+        throw new Error(`配置路径含危险键「${m[1]}」：${expr}`);
+      out.push(m[1]);
+    }
     for (const idx of m[2].matchAll(/\[(\d+)\]/g)) out.push(Number(idx[1]));
   }
   return out;

@@ -120,6 +120,8 @@ stateDiagram-v2
 > **命名坑**：空闲**进程**回收是 `WEMIND_WORKER_REAP_MS`；`WEMIND_WORKER_IDLE_MS` 是「单轮 prompt 空闲超时」。同名两义必然踩，所以没复用。
 >
 > 结束**在等你回复**的任务时**进程留着复用**（不杀）；结束**正在跑**的那条只能力杀——ACP 回合没法优雅取消（`task-manager.ts`：`waiting` → `release(conn)`，否则 `drop(conn)`）。「等你回复」的任务在结束前一直占着那条连接，所以它不计入空闲进程、也不受空闲回收影响。只有 `wemind stop` / daemon 进程退出才 `killAll()` 杀光整池（Windows 上子进程不会随父进程退出，漏掉就是一堆孤儿 agent 进程）。
+>
+> **2026-11-15 补注（连接回收的容错）**：`WorkerConn.dropSession()` 整段 try/catch（清 `session-cwd.json` 写盘失败只 WARN），`task-manager.ts` 两处收尾都写成 `try { conn.dropSession(...) } finally { release(conn) / drop(conn); t.conn = undefined }`。此前 `deleteSessionCwd()` 抛错会跳过 `release`/`drop`，把池连接慢慢耗光，且「正在跑的任务」没被力杀。回归用例见 `task-manager.test.ts` 的「结束任务时的收尾容错」。
 
 ### worker-acp.ts —— 独立 ACP 客户端（已类化）
 
@@ -132,7 +134,7 @@ stateDiagram-v2
 | 进程 | 1 个（槽位里的当前大脑） | **N 个**（池，各自一条任务） |
 | 会话 | 每用户一 session | 每任务一 session（键 `<agent>:task-<编号>@<userId>`） |
 | 持久化 | `brain-sessions.json`（键 `<agent>:userId`） | `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`） |
-| cwd | 账号 `workspace/brain`（或 `session-cwd.json` 记录） | **任务工作目录**：`--cwd` > `WEMIND_WORKER_CWD` > `<账号>/workspace/worker` |
+| cwd | 账号 `workspace/brain`（或 `session-cwd.json` 记录；恢复时用 `usableSessionCwd()` 校验 UNC/不存在/非目录并回落） | **任务工作目录**：`--cwd` > `WEMIND_WORKER_CWD` > `<账号>/workspace/worker` |
 | 配置 home | 默认 `direct` 直接用真实 home（`managed` 才是 `BRAIN_HOME`；managed 下 brain 默认空 MCP） | 默认 `direct` 直接用真实 home（`managed` 才是 `WORKER_HOME`；WeMind 生成的 worker 集为真实全量除 wechat） |
 | 超时 | idle 120s / cap 15min / 首帧 25s | idle 180s / cap 30min / 首帧 30s（更宽松） |
 

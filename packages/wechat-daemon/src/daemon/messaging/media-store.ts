@@ -140,19 +140,22 @@ export function pruneInboundMedia(
 
 /** 清理只在「写入入站媒体」与 daemon 启动时被问到；真正清理至少间隔 1 小时，避免同一批附件重复 readdir+stat 整个目录。 */
 export const INBOUND_MEDIA_PRUNE_INTERVAL_MS = 60 * 60_000;
-let lastPruneAt: number | null = null;
+/** 每个目录一份时钟：切 homeMode 后 inbound 换目录，新目录不该被旧目录的节流压住一小时。 */
+const lastPruneByDir = new Map<string, number>();
 
 /** 单测用：重置节流时钟（回到「从未清理」）。 */
 export function resetInboundMediaPruneClock(): void {
-  lastPruneAt = null;
+  lastPruneByDir.clear();
 }
 
-/** 启动时的第一次调用必定执行（不依赖时钟纪元）；之后按间隔节流。返回 null 表示这次跳过。 */
+/** 每个目录第一次调用必定执行（不依赖时钟纪元）；之后按间隔节流。返回 null 表示这次跳过。 */
 export function pruneInboundMediaIfDue(
   now: number = Date.now(),
   dir: string = mediaInboxDir(),
 ): { removed: number; bytes: number } | null {
-  if (lastPruneAt !== null && now - lastPruneAt < INBOUND_MEDIA_PRUNE_INTERVAL_MS) return null;
-  lastPruneAt = now;
+  const key = path.resolve(dir);
+  const last = lastPruneByDir.get(key);
+  if (last !== undefined && now - last < INBOUND_MEDIA_PRUNE_INTERVAL_MS) return null;
+  lastPruneByDir.set(key, now);
   return pruneInboundMedia(dir);
 }

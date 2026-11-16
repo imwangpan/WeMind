@@ -65,11 +65,14 @@ export function loadWorkspaceConfig(dir: string = DATA_DIR): {
   config: WorkspaceConfig;
   problem?: string;
 } {
+  const file = workspaceConfigPath(dir);
   let raw: unknown;
   try {
-    raw = JSON.parse(fs.readFileSync(workspaceConfigPath(dir), "utf-8"));
+    if (!fs.existsSync(file)) return { config: emptyConfig() };
+    raw = JSON.parse(fs.readFileSync(file, "utf-8"));
   } catch {
-    return { config: emptyConfig() };
+    // 文件在但解析不了：带上 problem，让写入方拒绝覆盖、让调用方明确报错，不再静默按默认工作区跑。
+    return { config: emptyConfig(), problem: "workspace.json 不是合法 JSON，已按默认工作区处理" };
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { config: emptyConfig(), problem: "workspace.json 不是对象，已按默认工作区处理" };
@@ -228,7 +231,12 @@ export function updateWorkspace(
   value: string | null,
   dir: string = DATA_DIR,
 ): WorkspaceConfig {
-  const { config } = loadWorkspaceConfig(dir);
+  const { config, problem } = loadWorkspaceConfig(dir);
+  // 损坏文件里可能还有另一角色仍有效的配置：set 时拒绝整份覆盖；reset 是用户明确要重建，允许修好。
+  if (problem && value !== null)
+    throw new Error(
+      `${problem}；为避免覆盖另一角色的配置，本次未写入。请修复 ${workspaceConfigPath(dir)}，或用 wemind workspace reset 重建。`,
+    );
   if (value === null) {
     config[role] = { mode: "default" };
   } else {

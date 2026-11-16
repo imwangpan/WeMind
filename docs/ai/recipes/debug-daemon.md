@@ -1,6 +1,6 @@
 # 配方：排查 daemon 不回复 / 大脑异常
 
-> **最后核对**：2026-11-14
+> **最后核对**：2026-11-15
 >
 > 先跑 [`scripts/doctor.ps1`](../../../scripts/doctor.ps1) 收集环境事实，再按症状定位。不要一上来改代码。
 
@@ -29,6 +29,9 @@
 | 池里进程不回收 / 内存高 | `wemind list` | 空闲回收默认 5 分钟（`WEMIND_WORKER_REAP_MS`）；上限 `WEMIND_IDLE_MAX`（默认 2） |
 | 「恢复会话」失败且当前会话没变 | 答复 | **预期行为**（严格恢复）：agent 侧没有那条会话，或在途 load 超时；不会静默新建 |
 | 重启后任务显示「已中断」 | `wemind task-list` / 日志 `restored tasks:` | **预期行为**：不自动拉起，回「继续」才续跑 |
+| `wemind config reload` / 微信「加载 <MCP>」后没生效 | 回执 + `daemon.log` + `<账号>/runtime.json` | 三态：回「已重启」= 当场生效；回「重启已排队到回合结束」= **预期**，等当前长回合结束才重启（不打断输出），`runtime.json` 有 `pendingReload:{reason,at}`；回「没有重启」（切脑进行中）= 等切换完再发一次。daemon 在排队期间被杀，启动时日志见「上次退出前排队的 … 未及生效」，新进程已按当前配置重建，无需再发指令 |
+| 改了 Agent 真实配置但下一条消息没变 | `wemind config reload` / `daemon.log` 的 `config changed` | `configFingerprint()` 现在也把 `ag.name + rt.mode` 入哈希（没有 `homeEnvVar` 的 Agent 也有非空指纹）；漏网才用 `wemind config reload` 兜底。`homeMode` 只在 daemon 启动时快照成 `homeModeAtBoot`，运行中改 `WEMIND_HOME_MODE` 不逐条消息生效（重启才生效） |
+| 会话丢了 / 工作区不对 | `session-cwd.json` + 日志 `usableSessionCwd` | 会话指针一律先落盘再写内存，写盘失败只 WARN（内存指针仍生效）；恢复时 UNC / 不存在 / 非目录都记 WARN 并回落默认工作区，不会静默搬到新目录 |
 
 ---
 

@@ -95,11 +95,21 @@ poller（长轮询，不被大脑阻塞）
 - **连发上限**：iLink 约 10 条；外发管线（串行链、按用户预算、挂起补发、任务推送让位）在 `send-pipeline.ts` 的 `SendPipeline`，`index.ts` 只接真实发送函数和回合编排。预留最后一条给最终答案，进度到第 8 条会暂停并提示「接近上限」；**结构化工具 item 不计入**（它们不是用户可见消息，计入会让可见消息没发几条就触发上限；但 item 发送失败回退的文本计入，且额度到线时不再发 item，避免回退文本挤占最后一条）；图片、文件、视频各计一条并走同一条串行链，额度不够时改附原路径/链接；大脑回合接近上限时任务推送先让位、回合结束后再发。**多任务与对话大脑共享同一份额度**（按用户计）。
 - **消息 ID 精度**：iLink 的 `message_id` 是 uint64，超过 JS 安全整数；core 在 `JSON.parse` 前给 ID 字段的裸整数加引号（按完整 JSON number token 读，小数/指数原样保留；改写失败退回原文解析，仅当原文合法而改写后非法时打 warn），游标/去重全部用字符串比较（`compareMessageIds`/`maxMessageId`），`state.lastMessageId` 与 `seenMessageIds` 持久化为字符串/字符串数组。
 
+**2026-11-15 修复批次（现行做法，排查前先看）**：本轮修复都在当前工作树里；逐条踩坑与验证方法见 [`已知坑.md`](已知坑.md) 的 2026-11-15 补注与 [`验收清单.md`](验收清单.md) 对应行。
+
+- **配置/MCP 变更后的重启是三态**：`acp-brain.ts` 的 `restartForMcpChange()` 返回 `applied`（当场重启）/ `queued`（有回合在跑，排到回合结束、不打断输出，并在账号级 `runtime.json` 写 `pendingReload:{reason,at}`）/ `failed`（切脑进行中且等不到结束，这次不重启、提示重试）；`reset()` 清内存标志与落盘标记，`brain-switch.ts` 切脑成功后 `clearQueuedReload()`，daemon 启动读标记 → 新进程已按当前配置启动 → 清标记并 WARN；微信「加载/卸载 MCP」与 `wemind config reload` 都按三态**如实回执**（排队明确说「重启已排队到回合结束」），`config.reload` 还会 `seedSlots(loadBrainConfig(DATA_DIR))` 重新 seed 槽位。`runtime.json` 现在是 `{version:1, homeMode:"direct"|"managed", pendingReload?:{reason,at}}`，**按需创建**（新账号不预建）。
+- **homeMode 只在启动时快照，指纹不再恒为空**：`index.ts` 的 `homeModeAtBoot` 由 `readHomeMode()` 启动时取一次，poller / 快车道 / 微信设置告警只读快照，不逐条消息重读；`migrateLegacyHomes()` 改用 `readPersistedHomeMode()`（只看磁盘持久值、不受 `WEMIND_HOME_MODE` 一次性覆盖影响），避免持久 `managed` 账号的 `brain-home`/`worker-home` 被误备份。`configFingerprint()` 把 `ag.name + rt.mode` 入哈希，不再对没有 `homeEnvVar` 的 Agent 返回空指纹；homeMode 变化触发重建，改真实配置后下一条消息可见（漏网才用 `wemind config reload` 兜底）。
+- **会话指针与任务收尾的落盘纪律**：brain / worker 一律**先落盘成功再写内存**（`saveSessionMap` / `setSessionCwd` 在 `userSessions.set` / `sessions.set` 之前）；`session-cwd.json` 的 `writeMap()` 写盘失败只 WARN 不抛（内存指针仍生效、磁盘索引可能滞后）；恢复旧会话时用 `usableSessionCwd(saved,fallback,sessionId)`，UNC / 不存在 / 非目录都记 WARN 并回落默认工作区。`WorkerConn.dropSession()` 整段 try/catch，`task-manager.ts` 两处收尾用 `try { dropSession } finally { release(conn) / drop(conn); t.conn = undefined }`，清会话指针抛错也不会把池连接耗光。
+- **ACP 协议边界**：`applyAcpModel()` 只吞 agent **明确回的 JSON-RPC error 帧**（有数字 `code`），超时 / `acp process reset` / 无进程 / 写帧失败一律抛出让上层 kill 重建；`handleAcpFrame()` 把 `session/prompt` 的**响应帧**也算首帧（committed-only agent 不误报「首帧 -1」），`clearAcpTurn()` 归零 `startedAt`/`firstFrameAt`/`sessionId`，回合计时不串到下一轮；`acp-reverse.ts` 要求 allow 候选项有非空字符串 `optionId`，一个合法项都没有就回 `cancelled` 并记 WARN，`WEMIND_ACP_AUTO_ALLOW` 空白串/未设置都按默认 yolo；`brain check` 起的自检副本在 `mcpDelivery: "acp"` 时同样剥离全部 MCP 条目（`copyProfilePatch` 的 `stripAllMcp`）。
+- **配置写入与 CLI 边界**：`parseConfigPath()` 拒绝 `__proto__` / `constructor` / `prototype`；`openEditor()` 不给不存在的非 `.json`/`.jsonc` 文件预建 `{}`（明确报错）；`takeOpt()` 拒绝空值/缺值/下一个是 `--flag`；`config mcp disable` 在 `direct` 下先 `removeMcp()`，失败就不写 overlay、不再假成功（overlay 写失败会尽力把激活集加回去并报错），`mcp-brain.ts` 的 `saveActive()` 用传入的 `list` 写回；`loadWorkspaceConfig()` 对损坏文件返回 `problem`（`config show` / `workspace show` 显示、`workspace set` 拒绝写入并提示修复或 `workspace reset`）；`config env clear` 区分「已删除」与「不存在」，`mergeEnvSnapshot()` 过滤 undefined 值。
+- **落盘与清理**：原子写 `writeFileAtomic()` 的临时文件固定 `mode: 0o600`；`managed` 副本的 `.wemind-inherited.json` 清单由 `safeManifestNames()` 过滤 `../` 与绝对路径；入站媒体清理节流**按目录分别记时**（`lastPruneByDir` / `resetInboundMediaPruneClock()`），`direct` 与 `managed` 两份 inbound 目录不互相饿死一小时。
+- **文档守卫自身 + 测试**：`doc-impact` 补 C-quoted git 路径还原（`unquoteGitPath` / `parseLsFiles`）、`--staged` 读 index blob、内容扫描跳过代码围栏、`testRe()` 每次重置 `lastIndex`、dirty diff 用 `--untracked-files=no`、`1\.0\.107(?!\d)` 不误报 `1.0.1070`；用例在 `scripts/doc-guards.test.mjs`，本轮新增测试含 `packages/wechat-daemon/src/cli/subcommands/cli-config.test.ts`（另补齐 `config.test.ts`、`atomic-json.test.ts`、`inherit.test.ts`、`acp-reverse.test.ts`、`media-store.test.ts`、`acp-connection.test.ts`、`task-manager.test.ts`、`brain-switch.test.ts`、`daemon-control.test.ts`、`parity-direct.test.ts`）。
+
 ---
 
 ## 4. 术语
 
-> **术语表已独立成篇**：[docs/ai/术语表.md](术语表.md) —— WeMind 内部概念（brain / worker / 任务编号 / 控制桥 / 激活集…）、中英术语对照（spawn、stdio、daemon、watchdog、capability、reverse request…）、账号与权限的用词纪律（「登录者」「登录者白名单」，禁用「主号」）、以及注释按段落换行的写作口径。
+> **术语表已独立成篇**：[docs/ai/术语表.md](术语表.md) —— WeMind 内部概念（brain / worker / 任务编号 / 控制桥 / 激活集…）、中英术语对照（spawn、stdio、daemon、watchdog、capability、reverse request…）、账号与权限的用词纪律（「登录者」「登录者白名单」，禁用「主号」）、以及注释按段落换行的写作口径。2026-11-15 新增术语：三态重启 / `applied|queued|failed`、`pendingReload`、`homeModeAtBoot`、`readPersistedHomeMode()`、`usableSessionCwd()`、显式 JSON-RPC error 帧、`optionId` 校验、workspace `problem`、`safeManifestNames()`、媒体清理按目录节流。
 
 最常用的几条，先记住：
 
@@ -185,6 +195,8 @@ poller（长轮询，不被大脑阻塞）
 
 > **规矩**：新增 agent 接入文档时，必须写清「已实测 / 仅代码 / 未验证」，并给版本与日期。
 
+> **2026-11-15 补注**：上表是结论索引；本轮修复批次（三态重启 + `runtime.json.pendingReload`、`homeModeAtBoot`、`configFingerprint` 不再恒空、会话指针先落盘、`applyAcpModel` 只吞显式 error 帧、响应帧算首帧、`optionId` 校验、配置写入边界）在 §3 与 [`已知坑.md`](已知坑.md) / [`验收清单.md`](验收清单.md)。表中若有旧结论与之冲突，按这三处现行口径，别按旧行排查。
+
 ---
 
 ## 6. 源码地图（按任务）
@@ -210,6 +222,8 @@ poller（长轮询，不被大脑阻塞）
 | 排查不回复                             | `docs/ai/recipes/debug-daemon.md`                                                                                         | `daemon.log`、`brain.json`、`brain check`                                                                                                                                                                                                                                                                     |
 | 端到端验收                             | `docs/ai/recipes/run-e2e.md`                                                                                              | `scripts/doctor.ps1`                                                                                                                                                                                                                                                                                          |
 
+| **改配置热重载 / 三态重启** | `agents/config/home-mode.ts`（`runtime.json` 的 `homeMode` + `pendingReload` 标记：读写/落盘/消费）、`acp/acp-brain.ts`（`restartForMcpChange()` / `clearQueuedReload()`） | `index.ts`（`homeModeAtBoot` 快照 + 启动消费标记）、`acp/brain-switch.ts`（切脑成功后清排队）、`cli/subcommands/cli-config.ts`（`config.reload` 三态回执 + `seedSlots`）、`daemon/daemon-control.ts`（微信「加载/卸载 MCP」三态回执）；守卫 `config.test.ts`、`brain-switch.test.ts`、`daemon-control.test.ts` |
+
 单文件职责（约 45 个模块）见 [代码地图](代码地图.md)。
 
 ---
@@ -222,6 +236,7 @@ poller（长轮询，不被大脑阻塞）
 4. 不在文档里复制易变细节（版本号、完整方法列表）；给「怎么查」（`initialize`、`wemind brain`）而不是「背答案」。
 5. 内部链接用相对路径；新增文件后跑 `pwsh -NoProfile -File scripts/check-docs.ps1`（CI 也可用）。
 6. 结论被推翻时，除了改正文，还要在 `scripts/doc-impact.rules.mjs` 的 `STALE_FACTS` 登记旧措辞（`id` / `since` / `why` / `pattern` / `allow`）；`npm run doc-impact:check` 会读工作树最终内容逐行拦截，报「文件:行号」。确实该保留的历史段/归档索引/测试反例用 `allow.marker` 写明约定（声明被删则放行失效）。`Docs-Impact: none` 豁免不覆盖这一层。见 [`文档守卫设计.md`](../设计文档/文档守卫设计.md) §3.7、§7.4。
+7. 2026-11-15 守卫自身也修了：C-quoted git 路径还原、`--staged` 读 index blob、内容扫描跳过代码围栏、`testRe()` 每次重置 `lastIndex`、dirty diff 不算未跟踪文件、`1\.0\.107(?!\d)` 不误报 `1.0.1070`（用例 `scripts/doc-guards.test.mjs`）；改 `cli-config.ts` 必须同步 `packages/wechat-daemon/src/cli/subcommands/cli-config.test.ts`。本轮全量 `npm test`：107 个测试文件 / 1205 passed + 4 skipped（快照）。
 
 ---
 

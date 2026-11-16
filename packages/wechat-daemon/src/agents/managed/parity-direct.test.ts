@@ -256,10 +256,16 @@ describe("指纹只跟配置内容走", () => {
     expect(configFingerprint(ag, rt, account)).not.toBe(a);
   });
 
-  it("没有可重定向配置目录的 agent 返回空指纹（不做热重载）", async () => {
+  it("没有 homeEnvVar 的 agent 仍返回非空指纹，且 homeMode 改变会让它变化（config.reload 能重建进程）", async () => {
     const { configFingerprint } = await import("../config/config-fingerprint.js");
+    const { writeHomeMode } = await import("../config/home-mode.js");
     const ag = await agentOf("qoder", { realHome: qoderHome });
-    expect(configFingerprint(ag, agentRuntime("brain", ag, account), account)).toBe("");
+    const before = configFingerprint(ag, agentRuntime("brain", ag, account), account);
+    expect(before).not.toBe("");
+    expect(configFingerprint(ag, agentRuntime("brain", ag, account), account)).toBe(before);
+    writeHomeMode("managed", account);
+    const after = configFingerprint(ag, agentRuntime("brain", ag, account), account);
+    expect(after).not.toBe(before);
   });
 });
 

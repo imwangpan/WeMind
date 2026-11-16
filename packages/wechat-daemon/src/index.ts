@@ -48,7 +48,12 @@ import { CLI_PID_MARKERS, findOtherOurProcess } from "./shared/process/proc-iden
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./cli/watchdog-runner.js";
 import { isOwnerOnly } from "./ipc/chat-commands.js";
 import { ensureBrainHome } from "./agents/managed/mcp-brain.js";
-import { readHomeMode } from "./agents/config/home-mode.js";
+import {
+  clearReloadPending,
+  readHomeMode,
+  readReloadMarker,
+  type HomeMode,
+} from "./agents/config/home-mode.js";
 import { ensureParityAccountDirs } from "./agents/config/account-bootstrap.js";
 import { migrateLegacyHomes } from "./agents/config/migrate-legacy.js";
 import { readWechatSettings, replyStyleHint } from "./agents/config/wechat-settings.js";
@@ -345,6 +350,9 @@ let activeTurn: { from: string; token: string | undefined; runId: string } | nul
 
 // 微信设置的坏文件告警去重：每轮都会读一次设置，坏一次不能每轮刷一行日志。
 let warnedWechatSettingsProblem = "";
+// homeMode 在启动时定一次：运行期改 runtime.json 不该让同一批消息一半按 direct、一半按 managed 处理。
+// `wemind config home-mode` 的回执明确要求重启 daemon，运行期覆盖不属于受支持的用法。
+let homeModeAtBoot: HomeMode = "direct";
 
 /** 从解密后的字节嗅探图片 MIME。 */
 function sniffMime(b: Buffer): string {
@@ -743,9 +751,14 @@ async function handleMessage(
   const imagesForBrain = plan.kind === "text-only" ? [] : images; // 大脑不支持看图时别再塞图片（会 -32602）
   // 微信侧回复风格：每轮现读一次 `<账号>/wechat-settings.json`，改完下一条消息即生效（不需要 reload / 新会话）。
   const wxSettings = readWechatSettings(DATA_DIR);
-  if (wxSettings.problem && wxSettings.problem !== warnedWechatSettingsProblem) {
-    warnedWechatSettingsProblem = wxSettings.problem;
-    log.warn(`wechat-settings: ${wxSettings.problem}`);
+  if (wxSettings.problem) {
+    if (wxSettings.problem !== warnedWechatSettingsProblem) {
+      warnedWechatSettingsProblem = wxSettings.problem;
+      log.warn(`wechat-settings: ${wxSettings.problem}`);
+    }
+  } else {
+    // 坏→好时清掉去重串：之后再坏成同一种问题要重新告警，不能被上一次的去重吞掉。
+    warnedWechatSettingsProblem = "";
   }
   const promptText = [
     text.trim(),
@@ -1033,10 +1046,7 @@ async function pollerLoop(
           interrupted: interruptedTasks(from).length,
         };
         // 带附件的消息不走快车道：控制/任务指令不处理附件，进快车道会静默丢文件。
-        const mcpToBrain = passMcpToggleToBrain(
-          parseControl(text),
-          readHomeMode(DATA_DIR) === "direct",
-        );
+        const mcpToBrain = passMcpToggleToBrain(parseControl(text), homeModeAtBoot === "direct");
         if (!mcpToBrain && isFastLane(text, facts, parts.attachments.length))
           fastQueue.push(queued);
         else msgQueue.push(queued);
@@ -1146,7 +1156,7 @@ async function handleFastItem(
   // 控制指令：单独处理
   const ctrl = item.text ? parseControl(item.text) : null;
   // direct 下「加载/卸载 MCP」不在 daemon 侧处理：原样交给 Agent，由它决定怎么改自己的配置。
-  if (passMcpToggleToBrain(ctrl, readHomeMode(DATA_DIR) === "direct")) {
+  if (passMcpToggleToBrain(ctrl, homeModeAtBoot === "direct")) {
     log.info("control: mcp toggle passed through to agent (direct)", JSON.stringify(ctrl));
   } else if (ctrl) {
     // owner-only（切脑/交接）：非本人 → 短提示拒绝，**不**转发给大脑（否则大脑可能替用户执行越权动作）
@@ -1471,6 +1481,16 @@ export async function runDaemon(): Promise<void> {
     log.error("uncaughtException:", describeError(err, import.meta.url));
   });
   try {
+    homeModeAtBoot = readHomeMode(DATA_DIR);
+    // 排队重载在旧进程里随 daemon 退出消失：新进程本来就是按当前配置 spawn 的，记一行并清掉标记，
+    // 免得下次启动又误报「上次还有没生效的重载」。
+    const pendingMarker = readReloadMarker();
+    if (pendingMarker) {
+      log.warn(
+        `上次退出前排队的 ${pendingMarker.reason} 未及生效；新进程已按当前配置启动，标记已清。`,
+      );
+      clearReloadPending();
+    }
     ensureParityAccountDirs();
     migrateLegacyHomes();
     ensureBrainHome(); // 准备 brain 配置：direct 直接用真实配置，managed 才建账号副本

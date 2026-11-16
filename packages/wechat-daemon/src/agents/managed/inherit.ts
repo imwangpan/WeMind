@@ -23,13 +23,24 @@ const MANIFEST = ".wemind-inherited.json";
 
 type Manifest = { agent?: string; dirs: string[]; files: string[] };
 
+/** 清单里的名字只用来在副本目录内删 WeMind 自己建的东西；`../` / 绝对路径必须过滤，否则可删账号目录外文件。 */
+function safeManifestNames(dir: string, list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  const root = path.resolve(dir);
+  return list.filter((x: unknown): x is string => {
+    if (typeof x !== "string" || !x) return false;
+    const rel = path.relative(root, path.resolve(root, x));
+    return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+  });
+}
+
 function readManifest(dir: string): Manifest {
   try {
     const j = JSON.parse(fs.readFileSync(path.join(dir, MANIFEST), "utf-8"));
     return {
       agent: typeof j?.agent === "string" ? j.agent : undefined,
-      dirs: Array.isArray(j?.dirs) ? j.dirs.filter((x: unknown) => typeof x === "string") : [],
-      files: Array.isArray(j?.files) ? j.files.filter((x: unknown) => typeof x === "string") : [],
+      dirs: safeManifestNames(dir, j?.dirs),
+      files: safeManifestNames(dir, j?.files),
     };
   } catch {
     return { dirs: [], files: [] };

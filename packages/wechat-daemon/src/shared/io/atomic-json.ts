@@ -17,7 +17,8 @@ export function writeFileAtomic(filePath: string, data: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    fs.writeFileSync(tmp, data, "utf-8");
+    // 0600：runtime.json / env.json / 账号状态这类文件覆盖写时不能回落到 umask 默认权限。
+    fs.writeFileSync(tmp, data, { encoding: "utf-8", mode: 0o600 });
     fs.renameSync(tmp, filePath);
   } catch (e) {
     try {

@@ -11,7 +11,8 @@ import {
 import { agentRuntime } from "../agents/config/runtime.js";
 import { configFingerprint } from "../agents/config/config-fingerprint.js";
 import { formatMcpPerf, mcpPerfWarnings } from "../agents/config/mcp-perf.js";
-import { getSessionCwd, setSessionCwd } from "../agents/config/session-cwd.js";
+import { getSessionCwd, setSessionCwd, usableSessionCwd } from "../agents/config/session-cwd.js";
+import { clearReloadPending, markReloadPending } from "../agents/config/home-mode.js";
 import { getAgent } from "../agents/agent-slot.js";
 import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
 import { pidRecordOf, writePidRecords } from "../shared/process/pid-record.js";
@@ -113,7 +114,7 @@ const host: AcpHost = {
 let turnDepth = 0; // 已入队/正在跑的 ACP 操作数（提问 / 新建会话 / 恢复会话）
 let opChain: Promise<void> = Promise.resolve(); // ACP 操作串行链：同一时刻只有一个操作在碰进程
 let switching = false; // 正在切换大脑
-let pendingReload = false; // 配置变更要求重启，但当前有回合在跑 → 排到最后一个回合结束
+let pendingReload = false; // 配置变更要求重启，但当前有回合在跑 → 排到最后一个回合结束（并落盘 runtime.json）
 const SWITCH_WAIT_MS = Number(process.env.WEMIND_SWITCH_TIMEOUT_MS) || 120_000; // 回合等切换的上限，与切换自身的启动新大脑的上限一致
 
 export function isTurnInFlight(): boolean {
@@ -131,9 +132,8 @@ function withBrainOp<T>(fn: () => Promise<T>): Promise<T> {
   const run = opChain.then(fn, fn).finally(() => {
     turnDepth -= 1;
     if (turnDepth === 0 && pendingReload) {
-      pendingReload = false;
       log.info("回合已结束：应用排队的 MCP/config 变更（重启大脑）");
-      reset();
+      reset(); // reset 会清掉内存标志与落盘标记
     }
   });
   opChain = run.then(
@@ -190,6 +190,9 @@ function isAlive(): boolean {
 
 /** 杀进程（按 PID 进程树）并清空内部态；不清磁盘 session 映射（留给重建后 load）。 */
 function reset(): void {
+  // 进程被重建就等于配置已生效：无论起因是切脑、排队重载还是回合失败自愈，都不能留着旧标记。
+  pendingReload = false;
+  clearReloadPending();
   const c = child;
   child = null;
   initialized = false;
@@ -309,7 +312,7 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
     const methods: Array<"load" | "resume"> =
       ag.restore === "resume" ? ["resume"] : ["load", "resume"];
     const savedCwd = getSessionCwd(ag.name, saved);
-    const cwd = savedCwd ?? rt.cwd;
+    const cwd = usableSessionCwd(savedCwd, rt.cwd, saved);
     for (const method of methods) {
       let restored: any;
       let establishMs = 0;
@@ -335,8 +338,9 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
         /* 已在 applyModel 内记日志 */
       }
       await applyAcpSessionMode(host, ag, saved, availableAcpModes(restored), REQ_TIMEOUT);
-      userSessions.set(userId, saved);
+      // 先完成所有可能抛错的持久化，再改内存指针：写盘失败不能留下「当前会话已变」的假象（AGENTS.md §4.12）。
       if (!savedCwd) setSessionCwd(ag.name, saved, cwd);
+      userSessions.set(userId, saved);
       markUsed(ag.name, userId, saved); // 会话登记表：把它顶到「最近使用」（列表按此排序）
       const perf = {
         mcpCount: mcpServers.length,
@@ -359,10 +363,11 @@ async function ensureSession(ag: ResolvedAgent, userId: string): Promise<string>
   if (!res?.sessionId) throw new Error("session/new returned no sessionId");
   await applyAcpModel(host, ag, res.sessionId, REQ_TIMEOUT);
   await applyAcpSessionMode(host, ag, res.sessionId, availableAcpModes(res), REQ_TIMEOUT);
-  userSessions.set(userId, res.sessionId);
-  setSessionCwd(ag.name, res.sessionId, rt.cwd);
+  // brain-sessions.json 是「当前会话」的唯一权威：先落盘，再动内存与派生索引。
   map[keyOf(ag, userId)] = res.sessionId;
   saveSessionMap(map);
+  setSessionCwd(ag.name, res.sessionId, rt.cwd);
+  userSessions.set(userId, res.sessionId);
   ensureEntry(ag.name, userId, res.sessionId); // 会话登记表：新会话进列表（turns 从 0 起）
   const perf = {
     mcpCount: mcpServers.length,
@@ -509,7 +514,7 @@ export async function resumeSession(
     const rt = agentRuntime("brain", ag);
     const mcpServers = activeMcpServers(ag, rt);
     const savedCwd = getSessionCwd(ag.name, sessionId);
-    const cwd = savedCwd ?? rt.cwd;
+    const cwd = usableSessionCwd(savedCwd, rt.cwd, sessionId);
     const methods: Array<"load" | "resume"> =
       ag.restore === "resume" ? ["resume"] : ["load", "resume"];
     let lastErr = "";
@@ -524,11 +529,12 @@ export async function resumeSession(
         await drainAcpReplay(host, ag);
         await applyAcpModel(host, ag, sessionId, REQ_TIMEOUT);
         await applyAcpSessionMode(host, ag, sessionId, availableAcpModes(restored), REQ_TIMEOUT);
-        userSessions.set(userId, sessionId);
-        if (!savedCwd) setSessionCwd(ag.name, sessionId, cwd);
+        // 严格恢复：全部持久化成功才改当前会话；失败时磁盘与内存都保持原样，不回退新建。
         const map = loadSessionMap(ag);
         map[keyOf(ag, userId)] = sessionId;
         saveSessionMap(map);
+        if (!savedCwd) setSessionCwd(ag.name, sessionId, cwd);
+        userSessions.set(userId, sessionId);
         log.info(`resume ok ${sessionId}`);
         return { ok: true };
       } catch (e) {
@@ -559,20 +565,33 @@ export function restart(): void {
   reset();
 }
 
+/** 切脑成功路径用：切脑本身就是一次重建，不能留着旧大脑排队的重载去杀新 warmup 出来的进程。 */
+export function clearQueuedReload(): void {
+  pendingReload = false;
+  clearReloadPending();
+}
+
+export type ReloadState = "applied" | "queued" | "failed";
+
 /**
- * MCP 激活集变更后用：切换进行中先等它结束（有界），再重启——否则会把正在预热的新大脑杀在半路。
- * 返回 false 表示切换在等待上限内仍未结束，这次没有重启（避免留下一个半截的新大脑）。
+ * MCP 激活集 / config.reload 变更后用：切换进行中先等它结束（有界），再重启——否则会把正在预热的新大脑杀在半路。
+ * 三态：`failed` = 切换在等待上限内仍未结束（这次没重启）；`queued` = 有回合在跑，重启排到回合结束；
+ * `applied` = 已当场重启。排队同时写 runtime.json 的 `pendingReload`：进程内布尔会随 daemon 退出消失，
+ * 新 daemon 启动时能发现并清掉（按当前配置重建进程本来就已生效）。调用方必须按三态回话，不能一律说「已生效」。
  */
-export async function restartForMcpChange(): Promise<boolean> {
-  if (switching && !(await drainSwitch(SWITCH_WAIT_MS))) return false;
+export async function restartForMcpChange(
+  reason: string = "MCP/config 变更",
+): Promise<ReloadState> {
+  if (switching && !(await drainSwitch(SWITCH_WAIT_MS))) return "failed";
   if (isTurnInFlight()) {
     pendingReload = true;
+    markReloadPending(reason);
     log.info("MCP/config 已变更：等当前回合结束再重启大脑（不打断正在生成的回复）");
-    return true;
+    return "queued";
   }
-  pendingReload = false;
+  clearReloadPending();
   restart();
-  return true;
+  return "applied";
 }
 
 /** 当前大脑是否接受图片输入（配置里的能力；默认 true）。 */

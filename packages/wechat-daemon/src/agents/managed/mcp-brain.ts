@@ -255,12 +255,9 @@ function saveActive(
     j?.active && typeof j.active === "object" && !Array.isArray(j.active)
       ? { ...(j.active as Record<string, unknown>) }
       : {};
-  if (Array.isArray(j?.active)) {
-    // 旧版全局列表：保留，但只归入当前 agent，避免其它 agent 继承微信相关条目。
-    map[agentName] = (j.active as unknown[]).filter((x): x is string => typeof x === "string");
-  } else {
-    map[agentName] = list;
-  }
+  // 旧版全局列表：本次变更后的集合直接归入当前 agent，避免其它 agent 继承微信相关条目。
+  // 不能在这里把旧列表原样写回：add/remove 传进来的 list 才是「刚改完」的激活集，忽略它会让指令假成功。
+  map[agentName] = list;
   writeJsonAtomic(activeFile(dir), { version: 2, active: map });
 }
 

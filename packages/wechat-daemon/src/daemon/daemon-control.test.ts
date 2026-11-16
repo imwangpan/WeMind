@@ -30,6 +30,9 @@ const m = vi.hoisted(() => ({
   addMcp: vi.fn(),
   removeMcp: vi.fn(),
   listMcp: vi.fn(),
+  ensureBrainHome: vi.fn(),
+  ensureWorkerHome: vi.fn(),
+  seedSlots: vi.fn(),
   saveHandoff: vi.fn(),
   killIdle: vi.fn(),
   hasActiveTask: vi.fn(() => false),
@@ -65,7 +68,11 @@ vi.mock("../agents/brain-agents.js", () => ({
   presetNames: m.presetNames,
   resolvePresetByName: m.resolvePresetByName,
 }));
-vi.mock("../agents/agent-slot.js", () => ({ getAgent: m.getAgent, setAgent: m.setAgent }));
+vi.mock("../agents/agent-slot.js", () => ({
+  getAgent: m.getAgent,
+  setAgent: m.setAgent,
+  seedSlots: m.seedSlots,
+}));
 vi.mock("../acp/brain-switch.js", () => ({
   preflightSwitch: m.preflightSwitch,
   switchBrain: m.switchBrain,
@@ -83,7 +90,9 @@ vi.mock("../agents/managed/mcp-brain.js", () => ({
   addMcp: m.addMcp,
   removeMcp: m.removeMcp,
   listMcp: m.listMcp,
+  ensureBrainHome: m.ensureBrainHome,
 }));
+vi.mock("../agents/managed/mcp-worker.js", () => ({ ensureWorkerHome: m.ensureWorkerHome }));
 vi.mock("../sessions/handoff.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../sessions/handoff.js")>();
   return { ...actual, saveHandoff: m.saveHandoff };
@@ -114,7 +123,7 @@ beforeEach(() => {
   m.taskPoolSummary.mockReturnValue([]);
   m.hasActiveTask.mockReturnValue(false);
   m.switchInFlightTarget.mockReturnValue(undefined);
-  m.restartForMcpChange.mockResolvedValue(true);
+  m.restartForMcpChange.mockResolvedValue("applied");
 });
 
 afterEach(() => resetSensitiveAllow());
@@ -176,14 +185,23 @@ describe("handleControl（微信控制指令分派）", () => {
     expect(m.restartForMcpChange).not.toHaveBeenCalled();
 
     m.removeMcp.mockReturnValue({ ok: true, changed: true, text: "已卸载" });
-    m.restartForMcpChange.mockResolvedValue(false);
+    m.restartForMcpChange.mockResolvedValue("failed");
     expect(await handleControl({ kind: "remove", name: "x" }, "u1", ctx("u1"))).toContain(
       "大脑正在切换中",
     );
     expect(m.restartForMcpChange).toHaveBeenCalled();
 
-    m.restartForMcpChange.mockResolvedValue(true);
+    m.restartForMcpChange.mockResolvedValue("applied");
     expect(await handleControl({ kind: "remove", name: "x" }, "u1", ctx("u1"))).toBe("已卸载");
+  });
+
+  it("MCP 变更在回合中排队：如实回「已排队」，不冒充已重启", async () => {
+    m.removeMcp.mockReturnValue({ ok: true, changed: true, text: "已卸载" });
+    m.restartForMcpChange.mockResolvedValue("queued");
+    const text = await handleControl({ kind: "remove", name: "x" }, "u1", ctx("u1"));
+    expect(text).toContain("已卸载");
+    expect(text).toContain("重启已排队");
+    expect(text).not.toContain("已重启");
   });
 
   it("AI 总览与 MCP 列表直接走查询实现", async () => {
@@ -382,5 +400,21 @@ describe("handleControlRequest（控制桥 9 个 kind）", () => {
     m.loadAccount.mockReturnValue({ botId: "bot-1" });
     expect(await handleControlRequest(req("session.unpause"), "o")).toContain("已解除");
     expect(m.clearSessionPause).toHaveBeenCalledWith("bot-1");
+  });
+
+  it("config.reload 重新 seed 槽位，并按三态回执", async () => {
+    m.restartForMcpChange.mockResolvedValue("queued");
+    const text = await handleControlRequest(req("config.reload"), "o");
+    expect(text).toContain("重启已排队");
+    expect(m.seedSlots).toHaveBeenCalledWith(m.loadBrainConfig());
+    expect(m.ensureBrainHome).toHaveBeenCalled();
+    expect(m.ensureWorkerHome).toHaveBeenCalled();
+    expect(m.killIdle).toHaveBeenCalled();
+
+    m.restartForMcpChange.mockResolvedValue("failed");
+    expect(await handleControlRequest(req("config.reload"), "o")).toContain("大脑正在切换中");
+
+    m.restartForMcpChange.mockResolvedValue("applied");
+    expect(await handleControlRequest(req("config.reload"), "o")).toContain("常驻大脑已重启");
   });
 });

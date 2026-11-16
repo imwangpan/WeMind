@@ -107,4 +107,34 @@ describe("handleReverseRequest（brain / worker / brain check 共用）", () => 
     ]);
     expect(c.logs[0]).toContain("fs/read_text_file");
   });
+
+  it("allow 选项缺 optionId 时回 cancelled 并告警（不回非法 selected）", () => {
+    const c = capture();
+    handleReverseRequest(
+      {
+        id: 11,
+        method: "session/request_permission",
+        params: { options: [{ kind: "allow_once" }] },
+      },
+      c.write,
+      c.log,
+    );
+    expect(c.written[0].result).toEqual({ outcome: { outcome: "cancelled" } });
+    expect(c.logs.join("\n")).toContain("optionId");
+  });
+
+  it("WEMIND_ACP_AUTO_ALLOW 是空白串时仍按默认 yolo", () => {
+    vi.stubEnv("WEMIND_ACP_AUTO_ALLOW", "   ");
+    const c = capture();
+    handleReverseRequest(
+      {
+        id: 12,
+        method: "session/request_permission",
+        params: { options: [{ kind: "allow_once", optionId: "ok" }] },
+      },
+      c.write,
+      c.log,
+    );
+    expect(c.written[0].result).toEqual({ outcome: { outcome: "selected", optionId: "ok" } });
+  });
 });

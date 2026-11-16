@@ -20,12 +20,18 @@ export function handleReverseRequest(
   log?.(`← reverse request ${method}#${frame.id}`);
   if (method === "session/request_permission") {
     const options = Array.isArray(frame.params?.options) ? frame.params.options : [];
-    const autoAllow = !["0", "false", "off", "no"].includes(
-      (process.env.WEMIND_ACP_AUTO_ALLOW ?? "").trim().toLowerCase(),
+    // 未设置 / 只写了空白都按默认 yolo；只有显式写 0/false/off/no 才关掉自动放行。
+    const raw = (process.env.WEMIND_ACP_AUTO_ALLOW ?? "").trim().toLowerCase();
+    const autoAllow = !["0", "false", "off", "no"].includes(raw);
+    const candidates = autoAllow
+      ? options.filter((o: any) => o?.kind === "allow_once" || o?.kind === "allow_always")
+      : [];
+    // optionId 缺失时不能回 selected：JSON.stringify 会丢掉 undefined，agent 可能视作非法响应把权限请求挂住。
+    const allow = candidates.find(
+      (o: any) => typeof o?.optionId === "string" && o.optionId.length > 0,
     );
-    const allow = autoAllow
-      ? options.find((o: any) => o?.kind === "allow_once" || o?.kind === "allow_always")
-      : undefined;
+    if (candidates.length && !allow)
+      log?.("permission: allow 选项缺 optionId，已回 cancelled（避免非法 selected 把回合挂住）");
     const result = allow
       ? { outcome: { outcome: "selected", optionId: allow.optionId } }
       : { outcome: { outcome: "cancelled" } };

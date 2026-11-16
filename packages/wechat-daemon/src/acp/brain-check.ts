@@ -63,7 +63,8 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
     try {
       const rel = path.join("profiles", ag.realProfile, "cordis.patch.yml");
       if (fs.existsSync(path.join(ag.realHome, rel)))
-        copyProfilePatch(ag.realHome, ag.realProfile, home);
+        // 自检会真起一个 agent：MCP 条目全部剥掉，不能让第二个收消息实例被带进临时副本。
+        copyProfilePatch(ag.realHome, ag.realProfile, home, { stripAllMcp: true });
     } catch {
       /* best-effort（与 daemon 的 syncProfilePatch 一致） */
     }

@@ -1,11 +1,7 @@
+import path from "node:path";
+
 import { createLogger, DATA_DIR, clearSessionPause, loadAccount } from "@wemind/wechat-ilink-core";
-import {
-  askBrainTurn,
-  isTurnInFlight,
-  newSession,
-  restartForMcpChange,
-  resumeSession,
-} from "../acp/acp-brain.js";
+import { askBrainTurn, newSession, restartForMcpChange, resumeSession } from "../acp/acp-brain.js";
 import { agentConfigFor, loadBrainConfig } from "../agents/brain-config.js";
 import {
   presetAvailable,
@@ -13,7 +9,7 @@ import {
   resolvePresetByName,
   type ResolvedAgent,
 } from "../agents/brain-agents.js";
-import { getAgent, setAgent } from "../agents/agent-slot.js";
+import { getAgent, seedSlots, setAgent } from "../agents/agent-slot.js";
 import { preflightSwitch, switchBrain, switchInFlightTarget } from "../acp/brain-switch.js";
 import { renderHelp, type ChatCommand } from "../ipc/chat-commands.js";
 import type { ControlRequest } from "../ipc/control-bridge.js";
@@ -199,9 +195,12 @@ export async function handleControl(
   if (c.kind === "add" || c.kind === "remove") {
     const r = c.kind === "add" ? addMcp(c.name) : removeMcp(c.name);
     if (!r.ok || !r.changed) return r.text; // 失败/没变化都不重启大脑
-    // 切换进行中先等它结束再重启，别把正在预热的新大脑杀在半路
-    if (!(await restartForMcpChange()))
+    // 三态回话：排队不等于已生效，切换中没重启也不能说「已生效」。
+    const state = await restartForMcpChange("加载/卸载 MCP");
+    if (state === "failed")
       return `${r.text}\n（大脑正在切换中，这次没有重启它；切换完成后请再发一次这条指令，让新 MCP 列表生效。）`;
+    if (state === "queued")
+      return `${r.text}\n（当前回合正在生成，重启已排队到回合结束，不打断输出。）`;
     return r.text;
   }
   if (c.kind === "ai") return agentOverview();
@@ -244,10 +243,14 @@ export async function handleControl(
       } catch (e) {
         return `❌ ${e instanceof Error ? e.message : String(e)}`;
       }
-      return `✅ ${WORKSPACE_CHANGE_NOTICE}\n新工作区：${c.path}`;
+      return `✅ ${WORKSPACE_CHANGE_NOTICE}\n新工作区：${path.resolve(c.path)}`;
     }
     if (c.reset) {
-      updateWorkspace("brain", null, DATA_DIR);
+      try {
+        updateWorkspace("brain", null, DATA_DIR);
+      } catch (e) {
+        return `❌ ${e instanceof Error ? e.message : String(e)}`;
+      }
       return `✅ brain 工作区已恢复默认：${defaultWorkspacePath("brain", DATA_DIR)}\n${WORKSPACE_CHANGE_NOTICE}`;
     }
     const ws = resolveWorkspace("brain", DATA_DIR);
@@ -293,9 +296,13 @@ export async function handleControlRequest(req: ControlRequest, owner: string): 
       ensureBrainHome();
       ensureWorkerHome();
       killIdleConns();
-      if (!(await restartForMcpChange()))
+      // 槽位是记忆化的：运行期改了 brain.json 的 bin/args/extra-args/model，光重启进程不够，
+      // 必须让下一轮 getAgent("brain") 按新配置重新解析（setAgent("brain", null) 也行）。
+      seedSlots(loadBrainConfig(DATA_DIR));
+      const state = await restartForMcpChange("config.reload");
+      if (state === "failed")
         return "Agent 配置已重新读取，但大脑正在切换中，这次没有重启；切换完成后用 `wemind config reload` 再试一次。";
-      if (isTurnInFlight())
+      if (state === "queued")
         return "Agent 配置已重新读取，重启已排队：当前回合结束后生效（不打断正在生成的回复）。";
       return "Agent 配置已重新读取，常驻大脑已重启；下一条消息使用新配置。已有会话会在重启后自动 session/load 恢复。";
     }

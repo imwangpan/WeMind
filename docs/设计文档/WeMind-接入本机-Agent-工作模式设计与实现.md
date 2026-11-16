@@ -104,7 +104,7 @@
 
 Phase 1 已落地（本分支）：
 
-- 账号默认 `homeMode = direct`（`agents/config/home-mode.ts`），读取 `<账号>/runtime.json`；缺失/损坏/无法识别的取值回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖。
+- 账号默认 `homeMode = direct`（`agents/config/home-mode.ts`），读取 `<账号>/runtime.json`；缺失/损坏/无法识别的取值回落 `direct`，`WEMIND_HOME_MODE` 只做一次性覆盖。daemon 启动时用 `readHomeMode()` 快照成 `homeModeAtBoot`，poller / 快车道 / 微信设置告警只读快照；`migrateLegacyHomes()` 用 `readPersistedHomeMode()` 只看磁盘持久值，避免一次性覆盖把持久 `managed` 账号的副本误备份。`runtime.json` 按需创建，结构为 `{version:1, homeMode:"direct"|"managed", pendingReload?:{reason:string,at:number}}`。
 - `agentRuntime("brain"|"worker", ag)` 在 `direct` 下直接返回 Agent 的真实配置目录，`configDir === home`；WeMind 不生成任何配置副本、不注入 `homeEnvVar`、不写 settings / MCP / 权限文件。`managed` 才使用 `brain-home` / `worker-home`，由 adapter 生成副本并按 `inheritDirs` / `inheritFiles` 继承。
 - brain 与 worker 的启动/会话 `cwd` 改为账号级默认工作区（`<账号>/workspace/brain`、`<账号>/workspace/worker`，`agents/config/workspace.ts`）；`session-cwd.json` 记录 `<agent>:<sessionId> → cwd`，恢复旧会话时优先使用它。`WEMIND_WORKER_CWD` 与 `task --cwd` 仍是一次性覆盖。
 - `direct` 的 MCP 完全由 Agent 真实配置决定：文件式 Agent 自己读配置，DSH 读 profile YAML 的 `dsh-mcp-client` 条目，Claude Code / Copilot / Codex 读各自的 `.claude.json` / `mcp-config.json` / `config.toml`。WeMind **不重发 catalog**；只有用户显式配置的微信独享 `overlay.mcp.extra` 会通过 ACP 补进会话（仅 `acpMcpServers` 的 Agent）。`加载/卸载 MCP` 在 direct 下原样转给 Agent（由它自己改配置）。`managed` 才是 brain 默认空（激活集按 agent 分键持久化在 `<账号>/brain-mcps.json`，`version: 2`）、worker 真实全量减 `wechat`；`mcpDelivery: "acp"` 的 Agent 由 WeMind 经 ACP 投递，文件式 Agent 写副本配置。
@@ -113,10 +113,12 @@ Phase 1 已落地（本分支）：
 - 微信 overlay 位于 `<账号>/agent-overrides/<agent>.json`；CLI 为 `wemind config wechat show|edit <agent>`，微信侧为只读的 `微信配置 查看 <agent>`。
 - 真实配置写入走 `agents/config/agent-config-writer.ts`：备份、mtime + size + sha256 并发校验、同目录原子写；含注释 JSONC、YAML/TOML 第一期拒绝写入。
 - 入站媒体在 `direct` 下写到 `<账号>/media/inbound`；`managed` 仍是 `<managed>/media/inbound`。
-- 配置变化通过 `configFingerprint()` 在每轮开始前检测并重启进程（只哈希显式配置文件与 overlay；无 `homeEnvVar` 的 Agent 返回空，改完重启 daemon）；`wemind config reload` 经控制桥让 brain 重建进程，有回合在跑时排到回合结束。worker 在每次 `acquire` 时按该任务 agent 重新解析。
+- `configFingerprint()` 把 `ag.name + rt.mode` 与显式配置文件、overlay 一起哈希，在每轮开始前检测变化；即使没有 `homeEnvVar` 也不再返回空指纹，homeMode 改变会触发进程重建。`wemind config reload` 与微信「加载/卸载 MCP」的重启统一走 `restartForMcpChange()` 三态 `applied|queued|failed`：`applied` 立即生效，`queued` 排到当前回合结束并写 `<账号>/runtime.json` 的 `pendingReload:{reason,at}`，`failed` 只在切脑进行中出现；daemon 启动按当前配置重建后消费标记并清掉，切脑成功也清排队标记，`config.reload` 还会重新 `seedSlots(loadBrainConfig(DATA_DIR))`。worker 在每次 `acquire` 时按该任务 agent 重新解析。
 - 技能/记忆在 `direct` 下由 Agent 自己读真实目录，天然双向；`managed` 才由 WeMind 的 `inherit.ts` 按 `inheritDirs` / `inheritFiles` 链接/复制。
 - 会话指针仍在 `brain-sessions.json` / `worker-sessions.json`；Agent 的真实会话库由各 Agent 自己管理，`direct` 下与终端共用同一个库。
 - 微信侧回复风格走 `<账号>/wechat-settings.json`（新账号骨架创建空的）：`replyStyle` 目前只有 `null`（默认，与终端一致）/ `"concise"`。`concise` 时每轮在 prompt 末尾追加一段「精简」要求；只影响措辞，不改 Agent 配置，也只在微信 brain 回合生效。每轮现读，改完下一条消息即生效（`wemind config reply-style [concise|off]`）。
+
+> **2026-11-15 补注（现行 reload / homeMode / 指纹口径）**：本文件保留早期实施阶段的叙述与实测结论，现行做法以本节、§7.7、§15.2、§16.1 为准。差异是：daemon 启动把 homeMode 快照成 `homeModeAtBoot`，运行期不逐条消息重读；迁移只读 `readPersistedHomeMode()`；`<账号>/runtime.json` 可带 `pendingReload:{reason,at}`，让排队重启跨 daemon 重启可恢复；`configFingerprint()` 永远包含 agent 名与 homeMode；三态 `applied|queued|failed` 会如实告诉用户是立即生效、排队还是失败。§17 的实施阶段与 §18 的历史实测结论按原文保留，不用新口径倒填；验收用例清单按现行做法同步。
 
 ### 3.2 与目标的差距
 
@@ -141,7 +143,7 @@ Phase 1 已落地（本分支）：
 3. **显式覆盖**：微信独享配置只写入 overlay（`mcp.disable` / `mcp.extra`）；默认不复制整份配置。
 4. **回环防护**：WeMind 自己生成的 MCP 集永久排除 `wechat`（按名字和定义双重判断）；Agent 真实配置里的微信 MCP 只告警，由用户自行删除。
 5. **会话绑定 cwd**：工作区变化只影响新会话；已有会话不自动搬家。
-6. **显式 reload**：配置变化在空闲时应用；不在一轮对话中途换模型/权限/MCP。
+6. **显式 reload**：配置变化由三态 `applied|queued|failed` 决定；`applied` 在空闲时立即应用，`queued` 排到当前回合结束并落盘 `pendingReload`，`failed` 在切脑进行中不重启，不在一轮对话中途换模型/权限/MCP。
 7. **失败要响**：外部工作区不存在、Agent 不可用、配置解析失败要明确报错，不静默回退。
 8. **账号数据隔离**：token、会话指针、任务、overlay、workspace 配置按账号隔离；真实 Agent 配置是共享基线。
 9. **副本不带 Agent 私有知识**：`managed` 只做两件"格式级"的事——整份复制真实配置、按 MCP **文件格式**剥掉 MCP 段。不维护"某个 Agent 该剥哪些键/该生成哪些文件"的清单：那等于替用户改配置，上游一改键名就静默剥错，表现成"终端能用、微信不能用"。Agent 专有差异一律回到 `McpAdapter` 与预设字段（`settingsBase` / `inheritDirs` / `credentialFiles`…），不在副本里按 Agent 名加分支。
@@ -166,7 +168,7 @@ AgentHomeResolver ──► Agent 进程
    ├── WorkspaceManager（brain / worker 默认工作区）
    ├── EnvProvider（继承或非敏感快照）
    ├── SessionBinder（sessionId ↔ cwd）
-   └── ReloadCoordinator（空闲 reload / 新会话生效）
+   └── ReloadCoordinator（三态 reload：applied / queued / failed，queued 落盘 pendingReload）
 ```
 
 ### 5.1 核心组件
@@ -180,7 +182,7 @@ AgentHomeResolver ──► Agent 进程
 | `WorkspaceManager`（`agents/config/workspace.ts`） | 校验、创建、读取 brain/worker 默认工作区；区分 default/external |
 | `EnvProvider`（`agents/config/env-snapshot.ts` + `brain-agents.ts`） | 继承 daemon 环境，或加载非敏感快照（PATH/代理/locale）；解析顺序不绑定某个版本管理器 |
 | `SessionBinder`（`agents/config/session-cwd.ts`） | 保存 `<agent>:<sessionId> → cwd`；恢复时使用并校验 cwd |
-| `ReloadCoordinator`（`config-fingerprint.ts` + `config.reload` 控制桥） | 检测真实配置变化；手动 reload 让 brain 重建进程，重启在回合结束后执行 |
+| `ReloadCoordinator`（`config-fingerprint.ts` + `config.reload` 控制桥） | 检测真实配置变化；`restartForMcpChange()` 返回 `applied|queued|failed`，排队时写 `runtime.json` 的 `pendingReload`，daemon 启动消费标记；手动 `config.reload` 还会重新 seed 槽位 |
 | `AgentCapabilityMatrix`（`brain-presets.ts`） | 每个 Agent 的 homeMode、MCP 传输、会话布局、yolo 方式、并发注意事项 |
 
 ### 5.2 brain 与 worker 的差异
@@ -192,7 +194,7 @@ AgentHomeResolver ──► Agent 进程
 | MCP 默认 | `direct`：由 Agent 自己加载真实配置（WeMind 不额外下发）；`managed`：**空**，显式加载后持久到所有新会话 | `direct`：由 Agent 自己加载真实配置，WeMind 不额外下发；`managed`：真实全量减 `wechat` |
 | 会话 | 每个用户一条当前 session | 每个任务一条 session |
 | 进程 | 1 个常驻 ACP 进程 | N 个进程池 |
-| 重载 | 空闲时 reload / 新会话 | 每次 `acquire` 重新解析配置；任务中不热切换 |
+| 重载 | 三态 `applied|queued|failed`；空闲立即重建、在途回合排队并落盘标记 | 每次 `acquire` 重新解析配置；任务中不热切换 |
 
 ---
 
@@ -246,7 +248,7 @@ AgentHomeResolver ──► Agent 进程
 - 微信里的 `加载 / 卸载 MCP` 不拦截，原样作为消息交给 Agent；它能不能改、怎么改由 Agent 自己的能力决定。
 - 不改写任何真实配置；`wemind config agent set` 这类写入口在此模式下仍会写真实文件（用户显式操作），但启动路径不做任何生成/同步。
 - 不注入 `homeEnvVar` 意味着 Agent 使用自己的默认配置目录；若用户通过系统环境变量把配置指到别处，由用户自己负责。
-- 配置指纹仍会盯真实配置文件与 overlay；有 `homeEnvVar` 的 Agent 在下一轮前发现变化会重启进程，没有 `homeEnvVar` 的 Agent 返回空指纹（改完重启 daemon）。
+- 配置指纹盯真实配置文件与 overlay，并先写入 `ag.name + rt.mode`：即使没有 `homeEnvVar` 也不返回空指纹，homeMode 改变会在下一轮前触发重建；有 `homeEnvVar` 的 Agent 同样按文件变化重建。
 
 ### 7.3 managed 模式
 
@@ -340,12 +342,12 @@ AgentHomeResolver ──► Agent 进程
 
 ### 7.7 reload 策略
 
-- 配置来源变化用 mtime + size + sha256 做指纹（`agents/config/config-fingerprint.ts`），**在每轮开始前比对**，不启动常驻轮询 watcher。
+- `configFingerprint()`（`agents/config/config-fingerprint.ts`）在每轮开始前比对显式配置文件内容哈希、overlay 与 `ag.name + rt.mode`，不启动常驻轮询 watcher；没有 `homeEnvVar` 也不返回空指纹，homeMode 变化会触发重建。
 - 忽略 WeMind 自己刚写入的 hash，避免回环。
-- brain 在**空闲**时 reload；有在途回合则排队，不中途换模型/权限/MCP。
+- brain 的重启由 `restartForMcpChange()` 统一给出三态 `applied|queued|failed`：空闲时 `applied` 立即重建；有在途回合时 `queued` 排到回合结束、写 `<账号>/runtime.json` 的 `pendingReload:{reason,at}`，微信「加载/卸载 MCP」与 `config.reload` 都按三态如实回执；切脑进行中返回 `failed` 且不重启。daemon 启动读标记，按当前配置重建进程后清标记并 WARN，`clearQueuedReload()` 同时清内存标志与磁盘标记，切脑成功也清排队标记。
 - worker 在每次 `acquire` 时刷新；任务运行中不热切换。
 - 无法 reload 的 Agent 明确提示“需要新会话/重启 daemon”。
-- `wemind config reload` 提供手动入口。
+- `wemind config reload` 提供手动入口，并重新 `seedSlots(loadBrainConfig(DATA_DIR))`。
 
 ---
 
@@ -724,7 +726,7 @@ wemind env capture [--key <key>] [--dry-run]
 
 **迁移范围仅此两步**：不迁移旧 Agent 会话文件，也不改写 `brain-sessions.json` / `worker-sessions.json`（旧副本会话在 `direct` 下可能无法 `load/resume`，此时如实报错，用户在微信发 `新会话` 即可）；不迁移 `brain-mcps.json`（它只在 `managed` 下有语义）；不生成 `workspace.json` / `session-cwd.json` / per-agent overlay（都按需创建）。
 
-迁移在 daemon 启动时自动执行（`migrateLegacyHomes()`），没有对应的 CLI 子命令，也没有启动后的微信迁移通知；`.bak-<时间>` 备份不自动删除，由用户确认后清理。
+迁移在 daemon 启动时自动执行（`migrateLegacyHomes()`），`migrateLegacyHomes()` 用 `readPersistedHomeMode()` 只读磁盘持久值、不看 `WEMIND_HOME_MODE` 的一次性覆盖，避免持久 `managed` 账号的 `brain-home` / `worker-home` 被误备份；没有对应的 CLI 子命令，也没有启动后的微信迁移通知；`.bak-<时间>` 备份不自动删除，由用户确认后清理。
 
 ---
 
@@ -735,8 +737,8 @@ wemind env capture [--key <key>] [--dry-run]
 | 命令 | 作用 |
 |---|---|
 | `wemind config show [--key <key|label>]` | 显示 homeMode、真实配置目录、overlay 目录、workspace、env 快照键与 `managed` 的 MCP 激活集文件 |
-| `wemind config home-mode [direct|managed]` | 查看/写入 `<账号>/runtime.json`；CLI 提示「重启 daemon 后生效」，实际是**新起的 agent 进程**按新值、常驻 brain 要重连或重启才换 home（见 §18.7） |
-| `wemind config reload [--key <key|label>]` | 经控制桥让常驻 brain 重建进程，空闲时执行 |
+| `wemind config home-mode [direct|managed]` | 查看/写入 `<账号>/runtime.json`；CLI 提示「重启 daemon 后生效」是保守说法，`configFingerprint()` 含 `rt.mode`，写入后下一轮前会触发进程重建；`WEMIND_HOME_MODE` 仍只做一次性覆盖，运行期告警用 `homeModeAtBoot` 快照、迁移用 `readPersistedHomeMode()`（见 §3.1、§15.2、§18.7） |
+| `wemind config reload [--key <key|label>]` | 经控制桥走 `restartForMcpChange()` 三态 `applied|queued|failed`；`queued` 写 `runtime.json` 的 `pendingReload`，回执明确说「重启已排队到回合结束」，还会重新 seed 槽位 |
 | `wemind config reply-style [concise|off] [--key <key|label>]` | 查看/设置微信侧回复风格（写 `<账号>/wechat-settings.json`）；每轮现读，下一条消息生效，不改 Agent 配置 |
 | `wemind config agent show|get|set|unset|edit <agent> [<键路径>] [值] [--file <相对路径>]` | 默认修改真实 Agent 配置；写入前备份并做并发校验 |
 | `wemind config wechat show|edit <agent>` | 只读写微信侧 overlay 的 `mcp.disable` / `mcp.extra`，不碰真实文件 |
@@ -838,7 +840,7 @@ wemind env capture [--key <key>] [--dry-run]
 12. 真实配置包含 `wechat` 时：`direct` 只告警、不阻止启动；`managed` 副本剔除、真实文件不动；WeMind 下发集永不包含 `wechat`。
 13. 老账号迁移与 `.bak-<时间>` 备份（迁移在 daemon 启动时自动执行）。
 14. `direct` 入站文件/视频落到 `<账号>/media/inbound/`，prompt 中的绝对路径可读，30 天/1GB 清理仍生效。
-15. 直接编辑 overlay 或用 `wemind config wechat edit` 修改都能触发 idle reload；改真实配置也能在下一条新会话生效。
+15. 直接编辑 overlay 或用 `wemind config wechat edit` 修改都能触发三态 reload：空闲 `applied`、在途回合 `queued`（写 `runtime.json` 的 `pendingReload` 并如实回执）、切脑中 `failed`；daemon 重启消费标记；改真实配置也能在下一条新会话生效。
 16. `managed` 下 brain 默认空 MCP 是否真的为空：取决于该 Agent 是否在复制阶段被整体剥离（DSH 是），以及它是否把自身原生 MCP 与 ACP 下发的合并（Claude Code / Codex 等会，**传空列表不等于卸载**）。这是已确认的边界，见 §8.3，只做提示、不承诺。`direct` 不承诺空集。
 17. 微信回复风格：`wemind config reply-style concise` 后下一条微信消息明显更精简，`off` 后恢复；worker 任务结果与终端行为不受影响；坏 `wechat-settings.json` 只告警不打断回合。
 

@@ -144,28 +144,47 @@ export function docChanged(entry, changedPaths) {
 
 /**
  * 内容级校验只扫「结论会写在里面」的文件：仓库文档 + 包源码（日志文案也算结论）。
- * 刻意排除 scripts/：STALE_FACTS 的 pattern 字面量自身就写在 scripts/doc-impact.rules.mjs 里，
- * 扫到会自命中；同理排除依赖目录与构建产物。
+ * 只排除登记 pattern 的三个脚本自身（它们的字面量会自命中），其它 scripts/ 下的 md/txt 仍要扫；
+ * 依赖目录、构建产物、worktree 与 agent 私有目录跳过。
  */
-const STALE_SCAN_EXCLUDE = /^(?:\.worktrees\/|\.agents\/|\.git\/|scripts\/|node_modules\/)|(?:^|\/)node_modules\/|(?:^|\/)dist\//;
+const STALE_SCAN_EXCLUDE = /^(?:\.worktrees\/|\.agents\/|\.git\/|node_modules\/|scripts\/doc-impact\.rules\.mjs$|scripts\/doc-guards\.test\.mjs$|scripts\/doc-impact\.mjs$)|(?:^|\/)node_modules\/|(?:^|\/)dist\//;
 
 export function isStaleScanPath(rel) {
   if (!rel || rel.endsWith("/") || STALE_SCAN_EXCLUDE.test(rel)) return false;
   if (/^(?:AGENTS\.md|README\.md|llms\.txt)$/.test(rel)) return true;
   if (/^docs\/.*\.(?:md|txt)$/.test(rel)) return true;
+  if (/^scripts\/.*\.(?:md|txt)$/.test(rel)) return true;
   if (/^packages\/[^/]+\/README\.md$/.test(rel)) return true;
   return /^packages\/.*\.ts$/.test(rel);
 }
 
-/** 读工作树里文件的最终内容（含未跟踪文件）；删掉/读不到的文件跳过。 */
-export function collectDocContents() {
-  const tracked = (tryGit(["ls-files"]) ?? "").split(/\r?\n/);
-  const untracked = (tryGit(["ls-files", "--others", "--exclude-standard"]) ?? "").split(/\r?\n/);
+/** 还原 git ls-files 输出：C 风格引号路径先还原，空行与目录项丢掉。 */
+export function parseLsFiles(raw) {
+  return (raw ?? "")
+    .split(/\r?\n/)
+    .map((line) => unquoteGitPath(line))
+    .filter((p) => p && !p.endsWith("/"));
+}
+
+/**
+ * 读内容级校验要用的文件。默认读工作树最终内容（含未跟踪）；`--staged` 时只读 index blob
+ * 并排除未跟踪文件，与 pre-commit 的路径层口径一致，避免「暂存区干净、工作树草稿却挡住提交」。
+ */
+export function collectDocContents({ staged = false } = {}) {
+  const tracked = parseLsFiles(tryGit(["ls-files"]));
+  const untracked = staged
+    ? []
+    : parseLsFiles(tryGit(["ls-files", "--others", "--exclude-standard"]));
   const files = [];
   for (const rel of new Set([...tracked, ...untracked])) {
     if (!isStaleScanPath(rel)) continue;
     try {
-      files.push({ path: rel, content: fs.readFileSync(path.join(ROOT, rel), "utf8") });
+      // staged 用 `git show :path` 读暂存区 blob；工作树还没 add 的修改不属于这次提交。
+      const content = staged
+        ? tryGit(["show", `:${rel}`])
+        : fs.readFileSync(path.join(ROOT, rel), "utf8");
+      if (content === null) continue;
+      files.push({ path: rel, content });
     } catch {
       // 索引里已删除、或临时文件被移走：它没有「仍写在文档里」的结论。
     }
@@ -173,9 +192,15 @@ export function collectDocContents() {
   return files;
 }
 
+/** 复用同一个 RegExp 时先重置 lastIndex，避免带 g 的规则跨行串状态。 */
+function testRe(re, value) {
+  re.lastIndex = 0;
+  return re.test(value);
+}
+
 /** allow 项的 path 可以是精确字符串，也可以是给一类文件用的正则。 */
 function allowPathMatches(rule, rel) {
-  return typeof rule === "string" ? rule === rel : rule.test(rel);
+  return typeof rule === "string" ? rule === rel : testRe(rule, rel);
 }
 
 /**
@@ -185,9 +210,9 @@ function allowPathMatches(rule, rel) {
 export function isStaleHitAllowed(allow, { rel, content, line, section }) {
   return allow.some((a) => {
     if (!a.path || !allowPathMatches(a.path, rel)) return false;
-    if (a.section && !a.section.test(section)) return false;
-    if (a.linePattern && !a.linePattern.test(line)) return false;
-    if (a.marker && !a.marker.test(content)) return false;
+    if (a.section && !testRe(a.section, section)) return false;
+    if (a.linePattern && !testRe(a.linePattern, line)) return false;
+    if (a.marker && !testRe(a.marker, content)) return false;
     return true;
   });
 }
@@ -199,8 +224,15 @@ export function checkStaleFacts(facts, files) {
     for (const file of files) {
       const lines = file.content.split(/\r?\n/);
       let section = "";
+      let inFence = false;
       for (let i = 0; i < lines.length; i += 1) {
         const line = lines[i];
+        // 代码围栏里的 `## [x.y.z]` 只是示例，不能伪造已发布章节让 allow 错误放行。
+        if (/^\s*(?:```|~~~)/.test(line)) {
+          inFence = !inFence;
+          continue;
+        }
+        if (inFence) continue;
         if (/^#{1,2} /.test(line)) section = line.trim();
         fact.pattern.lastIndex = 0;
         if (!fact.pattern.test(line)) continue;
@@ -228,11 +260,12 @@ export function checkStaleFacts(facts, files) {
 }
 
 /**
- * 内容级结论是否在 --check 下拦住本次执行。
- * 刻意不接收豁免结果：`Docs-Impact: none — Pure refactor` 是「这次改动不必同步文档」的出口，
- * 不是「仓库里可以继续留着已推翻的结论」的出口；ca63fcb / 621f0cb 就是靠它跳过整条分支。
+ * 内容级结论是否在 --check 下拦住本次执行。第三形参只是调用方递来的豁免结果，刻意不读：
+ * `Docs-Impact: none — Pure refactor` 是「这次改动不必同步文档」的出口，不是「仓库里可以继续留着
+ * 已推翻的结论」的出口；ca63fcb / 621f0cb 就是靠它跳过整条分支。main() 在 readEscapeHatch() 之前调用它。
  */
-export function staleBlocksCheck(check, staleHits) {
+export function staleBlocksCheck(check, staleHits, _escapeIgnored) {
+  void _escapeIgnored;
   if (!check || !staleHits || staleHits.length === 0) return false;
   return true;
 }
@@ -284,17 +317,17 @@ function collectDiff({ staged, base }) {
   const commitCount = Number(
     (tryGit(["rev-list", "--count", `${mb}..HEAD`]) ?? "").trim() || 0,
   );
-  const dirty = Boolean(
-    (tryGit(["status", "--porcelain", "--untracked-files=normal"]) ?? "").trim(),
-  );
+  // dirty 只看已跟踪文件的改动：TASK_NOTES.md 之类的本地未跟踪笔记不该让单提交的提交信息豁免失效。
+  const dirty = Boolean((tryGit(["status", "--porcelain", "--untracked-files=no"]) ?? "").trim());
 
   // `git diff` 不含未跟踪文件；本地 verify 时常还没 git add，漏掉它们会让规则假绿。
   // 未跟踪文件整体当作新增：状态行 A + 每行内容都当新增行。
-  const untracked = (tryGit(["ls-files", "--others", "--exclude-standard"]) ?? "")
-    .split(/\r?\n/)
-    .filter(
-      (p) => p && !p.endsWith("/") && !p.startsWith(".worktrees/") && !p.startsWith(".agents/"),
-    );
+  const untracked = parseLsFiles(tryGit(["ls-files", "--others", "--exclude-standard"])).filter(
+    (p) => !p.startsWith(".worktrees/") && !p.startsWith(".agents/"),
+  );
+  const untrackedInScope = untracked.some(
+    (p) => isStaleScanPath(p) || /^(?:packages|scripts|docs)\//.test(p),
+  );
   for (const rel of untracked) {
     files.push({ status: "A", path: rel });
     try {
@@ -304,7 +337,7 @@ function collectDiff({ staged, base }) {
       // 读不到就只记录路径，规则仍能看到「新增了这个文件」。
     }
   }
-  return { files, added, commitCount, dirty };
+  return { files, added, commitCount, dirty, untrackedInScope };
 }
 
 /** 接入文档名归一化：大小写与连字符不参与比较（预设 `claude-code` ↔ 文件 `接入-ClaudeCode.md`）。 */
@@ -383,9 +416,12 @@ export function readEscapeHatch({
   return null;
 }
 
-/** 只有「范围恰好一个提交且工作区干净」时，HEAD 的提交信息才覆盖本次检查的 diff。 */
-export function commitMessageCoversDiff({ commitCount, dirty }) {
-  return commitCount === 1 && !dirty;
+/**
+ * 只有「范围恰好一个提交、已跟踪文件干净、且没有落在文档/源码范围内的未跟踪文件」时，
+ * HEAD 的提交信息才覆盖本次检查的 diff；未跟踪的新文档/源码不是那个提交的一部分。
+ */
+export function commitMessageCoversDiff({ commitCount, dirty, untrackedInScope = false }) {
+  return commitCount === 1 && !dirty && !untrackedInScope;
 }
 
 function printRule(rule, missing) {
@@ -426,9 +462,8 @@ function main(argv) {
   const baseIndex = argv.indexOf("--base");
   const base = baseIndex >= 0 ? argv[baseIndex + 1] : undefined;
 
-  // 内容层与 diff 无关：读工作树最终内容，且必须在豁免判断之前独立结论。
-  // 放在 collectDiff 之后是为了复用同一份 git 环境；没有对比基准时这一层仍要跑。
-  const staleHits = checkStaleFacts(STALE_FACTS, collectDocContents());
+  // 内容层与 diff 无关：读最终内容，且必须在豁免判断之前独立结论；没有对比基准时这一层仍要跑。
+  const staleHits = checkStaleFacts(STALE_FACTS, collectDocContents({ staged }));
   printStaleHits(staleHits, check);
   if (staleBlocksCheck(check, staleHits)) return 1;
 

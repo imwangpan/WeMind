@@ -47,6 +47,7 @@ import {
 } from "../../agents/config/workspace.js";
 import { addMcp, catalogNames, loadActive, removeMcp } from "../../agents/managed/mcp-brain.js";
 import { bridgeReady, pickKey, viaBridge } from "../cli-context.js";
+import { buildShellLine, shellEnv } from "../../shared/process/spawn-agent.js";
 
 type Opts = { key?: string; file?: string; role?: "brain" | "worker" };
 
@@ -54,7 +55,7 @@ function takeOpt(rest: string[], flag: string): string | undefined {
   const i = rest.indexOf(flag);
   if (i < 0) return undefined;
   const v = rest[i + 1];
-  if (v === undefined || v.startsWith("--")) throw new Error(`${flag} 缺少参数值`);
+  if (v === undefined || v === "" || v.startsWith("--")) throw new Error(`${flag} 缺少参数值`);
   rest.splice(i, 2);
   return v;
 }
@@ -75,9 +76,24 @@ function openEditor(file: string): void {
     process.env.VISUAL?.trim() ||
     process.env.EDITOR?.trim() ||
     (process.platform === "win32" ? "notepad" : "vi");
-  if (!fs.existsSync(file)) fs.writeFileSync(file, "{}\n", "utf-8");
+  if (!fs.existsSync(file)) {
+    // 只给 JSON/JSONC 预建空对象：TOML/YAML 是 Agent 自己维护的格式，写 "{}" 会直接把它弄坏。
+    const fmt = configFileFormat(file);
+    if (fmt === "unsupported")
+      throw new Error(
+        `配置文件不存在：${file}。WeMind 不会为非 JSON 格式预建空文件；请先让 Agent 自己生成它，或用 --file 指向一个 .json/.jsonc 配置。`,
+      );
+    fs.writeFileSync(file, "{}\n", "utf-8");
+  }
+  // Windows 的 .cmd/.bat 编辑器必须「整串命令行 + shell」；shell:false 直接 spawn argv[0] 会 EINVAL。
   const argv = editor.split(/\s+/).filter(Boolean);
-  const r = spawnSync(argv[0], [...argv.slice(1), file], { stdio: "inherit", shell: false });
+  const line = buildShellLine(argv[0], [...argv.slice(1), file]);
+  const r = spawnSync(line, {
+    stdio: "inherit",
+    shell: true,
+    windowsHide: true,
+    env: shellEnv(process.platform, process.env),
+  });
   if (r.error) throw new Error(`无法启动编辑器「${editor}」：${r.error.message}`);
   if (r.status !== 0) throw new Error(`编辑器退出码 ${r.status ?? "unknown"}`);
 }
@@ -320,12 +336,26 @@ export function cmdMcp(rest: string[], keySel?: string): string {
   if (sub === "disable") {
     const name = rest.shift();
     if (!name) throw new Error("需要 MCP 名字");
+    // 先问 managed 的激活集：direct 下 removeMcp 返回 ok:false，此时绝不写 overlay
+    // （否则「已禁用」是假成功，且切到 managed 后这条 disable 会静默生效）。
+    const r = removeMcp(name, ag, dir);
+    if (!r.ok) return r.text;
     const ov = readOverlay(ag.name, dir).overlay;
     const disable = [...new Set([...(ov.mcp?.disable ?? []), name])];
-    writeOverlay(ag.name, { ...ov, mcp: { ...ov.mcp, disable } }, dir);
-    const r = removeMcp(name, ag, dir);
-    const how = r.ok ? `已从当前集合卸载（${r.text}）` : r.text;
-    return `已禁用「${name}」：${how}。用 \`wemind config reload --key ${key}\` 让 daemon 重启大脑。`;
+    try {
+      writeOverlay(ag.name, { ...ov, mcp: { ...ov.mcp, disable } }, dir);
+    } catch (e) {
+      // 半个成功不能留着：尽力把激活集加回去，再如实报错。
+      try {
+        addMcp(name, ag, dir);
+      } catch {
+        /* best-effort：回滚失败也照实报错，让用户可以再发一次 enable */
+      }
+      throw new Error(
+        `卸载「${name}」后写 overlay 失败，已尝试把激活集加回去：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    return `已禁用「${name}」：已从当前集合卸载（${r.text}）。用 \`wemind config reload --key ${key}\` 让 daemon 重启大脑。`;
   }
   if (sub === "add") {
     const name = rest.shift();

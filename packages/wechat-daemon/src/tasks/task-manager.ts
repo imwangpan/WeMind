@@ -492,9 +492,13 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
   // 收尾：连接还给进程池（活着才有复用价值；被 stop 时可能已经死了，release 会就地清掉空壳）。
   // 当前会话记录只在「任务真的结束」（已被 stop、不在表里）时清掉：回到「已中断」的任务要留着它，用户重述进展后还能再试。
   if (task.conn === conn) {
-    if (tasks.get(task.id) !== task) conn.dropSession(task.key);
-    release(conn);
-    task.conn = undefined;
+    // 收尾无论如何都要把连接还给池：dropSession 写盘失败也不能让 entries 永远 busy、池耗尽（AGENTS.md §4.13）。
+    try {
+      if (tasks.get(task.id) !== task) conn.dropSession(task.key);
+    } finally {
+      release(conn);
+      task.conn = undefined;
+    }
   }
   emitState();
   log.info(`task ${task.id} loop ended`);
@@ -668,11 +672,15 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
     }
     const conn = t.conn;
     if (conn) {
-      conn.dropSession(t.key);
-      if (wasWaiting)
-        release(conn); // 等回复的任务进程是干净的 → 留着复用
-      else drop(conn); // 正在跑的那条：回合没法「优雅取消」，只能杀掉（正在做的动作就此作罢）
-      t.conn = undefined;
+      // 同上：dropSession 抛错也必须继续 release/drop，否则正在跑的任务没被力杀、进程与工具调用继续跑。
+      try {
+        conn.dropSession(t.key);
+      } finally {
+        if (wasWaiting)
+          release(conn); // 等回复的任务进程是干净的 → 留着复用
+        else drop(conn); // 正在跑的那条：回合没法「优雅取消」，只能杀掉（正在做的动作就此作罢）
+        t.conn = undefined;
+      }
     }
   }
   persist();

@@ -37,7 +37,9 @@ const {
   restart,
   restartForMcpChange,
   resumeSession,
+  clearQueuedReload,
 } = await import("./acp-brain.js");
+const { markReloadPending, readReloadMarker } = await import("../agents/config/home-mode.js");
 const { getAgent, resetSlotsForTest, seedSlots, setAgent } =
   await import("../agents/agent-slot.js");
 const { loadBrainConfig, saveBrainConfig } = await import("../agents/brain-config.js");
@@ -530,7 +532,16 @@ describe("MCP 变更后的重启门", () => {
     } finally {
       endSwitch();
     }
-    await expect(p).resolves.toBe(true);
+    await expect(p).resolves.toBe("applied");
+  });
+
+  it("回合中配置变更排队并落盘；清掉排队状态后跨 daemon 重启不留痕", async () => {
+    setup();
+    markReloadPending("加载/卸载 MCP", dataDir);
+    expect(readReloadMarker(dataDir)).toMatchObject({ reason: "加载/卸载 MCP" });
+    clearQueuedReload();
+    expect(readReloadMarker(dataDir)).toBeNull();
+    await expect(restartForMcpChange("config.reload")).resolves.toBe("applied");
   });
 });
 

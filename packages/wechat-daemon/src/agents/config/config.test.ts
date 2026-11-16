@@ -8,11 +8,13 @@ import { agentRuntime, mediaDirFor } from "./runtime.js";
 import { readOverlay } from "./overlay.js";
 import {
   captureEnvSnapshot,
+  clearEnvSnapshot,
+  envSnapshotPath,
   mergeEnvSnapshot,
   readEnvSnapshot,
   writeEnvSnapshot,
 } from "./env-snapshot.js";
-import { getSessionCwd, setSessionCwd } from "./session-cwd.js";
+import { getSessionCwd, sessionCwdPath, setSessionCwd, usableSessionCwd } from "./session-cwd.js";
 import {
   defaultWorkspacePath,
   loadWorkspaceConfig,
@@ -21,10 +23,25 @@ import {
   validateWorkspacePath,
   workspaceConfigPath,
 } from "./workspace.js";
-import { mutateConfigFile, setConfigPath, snapshotConfigFile } from "./agent-config-writer.js";
+import {
+  mutateConfigFile,
+  parseConfigPath,
+  setConfigPath,
+  snapshotConfigFile,
+} from "./agent-config-writer.js";
 import { addMcp, catalogNames, loadActive } from "../managed/mcp-brain.js";
 import { configFingerprint } from "./config-fingerprint.js";
-import { homeModePath, normalizeHomeMode, readHomeMode, writeHomeMode } from "./home-mode.js";
+import {
+  clearReloadPending,
+  homeModePath,
+  markReloadPending,
+  normalizeHomeMode,
+  readHomeMode,
+  readPersistedHomeMode,
+  readReloadMarker,
+  writeHomeMode,
+} from "./home-mode.js";
+import { migrateLegacyHomes } from "./migrate-legacy.js";
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "wemind-config-"));
@@ -346,5 +363,143 @@ describe("homeMode：direct / managed", () => {
     expect(mediaDirFor("worker", "managed", dir)).toBe(
       path.join(dir, "worker-home", "media", "inbound"),
     );
+  });
+});
+
+/*
+ * 本轮修复的回归护栏：一次性覆盖不能改写迁移判据、待重启标记必须落盘、会话 cwd 索引写盘是 best-effort、
+ * 损坏配置要带 problem、危险键要拒、旧格式激活集要能写进新格式。
+ */
+describe("持久配置与磁盘失败的边界（修复回归）", () => {
+  it("持久 homeMode 不受 WEMIND_HOME_MODE 一次性覆盖影响；managed 账号的副本不被迁移备份", () => {
+    const dir = tmp();
+    writeHomeMode("managed", dir);
+    process.env.WEMIND_HOME_MODE = "direct";
+    try {
+      expect(readHomeMode(dir)).toBe("direct");
+      expect(readPersistedHomeMode(dir)).toBe("managed");
+      const brainHome = path.join(dir, "brain-home");
+      fs.mkdirSync(brainHome, { recursive: true });
+      migrateLegacyHomes(dir);
+      expect(fs.existsSync(brainHome)).toBe(true);
+    } finally {
+      delete process.env.WEMIND_HOME_MODE;
+    }
+  });
+
+  it("待重启标记可落盘/读取/清除，且 writeHomeMode 不把它冲掉", () => {
+    const dir = tmp();
+    expect(readReloadMarker(dir)).toBeNull();
+    markReloadPending("config.reload", dir);
+    expect(readReloadMarker(dir)?.reason).toBe("config.reload");
+    expect(typeof readReloadMarker(dir)?.at).toBe("number");
+    writeHomeMode("managed", dir);
+    expect(readReloadMarker(dir)?.reason).toBe("config.reload");
+    clearReloadPending(dir);
+    expect(readReloadMarker(dir)).toBeNull();
+  });
+
+  it("损坏的 pendingReload 不算待重启", () => {
+    const dir = tmp();
+    fs.writeFileSync(
+      homeModePath(dir),
+      JSON.stringify({ version: 1, homeMode: "direct", pendingReload: { reason: 1, at: "x" } }),
+      "utf-8",
+    );
+    expect(readReloadMarker(dir)).toBeNull();
+  });
+
+  it("旧格式 brain-mcps.json 也能写进新格式（saveActive 不再丢掉传入的 list）", () => {
+    const dir = tmp();
+    const realHome = path.join(dir, "real");
+    fs.mkdirSync(realHome, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "brain-mcps.json"),
+      JSON.stringify({ version: 1, active: ["old"] }),
+      "utf-8",
+    );
+    const catalog = path.join(dir, "catalog.json");
+    fs.writeFileSync(
+      catalog,
+      JSON.stringify({ mcpServers: { demo: { command: "node" } } }),
+      "utf-8",
+    );
+    const prevMode = process.env.WEMIND_HOME_MODE;
+    const prevCatalog = process.env.WEMIND_MCP_CATALOG;
+    process.env.WEMIND_HOME_MODE = "managed";
+    process.env.WEMIND_MCP_CATALOG = catalog;
+    try {
+      const r = addMcp("demo", fakeAgent(realHome), dir);
+      expect(r.ok).toBe(true);
+      expect(loadActive("kiro", dir)).toContain("demo");
+      const raw = JSON.parse(fs.readFileSync(path.join(dir, "brain-mcps.json"), "utf-8"));
+      expect(raw.version).toBe(2);
+      expect(raw.active.kiro).toContain("demo");
+    } finally {
+      if (prevMode === undefined) delete process.env.WEMIND_HOME_MODE;
+      else process.env.WEMIND_HOME_MODE = prevMode;
+      if (prevCatalog === undefined) delete process.env.WEMIND_MCP_CATALOG;
+      else process.env.WEMIND_MCP_CATALOG = prevCatalog;
+    }
+  });
+
+  it("session-cwd.json 写盘失败不影响当前回合（best-effort，不抛）", () => {
+    const dir = tmp();
+    fs.mkdirSync(sessionCwdPath(dir), { recursive: true });
+    expect(() => setSessionCwd("kiro", "s1", path.join(dir, "ws"), dir)).not.toThrow();
+  });
+
+  it("恢复会话时 UNC / 已删除 / 非目录的 cwd 都回落到当前默认工作区", () => {
+    const dir = tmp();
+    const fallback = path.join(dir, "default");
+    const saved = path.join(dir, "saved");
+    fs.mkdirSync(fallback, { recursive: true });
+    fs.mkdirSync(saved, { recursive: true });
+    expect(usableSessionCwd(saved, fallback, "s1")).toBe(saved);
+    expect(usableSessionCwd(path.join(dir, "gone"), fallback, "s1")).toBe(fallback);
+    const file = path.join(dir, "not-a-dir");
+    fs.writeFileSync(file, "x", "utf-8");
+    expect(usableSessionCwd(file, fallback, "s1")).toBe(fallback);
+    const desc = Object.getOwnPropertyDescriptor(process, "platform")!;
+    try {
+      Object.defineProperty(process, "platform", { ...desc, value: "win32" });
+      const bs = String.fromCharCode(92);
+      expect(usableSessionCwd(`${bs}${bs}server${bs}share`, fallback, "s1")).toBe(fallback);
+      expect(usableSessionCwd("//server/share", fallback, "s1")).toBe(fallback);
+    } finally {
+      Object.defineProperty(process, "platform", desc);
+    }
+  });
+
+  it("workspace.json 损坏时带 problem：set 拒绝覆盖，reset 能修好", () => {
+    const dir = tmp();
+    fs.writeFileSync(workspaceConfigPath(dir), "{ broken", "utf-8");
+    expect(loadWorkspaceConfig(dir).problem).toMatch(/不是合法 JSON/);
+    expect(resolveWorkspace("brain", dir).problem).toMatch(/不是合法 JSON/);
+    const target = path.join(dir, "ws");
+    fs.mkdirSync(target, { recursive: true });
+    expect(() => updateWorkspace("brain", target, dir)).toThrow(/为避免覆盖另一角色的配置/);
+    updateWorkspace("brain", null, dir);
+    expect(loadWorkspaceConfig(dir).problem).toBeUndefined();
+  });
+
+  it("合并环境快照忽略新增的 undefined 键；clear 对不存在的 env.json 返回 false", () => {
+    expect(mergeEnvSnapshot({ PATH: "p", WEMIND_ADD: undefined }, { LANG: "zh" })).toEqual({
+      LANG: "zh",
+      PATH: "p",
+    });
+    const dir = tmp();
+    expect(clearEnvSnapshot(dir)).toBe(false);
+    writeEnvSnapshot(captureEnvSnapshot(), dir);
+    expect(fs.existsSync(envSnapshotPath(dir))).toBe(true);
+    expect(clearEnvSnapshot(dir)).toBe(true);
+  });
+
+  it("配置路径拒绝 __proto__ / constructor / prototype（防原型污染）", () => {
+    for (const key of ["__proto__", "constructor", "prototype"]) {
+      expect(() => parseConfigPath(key)).toThrow(/危险键/);
+      expect(() => parseConfigPath(`${key}.polluted`)).toThrow(/危险键/);
+    }
+    expect(parseConfigPath("a.b[0].c")).toEqual(["a", "b", 0, "c"]);
   });
 });

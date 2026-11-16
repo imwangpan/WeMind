@@ -18,6 +18,16 @@ const VOLATILE = new Set([
   "projects",
 ]);
 
+/** overlay 也是「下一次启动该看到的配置」，单独哈希后喂进指纹。 */
+function hashOverlay(h: crypto.Hash, ag: ResolvedAgent, dir: string): void {
+  try {
+    const ov = overlayPath(ag.name, dir);
+    h.update(`overlay\0${crypto.createHash("sha1").update(fs.readFileSync(ov)).digest("hex")}\n`);
+  } catch {
+    h.update("overlay\0missing\n");
+  }
+}
+
 /**
  * 配置指纹：长跑进程发现终端侧改了配置后，在下一条消息/下一次 spawn 前重建进程，
  * 而不是等 daemon 重启。
@@ -25,19 +35,29 @@ const VOLATILE = new Set([
  * 只看**明确的配置文件内容**，不做目录递归 mtime 扫描：递归会把 agent 自己写的历史/会话当成
  * “终端改了配置”，导致每轮重启（实测 qoder/claude 都会）。
  *
- * 没有可重定向配置目录的 agent（claude-code / cline / qoder 等）返回空串：它们直接读真实配置，
- * WeMind 不做热重载；改完配置重启 daemon 即可。
+ * 运行参数（homeMode / 配置根 / 工作区 / 媒体目录）先入哈希：即使 agent 没有可重定向配置目录
+ * （claude-code / cline / qoder 等），也不能返回恒定的空串——否则 `config.reload` 把 direct 切成
+ * managed 后，旧进程因 `configFp === before` 一直复用，仍按 direct 下发空 MCP 集。
  */
 export function configFingerprint(
   ag: ResolvedAgent,
   rt: AgentRuntime,
   dir: string = DATA_DIR,
 ): string {
-  if (!ag.homeEnvVar) return "";
+  const h = crypto.createHash("sha1");
+  // 只认 agent + homeMode：probe 用 agentRuntime、真 spawn 用 ensure*Home，两者派生字段可能不同，
+  // 全量入哈希会让「每次 ensureProcess 都判定配置变了」；homeMode 才是 direct/managed 的分界。
+  h.update(`runtime\0${ag.name}\0${rt.mode}\n`);
+  if (!ag.homeEnvVar) {
+    hashOverlay(h, ag, dir);
+    return h.digest("hex");
+  }
   // managed 的副本只在重建时更新，所以统一盯**真实配置**：终端改完，下一次 spawn 才会重新复制。
   const base = ag.realHome || rt.configDir;
-  if (!base) return "";
-  const h = crypto.createHash("sha1");
+  if (!base) {
+    hashOverlay(h, ag, dir);
+    return h.digest("hex");
+  }
   const files = new Set<string>();
   const add = (rel: string | undefined): void => {
     if (!rel) return;
@@ -85,12 +105,6 @@ export function configFingerprint(
       h.update(`${p}\0unreadable\n`);
     }
   }
-  // 微信侧 overlay 也属于“下一次启动该看到的配置”。
-  try {
-    const ov = overlayPath(ag.name, dir);
-    h.update(`overlay\0${crypto.createHash("sha1").update(fs.readFileSync(ov)).digest("hex")}\n`);
-  } catch {
-    h.update("overlay\0missing\n");
-  }
+  hashOverlay(h, ag, dir);
   return h.digest("hex");
 }

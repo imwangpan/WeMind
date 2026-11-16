@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,6 +12,7 @@ import {
   matchRules,
   normalizeDocName,
   parseAddedLines,
+  parseLsFiles,
   parseEscapeHatch,
   parseEscapeHatchEnv,
   parseNameStatus,
@@ -121,10 +124,24 @@ describe("doc-impact 解析", () => {
     ).toBeNull();
   });
 
-  it("单提交但工作区有未提交改动时，提交信息也不覆盖本次 diff", () => {
+  it("单提交但工作区有未提交改动、或有范围内的未跟踪文件时，提交信息也不覆盖本次 diff", () => {
     expect(commitMessageCoversDiff({ commitCount: 1, dirty: false })).toBe(true);
     expect(commitMessageCoversDiff({ commitCount: 1, dirty: true })).toBe(false);
     expect(commitMessageCoversDiff({ commitCount: 2, dirty: false })).toBe(false);
+    expect(
+      commitMessageCoversDiff({ commitCount: 1, dirty: false, untrackedInScope: false }),
+    ).toBe(true);
+    expect(
+      commitMessageCoversDiff({ commitCount: 1, dirty: false, untrackedInScope: true }),
+    ).toBe(false);
+  });
+
+  it("git ls-files 的 C 风格引号路径先还原，空行与目录项丢掉", () => {
+    const quoted = '"docs/repowiki/06-ACP-\\345\\244\\247\\350\\204\\221\\344\\270\\216\\345\\211\\257\\346\\234\\254.md"';
+    expect(parseLsFiles([quoted, "", "scripts/", "docs/x.md"].join("\n"))).toEqual([
+      "docs/repowiki/06-ACP-大脑与副本.md",
+      "docs/x.md",
+    ]);
   });
 
   it("单提交范围仍认提交信息；env 显式声明始终生效", () => {
@@ -339,6 +356,8 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     expect(isStaleScanPath("packages/wechat-daemon/src/agents/managed/managed-common.ts")).toBe(true);
     expect(isStaleScanPath("scripts/doc-impact.rules.mjs")).toBe(false);
     expect(isStaleScanPath("scripts/doc-guards.test.mjs")).toBe(false);
+    expect(isStaleScanPath("scripts/doc-impact.mjs")).toBe(false);
+    expect(isStaleScanPath("scripts/README.md")).toBe(true);
     expect(isStaleScanPath(".worktrees/x/docs/a.md")).toBe(false);
     expect(isStaleScanPath("packages/a/node_modules/x/README.md")).toBe(false);
     expect(isStaleScanPath("packages/a/dist/cli.js")).toBe(false);
@@ -425,6 +444,32 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     expect(hits[0].path).toBe("packages/a/src/x.ts");
   });
 
+  it("代码围栏里的章节标题只是示例，不能伪造已发布章节让 allow 错误放行", () => {
+    const f = fact({
+      allow: [{ path: "docs/x.md", section: /^## \[1\.7\.0\]/, why: "已发布段" }],
+    });
+    const content = [
+      "## [Unreleased] 未发布",
+      "```md",
+      "## [1.7.0] 已发布（这只是示例）",
+      "旧结论",
+      "```",
+      "旧结论",
+    ].join("\n");
+    const hits = checkStaleFacts([f], [{ path: "docs/x.md", content }]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].line).toBe(6);
+  });
+
+  it("复用的 allow 正则重置 lastIndex，带 g 的规则不会跨行串状态", () => {
+    const f = fact({
+      pattern: /旧结论/g,
+      allow: [{ path: "docs/x.md", linePattern: /旧结论/g, marker: /约定/g, why: "…" }],
+    });
+    const content = "> 约定\n旧结论\n旧结论\n";
+    expect(checkStaleFacts([f], [{ path: "docs/x.md", content }])).toEqual([]);
+  });
+
   it("合法豁免也不能放行内容级命中（staleBlocksCheck 刻意不接收豁免结果）", () => {
     const escape = parseEscapeHatch("Docs-Impact: none — Pure refactor");
     expect(escape).toMatchObject({ status: "none", valid: true });
@@ -432,6 +477,10 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     expect(hits).toHaveLength(1);
     expect(staleBlocksCheck(true, hits)).toBe(true);
     expect(staleBlocksCheck(true, hits, escape)).toBe(true);
+    // main() 在 readEscapeHatch() 之前就 return 1；这里用源码顺序钉住，避免将来把内容层挪到豁免之后。
+    const src = fs.readFileSync(new URL("./doc-impact.mjs", import.meta.url), "utf8");
+    const main = src.slice(src.indexOf("function main(argv)"));
+    expect(main.indexOf("staleBlocksCheck")).toBeLessThan(main.indexOf("readEscapeHatch"));
   });
 
   it("只读模式不拦截，没有命中也不拦截", () => {
@@ -470,6 +519,47 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     expect(checkStaleFacts([f], [{ path, content: withNote }])).toEqual([]);
     expect(
       checkStaleFacts([f], [{ path, content: "> **后续变更（2026-11-05）**：…\n\n" + row }]),
+    ).toHaveLength(1);
+  });
+
+  it("版本号模式带边界：1.0.1070 不误报", () => {
+    expect(
+      checkStaleFacts(STALE_FACTS, [
+        { path: "docs/x.md", content: "Copilot CLI 1.0.1070 是另一个虚构版本号。\n" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("「返回空指纹」的旧断言被登记，现行否定语境不误报", () => {
+    const f = STALE_FACTS.find((x) => x.id === "empty-config-fingerprint");
+    expect(f).toBeDefined();
+    expect(
+      checkStaleFacts([f], [
+        { path: "docs/x.md", content: "`claude-code`/`cline` 没有可重定向配置目录，返回空指纹，改完重启 daemon。\n" },
+      ]),
+    ).toHaveLength(1);
+    const current = [
+      "即使没有 `homeEnvVar` 也不再返回空指纹，homeMode 改变会触发进程重建。",
+      "没有 `homeEnvVar` 也不返回空指纹，指纹不再恒为空。",
+      "没有 homeEnvVar 的 agent 仍返回非空指纹，且 homeMode 改变会让它变化。",
+    ].join("\n");
+    expect(checkStaleFacts([f], [{ path: "docs/x.md", content: current }])).toEqual([]);
+  });
+
+  it("守卫文档补注里引用正则字面量本身放行；删掉补注标记就报错", () => {
+    const f = STALE_FACTS.find((x) => x.id === "copilot-acp-mcp-old");
+    const design = "docs/设计文档/文档守卫设计.md";
+    const audit = "docs/审查与质量记录/审查-2026-11-05-经验与约束.md";
+    const withNote = (p, label) => ({
+      path: p,
+      content: `> **2026-11-15 补注（${label}）**：正则 \`1\\.0\\.107(?!\\d)\` 不误报 \`1.0.1070\`，不会把 \`1.0.107\` 误判为现行结论。\n`,
+    });
+    expect(checkStaleFacts([f], [withNote(design, "守卫自身解析口径")])).toEqual([]);
+    expect(checkStaleFacts([f], [withNote(audit, "守卫自身口径")])).toEqual([]);
+    expect(
+      checkStaleFacts([f], [
+        { path: design, content: "> **2026-11-14 旧说明**：不会把 `1.0.107` 误判为现行结论。\n" },
+      ]),
     ).toHaveLength(1);
   });
 });
