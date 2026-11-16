@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "copilot",
+  "bin": "copilot",
+  "binWin": "copilot.cmd",
+  "args": ["--acp", "--no-auto-update", "--allow-all-tools"],
+  "shell": true,
+  "homeEnvVar": "COPILOT_HOME",
+  "realHome": "~/.copilot",
+  "inheritDirs": ["skills"],
+  "inheritFiles": ["copilot-instructions.md"],
+  "credentialFiles": ["config.json"],
+  "mcpConfigFile": "mcp-config.json",
+  "catalogFile": "mcp-config.json",
+  "mcpDelivery": "config",
+  "notes": [
+    "COPILOT_HOME 只在 managed 下指向账号副本（direct 不设置，直接用 ~/.copilot）；managed 下只同步 config.json 登录元数据、skills 与 copilot-instructions.md，不继承用户插件/hooks。",
+    "MCP 只读自己的 `~/.copilot/mcp-config.json`：`initialize` 的 mcpCapabilities 只有 http/sse，实测 `session/new` 传入的 stdio mcpServers 不被加载（1.0.108 普通写法与带 type 写法模型都答「没有这个工具」）。故 managed 写副本 mcp-config.json，不依赖 ACP 投递。",
+    "`--allow-all-tools` 免除工具审批，但不启用 `--allow-all` 的路径/URL 放宽；默认 `auto` 不探测，避免「已安装但未登录」导致误选。"
+  ]
+}

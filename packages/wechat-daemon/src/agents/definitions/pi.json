@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "pi",
+  "bin": "pi-acp",
+  "binWin": "pi-acp.cmd",
+  "requiresBins": ["pi"],
+  "args": [],
+  "shell": true,
+  "homeEnvVar": "PI_CODING_AGENT_DIR",
+  "realHome": "~/.pi/agent",
+  "inheritDirs": ["skills"],
+  "inheritFiles": ["AGENTS.md"],
+  "credentialFiles": ["settings.json", "auth.json", "models.json", "models-store.json"],
+  "settingsDefaults": { "quietStartup": true },
+  "mcpConfigFile": "mcp.json",
+  "catalogFile": "mcp.json",
+  "notes": [
+    "pi coding agent（`@earendil-works/pi-coding-agent`）经社区适配器 pi-acp 接入：适配器 spawn `pi --mode rpc`，在 ACP 与 pi RPC 之间桥接。2026-10-30 探针 + 2026-11-01 复跑（pi-acp 0.0.34 + pi 1.4.0，见 docs/接入方案/接入-pi.md）。",
+    "session/load 原生支持（强杀后上下文接上）；image:true；首帧 0–3ms；有 thought/tool 帧；无反向请求——pi 默认不做逐次工具审批（官方 security.md 明说），无需 yolo flag / sessionMode。",
+    "模型跟随用户 pi 配置（settings.json 的 defaultProvider/defaultModel；managed 下随凭据原样同步，direct 直接用真实目录）；覆盖用 `wemind brain set pi --model \"<provider>/<model>\"`（set_config_option 的 configId 就叫 model）。",
+    "MCP：pi 读 `<PI_CODING_AGENT_DIR>/mcp.json`（`pi mcp list` 实测；不是 settings/mcp.json），格式与 kiro 相同。不设 acpMcpServers（pi-acp 只把 mcpServers 存进会话、从不读取）。",
+    "适配器只是桥：真正进程是 PATH 上的 pi 本体（requiresBins 会在缺 pi 时提前报错，而不是等 session/new 才炸）。适配器的会话映射表固定写在真实 home 的 `~/.pi/pi-acp/session-map.json`（不随副本走）：跨账号共享的只是 id→会话文件的映射，会话本体仍在各自 home 的 sessions/ 下。",
+    "适配器类不参与 auto 探测（装好适配器 ≠ 已登录/配好模型），用 `wemind brain set|switch pi` 显式选用。",
+    "pi-acp 把 pi 的启动信息（## Context / ## Skills …）当作 agent_message_chunk 发出来，那是给人看的启动信息，进微信回复就是噪声。pi 自己的 `quietStartup: true` 关掉它；写进 managed 副本，用户显式设过就保留用户的值。"
+  ]
+}

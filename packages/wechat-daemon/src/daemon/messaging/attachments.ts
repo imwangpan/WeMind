@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { DATA_DIR, classifyMediaByName, type MediaKind } from "@wemind/wechat-ilink-core";
 
-import { ACP_AGENT_PRESETS } from "../../agents/brain-presets.js";
+import { ACP_AGENT_PRESETS } from "../../agents/agent-registry.js";
 
 /**
  * 出站附件：brain 用显式 Markdown 链接 `[附件](file:///abs/path)` / `[文件](...)` / `[视频](...)`
@@ -40,7 +40,7 @@ const SENSITIVE_NAMES = new Set([
 ]);
 
 /**
- * 各 agent 同步进副本的登录态/凭据文件名（与 `agents/brain-presets.ts` 的 `credentialFiles` 对齐）。
+ * 各 agent 同步进副本的登录态/凭据文件名（与 `agents/definitions/*.json` 的 `credentialFiles` 对齐）。
  * 这些文件不在数据目录根下，但同样不能外发：提示注入只要让 brain 写一个附件链接就能把
  * OAuth/API 凭据发到微信里。
  */

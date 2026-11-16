@@ -114,7 +114,7 @@ WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文�
 
 > 以下为**已实现**的实现说明（M2 已落地）；代码路径对应现仓库结构。
 
-#### Step 1 · 新增 `opencode` agent（`packages/wechat-daemon/src/agents/brain-presets.ts`）
+#### Step 1 · 新增 `opencode` agent（现为 `packages/wechat-daemon/src/agents/definitions/opencode.json`）
 
 ```ts
 opencode: {
@@ -240,7 +240,7 @@ npm run build; npm run daemon
 
 | 文件 | 改动 |
 |---|---|
-| `packages/wechat-daemon/src/agents/brain-presets.ts` | 新增 `opencode` agent；`AcpAgentPreset` 增加 `configSubdir`/`mcpFormat`/`mcpConfigFile`/`catalogFile`/`env`/`inheritFiles`（`ResolvedAgent` 透传在 `agents/brain-agents.ts`） |
+| `packages/wechat-daemon/src/agents/definitions/opencode.json`（原 `brain-presets.ts`） | 新增 `opencode` agent；定义增加 `configSubdir`/`mcpFormat`/`mcpConfigFile`/`catalogFile`/`env`/`inheritFiles`（`ResolvedAgent` 透传在 `agents/brain-agents.ts`） |
 | `packages/wechat-daemon/src/agents/managed/agent-mcp.ts`（新） | MCP 格式纯函数：`readMcpServers`/`withMcpServers`/`parseJsonc` |
 | `packages/wechat-daemon/src/agents/managed/mcp-brain.ts` | 按 agent 分派配置目录与 MCP 格式；opencode 继承 `model` 基底；`inheritFiles` 支持 |
 | `packages/wechat-daemon/src/agents/managed/mcp-worker.ts` | 同上（worker 策略：继承全量 MCP 除 wechat） |

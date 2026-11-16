@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "qoder",
+  "bin": "qodercli",
+  "binWin": "qodercli.exe",
+  "fallbackBinPaths": ["~/.qoder/bin/qodercli/qodercli.exe"],
+  "args": ["--acp", "--yolo"],
+  "env": { "QODER_CONFIG_DIR": "%HOME%/qoder" },
+  "realHome": "~/.qoder",
+  "configSubdir": "qoder",
+  "inheritDirs": ["memory", "skills", "agents", "commands"],
+  "inheritFiles": ["AGENTS.md"],
+  "mcpFormat": "mcpServers",
+  "mcpConfigFile": "settings.json",
+  "catalogFile": "settings.json",
+  "settingsBase": "settings.json",
+  "credentialFiles": [".auth/user"],
+  "identityFiles": [".auth/machine_id"],
+  "notes": [
+    "直接起 qodercli.exe：`qoder` 是分发器（cmd → powershell → qodercli），多一层管道且会与 IDE 命令混淆。",
+    "QODER_CONFIG_DIR 只在 managed 下指向账号副本的 qoder 子目录；direct 不注入，直接用真实 ~/.qoder（WeMind 只读，绝不写 settings.json）。direct 下微信侧 overlay/MCP 对该 agent 不生效（改 Agent 自己的配置即可）；要由 WeMind 托管请用 managed。",
+    "登录态要 `.auth/user` + `.auth/machine_id` 两个文件（只带 user 会 `Authentication required`）。",
+    "MCP 在 settings.json 的 mcpServers（与其它设置同文件），改后需重启进程 → 加载/卸载 MCP 的 restart 已覆盖。`--yolo` 下工具调用不发反向请求；capabilities 有 load/resume/image。providers（BYOK，含明文密钥）与 model 不继承，见 docs/接入方案/接入-Qoder.md §5。",
+    "fallbackBinPaths 是官方安装器的固定位置（pm2/服务里 PATH 可能不含它）。原实现只在 Windows 上启用该兜底；数据面无法按平台分支，故统一列出——在别的平台上这个路径本来也不存在，`existsSync` 自然不会命中。",
+    "memory/ 是 Qoder agent 的用户画像/偏好记忆（实测存在），与日常使用共用一份（junction）；skills/agents/commands/AGENTS.md 在 1.1.78 的本机不存在 → 当前是空操作，保留以便上游新增后自动生效。"
+  ]
+}

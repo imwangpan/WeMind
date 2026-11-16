@@ -49,6 +49,7 @@ const EXPECTED_DATA_KEYS = [
   "sessionMode",
   "kiroEngine",
   "isolateSessions",
+  "notes",
 ];
 
 /** 最小合法定义。 */
@@ -100,6 +101,7 @@ function full(): Record<string, unknown> {
     sessionMode: "bypassPermissions",
     kiroEngine: false,
     isolateSessions: true,
+    notes: ["这条说明只作文档用途"],
     probe: { at: "2026-11-16T10:00:00Z", agentVersion: "1.2.3" },
   };
 }

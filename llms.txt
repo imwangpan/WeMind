@@ -91,7 +91,7 @@
 - `packages/wechat-ilink-core/`: iLink HTTP client, types, errors, session guard, account/state, image crypto. Private JIT source package (entry points to `src/index.ts`, no build step or `dist/`), bundled into the published packages at publish time.
 - `packages/wechat-mcp/`: MCP server with 6 tools. Published as `@wemind/wechat-mcp` (bin `wemind-mcp`).
 - `packages/wechat-daemon/`: daemon, ACP brain, worker, CLI. Published as `@wemind/cli` (bin `wemind`).
-- `packages/wechat-daemon/src/agents/brain-presets.ts`: `ACP_AGENT_PRESETS` (the 10 built-in agent presets).
+- `packages/wechat-daemon/src/agents/definitions/*.json`: the 10 built-in agent definitions (pure data); `agents/agent-registry.ts` validates and loads them.
 - `packages/wechat-daemon/src/agents/brain-agents.ts`: `resolveAgent()`, `agentProblem()`.
 - `packages/wechat-daemon/src/acp/acp-brain.ts`: resident ACP client (brain).
 - `packages/wechat-daemon/src/tasks/worker-acp.ts`: resident ACP client (worker).

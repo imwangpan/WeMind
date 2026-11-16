@@ -45,7 +45,8 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 
 相关代码：
 
-- `packages/wechat-daemon/src/agents/brain-presets.ts` —— agent 表（本文主角的数据）；
+- `packages/wechat-daemon/src/agents/definitions/*.json` —— 内置 agent 定义（本文主角的数据）；
+- `packages/wechat-daemon/src/agents/agent-registry.ts` —— 静态加载定义、展开 `~`、校验并挂代码 hook；
 - `packages/wechat-daemon/src/agents/brain-agents.ts` —— 预设解析/探测逻辑；
 - `packages/wechat-daemon/src/acp/acp-brain.ts` —— ACP 客户端（协议层；缺 load/反向请求时需要改）；
 - `packages/wechat-daemon/src/tasks/worker-acp.ts` —— worker 的 ACP 客户端；协议层（帧分类、超时、模型与模式、回放静默）brain 与 worker 共用 `acp/protocol/acp-connection.ts`，只有进程生命周期与会话持久化各自实现。
@@ -147,25 +148,23 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 
 ---
 
-## 4. 配置方式 B：新增一条 agent 配置（推荐长期使用）
+## 4. 配置方式 B：新增一份内置 agent 定义（开发）
 
-在 `packages/wechat-daemon/src/agents/brain-presets.ts` 的 `ACP_AGENT_PRESETS` 里加一条：
+内置 agent 是纯数据：在 `packages/wechat-daemon/src/agents/definitions/` 放一份 `<name>.json`（文件名必须与 `name` 相同）：
 
-```ts
-export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {
-  kiro: { name: "kiro", bin: "kiro-cli", binWin: "kiro-cli.exe", args: ["acp", "--trust-all-tools"], homeEnvVar: "KIRO_HOME", kiroEngine: true },
-
-  // 新增：
-  acme: {
-    name: "acme",
-    bin: "acme-agent",          // 非 Windows 的可执行名
-    binWin: "acme-agent.exe",   // Windows 可执行名（默认在 bin 后加 .exe）
-    args: ["serve", "--acp"],   // 进入 ACP 模式的参数
-    homeEnvVar: "ACME_HOME",    // 没有就删掉这行
-    // requiresBins: ["acme"],  // 适配器内部还要 spawn 的运行时（只装适配器不够；缺失时 agentProblem() 提前报）
-  },
-};
+```json
+{
+  "schemaVersion": 1,
+  "name": "acme",
+  "bin": "acme-agent",
+  "binWin": "acme-agent.exe",
+  "args": ["serve", "--acp"],
+  "homeEnvVar": "ACME_HOME",
+  "notes": ["没有就删掉 homeEnvVar；实测结论与踩坑写在这里（JSON 没有注释）"]
+}
 ```
+
+`agent-registry.ts` 在构建期静态导入这些 JSON 并按 `agent-definition.ts` 的契约校验（未知字段、类型错误、版本不符都会直接失败）；`~` 在 `realHome` / `fallbackBinPaths` / `extraConfigFiles` 里展开为当前用户家目录。
 
 > **不要因二进制存在就一律加入 `AUTO_PROBE_ORDER`**：`claude-code` / `codex` / `pi` 是适配器，`copilot` 虽是原生 ACP，但二进制存在都不代表运行账号已登录；这四者均显式选用，避免「装了但没登录」的机器静默换脑。其它原生 ACP 按实际启动条件与耗时决定是否加入。
 
@@ -177,7 +176,7 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 # 或一次性覆盖（仅对本次启动的 daemon 生效）：$env:WEMIND_BRAIN = "acme"
 ```
 
-`AcpAgentPreset` 字段：
+`AgentDefinition` 字段：
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
@@ -192,14 +191,14 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `inheritDirs` | 否 | **仅 `managed`**：从 `realHome` 链入副本的「目录式」记忆子目录（`direct` 直接用真实目录） |
 | `inheritFiles` | 否 | **仅 `managed`**：从 `realHome` 拷入副本的单文件记忆（如 `AGENTS.md`） |
 | `configSubdir` | 否 | agent 配置目录相对副本根的子路径（kiro 空；opencode `opencode`） |
-| `mcpFormat` | 否 | MCP 定义的 JSON 键路径：`mcpServers`（顶层）或 `mcp.servers`（嵌套）；默认 `mcpServers` |
+| `mcpFormat` | 否 | MCP 定义的文件格式：`mcpServers`（顶层）、`mcp.servers`（嵌套）或 `dshProfileYaml`；默认 `mcpServers`。自定义格式必须同时给 `adapter` |
 | `mcpConfigFile` | 否 | MCP 配置文件相对配置目录的路径（默认 `settings/mcp.json`） |
 | `catalogFile` | 否 | 可选 MCP 目录来源文件相对 `realHome` 的路径（默认 `settings/mcp.json`） |
 | `acpMcpServers` | 否 | 纯能力：Agent 是否接受 ACP `session/new`/`resume` 的 `mcpServers`（不代表它不读自身配置） |
 | `mcpDelivery` | 否 | `managed` 托管 MCP 时的投递方式：`config`（写副本配置文件，默认；如 kiro/gemini/opencode/qoder/cline/pi/Copilot）或 `acp`（随会话下发；如 DSH / Claude Code / Codex） |
 | `env` | 否 | **仅 `managed`** 额外注入的环境变量（强制；值里 `%HOME%` → 副本根），如 opencode 的 `OPENCODE_DISABLE_PROJECT_CONFIG` |
 | `envDefaults` | 否 | **默认值**环境变量：父进程已设同名变量时**不覆盖**（如 DSH `DSH_PERMISSION_MODE`、codex `INITIAL_AGENT_MODE`）。审批/副本类开关用它，部署方可在 daemon 环境里收紧权限；跳过时会记日志 `env defaults kept from parent: …` |
-| `credentialEnv` | 否 | 从 agent 自己的凭据文件**派生**环境变量（仅父进程未显式提供时；如 Cline 的 `clineCredentialEnv()` 从 `providers.json` 的 `lastUsedProvider` + `apiKey` 派生 `CLINE_PROVIDER` / `CLINE_API_KEY`）。只读、解析失败静默返回空；显式 env 永远优先 |
+| `adapter` | 否 | 代码逃生舱：`{ "module": "...", "apiVersion": 1 }`。数据表达不了时（自定义 MCP 格式、凭据派生、启动前文件生成）指向一个按 hook 契约注册的模块。内置目前只有 Cline 用 `builtin:cline-credentials` 从 `providers.json` 的 `lastUsedProvider` + `apiKey` 派生 `CLINE_PROVIDER` / `CLINE_API_KEY`（只读、解析失败返回空、显式 env 永远优先） |
 | `sessionMode` | 否 | 会话建立/恢复后经 `session/set_mode { sessionId, modeId }` 切到的模式（**agent 自己的 ACP 接口**；用于免审批：claude-code `bypassPermissions`、codex `agent-full-access`）。会话回包报告 `modes.availableModes` 且不含该值时**跳过**并记日志；调用失败只记日志、不拖垮回合。`WEMIND_ACP_SESSION_MODE=0/false/off/no` 关闭，其它非空值 = 覆盖 modeId |
 | `replayOnLoad` | 否 | `session/load`/`resume` **返回后仍会异步回放历史帧**的 agent（gemini 的 `loadSession` 里 `streamHistory` 不 await）：恢复后先等帧流安静（200ms 静默窗口、最多 3s）再发本轮 prompt，否则历史会被拼进本轮答复。默认 `false` |
 | `restore` | 否 | 恢复会话的方式：`load`（默认）或 `resume`（如 DSH） |
@@ -216,26 +215,27 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `realProfile` | 否 | 该 agent **用户层 profile 的名字**（DSH：`"acp"`，对应真实 `<realHome>/profiles/acp/`）。`direct` 直接使用；`managed` 在 `syncSettings` 里复制这份 `cordis.patch.yml`：provider/模型条目原样，`mcpDelivery: "acp"` 时**剥离全部 MCP 条目**（集合由 WeMind 经 ACP 注入）——agent 自己首次启动生成的往往是空壳 `[]`，不同步就连它的 provider 路由都不存在；WeMind 不追加任何条目，缺的配置由用户自己补（`wemind brain` 只提示）。`profile-model.ts` 从它读默认模型（优先用户写的 `- id: acp`，否则 `agent-default-model`）——用户日常怎么用，WeMind 就跟着怎么用 |
 | `kiroEngine` | 否 | kiro 专用（`true`）：按 `--agent-engine` → 真实 `settings/cli.json` 的 `acp.agentEngine` → CLI 主版本 ≥3 判断 v2/v3（`acp --help`：两者都没设时默认 v2；CLI ≥3 默认 v3 为假设/待实测，仅作兜底）；v3 时剔除 v2 专属的 `--trust-all-tools` / `-a` / `--trust-tools`、补 `--agent-engine v3`，并在 `managed` 写 `settings/permissions.yaml` 的 allow-all 规则（真实设置已有则原样保留）。见 §5 |
 | `isolateSessions` | 否 | DSH 专用（`true`）：启动前落盘 `<数据目录>/agent-sessions/deepseek/session-root-<brain\|worker>.patch.yml`，用 `--patch` 把 `session-persistence-jsonl.root` 指到 `agent-sessions/deepseek/<role>`，避免与 kiro/pi 共用 managed 根时把其它 agent 写进 `sessions/` 的平铺文件当成自己的会话库；用户 `--args` 自带 `--patch` 时不再追加。`direct` 下不启用 |
+| `notes` | 否 | 给维护者的说明（一段一条：为什么这么写、踩过什么坑）。只作文档用途，不改变行为；`wemind agent show` 会打印 |
 
 ---
 
 ## 5. 内置 agent
 
-> 预设清单（名称/二进制/启动参数）由 `node scripts/gen-docs-tables.mjs` 从 `brain-agents.ts` 自动生成；状态、限制与接入文档见本节下方的手写表。
+> 预设清单（名称/二进制/启动参数）由 `node scripts/gen-docs-tables.mjs` 从 `agents/definitions/*.json` 自动生成；状态、限制与接入文档见本节下方的手写表。
 
 <!-- BEGIN:auto presets -->
 | 预设 | 二进制 | 启动参数 |
 |:---|:---|:---|
-| `kiro` | `kiro-cli` | `acp --trust-all-tools` |
-| `gemini` | `gemini` | `--acp --approval-mode yolo --skip-trust` |
-| `copilot` | `copilot` | `--acp --no-auto-update --allow-all-tools` |
-| `opencode` | `opencode` | `acp` |
-| `deepseek` | `dsh` | `--profile acp` |
-| `qoder` | `qodercli` | `--acp --yolo` |
-| `cline` | `cline` | `--acp --auto-approve true` |
-| `pi` | `pi-acp` | `—` |
 | `claude-code` | `claude-agent-acp` | `—` |
+| `cline` | `cline` | `--acp --auto-approve true` |
 | `codex` | `codex-acp` | `—` |
+| `copilot` | `copilot` | `--acp --no-auto-update --allow-all-tools` |
+| `deepseek` | `dsh` | `--profile acp` |
+| `gemini` | `gemini` | `--acp --approval-mode yolo --skip-trust` |
+| `kiro` | `kiro-cli` | `acp --trust-all-tools` |
+| `opencode` | `opencode` | `acp` |
+| `pi` | `pi-acp` | `—` |
+| `qoder` | `qodercli` | `--acp --yolo` |
 <!-- END:auto presets -->
 
 ACP agent 分两类，接入方式不同：
@@ -408,7 +408,7 @@ WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直
   WEMIND_BRAIN_HOME_ENV=<配置目录环境变量名，没有则不设>
 
 长期接入（加 agent）：
-  在 brain-presets.ts 的 ACP_AGENT_PRESETS 加一条 → npm run build → wemind brain set <键>
+  在 agents/definitions/ 加一份 <名字>.json（文件名与 name 相同）→ npm run build → wemind brain set <键>
 
 验证：
   看 daemon.log 的 [wemind/wechat-daemon/acp] spawn / prompt ok；或 wemind brain check

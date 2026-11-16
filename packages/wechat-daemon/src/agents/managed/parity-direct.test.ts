@@ -55,7 +55,7 @@ afterAll(() => {
 });
 
 async function agentOf(name: string, overrides: Record<string, unknown>): Promise<ResolvedAgent> {
-  const { ACP_AGENT_PRESETS } = await import("../brain-presets.js");
+  const { ACP_AGENT_PRESETS } = await import("../agent-registry.js");
   const p = ACP_AGENT_PRESETS[name];
   if (!p) throw new Error(`unknown preset ${name}`);
   return {

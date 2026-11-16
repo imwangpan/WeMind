@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "kiro",
+  "bin": "kiro-cli",
+  "binWin": "kiro-cli.exe",
+  "args": ["acp", "--trust-all-tools"],
+  "homeEnvVar": "KIRO_HOME",
+  "realHome": "~/.kiro",
+  "inheritDirs": ["steering", "memories", "skills", "agents", "powers", "tasks", "extensions"],
+  "kiroEngine": true,
+  "notes": [
+    "v2 用 `--trust-all-tools` 免审批；v3 拒绝这个参数，改走 managed 副本 settings/permissions.yaml 的 allow-all（见 kiroEngine 字段的语义）。",
+    "引擎判定顺序：启动参数 `--agent-engine` → 真实 `settings/cli.json` 的 `acp.agentEngine` → CLI 主版本 ≥3 视作 v3（后者是假设/待实测，只作兜底）。`--agent-engine v1` 未验证，按 v2 处理。"
+  ]
+}

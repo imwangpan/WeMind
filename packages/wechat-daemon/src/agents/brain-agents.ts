@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config.js";
 import { readProfileDefaultModel } from "./profile-model.js";
-import { ACP_AGENT_PRESETS, type AcpAgentPreset } from "./brain-presets.js";
+import { ACP_AGENT_PRESETS, type AcpAgentPreset } from "./agent-registry.js";
 import { readEnvSnapshot, mergeEnvSnapshot } from "./config/env-snapshot.js";
 import { readHomeMode } from "./config/home-mode.js";
 
@@ -37,8 +37,8 @@ import { readHomeMode } from "./config/home-mode.js";
  * 否则用户点了切换、env 却压着它，会出现「看着成功、实际没生效」。
  */
 
-export { ACP_AGENT_PRESETS } from "./brain-presets.js";
-export type { AcpAgentPreset } from "./brain-presets.js";
+export { ACP_AGENT_PRESETS } from "./agent-registry.js";
+export type { AcpAgentPreset } from "./agent-registry.js";
 
 function onPath(exe: string): string | null {
   for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
@@ -104,6 +104,15 @@ export function acpArgsHint(ag: ResolvedAgent): string {
 /** agent 在该平台的「可执行文件名」（用于 PATH 探测）。 */
 function presetExe(preset: Pick<AcpAgentPreset, "bin" | "binWin">): string {
   return process.platform === "win32" ? (preset.binWin ?? `${preset.bin}.exe`) : preset.bin;
+}
+
+/** 数据面的 `mcpFormat` 是开放字符串（自定义格式靠 adapter）；这里只接受内置格式，其它值明确报错而不是猜。 */
+function resolvedMcpFormat(v: string | undefined): ResolvedAgent["mcpFormat"] {
+  if (v === undefined) return "mcpServers";
+  if (v === "mcpServers" || v === "mcp.servers" || v === "dshProfileYaml") return v;
+  throw new Error(
+    `mcpFormat「${v}」需要 adapter 解释（内置格式只有 mcpServers / mcp.servers / dshProfileYaml）`,
+  );
 }
 
 /**
@@ -525,7 +534,7 @@ function resolveAgentCore(
     inheritDirs,
     inheritFiles: preset.inheritFiles ?? [],
     configSubdir: preset.configSubdir ?? "",
-    mcpFormat: preset.mcpFormat ?? "mcpServers",
+    mcpFormat: resolvedMcpFormat(preset.mcpFormat),
     mcpConfigFile: preset.mcpConfigFile ?? "settings/mcp.json",
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},

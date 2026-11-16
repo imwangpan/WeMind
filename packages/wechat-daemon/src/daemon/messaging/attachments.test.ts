@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
-import { ACP_AGENT_PRESETS } from "../../agents/brain-presets.js";
+import { ACP_AGENT_PRESETS } from "../../agents/agent-registry.js";
 import {
   attachmentFailureNote,
   extractAttachments,
@@ -171,7 +171,7 @@ describe("resolveAttachment（读取与安全闸）", () => {
     expect(() => resolveAttachment({ src: authUser })).toThrow(/敏感文件/);
   });
 
-  it("brain-presets 里所有 credentialFiles 都被拦截（防止新增 agent 漏配）", () => {
+  it("内置定义里所有 credentialFiles 都被拦截（防止新增 agent 漏配）", () => {
     const home = tmpDir();
     const prev = process.env.WECHAT_BRAIN_HOME;
     process.env.WECHAT_BRAIN_HOME = home;

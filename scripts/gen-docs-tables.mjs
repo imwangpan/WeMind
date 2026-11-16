@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { extractPresetNames } from "./check-agent-docs.mjs";
+import { readBuiltinDefinitions } from "./agent-definitions.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -115,32 +115,12 @@ export function collectEnvVars() {
   return [...seen.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
-/** 从预设对象字面量里提取 bin / args。 */
-export function parsePresetRows(source) {
-  const start = source.indexOf("export const ACP_AGENT_PRESETS");
-  const body = start >= 0 ? source.slice(start) : source;
-  const names = extractPresetNames(source);
-  const rows = [];
-  for (const name of names) {
-    const keyRe = new RegExp(`^ {2}"?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"?:\\s*\\{`, "m");
-    const keyMatch = body.match(keyRe);
-    if (!keyMatch) continue;
-    const blockStart = keyMatch.index + keyMatch[0].length;
-    const rest = body.slice(blockStart);
-    const nextKey = rest.search(/\n {2}"?[\w-]+"?: \{/);
-    const block = nextKey >= 0 ? rest.slice(0, nextKey) : rest;
-    const bin = block.match(/bin:\s*"([^"]+)"/)?.[1] ?? "—";
-    const argsMatch = block.match(/args:\s*\[([^\]]*)\]/);
-    const args = argsMatch
-      ? argsMatch[1]
-          .split(",")
-          .map((s) => s.trim().replace(/^["']|["']$/g, ""))
-          .filter(Boolean)
-          .join(" ")
-      : "—";
-    rows.push({ name, bin, args: args || "—" });
-  }
-  return rows;
+/** 从内置定义（已解析的 JSON）里提取表格行。 */
+export function parsePresetRows(definitions) {
+  return definitions.map((def) => {
+    const args = Array.isArray(def.args) ? def.args.join(" ") : "";
+    return { name: def.name, bin: def.bin ?? "—", args: args || "—" };
+  });
 }
 
 /** CLI 子命令（manage.ts 的 case 分支，过滤 flag 别名）。 */
@@ -201,7 +181,7 @@ export function renderCliTable(cliCommands, wechatCommands) {
 
 export function generateAll() {
   const envVars = collectEnvVars();
-  const presets = parsePresetRows(readText("packages/wechat-daemon/src/agents/brain-presets.ts"));
+  const presets = parsePresetRows(readBuiltinDefinitions(ROOT));
   const cli = collectCliCommands(readText("packages/wechat-daemon/src/cli/manage.ts"));
   const wechat = collectWechatCommands(
     readText("packages/wechat-daemon/src/ipc/chat-command-specs.ts"),

@@ -124,6 +124,10 @@ export type AgentDefinition = {
   // —— 引擎差异 ——
   kiroEngine?: boolean;
 
+  // —— 说明 ——
+  /** 给维护者看的说明（一段一条）；JSON 没有注释，这批"为什么这么写"的经验放这里。 */
+  notes?: string[];
+
   // —— 插件与探测 ——
   adapter?: AgentDefinitionAdapter;
   probe?: AgentDefinitionProbe;
@@ -182,6 +186,8 @@ const DEFINITION_DATA_KEYS: Record<
   identityFiles: true,
   // —— 引擎差异 ——
   kiroEngine: true,
+  // —— 说明 ——
+  notes: true,
 };
 
 /** 数据字段名（校验器与 JSON Schema 的键集来源）。 */
@@ -388,6 +394,12 @@ export const AGENT_DEFINITION_FIELDS: readonly AgentDefinitionField[] = [
     kind: { kind: "boolean" },
     codeInterpreted: true,
     desc: "kiro v2/v3 引擎差异（启动参数与免审批方式的语义由 adapter 解释）",
+  },
+  // —— 说明 ——
+  {
+    key: "notes",
+    kind: { kind: "stringArray" },
+    desc: "给维护者的说明（一段一条：为什么这么写、踩过什么坑）；只作文档用途，不改变行为，`wemind agent show` 会打印",
   },
 ];
 

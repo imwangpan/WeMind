@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 import type { ResolvedAgent } from "../brain-agents.js";
-import { ACP_AGENT_PRESETS } from "../brain-presets.js";
+import { ACP_AGENT_PRESETS } from "../agent-registry.js";
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
 import { parseJsonc } from "../managed/agent-mcp.js";
 

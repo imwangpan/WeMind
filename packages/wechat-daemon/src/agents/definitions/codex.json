@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "name": "codex",
+  "bin": "codex-acp",
+  "binWin": "codex-acp.cmd",
+  "args": [],
+  "shell": true,
+  "envDefaults": { "INITIAL_AGENT_MODE": "agent-full-access" },
+  "sessionMode": "agent-full-access",
+  "realHome": "~/.codex",
+  "catalogFile": "config.toml",
+  "acpMcpServers": true,
+  "mcpDelivery": "acp",
+  "heartbeatMs": 60000,
+  "notes": [
+    "需适配器（Codex CLI 本身不说 ACP）：npm 包 `@agentclientprotocol/codex-acp`（bin: codex-acp；ACP 项目维护，非 OpenAI 官方）。npm latest 2.6.0（2026-11-11）；本预设的实测基线是 2.6.0（2026-11-12 全量复测通过），升级后重跑探针。",
+    "**全局安装，不用 npx**（口径同 claude-code）：`npm i -g @agentclientprotocol/codex-acp`。适配器自带 @openai/codex 依赖（含平台原生二进制，约 100MB）；想复用本机已装的 Codex 可装适配器时加 `--omit=optional` 并设 CODEX_PATH=<codex.exe 绝对路径>。",
+    "Windows 上 npm 全局安装产出的是 codex-acp.cmd（**无 .exe**），故 binWin 写 .cmd + shell（.cmd 必须经 shell，AGENTS.md §4.6）；standalone 二进制用 --bin 指定。",
+    "codex-acp **不解析** CLI 参数（codex 的 --yolo/--full-auto 都不适用）；免审批走 ACP `session/set_mode {modeId:\"agent-full-access\"}`（= approval never + managed danger-full-access），并同时用 README 记录的环境变量 INITIAL_AGENT_MODE 兜底（旧版本无 set_mode 时仍生效）。",
+    "认证走 Codex 自己（ChatGPT 登录或 OPENAI_API_KEY）；已有 ~/.codex/config.toml 直接沿用——适配器不读 WeMind 副本，故无 homeEnvVar。",
+    "MCP：**支持客户端提供的 stdio MCP server**（2026-11-12 复测 codex-acp 2.5.0 与 2.6.0：session/new 传 stdio mcpServers，模型实际调用 fake_ping 并返回 FAKE_PONG）。旧结论「mcpCapabilities.acp=false = 不支持 stdio」是误读：`acp` 指 MCP-over-ACP 传输，stdio 是 ACP 的基础传输，不靠这个字段声明。Codex 自己的 ~/.codex/config.toml 仍会被原生加载；同名 server 由 Codex 自身条目优先。WeMind **只读解析** config.toml 的 `[mcp_servers.*]`（列目录 + 启动前检查 wechat），绝不写回，也无法替它 unload。",
+    "2026-10-30 探针实测（codex-acp 2.5.0 / Codex CLI 0.165，Windows）：loadSession ✅、promptCapabilities.image ✅、session/set_mode ✅、session/set_config_option(model) ✅、session/load 后上下文保留、工具调用 0 反向请求；首帧 ~20ms、首字 3–4s、带图整轮 ~24s。真机 E2E 已通过（2026-11-01：worker 与 brain 通道均通）。",
+    "heartbeatMs 60s：回合可能跑几十秒（实测带图 ~24s），且适配器会发 thought / tool_call / usage 帧；心跳放长少占微信连发额度（约 10 条/用户）。"
+  ]
+}

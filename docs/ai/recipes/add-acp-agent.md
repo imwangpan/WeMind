@@ -58,7 +58,7 @@ node scripts/acp-probe.mjs
 
 | #   | 产出物                 | 位置                                                             | 由谁检查               |
 | --- | ---------------------- | ---------------------------------------------------------------- | ---------------------- |
-| 1   | 预设                   | `brain-presets.ts` 的 `ACP_AGENT_PRESETS`                        | 单测                   |
+| 1   | 内置定义               | `agents/definitions/<name>.json`                                 | 单测 + 注册表校验      |
 | 2   | 预设单测               | `brain-agents.test.ts`                                           | `npm test`             |
 | 3   | 副本单测（涉及副本时） | `agents/managed/<name>.test.ts`                                         | `npm test`             |
 | 4   | 接入文档               | `docs/接入方案/接入-<Name>.md`，含 §0.6 的五类小节 + `## 待实测` | `check-agent-docs.mjs` |
@@ -100,47 +100,44 @@ node scripts/acp-probe.mjs
 
 ---
 
-## 2. 加 agent（`brain-presets.ts`）
+## 2. 加 agent（`agents/definitions/<name>.json`）
 
-```ts
-acme: {
-  name: "acme",
-  bin: "acme-agent",
-  binWin: "acme-agent.cmd",      // Windows 实际文件名；只有 .cmd 时必须写全
-  args: ["serve", "--acp"],
-  shell: true,                   // .cmd/.bat/npx 必须；.exe 可 false
-  // requiresBins: ["acme"],     // 适配器内部还要 spawn 的运行时（只装适配器不够）；缺失时 agentProblem() 提前报错
-  homeEnvVar: "ACME_HOME",       // 仅 managed 指向副本根；没有就删掉
-  realHome: path.join(os.homedir(), ".acme"),
-  inheritDirs: ["skills"],       // 目录式记忆/技能
-  inheritFiles: ["AGENTS.md"],   // 单文件记忆
-  // 仅在探针证明需要时加：
-  // restore: "resume",
-  // images: false,                     // 图片输入不支持（DSH 靠它关掉）
-  // firstFrameMs: 90_000,
-  // heartbeatMs: 60_000,
-  // acpMcpServers: true,
-  // mcpDelivery: "acp",
-  // modelArg: "--model",               // 不支持 session/set_config_option 时模型走启动参数（gemini）
-  // replayOnLoad: true,                // load/resume 返回后仍异步回放历史：恢复后先等帧流安静，否则旧历史会拼进本轮答复（gemini）
-  // sessionMode: "bypassPermissions",  // 会话建立/恢复后经 session/set_mode 切模式（claude-code / codex）
-  // env: { CLAUDE_CONFIG_DIR: "%HOME%/claude" },                  // 仅 managed 强制注入（值里 %HOME% → 副本根）
-  // envDefaults: { DSH_PERMISSION_MODE: "danger-full-access" }, // 审批类默认值：父进程已设同名变量时以父进程为准
-  // credentialEnv: (realHome, parentEnv) => ({ ... }),            // 从 agent 凭据文件派生 env（仅父进程未提供时；Cline 的 CLINE_PROVIDER/CLINE_API_KEY）
-  // isolateSessions: true,             // 会话持久化 root 用 agent 自己的 --patch 指到账号数据目录（DSH）
-  // fallbackBinPaths: [path.join(os.homedir(), ".acme", "bin", "acme-agent")], // 官方安装不在 PATH
-  // settingsBase: "settings.json",       // managed 下把该文件整份复制进副本（只按格式剥 MCP 段、关自动更新）
-  // settingsDefaults: { quietStartup: true }, // 生成副本的 settings.json 缺省补键（用户显式设过则保留用户的值；真实文件不动）
-  // credentialFiles: [".auth/user"],     // 登录态（新者胜）
-  // identityFiles: [".auth/machine_id"], // 必须与真实目录一致（内容不同即覆盖）
-  // realProfile: "acp",                  // 该 agent 的用户层 profile 名——复制真实 profiles/<名>/cordis.patch.yml（非 MCP 原样、mcpDelivery=acp 时剥离全部 MCP 条目）并从它读默认模型（DSH）
-},
+新建 `packages/wechat-daemon/src/agents/definitions/acme.json`（文件名必须与 `name` 相同；`~` 会展开为当前用户家目录）：
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "acme",
+  "bin": "acme-agent",
+  "binWin": "acme-agent.cmd",
+  "args": ["serve", "--acp"],
+  "shell": true,
+  "homeEnvVar": "ACME_HOME",
+  "realHome": "~/.acme",
+  "inheritDirs": ["skills"],
+  "inheritFiles": ["AGENTS.md"],
+  "notes": ["为什么这么写、踩过什么坑（JSON 没有注释）"]
+}
 ```
+
+仅在探针证明需要时再加（同为这份 JSON 的字段）：
+
+- `requiresBins`: 适配器内部还要 spawn 的运行时（只装适配器不够；缺失时 `agentProblem()` 提前报）；
+- `restore: "resume"`；`images: false`；`firstFrameMs` / `heartbeatMs`；
+- `acpMcpServers: true` / `mcpDelivery: "acp"`；
+- `modelArg: "--model"`（不支持 `session/set_config_option` 时模型走启动参数，gemini）；
+- `replayOnLoad: true`（load/resume 返回后仍异步回放历史，恢复后先等帧流安静）；
+- `sessionMode: "bypassPermissions"`（会话建立/恢复后经 `session/set_mode` 切模式）；
+- `env` / `envDefaults`（`%HOME%` → managed 副本根；`envDefaults` 父进程已设同名变量时不覆盖）；
+- `isolateSessions: true`（DSH 的 `--patch` 会话 root）；
+- `fallbackBinPaths`（官方安装不在 PATH）；`settingsBase` / `settingsDefaults`、`credentialFiles` / `identityFiles`、`realProfile`。
+
+数据表达不了的才用代码 hook：`"adapter": { "module": "builtin:cline-credentials", "apiVersion": 1 }`（内置目前只有 Cline 的凭据派生化）。当前 `credentialEnv` 由 `agent-registry.ts` 按 `adapter.module` 挂上；P3 会把这类 hook 收敛成正式契约。
 
 同时：
 
 - **原生 ACP** 才按实测启动耗时把新原生 agent 插入 `AUTO_PROBE_ORDER` 的合适位置；**适配器类不要加**（各自独立安装、各有认证，装好不等于登录过，参与探测会让「装了但没登录」的机器静默换脑）——`claude-code` / `codex` / `pi` 都不在探测顺序里；
-- `AcpAgentPreset` / `ResolvedAgent` 透传新字段；
+- `AgentDefinition` / `ResolvedAgent` 透传新字段；
 - `brain-agents.test.ts` 加断言；
 - `docs/接入方案/接入其它-ACP-Agent.md` §5 agent 表加一行。
 
@@ -220,7 +217,7 @@ wemind brain check
 - **反向请求不应答 = 挂起**：哪怕回 `-32601` 也比沉默好。三处入口（brain / worker / `brain check`）共用 `acp-reverse.ts`，别在某一处另写一份。
 - **committed-only + 15s 心跳 = 烧连发额度**：先调心跳，再考虑首帧。
 - **密钥不要写进 agent**：daemon 进程环境提供。
-- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`acpMcpServers`/`mcpDelivery` 全部来自 agent 配置字段——所以探针必须看，看完必须写进 `brain-presets.ts`。
+- **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`acpMcpServers`/`mcpDelivery` 全部来自 agent 定义字段——所以探针必须看，看完必须写进 `agents/definitions/<agent>.json`。
 - **冷启动耗时（2026-10-29 已量）**：DSH `initialize` **5.8s** / `session/new` 50ms；opencode ~650ms / ~800ms；qoder 1.7s / 1.5s——均远小于 `REQ_TIMEOUT=30s`，**暂不需要** `reqTimeoutMs`（见 `run-e2e.md` §7.3）。新接入的 agent 仍要先量；若超过 30s，再在 agent 里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
 - **适配器不要用 npx 当默认**：全局安装后 `bin` 写 `claude-agent-acp`（Windows `claude-agent-acp.cmd`）+ `shell: true`；npx 只做兜底。没装时用 `ADAPTER_INSTALL_HINT` 给提示，别只回一句「找不到」。适配器另有运行时依赖（`pi-acp` → `pi`）时用 `requiresBins`；`onPathAny()` 会补试 `.cmd`/`.exe`。
 - **「免审批」要用漂移检测兜住**：`ACP_TEST_TOOL=1` 跑探针——强制一次工具调用（写标记文件），断言「0 个 `session/request_permission` + 文件真的落盘」。只看 stopReason 分不出「被拒绝」和「没执行」；上游改成逐次审批时探针会先红，而不是微信第一条消息卡 30s 超时。

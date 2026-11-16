@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "claude-code",
+  "bin": "claude-agent-acp",
+  "binWin": "claude-agent-acp.cmd",
+  "args": [],
+  "shell": true,
+  "env": { "CLAUDE_CONFIG_DIR": "%HOME%/claude" },
+  "realHome": "~/.claude",
+  "configSubdir": "claude",
+  "inheritDirs": ["skills", "agents", "commands"],
+  "inheritFiles": ["CLAUDE.md"],
+  "catalogFile": "../.claude.json",
+  "extraConfigFiles": ["~/.claude.json"],
+  "credentialFiles": [".credentials.json"],
+  "acpMcpServers": true,
+  "mcpDelivery": "acp",
+  "sessionMode": "bypassPermissions",
+  "notes": [
+    "官方 ACP 适配器 `@agentclientprotocol/claude-agent-acp`（bin: claude-agent-acp；**Node ≥22**）。**全局安装，不用 npx**（daemon 常驻、worker 每条任务起进程，npx 每次冷启动都要问 registry/现下包，离线不可用且版本漂移）：`npm i -g @agentclientprotocol/claude-agent-acp`。适配器自带 @anthropic-ai/claude-agent-sdk（含平台原生二进制）；若装的时候漏了 optional 依赖（native binary not found），可用 CLAUDE_CODE_EXECUTABLE 指向本机已装的 claude 二进制。",
+    "免审批：适配器**不解析** `--dangerously-skip-permissions` 之类 CLI flag；会话建立/恢复后走 `session/set_mode {modeId:\"bypassPermissions\"}`（见 sessionMode）。以 root 运行且未设 IS_SANDBOX=1 时该模式不可用——会话回包的 availableModes 里没有它，applyAcpSessionMode 会跳过并记日志。",
+    "副本：CLAUDE_CONFIG_DIR 只在 managed 下指向 `<BRAIN_HOME>/claude`（实测会把 ~/.claude.json 一起搬进该目录，用户级 mcpServers 不会漏进大脑）；direct 下不覆盖 CLAUDE_CONFIG_DIR，CLAUDE.md/skills 与 ~/.claude.json 全部直接读真实文件，与终端完全一致。OAuth 登录态 `.credentials.json` 在 managed 下同步进账号副本（direct 直接读真实文件）。**不复制 settings.json**：它常含网关 token（env），按 AGENTS.md §4.9 密钥由 daemon 进程环境提供；需要网关时设 ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL。",
+    "MCP：Agent 自己读 ~/.claude.json；managed 下由 WeMind 经 ACP 投递（acpMcpServers + mcpDelivery=acp），不写配置文件。探针实测 stdio MCP 可用（尽管 initialize 的 mcpCapabilities 只声明 http/sse——能力字段不可信的又一例）。",
+    "2026-10-30 探针实测（claude-agent-acp 0.99.1 / Claude Code 2.1.314，Windows）：loadSession ✅、sessionCapabilities.resume/close/delete/fork/list ✅、image ✅、stdio MCP ✅、bypassPermissions 下 0 反向请求；重启后 session/load 上下文保留；session/new ~1.2s、首帧 ~2ms、首段正文 ~8–12s。真机微信单轮 E2E 已过（2026-10-31）；重启续聊/MCP/任务待复测。"
+  ]
+}

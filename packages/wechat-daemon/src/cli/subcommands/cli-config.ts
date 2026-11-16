@@ -6,7 +6,7 @@ import { accountDir } from "@wemind/wechat-ilink-core";
 
 import { loadBrainConfig } from "../../agents/brain-config.js";
 import { resolveAgentFor } from "../../agents/brain-agents.js";
-import { ACP_AGENT_PRESETS } from "../../agents/brain-presets.js";
+import { ACP_AGENT_PRESETS } from "../../agents/agent-registry.js";
 import {
   configFileFormat,
   getConfigPath,

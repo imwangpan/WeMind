@@ -5,7 +5,7 @@ import os from "node:os";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
-import { ACP_AGENT_PRESETS } from "../brain-presets.js";
+import { ACP_AGENT_PRESETS } from "../agent-registry.js";
 
 export type AgentRole = "brain" | "worker";
 /**

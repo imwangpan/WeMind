@@ -589,7 +589,7 @@ describe("resolveAgent agent", () => {
     // MCP：走 ACP session/new|load 的 mcpServers；目录是真实 ~/.claude.json（与 realHome 同级）
     expect(ag.acpMcpServers).toBe(true);
     expect(ag.mcpDelivery).toBe("acp");
-    expect(ag.catalogFile).toBe(path.join("..", ".claude.json"));
+    expect(ag.catalogFile).toBe("../.claude.json");
     // 能力默认：load 恢复、支持图片、不覆盖模型
     expect(ag.restore).toBeUndefined();
     expect(ag.images).toBe(true);

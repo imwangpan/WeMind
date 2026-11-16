@@ -14,7 +14,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 
 | 方法 | 作用 | 注意 |
 |------|------|------|
-| `initialize` | 握手 | **WeMind 只置 `initialized = true`，从不解析回包里的 `agentCapabilities`**——`load`/`resume`、图片、`acpMcpServers`/`mcpDelivery` 全部取自 `brain-presets.ts` 的预设字段（见下条） |
+| `initialize` | 握手 | **WeMind 只置 `initialized = true`，从不解析回包里的 `agentCapabilities`**——`load`/`resume`、图片、`acpMcpServers`/`mcpDelivery` 全部取自内置定义（`agents/definitions/*.json`）的字段（见下条） |
 | `session/new` | 新建会话 | 绝对 `cwd`；可传 `mcpServers` |
 | `session/load` | 按 sessionId 恢复会话 | **不是所有 agent 都实现**（DSH 返回 `-32601`） |
 | `session/resume` | 恢复持久会话 | DSH 用这个；恢复日志但不回放旧更新 |
@@ -22,7 +22,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 | `session/update`（通知） | 流式回包：`agent_message_chunk`（正文）、`agent_thought_chunk`（思考）、`tool_call`/`tool_call_update`（工具进度） | committed-only agent 可能整段提交；`tool_call` 首帧报 start、终态 `tool_call_update` 报 end，同一 `toolCallId` 的终态只报一次 |
 | `session/request_permission`（反向请求） | agent 请求权限 | 客户端内置应答器（`acp-reverse.ts`，brain / worker / `brain check` 三处共用）：**默认 yolo**，自动选择 `allow_once` / `allow_always`；`WEMIND_ACP_AUTO_ALLOW=0` 恢复逐次拒绝（`cancelled`），空白串/未设置都按默认 yolo；allow 候选项必须有非空字符串 `optionId`，一个合法项都没有就回 `cancelled` 并记 WARN（防非法 `selected` 把回合挂住）；未知 method 回 `-32601`；接入前仍建议验证 |
 
-> ⚠️ **能力来自预设字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`acpMcpServers`、`mcpDelivery` 都写在 `brain-presets.ts` 的 `ACP_AGENT_PRESETS` 里，来源是接入时的**探针实测**。因此接新 agent 必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进预设——代码不会自动适配（详见 [AGENTS.md §4.2](../../AGENTS.md)）。
+> ⚠️ **能力来自定义字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`acpMcpServers`、`mcpDelivery` 都写在内置定义（`agents/definitions/*.json`）里，来源是接入时的**探针实测**。因此接新 agent 必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进定义——代码不会自动适配（详见 [AGENTS.md §4.2](../../AGENTS.md)）。
 
 「接入一个新 agent」主要是告诉 WeMind「怎么把它以 ACP 模式启动」；协议层能复用，但**能力差异要按 agent 补**（见 §6.6）。
 
@@ -211,15 +211,15 @@ MCP **文件格式**知识集中在 `agents/managed/mcp-adapters.ts` 的 `McpAda
 
 > 换模型/权限后旧 ACP 会话可能仍绑旧配置，需要新会话或 `wemind config reload`。真实配置变化由 `configFingerprint()` 在下一轮开始前发现：它先入哈希 `ag.name` + `rt.mode`，再哈希 `settingsBase` / `mcpConfigFile` / `catalogFile` / profile 一层文件 / overlay（跳过 Agent 自己高频写的会话/历史文件）。**指纹不再恒为空**：没有 `homeEnvVar` 的 Agent（claude-code / cline / qoder 等）也把 `ag.name + rt.mode` 与微信侧 overlay 单独哈希，homeMode 从 `direct` 改成 `managed` 会改变 `rt.mode`、触发重建（旧行为返回空串，会让旧进程因 `configFp === before` 一直复用、仍按 direct 下发空 MCP 集）；`direct` 与 `managed` 都盯真实配置，managed 在下次 spawn 时重新复制。`wemind config reload` 重读 Agent 配置、`seedSlots(loadBrainConfig(DATA_DIR))` 重新 seed 槽位，并按三态重启 brain：`applied` 立即重建进程生效；有回合在跑时 `queued`，排到回合结束再重启（不打断输出）并落盘 `runtime.json` 的 `pendingReload`，如实回执「重启已排队到回合结束」；切脑进行中 `failed`，不重启并提示重试。
 
-## 6.4 可配置的 agent（brain-presets.ts / brain-agents.ts）
+## 6.4 可配置的 agent（definitions/*.json / agent-registry.ts / brain-agents.ts）
 
 大脑通过 ACP 驱动，未配置时默认 `auto`（按 `opencode → cline → qoder → gemini → deepseek → kiro` 探测已安装者）。**多数原生 ACP agent 可以零代码接入**（加 agent/环境变量）；但若它缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，就需要协议层适配（见 §6.6）。
 
 ### AcpAgentPreset 与解析
 
-`AcpAgentPreset` 描述一个 agent：`bin`/`binWin`（二进制名）、`requiresBins`（除 bin 外还必须在 PATH 上解析到的运行时，如 `pi-acp` 需要 `pi` 本体；缺失时 `agentProblem()` 直接报安装提示，不等 `session/new` 才炸）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名，**仅 managed** 注入）、`shell`（是否经 shell 启动）、`env`（**仅 managed** 强制注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批开关；direct 也注入）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——`managed` 模式复制真实的 `profiles/<名>/cordis.patch.yml` 并剥离其中的 MCP 条目，其余 provider/模型条目原样；DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`，目前只有 DSH 用：`"acp"`）、`realHome`（真实配置目录；catalog、指纹与 managed 继承的来源）、`inheritDirs`/`inheritFiles`（**仅 managed** 的记忆/技能继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`configSubdir`（agent 配置目录相对副本根的子路径：kiro 空=根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`）、`settingsBase`（**仅 managed**：把真实设置文件整份复制进副本，只剥该格式的 MCP 段）、`credentialFiles`/`identityFiles`（**仅 managed** 的登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`；direct 也生效）、`kiroEngine`（kiro：按 `--agent-engine` / `acp.agentEngine` / CLI 主版本判 v2/v3——`acp --help` 说两者都没设时默认 v2，CLI ≥3 默认 v3 为假设/待实测；v3 剔 v2 参数并写副本的 `settings/permissions.yaml`）、`isolateSessions`（DSH：**仅 `managed`** 用 `--patch` 把会话 root 指到账号数据目录；`direct` 下使用真实会话库）。此外还有 `restore` / `images` / `acpMcpServers`（纯能力）/ `mcpDelivery`（managed 托管投递方式）/ `modelArg` / `replayOnLoad` / `firstFrameMs`（首帧超时覆盖）/ `heartbeatMs`（静默期心跳间隔覆盖）/ `settingsDefaults` / `mcpFormat` / `mcpConfigFile` / `catalogFile` 等字段（按 agent 覆盖协议能力与副本约定）；完整字段表见 [接入其它-ACP-Agent.md](../接入方案/接入其它-ACP-Agent.md) §4。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量（`direct` 时保留父进程 env、`envDefaults` 与只读凭据桥接，但不注入 `homeEnvVar` / 预设 `env`），并在起进程前调 `prepareAgent(ag)` 落盘派生配置（目前是 DSH 在 `managed` 下的 `--patch` 文件）。
+内置定义描述一个 agent：`bin`/`binWin`（二进制名）、`requiresBins`（除 bin 外还必须在 PATH 上解析到的运行时，如 `pi-acp` 需要 `pi` 本体；缺失时 `agentProblem()` 直接报安装提示，不等 `session/new` 才炸）、`args`（进入 ACP 模式的参数）、`homeEnvVar`（配置目录环境变量名，**仅 managed** 注入）、`shell`（是否经 shell 启动）、`env`（**仅 managed** 强制注入的环境变量）、`envDefaults`（**默认值**环境变量：父进程已设同名变量时不覆盖，用于审批开关；direct 也注入）、`sessionMode`（会话建立/恢复后经 `session/set_mode` 切到的模式，免审批用；`WEMIND_ACP_SESSION_MODE=0` 可关）、`model`（默认模型：用于会话建立后经 `session/set_config_option` 下发）、`realProfile`（该 agent 的用户层 profile 名——`managed` 模式复制真实的 `profiles/<名>/cordis.patch.yml` 并剥离其中的 MCP 条目，其余 provider/模型条目原样；DSH 优先用户写的 `- id: acp`，否则 `agent-default-model`，目前只有 DSH 用：`"acp"`）、`realHome`（真实配置目录；catalog、指纹与 managed 继承的来源）、`inheritDirs`/`inheritFiles`（**仅 managed** 的记忆/技能继承来源）、`fallbackBinPaths`（不在 PATH 时的兜底绝对路径）、`configSubdir`（agent 配置目录相对副本根的子路径：kiro 空=根、opencode `opencode`、gemini `.gemini`、cline `cline`、claude-code `claude`）、`settingsBase`（**仅 managed**：把真实设置文件整份复制进副本，只剥该格式的 MCP 段）、`credentialFiles`/`identityFiles`（**仅 managed** 的登录态同步，后者内容不同即覆盖）、`credentialEnv`（从 agent 自己的凭据文件派生 env；仅父进程未显式提供时，如 Cline 的 `CLINE_PROVIDER`/`CLINE_API_KEY`；direct 也生效；它是代码 hook，由 `agent-registry.ts` 按 `adapter.module` 挂上）、`kiroEngine`（kiro：按 `--agent-engine` / `acp.agentEngine` / CLI 主版本判 v2/v3——`acp --help` 说两者都没设时默认 v2，CLI ≥3 默认 v3 为假设/待实测；v3 剔 v2 参数并写副本的 `settings/permissions.yaml`）、`isolateSessions`（DSH：**仅 `managed`** 用 `--patch` 把会话 root 指到账号数据目录；`direct` 下使用真实会话库）。此外还有 `restore` / `images` / `acpMcpServers`（纯能力）/ `mcpDelivery`（managed 托管投递方式）/ `modelArg` / `replayOnLoad` / `firstFrameMs`（首帧超时覆盖）/ `heartbeatMs`（静默期心跳间隔覆盖）/ `settingsDefaults` / `mcpFormat` / `mcpConfigFile` / `catalogFile` 等字段（按 agent 覆盖协议能力与副本约定）；完整字段表见 [接入其它-ACP-Agent.md](../接入方案/接入其它-ACP-Agent.md) §4。三个 spawn 点（`acp-brain.ts`、`worker-acp.ts`、`brain-check.ts`）统一用 `agentEnv()` 合并环境变量（`direct` 时保留父进程 env、`envDefaults` 与只读凭据桥接，但不注入 `homeEnvVar` / 预设 `env`），并在起进程前调 `prepareAgent(ag)` 落盘派生配置（目前是 DSH 在 `managed` 下的 `--patch` 文件）。
 
-**定义的数据面契约（`agent-definition.ts`）**：`AcpAgentPreset` 的"数据面"被抽成独立的定义契约——`AgentDefinition` 类型 + 字段表 `AGENT_DEFINITION_FIELDS`（唯一事实来源，同时驱动运行时校验器与 JSON Schema）+ `validateAgentDefinition()`。三条纪律：**未知字段一律拒绝**（拼错字段名不能静默忽略，否则故障表现是"接上了但没生效"）、**一次报全所有问题**（写定义的人/模型需要一轮就知道全部要改的地方）、**版本 fail-closed**（`schemaVersion` 与 `adapter.apiVersion` 不符就如实报错，不做"尽力解释"）。注意它**不解释字段语义**：`realProfile` / `kiroEngine` / `isolateSessions` 是数据、但语义靠 per-agent 代码（未来收敛为 adapter hook）；`credentialEnv` 是函数值，必须留在代码侧。目标与阶段见 [Agent 接入：配置化与插件化设计与实现](../设计文档/Agent-接入配置化与插件化设计与实现.md)（P0 已实现，P1–P4 未实现）。
+**定义的数据面契约（`agent-definition.ts`）**：`AcpAgentPreset` 的"数据面"被抽成独立的定义契约——`AgentDefinition` 类型 + 字段表 `AGENT_DEFINITION_FIELDS`（唯一事实来源，同时驱动运行时校验器与 JSON Schema）+ `validateAgentDefinition()`。三条纪律：**未知字段一律拒绝**（拼错字段名不能静默忽略，否则故障表现是"接上了但没生效"）、**一次报全所有问题**（写定义的人/模型需要一轮就知道全部要改的地方）、**版本 fail-closed**（`schemaVersion` 与 `adapter.apiVersion` 不符就如实报错，不做"尽力解释"）。注意它**不解释字段语义**：`realProfile` / `kiroEngine` / `isolateSessions` 是数据、但语义靠 per-agent 代码（未来收敛为 adapter hook）；`credentialEnv` 是函数值，必须留在代码侧。内置 10 个 agent 已全部迁成 `definitions/*.json`，由 `agent-registry.ts` 静态加载、展开 `~`、校验并挂 hook；目标与阶段见 [Agent 接入：配置化与插件化设计与实现](../设计文档/Agent-接入配置化与插件化设计与实现.md)（P0–P1 数据迁移已实现，加载层与 P2–P4 未实现）。
 
 内置 agent：
 
@@ -280,7 +280,7 @@ $env:WEMIND_BRAIN_ARGS     = "serve --acp"
 $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 ```
 
-**方式 B（加 agent，长期）**：在 `ACP_AGENT_PRESETS` 加一条 → `npm run build` → `wemind brain set acme`。
+**方式 B（加 agent，长期）**：在 `agents/definitions/` 加一份 `<agent>.json`（或改现有定义）→ `npm run build` → `wemind brain set acme`。
 
 ### 跨 agent 的限制
 
