@@ -1,3 +1,7 @@
+import fss from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, it, expect, afterEach, vi } from "vitest";
 
 import {
@@ -148,6 +152,38 @@ describe("resolveImageBytes 的 URL 安全闸", () => {
       /重定向次数过多/,
     );
     expect(n).toBe(4); // 原请求 + 3 次跟随
+  });
+});
+
+describe("resolveImageBytes 的本地路径安全闸", () => {
+  const dir = fss.mkdtempSync(path.join(os.tmpdir(), "wemind-img-"));
+  afterEach(() => {
+    for (const f of fss.readdirSync(dir)) fss.rmSync(path.join(dir, f), { force: true });
+  });
+
+  it("普通本地图片照常读", async () => {
+    const file = path.join(dir, "shot.png");
+    fss.writeFileSync(file, Buffer.from([9, 9]));
+    await expect(resolveImageBytes(file)).resolves.toEqual(Buffer.from([9, 9]));
+  });
+
+  it("非图片扩展名拒绝", async () => {
+    const file = path.join(dir, "notes.txt");
+    fss.writeFileSync(file, "x");
+    await expect(resolveImageBytes(file)).rejects.toThrow(/非图片文件/);
+  });
+
+  it("敏感名单里的文件名即使扩展名是图片也拒绝（凭证不能借图片通道外发）", async () => {
+    const file = path.join(dir, "id_rsa.png");
+    fss.writeFileSync(file, "secret");
+    await expect(resolveImageBytes(file)).rejects.toThrow(/敏感文件/);
+  });
+
+  it("网络路径（UNC）拒绝", async () => {
+    const sep = String.fromCharCode(92); // 拼 UNC，避免源码里的反斜杠转义歧义
+    await expect(resolveImageBytes(`${sep}${sep}server${sep}share${sep}a.png`)).rejects.toThrow(
+      /网络路径/,
+    );
   });
 });
 

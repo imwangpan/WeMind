@@ -49,6 +49,7 @@ const {
   dispatchTask,
   injectTask,
   stopTask,
+  findRecipientTask,
   hasActiveTask,
   awaitingTasks,
   interruptedTasks,
@@ -153,7 +154,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     expect(has(pushed, "🤖【任务】")).toBe(true); // 来源标记
     // 每条结果都带「怎么回这条任务」的提示（无前缀的消息已改为走大脑）
     expect(has(pushed, "#1 正文")).toBe(true);
-    expect(has(pushed, "不带前缀的消息会交给大脑")).toBe(true);
+    expect(has(pushed, "不带前缀的消息默认交给大脑")).toBe(true);
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1)); // 推送后进入 waiting
 
     injectTask("u1", "选 A"); // waiting 态回话 → 第二轮
@@ -852,5 +853,131 @@ describe("结束任务时的收尾容错（AGENTS.md §4.13）", () => {
     expect(() => stopTask("u1", 1)).toThrow(/ENOSPC/);
     expect(drop).toHaveBeenCalledWith(conn);
     expect(hasActiveTask("u1")).toBe(false);
+  });
+});
+
+describe("媒体：图片随指令进入任务回合（收件人模式）", () => {
+  it("dispatchTask 带 images：首轮 ask 收到图片 + onTaskId 回调", async () => {
+    const r1 = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise);
+      return { ok: true, conn: c };
+    });
+    const seen: number[] = [];
+    dispatchTask("u1", "看看这些", {
+      images: [{ data: "AAA", mimeType: "image/png" }],
+      onTaskId: (id) => seen.push(id),
+    });
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalledTimes(1));
+    expect(conns[0].ask.mock.calls[0][3]).toMatchObject({
+      images: [{ data: "AAA", mimeType: "image/png" }],
+    });
+    expect(seen).toEqual([1]);
+    r1.resolve("看完了");
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
+  });
+
+  it("waiting 态 injectTask 带 images：续跑轮 ask 收到图片 + onTaskId", async () => {
+    const r1 = deferred();
+    const r2 = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise).mockReturnValueOnce(r2.promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "做X");
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalledTimes(1));
+    r1.resolve("要哪张？");
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
+    const seen: number[] = [];
+    injectTask("u1", "", 1, undefined, {
+      images: [{ data: "BBB", mimeType: "image/jpeg" }],
+      onTaskId: (id) => seen.push(id),
+    });
+    await vi.waitFor(() => expect(conns[0].ask).toHaveBeenCalledTimes(2));
+    expect(conns[0].ask.mock.calls[1][3]).toMatchObject({
+      images: [{ data: "BBB", mimeType: "image/jpeg" }],
+    });
+    expect(seen).toEqual([1]);
+    r2.resolve("好了");
+  });
+
+  it("只带图片、无正文：允许注入；无图无正文才报错", async () => {
+    const r1 = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "做X");
+    await vi.waitFor(() => expect(conns[0]?.ask).toHaveBeenCalledTimes(1));
+    r1.resolve("等你发图");
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
+    expect(
+      injectTask("u1", "", 1, undefined, { images: [{ data: "C", mimeType: "image/png" }] }),
+    ).toBe("");
+    await vi.waitFor(() => expect(conns[0].ask).toHaveBeenCalledTimes(2));
+    expect(injectTask("u1", "", 1)).toBe("要回给任务的内容是空的。");
+  });
+
+  it("findRecipientTask：只认属于该用户且存在的编号", async () => {
+    const r1 = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn();
+      conns.push(c);
+      c.ask.mockReturnValueOnce(r1.promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "做X");
+    await vi.waitFor(() => expect(findRecipientTask("u1", 1)).not.toBeNull());
+    expect(findRecipientTask("u2", 1)).toBeNull();
+    expect(findRecipientTask("u1", 99)).toBeNull();
+  });
+
+  it("onTaskId 只在真的定位到任务时触发：没有任务 / 多条歧义都不误 arm", async () => {
+    const seen: number[] = [];
+    // 一条任务都没有：不 arm（也不会凭空设收件人）
+    expect(
+      injectTask("u1", "在吗", undefined, undefined, { onTaskId: (id) => seen.push(id) }),
+    ).toBe("");
+    expect(seen).toEqual([]);
+
+    const a1 = deferred();
+    const a2 = deferred();
+    acquire
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("kiro");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(a1.promise);
+        return { ok: true, conn: c };
+      })
+      .mockImplementationOnce(async () => {
+        const c = fakeConn("opencode");
+        conns.push(c);
+        c.ask.mockReturnValueOnce(a2.promise);
+        return { ok: true, conn: c };
+      });
+    dispatchTask("u1", "任务甲", { agentKey: "kiro" });
+    dispatchTask("u1", "任务乙", { agentKey: "opencode" });
+    await vi.waitFor(() => expect(conns.length).toBe(2));
+    a1.resolve("甲在等");
+    a2.resolve("乙在等");
+    await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(2));
+
+    // 多条都在等、又没给编号：回编号清单，不能替用户挑一条去 arm
+    expect(
+      injectTask("u1", "随便说点什么", undefined, undefined, {
+        onTaskId: (id) => seen.push(id),
+      }),
+    ).toContain("2 条任务");
+    expect(seen).toEqual([]);
+
+    // 指明编号才 arm
+    injectTask("u1", "只回给乙", 2, undefined, { onTaskId: (id) => seen.push(id) });
+    expect(seen).toEqual([2]);
   });
 });

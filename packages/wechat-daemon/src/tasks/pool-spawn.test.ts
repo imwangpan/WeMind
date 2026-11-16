@@ -60,7 +60,8 @@ process.stdin.on("data", (d) => {
     else if (f.method === "session/load" || f.method === "session/resume") out({ jsonrpc: "2.0", id: f.id, result: {} });
     else if (f.method === "session/prompt") {
       process.stdout.write("prompt log line\\n");
-      out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: f.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "pid=" + process.pid + " 收到:" + f.params.prompt[0].text } } } });
+      const texts = f.params.prompt.filter((p) => p.type === "text");
+      out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: f.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "pid=" + process.pid + " 收到:" + texts.at(-1).text + " texts=" + texts.length } } } });
       out({ jsonrpc: "2.0", id: f.id, result: { stopReason: "end_turn" } });
     } else out({ jsonrpc: "2.0", id: f.id, error: { code: -32601, message: "unsupported" } });
   }
@@ -146,6 +147,23 @@ describe("worker 进程池（真进程）", () => {
     if (!g.ok) throw new Error(g.problem);
     try {
       expect(await g.conn.ask("噪音测试", "task-99@u1")).toContain("收到:噪音测试");
+    } finally {
+      release(g.conn);
+    }
+  });
+
+  it("首轮多带一次「可发图/发文件」约定提示，之后同一会话不再重复", async () => {
+    const g = await acquire(agent("kiro"), 98);
+    expect(g.ok).toBe(true);
+    if (!g.ok) throw new Error(g.problem);
+    try {
+      const first = await g.conn.ask("第一问", "task-98@u1");
+      expect(first).toContain("收到:第一问");
+      // 提示 + 指令：指令必须是最后一块（模型看的是最后那句）
+      expect(first).toContain("texts=2");
+      const second = await g.conn.ask("第二问", "task-98@u1");
+      expect(second).toContain("收到:第二问");
+      expect(second).toContain("texts=1");
     } finally {
       release(g.conn);
     }

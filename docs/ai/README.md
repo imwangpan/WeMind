@@ -64,11 +64,11 @@ poller（长轮询，不被大脑阻塞）
   → 收到消息 / 逐条分拣入队（**不合并**：一条消息 = 一次 prompt）
   → 消息 id 按 uint64 字符串比较 + 最近 200 条去重环（防同批/服务端重放；daemon 与 MCP 两侧共用）
   → 解析 item_list：文本 + 图片/语音/文件/视频附件 + 内联引用；未知类型计数
-  → 快车道（fastQueue，独立于大脑）：控制指令 / 任务指令 / 可续跑任务的「继续」短句
-     （帮助 / 切脑 / 交接 / 会话四件套 / 任务 / MCP 等；「问大脑」前缀不在此列；
+  → 快车道（fastQueue，独立于大脑）：控制指令 / 任务指令 / 可续跑任务的「继续」短句 / 收件人模式下的文字
+     （帮助 / 切脑 / 交接 / 会话四件套 / 任务 / MCP 等；「问大脑」「大脑：」「brain:」前缀不在此列；
        账号级指令（切脑/交接）由非登录者发 → 短提示拒绝，不进大脑；兜底校验，平台限制下正常不触发；
-       **带附件的消息一律不进快车道**，因为控制/任务指令不处理附件）
-  → 大脑队列（msgQueue，串行）：选择 brain 或 worker（**无前缀消息默认走 brain**；出队时仍有可续跑任务才进任务表，见 `shouldResumeTask()`；回任务要显式寻址 `#编号 正文` / `> 正文` / `任务 …`。**模型/账号侧报错的任务直接转「已中断」**）
+       **带附件的消息一律不进快车道**，除非已用 `#编号`/`发给任务 编号` 设了收件人——那类附件走待投递队列交给该任务）
+  → 大脑队列（msgQueue，串行）：选择 brain 或 worker（**无前缀消息默认走 brain**；出队时仍有可续跑任务才进任务表，见 `shouldResumeTask()`；回任务要显式寻址 `#编号 正文` / `> 正文` / `任务 …`，设过收件人后无前缀文字与附件直接交给该任务。**模型/账号侧报错的任务直接转「已中断」**）
   → askBrain(userId, text, onProgress, images)
        ├─ 等切换门（切换大脑进行中时有界等待）
        ├─ ensureProcess(ag)：懒启动 ACP agent，initialize
@@ -84,7 +84,7 @@ poller（长轮询，不被大脑阻塞）
 关键点：
 
 - **入站消息类型**：文本、图片、语音、文件、视频；引用消息做**内联引用**（`[引用消息] 标题 | 正文`，只有 `svr_id` 时给「内容未缓存」占位；引用正文缓存暂未实现）。没有 emoji/位置/小程序/合并转发的 item 类型；纯未知类型、以及只引用不输入正文的消息都会被明确告知，不静默丢、也不拿空 prompt 问大脑。
-- **入站媒体**：图片下载解密成 ACP image 块；文件/视频/无转写语音在默认 `direct` 模式存 `<账号>/media/inbound`（`managed` 才在 `<managed>/media/inbound`），prompt 里给绝对路径（语音用 SILK→WAV，失败保留原始 SILK 并说明）。有微信转写的语音直接当文本，不再下载、也不算附件（语音里的控制/续跑指令照常生效）。媒体目录默认保留 30 天 / 总量 1GB，启动时清理，之后每次写入入站媒体时检查、至少间隔 1 小时才真正清理。
+- **入站媒体**：图片下载解密成 ACP image 块；文件/视频/无转写语音在默认 `direct` 模式存 `<账号>/media/inbound`（`managed` 才在 `<managed>/media/inbound`），prompt 里给绝对路径（语音用 SILK→WAV，失败保留原始 SILK 并说明）。有微信转写的语音直接当文本，不再下载、也不算附件（语音里的控制/续跑指令照常生效）。媒体目录默认保留 30 天 / 总量 1GB，启动时清理，之后每次写入入站媒体时检查、至少间隔 1 小时才真正清理。**任务侧同样适用**：设了收件人（`#n` / `发给任务 n`）时，`prepareInboundMedia()`（`daemon/messaging/inbound-media.ts`）做同一套下载解密，图片经 `applyMediaToPrompt()` 以 image 块进 worker prompt，文件/视频/语音的本地路径写进指令；附件先入待投递队列，下一句文字或 `好了`/`就这样` 时一起提交。
 - **出站文件/视频**：brain 用显式 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)` 触发（路径含 `)` 用 `<...>`）；读取前 realpath + 敏感文件 denylist（含各 agent 登录态、`.auth/`、副本/真实 home 的 `settings.json`/`models*.json`）+ 拒绝 UNC/网络路径与 NTFS 数据流 + 单文件 25MB 上限；硬链接属已接受风险。临时要发 `account.json` 这类文件时，登录者发 `允许敏感文件 [分钟]`（默认 2 分钟、上限 30，仅本进程内生效；只跳过名单，其余闸门照旧）：先开后发、或被拦下后再发这条指令补发（内存里留 30 分钟）都成立。**不通**用普通链接扫描方式发本地文件。
 - **每用户一个 brain session**，映射在 `<数据目录>/brain-sessions.json`（键 `<agent>:<userId>`，换大脑不丢各自上下文）——**这张当前会话表是「当前是哪个会话」的唯一权威**；`session-registry.json` 只是展示用的登记表（名字/标题/轮次），坏了不影响恢复；
 - **worker 是 N 个独立 ACP 进程**（进程池，一条任务一条连接），任务会话在 `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`）；任务表另存 `tasks.json` 供**重启后续跑**（未完成的标「已中断」，回「继续」才续跑）；
@@ -238,7 +238,7 @@ poller（长轮询，不被大脑阻塞）
 4. 不在文档里复制易变细节（版本号、完整方法列表）；给「怎么查」（`initialize`、`wemind brain`）而不是「背答案」。
 5. 内部链接用相对路径；新增文件后跑 `pwsh -NoProfile -File scripts/check-docs.ps1`（CI 也可用）。
 6. 结论被推翻时，除了改正文，还要在 `scripts/doc-impact.rules.mjs` 的 `STALE_FACTS` 登记旧措辞（`id` / `since` / `why` / `pattern` / `allow`）；`npm run doc-impact:check` 会读工作树最终内容逐行拦截，报「文件:行号」。确实该保留的历史段/归档索引/测试反例用 `allow.marker` 写明约定（声明被删则放行失效）。`Docs-Impact: none` 豁免不覆盖这一层。见 [`文档守卫设计.md`](../设计文档/文档守卫设计.md) §3.7、§7.4。
-7. 2026-11-15 守卫自身也修了：C-quoted git 路径还原、`--staged` 读 index blob、内容扫描跳过代码围栏、`testRe()` 每次重置 `lastIndex`、dirty diff 不算未跟踪文件、`1\.0\.107(?!\d)` 不误报 `1.0.1070`（用例 `scripts/doc-guards.test.mjs`）；改 `cli-config.ts` 必须同步 `packages/wechat-daemon/src/cli/subcommands/cli-config.test.ts`。本轮全量 `npm test`：107 个测试文件 / 1205 passed + 4 skipped（快照）。
+7. 2026-11-15 守卫自身也修了：C-quoted git 路径还原、`--staged` 读 index blob、内容扫描跳过代码围栏、`testRe()` 每次重置 `lastIndex`、dirty diff 不算未跟踪文件、`1\.0\.107(?!\d)` 不误报 `1.0.1070`（用例 `scripts/doc-guards.test.mjs`）；改 `cli-config.ts` 必须同步 `packages/wechat-daemon/src/cli/subcommands/cli-config.test.ts`。本轮全量 `npm test`：107 个测试文件 / 1205 passed + 4 skipped（当时的快照；2026-11-16 已增至 **110 个测试文件 / 1261 passed + 4 skipped**）。
 
 ---
 

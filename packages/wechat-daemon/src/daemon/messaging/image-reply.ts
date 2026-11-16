@@ -1,8 +1,10 @@
 import fs from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readBodyWithLimit } from "@wemind/wechat-ilink-core";
 
+import { assertLocalPath, isSensitiveFilePath } from "./attachments.js";
 import { assertPublicHttpUrl } from "./image-url.js";
 
 /**
@@ -158,8 +160,18 @@ export async function resolveImageBytes(src: string): Promise<Buffer> {
     if (Number.isFinite(declared) && declared > MAX_BYTES) throw new Error(`图片过大 ${declared}`);
     return readBodyWithLimit(res.body, MAX_BYTES);
   }
-  const p = src.startsWith("file://") ? fileURLToPath(src) : src;
-  if (!IMG_EXT.test(p)) throw new Error(`非图片文件（仅按图片扩展名发送）: ${p}`);
+  const raw = src.startsWith("file://") ? fileURLToPath(src) : src;
+  // 图片通道同样不能成为绕过敏感名单的后门（软链/硬链、UNC、NTFS 数据流都要先判）。
+  assertLocalPath(raw, src);
+  let p = raw;
+  try {
+    p = fs.realpathSync(raw);
+  } catch {
+    /* 不存在就让下面的 statSync 报错 */
+  }
+  if (!IMG_EXT.test(p)) throw new Error(`非图片文件（仅按图片扩展名发送）: ${src}`);
+  if (isSensitiveFilePath(p))
+    throw new Error(`拒绝发送敏感文件（图片通道同样受限）: ${path.basename(p)}`);
   const stat = fs.statSync(p);
   if (!stat.isFile()) throw new Error("不是文件");
   if (stat.size > MAX_BYTES) throw new Error(`图片过大 ${stat.size}`);

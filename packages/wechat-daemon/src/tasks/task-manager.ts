@@ -3,6 +3,7 @@ import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
 import { getAgent } from "../agents/agent-slot.js";
 import { agentConfigFor, loadBrainConfig } from "../agents/brain-config.js";
 import { resolvePresetByName, type ResolvedAgent } from "../agents/brain-agents.js";
+import type { PromptImage } from "../acp/prompt-media.js";
 import { acquire, drop, release, poolSummary } from "./worker-pool.js";
 import type { WorkerConn, WorkerProgressEvent } from "./worker-acp.js";
 import {
@@ -33,6 +34,15 @@ const log = createLogger("wechat-daemon/task");
 
 export type TaskStatus = StoredTaskStatus;
 
+/**
+ * 一次「送进任务回合」的内容：文字 + 随本轮一起到达的图片。
+ * 收件人模式把「先后到达的文字与图片/文件」重组为一个多模态回合，就是这个形状。
+ */
+export type InjectPayload = {
+  text: string;
+  images?: PromptImage[];
+};
+
 export type Task = {
   id: number;
   userId: string;
@@ -54,8 +64,8 @@ export type Task = {
   numbered?: boolean;
   /** 下一轮是「从中断处续跑」：会话恢复失败要诚实报错，不能静默换空会话。 */
   strictResume?: boolean;
-  pendingInjects?: string[];
-  injectResolver?: (text: string | null) => void;
+  pendingInjects?: InjectPayload[];
+  injectResolver?: (payload: InjectPayload | null) => void;
 };
 
 /** 依赖注入：把「推送文本给用户」交给 index 提供（内部走 sendOrdered + 最新 token）。 */
@@ -210,6 +220,12 @@ export const interruptedTasks = (userId: string): Task[] =>
 export const listTasks = (userId: string): Task[] =>
   [...tasks.values()].filter((t) => t.userId === userId).sort((a, b) => a.id - b.id);
 
+/** 收件人目标校验：编号存在且属于该用户（任一状态都算）→ 返回那条任务，否则 null。 */
+export function findRecipientTask(to: string, id: number): Task | null {
+  const t = tasks.get(id);
+  return t && t.userId === to ? t : null;
+}
+
 /**
  * 像不像「继续跑」这句话。
  *
@@ -269,11 +285,15 @@ function labelOf(task: Task): string {
  * 2026-11-02 起不带前缀的消息一律交给大脑，任务必须显式寻址，所以每条需要用户接话的推送都要把当前编号的写法带上；
  * 只拼在发送文本上，不写进 `lastOutput`（任务列表里不需要重复这段）。
  */
+/**
+ * 任务推送末尾的「怎么回它」提示。收件人模式（2026-11-16）下无前缀消息也可能归任务，
+ * 所以这里说的是「默认」并顺带教一次收件人的写法——这行是用户学习寻址语法的主要入口。
+ */
 function replyFooter(task: Task, kind: "result" | "interrupted"): string {
   const id = `#${task.id}`;
   return kind === "interrupted"
-    ? `\n↩ 续跑用「${id} 继续」，补充用「${id} 正文」，结束用「结束任务 ${task.id}」；不带前缀的消息会交给大脑。`
-    : `\n↩ 回这条任务用「${id} 正文」；不带前缀的消息会交给大脑。`;
+    ? `\n↩ 续跑用「${id} 继续」，补充用「${id} 正文」，结束用「结束任务 ${task.id}」；不带前缀的消息默认交给大脑（发「${id}」可设为收件人）。`
+    : `\n↩ 回这条任务用「${id} 正文」；不带前缀的消息默认交给大脑（发「${id}」可设为收件人）。`;
 }
 
 /** `任务列表`：编号 / agent / 状态 / 轮次 / 已运行 / 最近输出摘要。 */
@@ -329,7 +349,15 @@ function resolveTaskAgent(
 export function dispatchTask(
   to: string,
   instruction: string,
-  opts: { cwd?: string; agentKey?: string; ackId?: string } = {},
+  opts: {
+    cwd?: string;
+    agentKey?: string;
+    ackId?: string;
+    /** 随首轮一起到达的图片（收件人模式重组后的附件）。 */
+    images?: PromptImage[];
+    /** 任务建好后回调其编号（收件人模式据此把指针指向这条任务）。 */
+    onTaskId?: (id: number) => void;
+  } = {},
 ): string {
   const text = (instruction ?? "").trim();
   if (!text) {
@@ -359,9 +387,10 @@ export function dispatchTask(
   if (opts.cwd) task.cwd = opts.cwd;
   if (opts.ackId) task.ackId = opts.ackId;
   tasks.set(id, task);
+  opts.onTaskId?.(id);
   persist();
   emitState();
-  void runTask(task, text);
+  void runTask(task, text, opts.images);
   return ackFor(task, numbered);
 }
 
@@ -370,11 +399,18 @@ export function taskKeyOf(id: number, userId: string): string {
   return `task-${id}@${userId}`;
 }
 
-function waitForInject(task: Task): Promise<string | null> {
+function waitForInject(task: Task): Promise<InjectPayload | null> {
   if (task.pendingInjects?.length) {
-    const t = task.pendingInjects.join("\n"); // 多条暂存按序合并喂下一轮，一条不丢
+    const items = task.pendingInjects; // 多条暂存按序合并喂下一轮，一条不丢
     task.pendingInjects = undefined;
-    return Promise.resolve(t);
+    const images = items.flatMap((i) => i.images ?? []);
+    return Promise.resolve({
+      text: items
+        .map((i) => i.text)
+        .filter(Boolean)
+        .join("\n"),
+      images: images.length ? images : undefined,
+    });
   }
   return new Promise((resolve) => {
     task.injectResolver = resolve;
@@ -382,7 +418,11 @@ function waitForInject(task: Task): Promise<string | null> {
 }
 
 /** 任务循环：每轮 ask → 推送本轮输出 → 等用户回话 → 续跑。绝不在 workerLoop 里 await 它。 */
-async function runTask(task: Task, firstInstruction: string): Promise<void> {
+async function runTask(
+  task: Task,
+  firstInstruction: string,
+  firstImages?: PromptImage[],
+): Promise<void> {
   const ag = task.ag;
   if (!ag) {
     log.error(`task ${task.id} 没有 agent（内部错误）`);
@@ -425,8 +465,9 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
   task.ackId = undefined;
   log.info(`task ${task.id} start agent=${ag.name} conn=${conn.id} cwd=${conn.effectiveCwd()}`);
 
-  let instruction: string | null = firstInstruction;
-  while (tasks.get(task.id) === task && instruction !== null) {
+  let payload: InjectPayload | null = { text: firstInstruction, images: firstImages };
+  while (tasks.get(task.id) === task && payload) {
+    const { text: instruction, images } = payload;
     typing(task.userId); // 立即一次「正在输入」
     const ti = setInterval(() => typing(task.userId), 5000); // 每 5s 续命（客户端 typing 约 5–8s 过期；不占连发上限，请求量比 3s 少 40%）
     let wasResume = false;
@@ -439,7 +480,10 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
         : undefined;
       wasResume = task.strictResume === true;
       task.strictResume = false;
-      const out = await conn.ask(instruction, task.key, onProgress, { strictResume: wasResume });
+      const out = await conn.ask(instruction, task.key, onProgress, {
+        strictResume: wasResume,
+        images,
+      });
       if (tasks.get(task.id) !== task) break; // 期间被 stop
       const label = labelOf(task);
       const body = out || "（本轮无输出）";
@@ -482,7 +526,7 @@ async function runTask(task: Task, firstInstruction: string): Promise<void> {
     task.status = "waiting";
     persist();
     emitState(); // → waiting（task-list 可见「等你回复」）
-    instruction = await waitForInject(task); // null = stop
+    payload = await waitForInject(task); // null = stop
     if (tasks.get(task.id) === task) {
       task.status = "running";
       persist();
@@ -556,7 +600,7 @@ export function providerIssue(e: unknown): string | null {
 }
 
 /** 续跑一条「已中断」的任务：按原 agent 拉进程 + session/load 恢复上下文，然后照常跑循环。 */
-function resumeTask(task: Task, instruction: string): string {
+function resumeTask(task: Task, instruction: string, images?: PromptImage[]): string {
   const got = resolveTaskAgent(task.agent);
   if (!got.ok) {
     // 返回而不是 push：微信侧一样会看到（injectTask 的返回值由调用方当答复发出去），CLI 侧则能拿到真话，
@@ -568,6 +612,7 @@ function resumeTask(task: Task, instruction: string): string {
   void runTask(
     task,
     `（这条任务上一轮没跑完就中断了，现在续跑；上下文按会话恢复。动手前先核对上一步是否已经产生副作用，避免重复。）\n${instruction}`,
+    images,
   );
   return `⏳ 正在按 #${task.id} 号任务续跑（${got.ag.name}）。上一步可能已经改过文件或发过请求，核对时注意别重复动作。`;
 }
@@ -577,7 +622,18 @@ function resumeTask(task: Task, instruction: string): string {
  * 返回要额外回复的文案（空字符串＝只推给了任务，不需要额外答复）。
  * `ackId`（本地命令）：非空返回文案也回一份给 CLI——「没有 #9 号任务」这种话不能只进 daemon 日志。
  */
-export function injectTask(to: string, text: string, id?: number, ackId?: string): string {
+export function injectTask(
+  to: string,
+  text: string,
+  id?: number,
+  ackId?: string,
+  opts: {
+    /** 随本轮一起到达的图片（收件人模式重组后的附件）。 */
+    images?: PromptImage[];
+    /** 目标确定后回调其编号（收件人模式据此把指针指向这条任务）。 */
+    onTaskId?: (id: number) => void;
+  } = {},
+): string {
   const done = (r: string): string => {
     ackIf(ackId, r);
     return r;
@@ -585,7 +641,7 @@ export function injectTask(to: string, text: string, id?: number, ackId?: string
   const live = liveTasks(to);
   const intr = interruptedTasks(to);
   const body = (text ?? "").trim();
-  if (!body) return done("要回给任务的内容是空的。");
+  if (!body && !opts.images?.length) return done("要回给任务的内容是空的。");
 
   let target: Task | undefined;
   if (id !== undefined) {
@@ -598,7 +654,10 @@ export function injectTask(to: string, text: string, id?: number, ackId?: string
     if (awaiting.length === 1) target = awaiting[0];
     else if (live.length === 1) target = live[0];
     else if (live.length === 0) {
-      if (intr.length === 1) return done(resumeTask(intr[0], body));
+      if (intr.length === 1) {
+        opts.onTaskId?.(intr[0].id);
+        return done(resumeTask(intr[0], body, opts.images));
+      }
       if (intr.length > 1)
         return done(
           `有 ${intr.length} 条已中断的任务，请指明编号续跑：${intr.map((t) => `#${t.id}`).join("、")}（写法：\`#${intr[0].id} 继续\`）。`,
@@ -610,14 +669,15 @@ export function injectTask(to: string, text: string, id?: number, ackId?: string
     }
   }
 
-  if (target.status === "interrupted") return done(resumeTask(target, body));
+  opts.onTaskId?.(target.id);
+  if (target.status === "interrupted") return done(resumeTask(target, body, opts.images));
   if (target.status === "waiting" && target.injectResolver) {
     const r = target.injectResolver;
     target.injectResolver = undefined;
-    r(body);
+    r({ text: body, images: opts.images });
     return done("");
   }
-  (target.pendingInjects ??= []).push(body); // running 期间：按序累积，等这一步跑完一并处理（不覆盖前一条）
+  (target.pendingInjects ??= []).push({ text: body, images: opts.images }); // running 期间：按序累积，等这一步跑完一并处理（不覆盖前一条）
   push(to, `📝 已记下给 #${target.id} 的补充，等当前这步跑完就处理。`);
   return done("");
 }

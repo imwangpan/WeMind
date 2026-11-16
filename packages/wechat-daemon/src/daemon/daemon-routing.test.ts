@@ -7,6 +7,7 @@ import {
   extractText,
   formatQuote,
   isFastLane,
+  parseBrainEscape,
   passMcpToggleToBrain,
   shouldResumeInBrainQueue,
   PROGRESS_ACK_DELAY_MS,
@@ -267,5 +268,35 @@ describe("contentlessNotice（只引用 / 未知类型时给明确提示）", ()
     expect(
       contentlessNotice({ text: "", mediaCount: 0, unsupportedTypes: [], quote: undefined }),
     ).toBeNull();
+  });
+});
+
+describe("parseBrainEscape（一次性问大脑的逃逸前缀）", () => {
+  it("问大脑：历史宽松写法都认", () => {
+    expect(parseBrainEscape("问大脑：帮我看下这个报错")).toBe("帮我看下这个报错");
+    expect(parseBrainEscape("问大脑: hi")).toBe("hi");
+    expect(parseBrainEscape("问大脑 你好")).toBe("你好");
+    expect(parseBrainEscape("问大脑你好")).toBe("你好");
+  });
+
+  it("大脑 / brain：必须带分隔符（冒号或空白）", () => {
+    expect(parseBrainEscape("大脑：这东西靠谱吗")).toBe("这东西靠谱吗");
+    expect(parseBrainEscape("大脑 在吗")).toBe("在吗");
+    expect(parseBrainEscape("brain: explain this")).toBe("explain this");
+    expect(parseBrainEscape("Brain hi")).toBe("hi");
+    // 不带分隔符是普通词首，不能误吞
+    expect(parseBrainEscape("大脑你好")).toBeNull();
+    expect(parseBrainEscape("brainstorm 一下")).toBeNull();
+    // 斜杠 /brain 已是「切换大脑」，不能当逃逸
+    expect(parseBrainEscape("/brain kiro")).toBeNull();
+    // 空正文不逃逸
+    expect(parseBrainEscape("问大脑：")).toBeNull();
+    expect(parseBrainEscape("大脑：   ")).toBeNull();
+  });
+
+  it("普通消息不逃逸", () => {
+    expect(parseBrainEscape("帮我写个函数")).toBeNull();
+    expect(parseBrainEscape("任务：做X")).toBeNull();
+    expect(parseBrainEscape("#1 继续")).toBeNull();
   });
 });

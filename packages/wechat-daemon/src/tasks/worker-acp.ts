@@ -22,6 +22,11 @@ import {
   readSessionMapStrict,
   sessionKey,
 } from "../sessions/session-map.js";
+import {
+  applyMediaToPrompt,
+  type PromptImage,
+  WORKER_UNSUPPORTED_IMAGE_NOTE,
+} from "../acp/prompt-media.js";
 import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
 import {
   applyAcpModel,
@@ -88,6 +93,9 @@ function firstFrameMs(a: ResolvedAgent): number {
 export type WorkerProgressEvent = AcpProgressEvent;
 
 let connSeq = 0;
+
+// 已带上「可发图/发文件」约定的 session（每会话首轮带一次，与 brain 的 hintedSessions 同口径）
+const hintedSessions = new Set<string>();
 
 // ---- 磁盘 session 映射（`<agent>:<sessionKey>` -> sessionId），与 brain 同样按 agent 分开存 ----
 function loadSessionMap(a: ResolvedAgent): Record<string, string> {
@@ -236,18 +244,31 @@ export class WorkerConn {
    * 失败即杀本连接的进程（下一轮 ask 重建并 session/load 恢复上下文）→ 配合「继续」实现中断恢复。
    * `strictResume`：磁盘上有旧会话、但 load/resume 都失败时**不静默新建**，直接抛错（续跑场景要的是「上下文接上」，
    * 悄悄换一个空会话会让用户以为续上了、其实什么都不知道）。
+   * `images`：本轮随指令一起发来的图片（收件人模式重组后的附件）；agent 不支持看图时降级为一段提示文本，不静默丢图。
    */
   async ask(
     instruction: string,
     key: string,
     onProgress?: (ev: WorkerProgressEvent) => void,
-    opts: { strictResume?: boolean } = {},
+    opts: { strictResume?: boolean; images?: PromptImage[] } = {},
   ): Promise<string> {
     await this.ensureProcess();
     const sid = await this.ensureSession(key, opts.strictResume === true);
     beginAcpTurn(this.turn, sid, onProgress);
     const t0 = Date.now();
-    const prompt: unknown[] = [{ type: "text", text: instruction || "（继续）" }];
+    const prompt: unknown[] = [];
+    applyMediaToPrompt(prompt, opts.images, this.agent.images, {
+      unsupportedNote: WORKER_UNSUPPORTED_IMAGE_NOTE,
+    });
+    const hintKey = `${this.agent.name}:${sid}`;
+    if (!hintedSessions.has(hintKey)) {
+      hintedSessions.add(hintKey);
+      prompt.push({
+        type: "text",
+        text: "（系统提示：你在后台任务里运行，结果会经微信发给用户。需要发图片时，在回复里用 Markdown 图片语法 ![](本地文件绝对路径 或可直接下载的 http 链接)；需要发文件/视频时，用 [附件](file:///绝对路径)、[文件](file:///绝对路径) 或 [视频](file:///绝对路径)，系统会读取本地文件并作为对应消息发出（不支持语音气泡，音频请按文件发）。其余正常用文字/Markdown 回复；别刷屏——每张图片/每个文件也占微信连发额度。此提示只出现一次，无需理会本句。）",
+      });
+    }
+    prompt.push({ type: "text", text: instruction || "（继续）" });
     try {
       await promptAcp(
         this.host,

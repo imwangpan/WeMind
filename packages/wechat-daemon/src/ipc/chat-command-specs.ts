@@ -40,6 +40,8 @@ export type ChatCommand =
   | { kind: "handoff" }
   /** 临时放行敏感文件（凭证/状态文件）的外发窗口。 */
   | { kind: "allowSensitive"; minutes?: number }
+  /** 退出「收件人」模式：之后的文字与附件重新交给大脑。 */
+  | { kind: "toBrain" }
   /** 查看 / 设置 brain 默认工作区（登录者）。 */
   | { kind: "workspace"; path?: string; reset?: boolean }
   /** 微信独享配置：只读查看（登录者，确定性入口）。 */
@@ -53,6 +55,8 @@ export type TaskCommand =
   | { kind: "stop"; id?: number | "all" }
   /** 向指定编号的任务回话。 */
   | { kind: "reply"; id: number; text: string }
+  /** 只把某条任务设为「收件人」（不产生文本回合）：之后的文字、图片、文件都交给它。 */
+  | { kind: "recipient"; id: number }
   /** 任务列表。 */
   | { kind: "tasks" };
 
@@ -326,6 +330,15 @@ export const COMMAND_SPECS: CommandSpec<ChatCommand>[] = [
     brief: "这张表",
     match: (t) => (/^(?:帮助|指令|命令|\/help|\/h)$/i.test(t) ? { kind: "help" } : null),
   },
+  {
+    id: "task.toBrain",
+    section: "task",
+    zh: "回到大脑",
+    slash: "/to-brain",
+    brief: "退出收件人模式：之后的文字和附件重新交给大脑",
+    match: (t) =>
+      /^(?:回到大脑|返回大脑|退出收件人|\/to-?brain)$/i.test(t) ? { kind: "toBrain" } : null,
+  },
 ];
 
 export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
@@ -372,6 +385,17 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
       // `#1 号文件在哪` 说的是「1 号文件」，不是给 1 号任务回话 —— 数字后面紧跟「号」时按普通消息处理。
       if (m[1] !== undefined && m[3].startsWith("号")) return null;
       return { kind: "reply", id: Number(m[1] ?? m[2]), text: m[3].trim() };
+    },
+  },
+  {
+    id: "task.recipient",
+    section: "task",
+    zh: "#<编号>、发给任务 <编号>",
+    slash: "/task-focus <编号>",
+    brief: "把某条任务设为收件人：之后的文字、图片、文件都交给它",
+    match: (t) => {
+      const m = t.match(/^(?:[#＃](\d+)|发给任务\s*(\d+)|[/／]\s*task-focus\s+(\d+))\s*$/i);
+      return m ? { kind: "recipient", id: Number(m[1] ?? m[2] ?? m[3]) } : null;
     },
   },
   {
