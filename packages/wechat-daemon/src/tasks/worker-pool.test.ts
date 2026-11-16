@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterAll, describe, it, expect } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +14,19 @@ import {
   type PoolLimits,
 } from "./worker-pool.js";
 import type { ResolvedAgent } from "../agents/brain-agents.js";
+
+const tmpDirs: string[] = [];
+
+/** 用例目录统一登记，文件结束时一起删掉（真机 TEMP 不该被测试越攒越多）。 */
+function tmpDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+afterAll(() => {
+  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 /**
  * 进程池的**取用/回收策略**是纯函数（`planAcquire`/`planReap`），IO（真起进程）在别处。
@@ -66,14 +79,14 @@ describe("agentKey", () => {
 describe("connKey", () => {
   it("cwd 也是身份：同 agent 换工作目录 → 不同键（不能复用旧进程）", () => {
     const a = { name: "kiro", bin: "/bin/kiro", args: ["acp"] } as unknown as ResolvedAgent;
-    const aDir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-conn-a-"));
-    const bDir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-conn-b-"));
+    const aDir = tmpDir("wemind-conn-a-");
+    const bDir = tmpDir("wemind-conn-b-");
     expect(connKey(a, aDir)).not.toBe(connKey(a, bDir));
   });
 
   it("显式 cwd 与默认 cwd 相同 → 同一个键", () => {
     const a = { name: "kiro", bin: "/bin/kiro", args: ["acp"] } as unknown as ResolvedAgent;
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-conn-default-"));
+    const dir = tmpDir("wemind-conn-default-");
     const old = process.env.WEMIND_WORKER_CWD;
     process.env.WEMIND_WORKER_CWD = dir;
     try {

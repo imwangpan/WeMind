@@ -2,7 +2,7 @@ import fss from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, afterAll, vi } from "vitest";
 
 import {
   canSendImage,
@@ -159,6 +159,9 @@ describe("resolveImageBytes 的本地路径安全闸", () => {
   const dir = fss.mkdtempSync(path.join(os.tmpdir(), "wemind-img-"));
   afterEach(() => {
     for (const f of fss.readdirSync(dir)) fss.rmSync(path.join(dir, f), { force: true });
+  });
+  afterAll(() => {
+    fss.rmSync(dir, { recursive: true, force: true });
   });
 
   it("普通本地图片照常读", async () => {

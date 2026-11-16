@@ -579,3 +579,8 @@ afterAll(() => {
   if (savedNodeOptions === undefined) delete process.env.NODE_OPTIONS;
   else process.env.NODE_OPTIONS = savedNodeOptions;
 });
+
+// 用例根目录在真机 TEMP 里，跑完自己收掉，别让它随着每次全量测试越攒越多。
+afterAll(() => {
+  fs.rmSync(root, { recursive: true, force: true });
+});

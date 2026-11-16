@@ -60,6 +60,9 @@ describe("helpText（CLI 帮助面）", () => {
 describe("resolveTaskCwd（--cwd 相对路径按用户当前目录解析）", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-cwd-"));
   fs.mkdirSync(path.join(base, "sub"));
+  afterAll(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
 
   it("相对路径 → 以用户当前目录为基准的绝对路径", () => {
     expect(resolveTaskCwd("sub", base)).toBe(path.join(base, "sub"));

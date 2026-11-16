@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -63,6 +63,9 @@ afterEach(() => {
   for (const f of ["qrcode.png", "qrcode.txt"]) {
     fs.rmSync(path.join(dataDir, f), { force: true });
   }
+});
+afterAll(() => {
+  fs.rmSync(m.root, { recursive: true, force: true });
 });
 
 const parse = (r: { content: Array<{ type: "text"; text: string }> }) =>

@@ -43,8 +43,13 @@ import {
 } from "./home-mode.js";
 import { migrateLegacyHomes } from "./migrate-legacy.js";
 
-function tmp(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "wemind-config-"));
+const tmpDirs: string[] = [];
+
+/** 用例目录统一登记，文件结束时一起删掉：`os.tmpdir()` 是开发者真实 TEMP，散落的 `wemind-config-*` 会一直攒下去。 */
+function tmp(prefix = "wemind-config-"): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
 }
 
 const oldMode = process.env.WEMIND_HOME_MODE;
@@ -54,6 +59,7 @@ beforeAll(() => {
 afterAll(() => {
   if (oldMode === undefined) delete process.env.WEMIND_HOME_MODE;
   else process.env.WEMIND_HOME_MODE = oldMode;
+  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
 function fakeAgent(realHome: string): ResolvedAgent {
@@ -114,7 +120,7 @@ describe("workspace", () => {
 
   it("external 必须是已存在目录；账号目录/家目录/Agent 配置目录被拒", () => {
     const dir = tmp();
-    const project = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-project-"));
+    const project = tmp("wemind-project-");
     updateWorkspace("brain", project, dir);
     expect(resolveWorkspace("brain", dir)).toMatchObject({ mode: "external", path: project });
     expect(validateWorkspacePath(dir, "brain", dir)).toMatch(/账号目录/);

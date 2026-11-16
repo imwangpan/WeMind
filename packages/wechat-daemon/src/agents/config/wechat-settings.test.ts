@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { ensureParityAccountDirs } from "./account-bootstrap.js";
 import {
@@ -14,9 +14,18 @@ import {
   wechatSettingsPath,
 } from "./wechat-settings.js";
 
+const tmpDirs: string[] = [];
+
+/** 用例目录统一登记，文件结束时一起删掉：否则每跑一次全量测试就在真机 TEMP 里多留几个。 */
 function tmp(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "wemind-wxsettings-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-wxsettings-"));
+  tmpDirs.push(dir);
+  return dir;
 }
+
+afterAll(() => {
+  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 describe("normalizeReplyStyle", () => {
   it("认 concise（大小写与空白不敏感）", () => {

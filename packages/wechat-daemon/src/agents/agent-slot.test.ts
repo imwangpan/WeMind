@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -30,6 +30,11 @@ afterEach(() => {
   resetSlotsForTest();
   if (savedBrain !== undefined) process.env.WEMIND_BRAIN = savedBrain;
   if (savedWorkerBrain !== undefined) process.env.WEMIND_WORKER_BRAIN = savedWorkerBrain;
+});
+
+// 用例根目录在真机 TEMP 里，跑完自己收掉（含其中建的 data 目录）。
+afterAll(() => {
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe("agent-slot", () => {
