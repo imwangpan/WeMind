@@ -5,7 +5,12 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { validateAgentDefinition } from "../agents/agent-definition.js";
-import { draftFromProbe, probeAgent, type AgentProbeOptions } from "./agent-probe.js";
+import {
+  draftFromProbe,
+  probeAgent,
+  probeUsesShell,
+  type AgentProbeOptions,
+} from "./agent-probe.js";
 
 vi.setConfig({ testTimeout: 20_000 });
 
@@ -97,6 +102,33 @@ function opts(mode = "ok"): AgentProbeOptions {
 }
 
 describe("probeAgent", () => {
+  it(".cmd/.bat 在 Windows 自动经 shell，显式值优先", () => {
+    expect(probeUsesShell("pi-acp.cmd", undefined, "win32")).toBe(true);
+    expect(probeUsesShell("C:\\tools\\agent.BAT", undefined, "win32")).toBe(true);
+    expect(probeUsesShell("pi-acp.exe", undefined, "win32")).toBe(false);
+    expect(probeUsesShell("pi-acp.cmd", false, "win32")).toBe(false);
+    expect(probeUsesShell("pi-acp.cmd", true, "linux")).toBe(true);
+    expect(probeUsesShell("pi-acp.cmd", undefined, "linux")).toBe(false);
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "未显式 --shell 也能探测 .cmd 适配器",
+    async () => {
+      const wrapper = path.join(root, "fake-acp.cmd");
+      fs.writeFileSync(wrapper, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`, "utf-8");
+      const r = await probeAgent({
+        bin: wrapper,
+        args: ["ok"],
+        timeoutMs: 5000,
+        testMcp: false,
+      });
+      expect(r.shell).toBe(true);
+      expect(r.ok).toBe(true);
+      expect(r.sessionId).toBe("probe-session");
+    },
+    20_000,
+  );
+
   it("默认只做握手与恢复，不发真实 prompt", async () => {
     process.env.FAKE_PROBE_LOG = log;
     try {

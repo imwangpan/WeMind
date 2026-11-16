@@ -11,7 +11,7 @@
 只给当前这台机器接入 Agent，走这条。不要改仓库、不要发 npm 包：
 
 1. 读规格：`wemind agent spec`（字段含义、必填性、自动/`--deep`/人工边界、正反例、JSON Schema）。需要给程序读时用 `wemind agent spec --json`。
-2. 探测：`wemind agent probe <bin> --args <进入 ACP 的参数> --draft`。默认只握手，不发真实 prompt；`--deep` 才发真实回合并验证恢复后的上下文。
+2. 探测：`wemind agent probe <bin> --args <进入 ACP 的参数> --draft`。默认只握手，不发真实 prompt；`--deep` 才发真实回合并验证恢复后的上下文。Windows 的 `.cmd/.bat` 会自动经 shell；只有无扩展名的 wrapper 才需要显式 `--shell`。
 3. 补人工字段：按 `agent spec` 的「去哪里找」补 `realHome`、`configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile`、凭据/继承清单、`requiresBins` 等；不要凭记忆猜字段。
 4. 校验：先 `wemind agent check <文件> --schema`，再 `wemind agent check <文件>`（默认真实握手），需要完整回合时再加 `--deep`。
 5. 安装与选择：`wemind agent add <包目录|package.json|定义.json>`（也可手工保存为 `~/.wemind/.agents/<name>.json`，文件名与 `name` 完全一致）→ `wemind agent list` / `show <name> --explain` → 用户明确要求时 `wemind brain switch <name>`。**不要自动切换大脑。** `agent add` 支持包内 `wemind-agent.json`、`package.json` 的 `wemind.definition` / `wemind.definitions`，并把相对路径 adapter 复制到定义目录。

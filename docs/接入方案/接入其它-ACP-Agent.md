@@ -197,7 +197,7 @@ wemind brain switch acme                # 建议先 check；daemon 在跑时热�
    - `自动`：探针能填（`restore`、`acpMcpServers`、`mcpDelivery`、`sessionMode` 候选等）；
    - `--deep`：探针发真实回合才敢下结论（`images`、`replayOnLoad`、首帧耗时等）；
    - `人工`：探针推不出的领域知识（`realHome`、`configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile`、凭据/继承清单、`requiresBins`、启动参数等）。
-2. **探测并产草稿**：`wemind agent probe <bin> --args <进入 ACP 的参数> --draft`。默认只做 `initialize` + `session/new` + load/resume，**不发真实 prompt**；默认用临时假 MCP 测 `session/new.mcpServers`，`--no-mcp-test` 可关闭。只有显式 `--deep` 才发真实 prompt（会产生费用，并可能把测试对话写进 agent 自己的会话历史）；`--image` / `--tool` 也必须配合 `--deep`。草稿只填协议层结论，`notes` 会列出仍需人工补的字段。
+2. **探测并产草稿**：`wemind agent probe <bin> --args <进入 ACP 的参数> --draft`。默认只做 `initialize` + `session/new` + load/resume，**不发真实 prompt**；默认用临时假 MCP 测 `session/new.mcpServers`，`--no-mcp-test` 可关闭。只有显式 `--deep` 才发真实 prompt（会产生费用，并可能把测试对话写进 agent 自己的会话历史）；`--image` / `--tool` 也必须配合 `--deep`。Windows 的 `.cmd/.bat` 自动经 shell；无扩展名的 wrapper 才需要显式 `--shell`。草稿只填协议层结论，`notes` 会列出仍需人工补的字段。
 3. **补领域字段**：按 `agent spec` 的字段表补齐目录、文件格式、凭据与依赖；不要凭记忆猜字段——未知字段会整份拒绝（例如 `realhome` 不是 `realHome`）。
 4. **先校验数据，再验真实握手**：把草稿保存到临时 `.json`，先跑 `wemind agent check <文件> --schema` 修 schema；再跑 `wemind agent check <文件>` 做真实 ACP 握手；需要验证完整回合时加 `--deep`。真实握手失败不会伪造成功，也不会替用户改 agent 配置。
 5. **安装并选择**：用 `wemind agent add <包目录|package.json|定义.json>` 复制安装（也可手工保存为 `~/.wemind/.agents/<name>.json`，文件名必须与 `name` 完全一致），再运行 `wemind agent list` / `wemind agent show <name> --explain`，最后由用户明确要求时运行 `wemind brain switch <name>`。**不要自动切换大脑**；在微信里只需回一句「要切过去就说『切到 <name>』」。

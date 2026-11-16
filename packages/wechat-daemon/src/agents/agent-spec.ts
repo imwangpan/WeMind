@@ -220,7 +220,7 @@ function fieldRows(): Array<{
 
 const COMMANDS = {
   spec: "wemind agent spec [--json]",
-  probe: "wemind agent probe <bin> [--args <JSON数组|空格分隔>] [--draft] [--deep]",
+  probe: "wemind agent probe <bin> [--args <JSON数组|空格分隔>] [--shell] [--draft] [--deep]",
   checkSchema: "wemind agent check <name|文件.json> --schema",
   check: "wemind agent check <name|文件.json> [--deep]",
   install:
@@ -267,6 +267,7 @@ export function agentSpecJson(): Record<string, unknown> {
     probeNotes: [
       "探针默认只做 initialize + session/new（可按需试 load/resume），不发真实 prompt。",
       "--deep 才会发一条真实 prompt；它会花钱，并可能把测试对话写进 agent 的会话历史。",
+      "Windows 上 .cmd/.bat 会自动经 shell 启动；无扩展名的 wrapper 可显式加 --shell。",
       "--image 需要配合 --deep，用来验证图片输入；只看 initialize 的能力声明可能会误判。",
       "探针成功只代表协议层可用；realHome / mcpFormat / 凭据/继承清单等仍需人工补。",
     ],
@@ -287,7 +288,7 @@ export function agentSpecMarkdown(): string {
     "",
     "## 自助接入流程",
     "",
-    "1. 先跑 `wemind agent probe <bin> --args <进入 ACP 的参数> --draft`，拿到协议层草稿。",
+    "1. 先跑 `wemind agent probe <bin> --args <进入 ACP 的参数> --draft`，拿到协议层草稿。Windows 的 `.cmd/.bat` 自动经 shell；无扩展名的 wrapper 才需要 `--shell`。",
     "2. 按下面的字段表补 `realHome`、`mcpFormat`、`mcpConfigFile`、凭据/继承清单等探针推不出的字段。",
     "3. 保存到临时文件，先跑 `wemind agent check <文件> --schema` 修 schema；再跑 `wemind agent check <文件>` 做真实握手。",
     "4. 握手通过后用 `wemind agent add <包目录|文件.json>` 安装（或手工保存到定义目录），再运行 `wemind agent list` / `wemind brain switch <name>`。",

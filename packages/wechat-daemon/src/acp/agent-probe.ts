@@ -110,6 +110,18 @@ export type AgentProbeResult = {
 
 type Frame = Record<string, any>;
 
+/** Windows 的 `.cmd`/`.bat` 无 shell 直接 spawn 会 EINVAL；仅在未显式指定时自动兜底。 */
+export function probeUsesShell(
+  bin: string,
+  explicit: boolean | undefined,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (explicit !== undefined) return explicit;
+  if (platform !== "win32") return false;
+  const clean = bin.trim().replace(/^["']+|["']+$/g, "");
+  return [".cmd", ".bat"].includes(path.win32.extname(clean).toLowerCase());
+}
+
 function errText(e: unknown): string {
   if (e instanceof Error) return e.message;
   return typeof e === "string" ? e : JSON.stringify(e);
@@ -468,7 +480,11 @@ function inferRestore(
   };
 }
 
-export async function probeAgent(opts: AgentProbeOptions): Promise<AgentProbeResult> {
+export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbeResult> {
+  const opts: AgentProbeOptions = {
+    ...rawOpts,
+    shell: probeUsesShell(rawOpts.bin, rawOpts.shell),
+  };
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-agent-probe-"));
   const cwd = opts.cwd ? path.resolve(opts.cwd) : path.join(root, "cwd");
   const home = opts.home ? path.resolve(opts.home) : opts.homeEnv ? path.join(root, "home") : null;

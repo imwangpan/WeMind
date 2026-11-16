@@ -44,8 +44,9 @@ const AGENT_USAGE = `用法：
   wemind agent show <name> [--explain] [--key <key|label>]
                                                查看最终生效值；--explain 打印每一层来源
   wemind agent spec [--json]                   规格、字段说明、正反例与校验方式
-  wemind agent probe <bin> [--args <JSON数组|空格分隔>] [--draft] [--deep] [--json]
+  wemind agent probe <bin> [--args <JSON数组|空格分隔>] [--shell] [--draft] [--deep] [--json]
                                                探测 ACP 能力；--draft 输出定义草稿，--json 输出完整结果
+                                               Windows 的 .cmd/.bat 自动经 shell
   wemind agent check <name|文件.json> [--schema] [--deep]
                                                校验 schema + 真实 ACP 握手；--schema 不启动进程
   wemind agent add <包目录|package.json|定义.json>

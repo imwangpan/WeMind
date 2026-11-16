@@ -1,6 +1,6 @@
 # Agent 接入：配置化与插件化设计与实现
 
-> **状态**：设计定稿；**P0 契约 + P1（内置迁移 + 本机加载层 + `agent list/show/check`）+ P2（`agent spec/probe`、真实握手校验、一次性自助接入提示）+ P3（可安装 adapter 插件与内置 adapter 收敛）+ P4（`agent add/remove` 与数据包分发）已实现**（2026-11-16）｜**分支**：`feat/agent-definitions`｜**最后核对**：2026-11-16
+> **状态**：设计定稿；**P0 契约 + P1（内置迁移 + 本机加载层 + `agent list/show/check`）+ P2（`agent spec/probe`、真实握手校验、一次性自助接入提示）+ P3（可安装 adapter 插件与内置 adapter 收敛）+ P4（`agent add/remove` 与数据包分发）已实现，并完成真实账号微信 E2E**（2026-11-16）｜**分支**：`feat/agent-definitions`｜**最后核对**：2026-11-16
 >
 > 本文描述如何把「接入一个新的 ACP Agent」从**改 TypeScript + 发新版**变成**加一份定义（必要时加一个插件）**：让用户在本机自己接入新 agent、让开发侧不再一个一个适配。本文是实现前定稿，进度以文末「实施阶段」与 [`docs/ai/README.md`](../ai/README.md) 事实状态表为准；未实测的结论标注「假设 / 待实测」。
 
@@ -225,7 +225,7 @@
 
 **P1 检查点 2（本机加载层 + 命令面）已实现（2026-11-16）**：`agent-registry.ts` 扫描 `~/.wemind/.agents/*.json`（`WEMIND_AGENTS_DIR` 可覆盖），按目录指纹缓存、下一次解析自动重读；优先级**内置 < 本机定义 < `brain.json` 字段覆盖 < 环境变量**，同名**整条替换**。坏定义（JSON/schema/未知字段/`name` 与文件名不一致/`name: "auto"`/自定义 `mcpFormat`/外部 adapter）按文件名遮住同名内置，`ResolvedAgent.definitionProblem` → `agentProblem()` → 退出码 78，文案含文件与修法；`ACP_AGENT_PRESETS` 改为合并视图 Proxy，`resolvePresetByName()` / 微信「切换大脑」「任务 <agent>」/ CLI 白名单自动接受本机定义；daemon 启动与切脑结果打印本机来源。新增 `wemind agent list|show [--explain]|check <name|文件>`；`config agent` 通过定义的 `realHome` / `mcpConfigFile` / `settingsBase` 工作，不按 agent 名硬编码。测试新增 `agent-registry.test.ts`（本机层/坏定义/热重读）、`cli-agent.test.ts`、`chat-commands.test.ts` 本机名用例、`cli-config.test.ts` 本机定义路径用例；`vitest.setup.ts` 把测试的定义目录指到空临时目录，避免读开发者真实 `~/.wemind`。
 
-**P2 自助接入已实现（2026-11-16）**：新增 `agents/agent-spec.ts`，用同一份 `AGENT_DEFINITION_FIELDS` + `FIELD_GUIDES` 输出人读 Markdown 与机器可读 JSON（含 JSON Schema、正例、错误示例、安装/选择命令），字段明确区分「自动 / `--deep` / 人工」。新增 `acp/agent-probe.ts`，把 `scripts/acp-probe.mjs` 的实现搬进 CLI：默认只做 `initialize` + `session/new` + load/resume 实测，不发真实 prompt；`--deep` 才发真实回合并验证恢复后的上下文，`--image` / `--tool` 需要显式配合 `--deep`；默认用临时假 MCP 测试 `session/new.mcpServers`，`--no-mcp-test` 可关闭；`--draft` 只填协议层能确认的字段，并在 notes 里列出仍需人工补的领域字段。`agent check` 默认改为真实 ACP 握手，`--schema` 才是纯数据校验，`--deep` 再发一条真实 prompt；`resolveAgentFromDefinition()` 让“检查未安装文件”和安装后使用同一套 adapter 解析。`scripts/acp-probe.mjs` 改成薄壳，兼容旧 `ACP_*` 变量并默认 `--deep`（`ACP_NO_PROMPT=1` 关闭）。反向请求统一走 `acp-reverse.ts`，探针可显式拒绝权限请求；草稿在检测到恢复后历史回放时自动写 `replayOnLoad: true`。大脑的一次性系统提示加入 `wemind agent spec` 入口，不新增微信指令、不每轮注入。**验收边界**：fake ACP 进程的探针、握手、`--deep`、草稿与提示注入已有单测；真实 agent 的「spec → probe → check → 落盘 → 热切换」闭环仍待真机跑通。
+**P2 自助接入已实现（2026-11-16）**：新增 `agents/agent-spec.ts`，用同一份 `AGENT_DEFINITION_FIELDS` + `FIELD_GUIDES` 输出人读 Markdown 与机器可读 JSON（含 JSON Schema、正例、错误示例、安装/选择命令），字段明确区分「自动 / `--deep` / 人工」。新增 `acp/agent-probe.ts`，把 `scripts/acp-probe.mjs` 的实现搬进 CLI：默认只做 `initialize` + `session/new` + load/resume 实测，不发真实 prompt；`--deep` 才发真实回合并验证恢复后的上下文，`--image` / `--tool` 需要显式配合 `--deep`；默认用临时假 MCP 测试 `session/new.mcpServers`，`--no-mcp-test` 可关闭；`--draft` 只填协议层能确认的字段，并在 notes 里列出仍需人工补的领域字段。`agent check` 默认改为真实 ACP 握手，`--schema` 才是纯数据校验，`--deep` 再发一条真实 prompt；`resolveAgentFromDefinition()` 让“检查未安装文件”和安装后使用同一套 adapter 解析。`scripts/acp-probe.mjs` 改成薄壳，兼容旧 `ACP_*` 变量并默认 `--deep`（`ACP_NO_PROMPT=1` 关闭）。反向请求统一走 `acp-reverse.ts`，探针可显式拒绝权限请求；草稿在检测到恢复后历史回放时自动写 `replayOnLoad: true`。大脑的一次性系统提示加入 `wemind agent spec` 入口，不新增微信指令、不每轮注入。**真机验收（2026-11-16）**：`agent spec` / `agent probe pi-acp.cmd --draft` / `agent check pi`（含 `--deep`）通过；真实微信回合由 `pi` 完成 `prompt ok 3567ms` 并收到 `OK`。首次实跑还暴露并修复了 Windows `.cmd` 探针未自动经 shell 的 `spawn EINVAL`，补了回归用例。
 
 ### P1 内置迁移 + 加载层（交付用户侧目标的大半）
 
@@ -239,7 +239,7 @@
 - **验收**：让一个真实 agent 走完"读 spec → 产草稿 → check → 落盘 → 热切换"闭环（真机）；`--deep` 与不带的差异有测试；提示只注入一次。
 - **文档**：`docs/接入方案/接入其它-ACP-Agent.md` 新增"用户自助接入"章节；[`docs/ai/recipes/add-acp-agent.md`](../ai/recipes/add-acp-agent.md) 拆成"官方内置定义"与"用户自定义"两条路。
 
-**P2 已实现（2026-11-16）**：见上方 P2 段；`agent spec/probe/check --schema/--deep`、薄壳脚本、字段说明守卫、一次性提示与 fake ACP 用例均已落地。真实 agent 闭环仍待真机验证。
+**P2 已实现（2026-11-16）**：见上方 P2 段；`agent spec/probe/check --schema/--deep`、薄壳脚本、字段说明守卫、一次性提示与 fake ACP 用例均已落地。真实 agent 的「spec → probe → check → 落盘 → 热切换」闭环已于同日用本机 `pi-acp` 和真实微信账号跑通。
 
 ### P3 插件层（交付开发侧目标）
 
@@ -254,7 +254,7 @@
 - **改动面**：包内定义约定（如包根 `wemind-agent.json` 或 `package.json` 的 `wemind` 字段）+ `agent add/remove`（复制即安装）；`llms.txt` 与 `docs/README.md` 同步；官方数据包结构预留。文档守卫键源已在 P1 改成 `definitions/*.json`，P4 只需确认用户目录不进入守卫。
 - **验收**：`npm run verify` 全绿；一个第三方定义包能装进 `~/.wemind/.agents/` 并被选中（真机）；用户目录里的定义**不触发**任何仓库守卫。
 
-**P4 已实现（2026-11-16）**：新增 `agents/agent-install.ts` / `agent-paths.ts` 与 `wemind agent add/remove`。包约定：包根 `wemind-agent.json`、`package.json` 的 `wemind.definition`（单定义）或 `wemind.definitions`（目录，默认 `agents/*.json`），可选 `package.json` 的 `wemind.adapter` 作为共享 adapter。`add` 只读本地目录/文件，复制定义与相对路径 adapter 到 `~/.wemind/.agents/`，改写成安装后的路径，并在 `.sources.json` 记录来源；adapter 预加载失败会回滚定义、adapter 与来源清单。`remove` 只删本机/数据包层，同名内置定义恢复。运行期不联网拉取；用户目录不进入仓库文档守卫。
+**P4 已实现（2026-11-16）**：新增 `agents/agent-install.ts` / `agent-paths.ts` 与 `wemind agent add/remove`。包约定：包根 `wemind-agent.json`、`package.json` 的 `wemind.definition`（单定义）或 `wemind.definitions`（目录，默认 `agents/*.json`），可选 `package.json` 的 `wemind.adapter` 作为共享 adapter。`add` 只读本地目录/文件，复制定义与相对路径 adapter 到 `~/.wemind/.agents/`，改写成安装后的路径，并在 `.sources.json` 记录来源；adapter 预加载失败会回滚定义、adapter 与来源清单。`remove` 只删本机/数据包层，同名内置定义恢复。运行期不联网拉取；用户目录不进入仓库文档守卫。**真机验收（2026-11-16）**：临时定义包 `ext-pi` 经 `agent add` 安装，`agent list/show/check` 识别为「数据包」并通过真实握手；运行时 `brain switch pi → ext-pi` 热切换成功，daemon pid 不变，真实微信回合 `prompt ok 1758ms` 并收到 `EXT_OK`；测试后已 `remove` 并恢复账号原配置。
 
 ---
 
@@ -266,7 +266,8 @@
 
 ## 7. 风险与待实测
 
-- **待实测**：`session/new` 的 `configOptions` 是否总能列出可用 mode id；tsdown 对 JSON 导入的内联行为（`resolveJsonModule` + `noEmit` 组合）；用户定义 agent 作为 worker 时进程池与会话持久化的表现。
+- **已实测（2026-11-16）**：tsdown 对 `definitions/*.json` 的内联行为（`npm run build` / `npm pack --dry-run` 通过）；真实 agent 的「spec → probe → check → 落盘 → 热切换 → 微信单轮」闭环；第三方定义包的安装、选中、热切换与移除。
+- **待实测**：`session/new` 的 `configOptions` 是否总能列出可用 mode id；用户定义 agent 作为 worker 时进程池与会话持久化的表现。
 - **风险**：用户写一份劣质定义覆盖内置（如 kiro 漏了 engine 探测）→ 症状静默。缓解：三处可见性 + `agent check` + `agent show --explain`。
 - **风险**：模型自行写定义文件时可能绕过 `agent add`。这是**既有能力**，靠"合法路径最顺畅 + 三处可见性"缓解，不靠一道能被绕过的闸。
 - **风险**：P3 触碰的是"终端能用、微信不能用"的高发区（profile 剥离、session patch、凭据派生、引擎探测）。缓解：已把 per-agent 逻辑收敛到内置 adapter，并用现有单测与 `agent-branch-guard.test.ts` 守住核心不再按 agent 名分支。
