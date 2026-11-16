@@ -33,6 +33,7 @@ type CacheEntry = AdapterLoadResult & {
   /** 外部模块解析到的实际文件；内置为空。 */
   resolvedFile?: string;
   mtimeMs?: number;
+  size?: number;
 };
 
 const cache = new Map<string, CacheEntry>();
@@ -291,8 +292,8 @@ export function loadAgentAdapterSync(
   if (cached?.ok) {
     if (!cached.resolvedFile) return cached;
     try {
-      const mtimeMs = fs.statSync(cached.resolvedFile).mtimeMs;
-      if (cached.mtimeMs === mtimeMs) return cached;
+      const st = fs.statSync(cached.resolvedFile);
+      if (cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached;
     } catch {
       /* 文件被删：走下面重新解析，得到可读错误 */
     }
@@ -326,6 +327,7 @@ export function loadAgentAdapterSync(
       source: target,
       resolvedFile: target,
       mtimeMs: fs.statSync(target).mtimeMs,
+      size: fs.statSync(target).size,
     };
     cache.set(key, result);
     return result;

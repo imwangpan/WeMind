@@ -176,10 +176,12 @@ describe("本机定义层", () => {
     expect(findAgentDefinitionSource("kiro")?.kind).toBe("local");
   });
 
-  it("合并视图只认自有键，不把原型链上的 `constructor` 当成 agent", () => {
+  it("合并视图只把自有键当 agent，同时保留普通对象的原型语义", () => {
     expect(findAgentDefinition("constructor")).toBeUndefined();
     expect(findAgentDefinitionSource("constructor")).toBeUndefined();
-    expect(ACP_AGENT_PRESETS["constructor"]).toBeUndefined();
+    expect(ACP_AGENT_PRESETS["constructor"]).toBe(Object);
+    expect(ACP_AGENT_PRESETS.hasOwnProperty("constructor")).toBe(false);
+    expect("toString" in ACP_AGENT_PRESETS).toBe(true);
     expect(isAgentToken("constructor")).toBe(false);
   });
 
@@ -216,6 +218,7 @@ describe("本机定义层", () => {
   it("自定义 mcpFormat 在 P1 明确失败（不猜格式）", () => {
     write("yaml-agent", {
       ...minimal("yaml-agent"),
+      realHome: "~/.yaml-agent",
       mcpFormat: "yaml",
       adapter: { module: "builtin:cline-credentials", apiVersion: 1 },
     });
@@ -237,5 +240,30 @@ describe("本机定义层", () => {
       expect(agentProblem(r.agent)).toBeNull();
       expect(r.agent.realHome).toBe(path.join(os.homedir(), ".test-agent"));
     }
+  });
+
+  it("运行期修改 adapter 文件会被指纹发现并重新加载", () => {
+    const adapter = path.join(dir, "live-adapter.cjs");
+    fs.writeFileSync(
+      adapter,
+      "module.exports = { apiVersion: 1, hints: { autoProbe: 1 } };\n",
+      "utf-8",
+    );
+    write("live-agent", {
+      ...minimal("live-agent"),
+      adapter: { module: "./live-adapter.cjs", apiVersion: 1 },
+    });
+    resetAgentRegistryCache();
+    expect(getAgentRegistry().presets["live-agent"]?.hooks?.hints?.autoProbe).toBe(1);
+
+    fs.writeFileSync(
+      adapter,
+      "module.exports = { apiVersion: 1, hints: { autoProbe: 9 } };\n",
+      "utf-8",
+    );
+    const future = new Date(Date.now() + 2000);
+    fs.utimesSync(adapter, future, future);
+
+    expect(getAgentRegistry().presets["live-agent"]?.hooks?.hints?.autoProbe).toBe(9);
   });
 });

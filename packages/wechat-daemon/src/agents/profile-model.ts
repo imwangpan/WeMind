@@ -65,7 +65,7 @@ function isWechatMcpEntry(body: string): boolean {
 
 /** 把真实 profile 用户层复制进某个副本 home：`stripAllMcp` 时剥离全部 MCP 条目，否则只剔除微信 MCP 条目；
  *  没有命中时逐字节原样——调用方共用同一段路径与剔除逻辑。
- *  `src` 不存在时抛错，调用方按 best-effort 包 try/catch。返回被剔除的条目（供调用方记日志）。 */
+ *  `src` 不存在时返回空数组（首次启动尚未生成 profile 是正常情况）。返回被剔除的条目（供调用方记日志）。 */
 export function copyProfilePatch(
   realHome: string,
   profile: string,
@@ -74,6 +74,7 @@ export function copyProfilePatch(
 ): string[] {
   const src = path.join(realHome, "profiles", profile, "cordis.patch.yml");
   const dst = path.join(destHome, "profiles", profile, "cordis.patch.yml");
+  if (!fs.existsSync(src)) return [];
   const raw = fs.readFileSync(src);
   const { text, removed } = opts.stripAllMcp
     ? stripAllDshMcpEntries(raw.toString("utf-8"))

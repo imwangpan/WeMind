@@ -18,11 +18,23 @@ const dist = path.join(ROOT, "packages/wechat-daemon/dist/cli.js");
 const tsx = path.join(ROOT, "node_modules/tsx/dist/cli.mjs");
 const src = path.join(ROOT, "packages/wechat-daemon/src/cli.ts");
 
+if (
+  process.env.ACP_TIMEOUT_MS &&
+  (!/^\d+$/.test(process.env.ACP_TIMEOUT_MS) || Number(process.env.ACP_TIMEOUT_MS) <= 0)
+) {
+  console.error("ACP_TIMEOUT_MS 应为正整数（毫秒）");
+  process.exit(2);
+}
+
 function addValue(args, flag, value) {
   if (value !== undefined && value !== "") args.push(flag, value);
 }
 
-const args = ["agent", "probe", process.env.ACP_BIN || "opencode"];
+const forwarded = process.argv.slice(2);
+let forwardedBin = "";
+if (forwarded[0] && !forwarded[0].startsWith("--")) forwardedBin = forwarded.shift();
+
+const args = ["agent", "probe", forwardedBin || process.env.ACP_BIN || "opencode"];
 addValue(args, "--args", process.env.ACP_ARGS || '["acp"]');
 if (process.env.ACP_SHELL === "1") args.push("--shell");
 addValue(args, "--cwd", process.env.ACP_CWD);
@@ -45,12 +57,35 @@ if (process.env.ACP_AUTO_ALLOW !== "1") args.push("--reject-permissions");
 if (process.env.ACP_NO_PROMPT !== "1") args.push("--deep");
 if (process.env.ACP_DRAFT === "1") args.push("--draft");
 else args.push("--json");
+// 旧脚本默认不测 MCP（ACP_TEST_MCP 未设时 session/new 的 mcpServers 为空）。
+if (!process.env.ACP_TEST_MCP) args.push("--no-mcp-test");
+args.push(...forwarded);
 
-const command = fs.existsSync(dist)
+function newestMtime(target) {
+  try {
+    const st = fs.statSync(target);
+    if (!st.isDirectory()) return st.mtimeMs;
+    let newest = st.mtimeMs;
+    for (const name of fs.readdirSync(target)) {
+      newest = Math.max(newest, newestMtime(path.join(target, name)));
+    }
+    return newest;
+  } catch {
+    return 0;
+  }
+}
+
+const sourceTree = path.join(ROOT, "packages/wechat-daemon/src");
+const distFresh =
+  fs.existsSync(dist) &&
+  (!fs.existsSync(tsx) || fs.statSync(dist).mtimeMs >= newestMtime(sourceTree));
+const command = distFresh
   ? [process.execPath, dist]
   : fs.existsSync(tsx)
     ? [process.execPath, tsx, src]
-    : null;
+    : fs.existsSync(dist)
+      ? [process.execPath, dist]
+      : null;
 
 if (!command) {
   console.error(
@@ -64,5 +99,5 @@ if (!command) {
     stdio: "inherit",
     windowsHide: true,
   });
-  process.exitCode = result.status ?? (result.error ? 1 : 0);
+  process.exitCode = result.status ?? (result.error || result.signal ? 1 : 0);
 }

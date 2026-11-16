@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { DATA_DIR, classifyMediaByName, type MediaKind } from "@wemind/wechat-ilink-core";
 
-import { ACP_AGENT_PRESETS } from "../../agents/agent-registry.js";
+import { agentSensitivePathSnapshot } from "../../agents/agent-registry.js";
 
 /**
  * 出站附件：brain 用显式 Markdown 链接 `[附件](file:///abs/path)` / `[文件](...)` / `[视频](...)`
@@ -83,34 +83,23 @@ function isUnderAgentConfigRoot(file: string): boolean {
   for (const p of [
     process.env.WECHAT_BRAIN_HOME,
     process.env.WEMIND_WORKER_HOME,
-    ...Object.values(ACP_AGENT_PRESETS).map((preset) => preset.realHome),
+    process.env.WEMIND_BRAIN_REAL_HOME,
+    process.env.WECHAT_REAL_KIRO_HOME,
+    ...agentSensitivePathSnapshot().roots,
   ]) {
     if (p?.trim()) roots.push(p);
   }
   return roots.some((root) => isUnderRoot(file, root));
 }
 
-/** adapter 声明的额外敏感路径（如 `~/.claude.json`）；目录按子树、文件按实时路径精确匹配。 */
+/**
+ * adapter 声明的额外敏感路径（如 `~/.claude.json`）；目录按子树、文件按实时路径精确匹配。
+ * 快照在 registry 构建时算好：出站热路径不重复执行第三方 hook。
+ */
 function isUnderAdapterSensitivePath(file: string): boolean {
-  for (const preset of Object.values(ACP_AGENT_PRESETS)) {
-    let extra: readonly string[] = [];
-    try {
-      extra =
-        preset.hooks?.paths?.sensitive?.({
-          agent: {
-            name: preset.name,
-            realHome: preset.realHome,
-            realProfile: preset.realProfile,
-            extraConfigFiles: preset.extraConfigFiles ?? [],
-          },
-        }) ?? [];
-    } catch {
-      /* 插件坏掉不能把附件功能一起拖垮；其它静态名单仍然生效 */
-    }
-    for (const p of [...(preset.extraConfigFiles ?? []), ...(extra ?? [])]) {
-      if (!p) continue;
-      if (path.resolve(file) === path.resolve(p) || isUnderRoot(file, p)) return true;
-    }
+  for (const p of agentSensitivePathSnapshot().paths) {
+    if (!p) continue;
+    if (path.resolve(file) === path.resolve(p) || isUnderRoot(file, p)) return true;
   }
   return false;
 }

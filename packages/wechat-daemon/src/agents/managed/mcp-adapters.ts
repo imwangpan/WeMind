@@ -31,13 +31,10 @@ export type { AgentMcpDeclaration };
 export type McpAdapter = AgentMcpFormatAdapter;
 
 /** 可选 MCP 的定义来源文件；`WEMIND_MCP_CATALOG` / `WECHAT_MCP_CATALOG` 可覆盖为任意路径。 */
-export function mcpCatalogPath(ag: ResolvedAgent): string {
+export function mcpCatalogPath(ag: ResolvedAgent): string | null {
   const override = process.env.WEMIND_MCP_CATALOG?.trim() || process.env.WECHAT_MCP_CATALOG?.trim();
   if (override) return override;
-  if (!ag.realHome)
-    throw new Error(
-      `agent「${ag.name}」没有 realHome，无法定位 MCP 目录文件；请在定义里补 realHome`,
-    );
+  if (!ag.realHome) return null;
   return path.join(ag.realHome, ag.catalogFile || "settings/mcp.json");
 }
 

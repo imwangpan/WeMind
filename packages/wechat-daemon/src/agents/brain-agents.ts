@@ -1,4 +1,3 @@
-import path from "node:path";
 import fs from "node:fs";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
@@ -8,6 +7,7 @@ import {
   AUTO_PROBE_ORDER,
   brokenAgentDefinitionMessage,
   findBrokenAgentDefinition,
+  getAgentRegistry,
   isAgentToken,
   presetForDefinition,
   type AcpAgentPreset,
@@ -16,6 +16,7 @@ import { AGENT_DEFINITION_SCHEMA_VERSION, type AgentDefinition } from "./agent-d
 import type { AgentAdapter } from "./agent-adapter.js";
 import { readEnvSnapshot, mergeEnvSnapshot } from "./config/env-snapshot.js";
 import { readHomeMode } from "./config/home-mode.js";
+import { findOnPath, findOnPathAny, locateExecutable } from "../shared/process/executable.js";
 
 /**
  * ACP agent 与解析。
@@ -47,20 +48,6 @@ import { readHomeMode } from "./config/home-mode.js";
 
 export { ACP_AGENT_PRESETS } from "./agent-registry.js";
 export type { AcpAgentPreset } from "./agent-registry.js";
-
-function onPath(exe: string): string | null {
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
-    if (dir && fs.existsSync(path.join(dir, exe))) return path.join(dir, exe);
-  }
-  return null;
-}
-
-/** 同 onPath，但按平台补齐扩展名：适配器依赖的运行时（如 pi）在 Windows 上通常是 .cmd。 */
-function onPathAny(exe: string): string | null {
-  if (process.platform === "win32")
-    return onPath(`${exe}.cmd`) ?? onPath(`${exe}.exe`) ?? onPath(exe);
-  return onPath(exe);
-}
 
 /**
  * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的 agent。只收纳**适合无配置自动选择的原生 ACP**；Copilot 虽原生支持 ACP，但认证独立于二进制安装，故与适配器一样只允许显式选择（`wemind brain set|switch <名>`）。适配器（`claude-code` / `codex` / `pi`）也不参与自动探测。顺序按本机实测的启动耗时排（暖启动：opencode ~1.7s、cline ~2.0s、qoder ~2.5s、gemini ~4.3s）；kiro 与 deepseek 在该轮实测中未握手成功（kiro `session/new` 超时、deepseek 旧会话 artifact 布局错误），暂排最后，修复后可再前移。
@@ -132,12 +119,12 @@ export function presetBinPath(
   preset: Pick<AcpAgentPreset, "bin" | "binWin" | "fallbackBinPaths">,
   overrideBin?: string,
 ): string | null {
-  if (overrideBin) return locateBin(overrideBin);
+  if (overrideBin) return locateExecutable(overrideBin);
   // 本机定义允许 bin 直接写绝对/相对路径；此时不该按 PATH 裸名处理。
   if (preset.bin.includes("/") || preset.bin.includes("\\"))
     return fs.existsSync(preset.bin) ? preset.bin : null;
   return (
-    onPath(presetExe(preset)) ??
+    findOnPath(presetExe(preset)) ??
     (preset.fallbackBinPaths ?? []).find((p) => fs.existsSync(p)) ??
     null
   );
@@ -154,23 +141,6 @@ export function presetAvailable(key: string, cfg?: BrainConfig | null): boolean 
   const normalized = key.toLowerCase();
   const bin = presets && Object.hasOwn(presets, normalized) ? presets[normalized]?.bin : undefined;
   return presetBinPath(preset, bin) !== null;
-}
-
-/**
- * 解析一个 bin 说明（绝对/相对路径，或 PATH 上的裸名）到实际文件；解析不到返回 null。
- * 裸名在 Windows 上会补试 `.exe`/`.cmd`，覆盖 npm shim 的常见布局。
- */
-function locateBin(bin: string): string | null {
-  if (!bin) return null;
-  if (bin.includes("/") || bin.includes(path.sep)) return fs.existsSync(bin) ? bin : null;
-  const candidates = [bin];
-  if (process.platform === "win32" && !/\.[A-Za-z0-9]+$/.test(bin))
-    candidates.push(`${bin}.exe`, `${bin}.cmd`);
-  for (const c of candidates) {
-    const hit = onPath(c);
-    if (hit) return hit;
-  }
-  return null;
 }
 
 /** daemon 因「大脑配置错误」退出时用的退出码；后台守护进程据此停止自动重启（配置错误需人工修，重拉无益）。 */
@@ -359,9 +329,12 @@ function resolveAgentCore(
   // 选 agent：auto → 探测第一个可用；未知值 → 标 known:false（结构上退回 kiro 兜底，交启动校验报错）。
   let known = true;
   let key = opts.presetOverride?.name ?? requestedKey;
+  let autoUnavailable = false;
   if (!opts.presetOverride) {
     if (key === "auto") {
-      key = AUTO_PROBE_ORDER.find((k) => presetAvailable(k, cfg)) ?? "kiro";
+      const selected = AUTO_PROBE_ORDER.find((k) => presetAvailable(k, cfg));
+      autoUnavailable = selected === undefined;
+      key = selected ?? "kiro";
     } else if (broken || !ACP_AGENT_PRESETS[key]) {
       known = false;
     }
@@ -405,11 +378,11 @@ function resolveAgentCore(
   const explicitBin =
     envBin || legacyBin || overrideCfg?.bin?.trim() || presetOv?.bin?.trim() || "";
   const exe = presetExe(preset);
-  const binPath = explicitBin ? locateBin(explicitBin) : presetBinPath(preset);
+  const binPath = explicitBin ? locateExecutable(explicitBin) : presetBinPath(preset);
   const bin =
     explicitBin ||
     (shell ? (process.platform === "win32" ? exe : preset.bin) : binPath || preset.bin);
-  const available = known && binPath !== null;
+  const available = known && !autoUnavailable && binPath !== null;
 
   // 继承「记忆/规则/技能」：来源目录与子目录清单按 agent 而异（下沉到 agent），env 可覆盖。
   // 放在 args 之前：kiro 的引擎选择与 v3 的信任参数清洗都要用它。
@@ -638,8 +611,17 @@ export function agentProblem(ag: ResolvedAgent): string | null {
   if (ag.definitionProblem) return ag.definitionProblem;
   if (!ag.known)
     return `未知 agent「${ag.requestedKey}」。可选：${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制可用 WEMIND_BRAIN_BIN 或 brain set --bin 指定）`;
-  if (ag.requestedKey === "auto" && !ag.available)
-    return `自动探测未找到可用的大脑（已试：${AUTO_PROBE_ORDER.join("、")}）。请安装其中之一，或运行 \`wemind brain set <agent 名>\``;
+  if (ag.requestedKey === "auto" && !ag.available) {
+    const brokenAuto = Object.values(getAgentRegistry().broken).filter((b) =>
+      AUTO_PROBE_ORDER.includes(b.name),
+    );
+    const brokenNote = brokenAuto.length
+      ? `；以下本机定义损坏，已按不可用处理：${brokenAuto
+          .map((b) => `${b.name}（${b.file}）`)
+          .join("、")}`
+      : "";
+    return `自动探测未找到可用的大脑（已试：${AUTO_PROBE_ORDER.join("、")}）。请安装其中之一，或运行 \`wemind brain set <agent 名>\`${brokenNote}`;
+  }
   if (!ag.available) {
     const hint = ag.hooks?.hints?.install?.({
       agentName: ag.name,
@@ -651,7 +633,7 @@ export function agentProblem(ag: ResolvedAgent): string | null {
   }
   // 适配器已装、但它依赖的运行时没装（如 pi-acp 找到了、pi 本体不在 PATH）：
   // 提前说清楚，别等 session/new 才抛一句适配器的内部错误。
-  const missingRuntime = ag.requiresBins.filter((b) => !onPathAny(b));
+  const missingRuntime = ag.requiresBins.filter((b) => !findOnPathAny(b));
   if (missingRuntime.length) {
     const hint = ag.hooks?.hints?.install?.({
       agentName: ag.name,

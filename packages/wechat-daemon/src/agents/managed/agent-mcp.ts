@@ -247,6 +247,45 @@ function envEntries(map: unknown): Array<{ name: string; value: string }> {
     .map(([name, v]) => ({ name, value: String(v) }));
 }
 
+/**
+ * 规范化调用方直接给的 ACP mcpServers（`agent probe --mcp` / 旧脚本环境变量）。
+ * ACP schema 要求 stdio 的 `env` 是 `{name,value}[]`；缺省补空数组，map 转数组。
+ * 空数组表示「没有要测的 MCP」，不能把 `tested` 误报成 true。
+ */
+export function normalizeAcpMcpServers(raw: readonly unknown[]): Array<Record<string, unknown>> {
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const entry = { ...(item as Record<string, unknown>) };
+    const name = typeof entry.name === "string" ? entry.name : "";
+    if (!name) return [];
+    if (typeof entry.command === "string" && entry.command) {
+      entry.args = Array.isArray(entry.args) ? entry.args.map(String) : [];
+      entry.env = Array.isArray(entry.env)
+        ? entry.env
+            .filter(
+              (x): x is { name: string; value: string } =>
+                !!x && typeof x === "object" && typeof (x as { name?: unknown }).name === "string",
+            )
+            .map((x) => ({ name: x.name, value: String(x.value ?? "") }))
+        : envEntries(entry.env);
+      return [entry];
+    }
+    if (typeof entry.url === "string" && entry.url) {
+      entry.type = "http";
+      entry.headers = Array.isArray(entry.headers)
+        ? entry.headers
+            .filter(
+              (x): x is { name: string; value: string } =>
+                !!x && typeof x === "object" && typeof (x as { name?: unknown }).name === "string",
+            )
+            .map((x) => ({ name: x.name, value: String(x.value ?? "") }))
+        : envEntries(entry.headers);
+      return [entry];
+    }
+    return [entry];
+  });
+}
+
 /** 该 catalog 条目能否转成 ACP 声明（addMcp 加载前的预校验也用它）。 */
 export function isConvertibleToAcp(entry: unknown): boolean {
   if (!isObj(entry)) return false;

@@ -1,6 +1,6 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-> **最后核对**：2026-11-16 ｜ **状态**：内置 10 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**、**Copilot CLI 已探针级实测 + 真机 E2E（1.0.108，Windows，2026-11-15）**。P2 起支持用户自助接入：`wemind agent spec` + `probe --draft` + `agent check`，本机定义无需 WeMind 发版。默认 `homeMode=direct`：WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Agent 完全使用真实配置/技能/记忆/会话库；`managed` 才是账号副本。
+> **最后核对**：2026-11-17 ｜ **状态**：内置 10 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**、**Copilot CLI 已探针级实测 + 真机 E2E（1.0.108，Windows，2026-11-15）**。P2 起支持用户自助接入：`wemind agent spec` + `probe --draft` + `agent check`，本机定义无需 WeMind 发版。默认 `homeMode=direct`：WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Agent 完全使用真实配置/技能/记忆/会话库；`managed` 才是账号副本。
 >
 > 本文说明如何把 WeMind daemon 的「大脑」从默认的 `auto` 换成另一个 ACP agent（默认 `auto` 按 `opencode → cline → qoder → gemini → deepseek → kiro` 探测已安装者，kiro 排最后）。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 
@@ -117,7 +117,7 @@ agent：  WEMIND_BRAIN(env)  >  brain.json 的 agent  >  auto（自动探测）
 | `WEMIND_BRAIN_EXTRA_ARGS` | 追加 ACP 启动参数（**空格分隔**，拼在预设/覆盖参数之后；只加开关时用它，不会漏掉 `acp`） | 无 |
 | `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的 `sessionMode`：`0`/`false`/`off`/`no` 关闭 `session/set_mode`，其它非空值 = 该 modeId（影响 claude-code / codex 的免审批） | 用预设值 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「配置目录环境变量名」（仅 managed 指向账号副本） | 内置默认值 |
-| `WEMIND_BRAIN_SHELL` | 是否经 shell 启动（`1`/`true` 开）；npx/`.cmd`/`.bat` 类适配器在 Windows 需要 | 内置默认值（默认 false） |
+| `WEMIND_BRAIN_SHELL` | 是否经 shell 启动（`1`/`true` 开）；npx/`.cmd`/`.bat` 类适配器在 Windows 需要 | 所选 agent 定义的 `shell`（10 个内置定义里 8 个是 `true`，仅 kiro / qoder 为 `false`）；不是全局默认 `false` |
 | `WEMIND_BRAIN_INHERIT` | 是否继承真实配置目录的记忆/规则/技能（见 §6.5） | `1`（开） |
 | `WEMIND_BRAIN_REAL_HOME` | 覆盖真实配置目录（managed 继承与配置指纹的来源） | 配置里的 `realHome` |
 | `WEMIND_BRAIN_INHERIT_DIRS` | 覆盖继承的子目录清单（逗号/空格分隔） | 配置里的 `inheritDirs` |
@@ -275,6 +275,7 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `realHome` | 否 | 真实配置目录（catalog、managed 继承与配置指纹的来源） |
 | `inheritDirs` | 否 | **仅 `managed`**：从 `realHome` 链入副本的「目录式」记忆子目录（`direct` 直接用真实目录） |
 | `inheritFiles` | 否 | **仅 `managed`**：从 `realHome` 拷入副本的单文件记忆（如 `AGENTS.md`） |
+| `extraConfigFiles` | 否 | 配置目录之外、但属于该 agent 的文件（绝对路径或已展开 `~` 的路径）。WeMind **只读**，用于配置指纹、微信 MCP 检查和目录展示；不会写回 |
 | `configSubdir` | 否 | agent 配置目录相对副本根的子路径（kiro 空；opencode `opencode`） |
 | `mcpFormat` | 否 | MCP 定义的文件格式：`mcpServers`（顶层）、`mcp.servers`（嵌套）或 `dshProfileYaml`；默认 `mcpServers`。自定义格式必须同时给 `adapter` |
 | `mcpConfigFile` | 否 | MCP 配置文件相对配置目录的路径（默认 `settings/mcp.json`） |
@@ -284,6 +285,7 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `env` | 否 | **仅 `managed`** 额外注入的环境变量（强制；值里 `%HOME%` → 副本根），如 opencode 的 `OPENCODE_DISABLE_PROJECT_CONFIG` |
 | `envDefaults` | 否 | **默认值**环境变量：父进程已设同名变量时**不覆盖**（如 DSH `DSH_PERMISSION_MODE`、codex `INITIAL_AGENT_MODE`）。审批/副本类开关用它，部署方可在 daemon 环境里收紧权限；跳过时会记日志 `env defaults kept from parent: …` |
 | `adapter` | 否 | 代码逃生舱：`{ "module": "...", "apiVersion": 1 }`。数据表达不了时（自定义 MCP 格式、凭据派生、启动前文件生成）指向一个按 hook 契约注册的模块；可用 hook 见 `wemind agent spec`。模块可来自包名/绝对路径/相对路径，未知键、版本不符、缺少 `mcp` 接口方法都 fail-closed。内置定义也走同一套 hook（如 Cline 用 `builtin:cline-credentials` 从 `providers.json` 派生 `CLINE_PROVIDER` / `CLINE_API_KEY`，只读、显式 env 永远优先） |
+| `probe` | 否 | 探测结论元数据（顶层字段，不是运行期能力）：`{ "at": "ISO 8601 时间", "agentVersion"?: "..." }`。`agent probe --draft` 会写；只用于展示「上次在哪个版本上测过」，不改变启动或会话行为 |
 | `sessionMode` | 否 | 会话建立/恢复后经 `session/set_mode { sessionId, modeId }` 切到的模式（**agent 自己的 ACP 接口**；用于免审批：claude-code `bypassPermissions`、codex `agent-full-access`）。会话回包报告 `modes.availableModes` 且不含该值时**跳过**并记日志；调用失败只记日志、不拖垮回合。`WEMIND_ACP_SESSION_MODE=0/false/off/no` 关闭，其它非空值 = 覆盖 modeId |
 | `replayOnLoad` | 否 | `session/load`/`resume` **返回后仍会异步回放历史帧**的 agent（gemini 的 `loadSession` 里 `streamHistory` 不 await）：恢复后先等帧流安静（200ms 静默窗口、最多 3s）再发本轮 prompt，否则历史会被拼进本轮答复。默认 `false` |
 | `restore` | 否 | 恢复会话的方式：`load`（默认）或 `resume`（如 DSH） |
@@ -422,9 +424,9 @@ WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直
 
 ## 7. 平台注意（Windows）
 
-- 默认 `shell: false` 直接 spawn 二进制。对 `.exe`（如 `kiro-cli.exe`）没问题。
+- 定义里的 `shell` 默认值是 `false`（直接 spawn 二进制），对 `.exe`（如 `kiro-cli.exe`）没问题；但 **10 个内置定义里 8 个显式设了 `shell: true`**，不要把它当成全局默认。
 - 若某 agent 在 Windows 上是 `.cmd` / `.bat` / 经 `npx` 启动（如 `claude-agent-acp.cmd`、`gemini.cmd`、`npx.cmd`），`shell: false` 直接 spawn 会失败。本项目已支持经 shell 启动：
-  - agent 里设 `shell: true`（`claude-code`、`gemini` agent 已设）；或运行时设 `WEMIND_BRAIN_SHELL=1`。
+  - agent 定义里设 `shell: true`（内置的 claude-code / gemini / opencode / cline / copilot / deepseek / pi / codex 已设；kiro / qoder 不需要）；或运行时设 `WEMIND_BRAIN_SHELL=1`。
   - 经 shell 启动时，二进制用「裸名」让 shell 从 PATH 解析（避免带空格的全路径在 shell 下出问题）。
   - 参数由我们自己逐条加引号拼成**一条命令串**再交给 shell（`spawn-agent.ts` 的 `spawnAgent`），**不传 `args` 数组**——Node 20+ 对「`shell:true` + args 数组」会报 DEP0190（args 只按空格拼接、不做转义），参数含空格会被拆开、含 `&`/`|` 等 cmd 元字符则会被 shell 自行解释。三处启动点（对话大脑 / 任务 worker / `brain check`）都走这个入口。
 - 仍可用 `WEMIND_BRAIN_BIN` 指向真正的 `.exe` / node 入口绕开 shim（则无需 shell）。
@@ -469,7 +471,7 @@ WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直
 - 本指南覆盖「**实现 ACP 的 agent CLI**」。这是接入成本最低的一档，但**不等于零适配**：先跑能力探针，再决定是否需要改 `acp-brain.ts` / `worker-acp.ts`。
 - **能力差异清单**（接入前逐条确认）：
   - **会话恢复**：有 `session/load`？只有 `session/resume`？都没有？当前客户端会按配置里的 `restore` 选 `load`/`resume`；DSH 走 `resume`，其余 agent 先 `load`，失败再试 `resume`/`new`。会话映射按 agent 分开存（`brain-sessions.json` 键 `<agent>:<userId>`，`worker-sessions.json` 键 `<agent>:task-<编号>@<userId>`），切换大脑互不覆盖，切回原大脑仍能恢复；
-  - **图片**：探针看 `initialize.promptCapabilities.image` 是否为 true？false 时带图 `session/prompt` 会报 `-32602`。**结论要写进预设的 `images` 字段**——WeMind 运行时不读这个回包（见 §4 与 [AGENTS.md §4.2](../../AGENTS.md)），不写就等于默认支持；
+  - **图片**：探针看 `initialize.promptCapabilities.image` 是否为 true？false 时带图 `session/prompt` 会报 `-32602`。**结论要写进定义里的 `images` 字段**——WeMind 运行时不读这个回包（见 §4 与 [AGENTS.md §4.2](../../AGENTS.md)），不写就等于默认支持；
   - **MCP**：走 agent 配置文件，还是 ACP `session/new` 的 `mcpServers`？支持 stdio/HTTP 哪些传输？
   - **反向请求**：是否会发 `session/request_permission` / `fs/*` / `terminal/*`？brain、worker、`brain check` 三处共用 `acp-reverse.ts` 的应答器（唯一实现）：权限请求默认 yolo 放行（`WEMIND_ACP_AUTO_ALLOW=0` 恢复逐次拒绝），未知 method 回 `-32601`，不会挂起；
   - **进度**：是否逐 token 发 `agent_message_chunk`？committed-only 时 15s 心跳会烧连发额度；
@@ -493,11 +495,13 @@ WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直
   WEMIND_BRAIN_HOME_ENV=<配置目录环境变量名，没有则不设>
 
 长期接入（加 agent）：
-  在 agents/definitions/ 加一份 <名字>.json（文件名与 name 相同）→ npm run build → wemind brain set <键>
+  用户本机（不用发版）：写 ~/.wemind/.agents/<名字>.json（WEMIND_AGENTS_DIR 可覆盖目录；文件名与 name 相同）
+                        或 wemind agent add <包目录|package.json|定义.json> → wemind agent check <名字> → wemind brain switch <名字>
+  内置开发（随包发布）：在 agents/definitions/ 加一份 <名字>.json → npm run build → wemind brain set <键>
 
 验证：
   看 daemon.log 的 [wemind/wechat-daemon/acp] spawn / prompt ok；或 wemind brain check
-  接入前先跑：wemind agent spec → wemind agent probe <bin> --draft（旧 node scripts/acp-probe.mjs 仍兼容）
+  接入前先跑：wemind agent spec → wemind agent probe <bin> --draft（旧 node scripts/acp-probe.mjs 只在源码检出中兼容）
   注意：brain check 默认 60s，冷启动慢的 agent 仍可能误报
 ```
 

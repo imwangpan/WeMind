@@ -8,6 +8,23 @@
 
 <!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
 
+### Added
+
+- **Agent 接入配置化与插件化（P0–P4）**：内置 10 个 agent 迁移为 `packages/wechat-daemon/src/agents/definitions/*.json`（同一份数据同时供运行期、`wemind agent spec` 与文档守卫使用）；用户可在 `~/.wemind/.agents/<name>.json` 放本机定义，同名**整条替换**内置，坏定义按文件名遮住同名内置并给出修法。新增 7 个 CLI 子命令 `wemind agent list|show|spec|probe|check|add|remove`：`show --explain` 打印来源链，`spec` 输出字段规格与 JSON Schema，`probe --draft` 生成草稿，`check` 默认真实 ACP 握手（`--schema` 只校验数据、`--deep` 再发真实 prompt），`add/remove` 复制安装/移除定义包。`WEMIND_AGENTS_DIR` 可覆盖本机定义目录。
+- **外部 adapter 插件（逃生舱）**：定义里的 `adapter.module` 可指向包名、绝对或相对路径，模块默认导出 `{ apiVersion: 1, ...hooks }`；CJS 同步加载、ESM 由 CLI/daemon 启动时预加载，未知键、版本不符、`mcp` 缺方法都 fail-closed。插件只能补文件格式与 spawn 前准备，不能替换会话恢复、回合帧、静默等待、权限应答或任何反向请求。
+- **`wemind agent probe` 的完整探针**：默认只做 `initialize` + `session/new` + load/resume（不发真实 prompt），`--deep` 才验证回合与恢复后上下文；`--image` / `--tool` 验证图片与工具；`--draft` 只填协议层能确认的字段；Windows 的 `.cmd` / `.bat` 与 npm 裸名会按 `PATHEXT` 自动经 shell。旧 `scripts/acp-probe.mjs` 保留为兼容薄壳（只在源码检出中存在，npm 包不含 `scripts/`）。
+
+### Changed
+
+- **`wemind agent check` 默认做真实握手**：纯数据校验必须显式 `--schema`；`--deep` 才发真实 prompt。它与 `brain check` 共用 `checkAgent()`，结束后统一杀进程树、destroy 三路 stdio 并 `unref()`，避免孙进程继承管道导致终端挂住。
+- **文档守卫改为读定义 JSON**：`check-agent-docs` 与 `gen-docs-tables` 经 `scripts/agent-definitions.mjs` 读取 `agents/definitions/*.json`，不再解析 TypeScript 里的 `ACP_AGENT_PRESETS`；环境变量表识别 `parentEnv.X`。
+
+### Fixed
+
+- **本机定义与安装边界**：坏本机定义不再让该 agent 掉出出站附件敏感路径黑名单（黑名单改为内置定义 ∪ 当前注册表）；`auto` 作为名字由统一定义校验器拒绝；`agent remove ../...` 被安全名字与 `isWithin` 双重拦截；`agent add` 覆盖手写本机定义时写 `.bak`，并在回执里区分内置/本机/数据包来源；来源文件读改写加锁，损坏时拒绝写入。
+- **探针结论与生命周期**：load/resume 复用实际 `mcpServers`（不再硬编码 `[]`）；`result.ok` 纳入 restore / tool / image 结论；`--mcp` 统一补 ACP schema 必填字段、空列表视为未测；`--reject-permissions` 不再覆盖 `WEMIND_ACP_AUTO_ALLOW=1`；反向请求回包监听 stdin error；日志与行解码缓冲设上限。
+- **配置与安全边界**：`mcpCatalogPath()` 对无 `realHome` 的定义返回 `null`（不再抛错），schema 校验补条件必填；DeepSeek adapter 声明 profile 目录的易变文件，避免 history/todos/statsig 每轮触发重建；定义里的相对路径统一拒绝 `../` 与绝对路径；重装后清理旧 adapter 文件，清理失败会在回执里警告。
+
 ## [2.0.0] 本机 Agent 终端等效工作模式（默认 direct）· `wemind config|workspace|env`（2026-11-16）
 
 > 同批发布 `@wemind/wechat-mcp` **1.1.4**（内联的 core 只改了注释与 README 措辞，无行为变化，故只升 patch）。

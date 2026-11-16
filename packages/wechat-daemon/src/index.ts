@@ -1406,9 +1406,6 @@ function readPidFile(file: string): number | null {
 }
 
 export async function runDaemon(): Promise<void> {
-  // ESM adapter 的预加载；cli.ts 已做一次，这里保证直接调用 runDaemon 的入口也一致。
-  const preloaded = await preloadAgentAdapters();
-  for (const problem of preloaded.problems) log.warn(problem);
   // 单实例：同账号只允许一个 daemon 占用同一个 bot token。
   // `wimind start` 有 wrapper.pid 守卫；这里挡住直接 `wimind daemon` / `npm run daemon`，以及两套 runner 并存。
   const pidFile = path.join(DATA_DIR, "daemon.pid");
@@ -1425,6 +1422,10 @@ export async function runDaemon(): Promise<void> {
     );
     process.exit(DAEMON_ALREADY_RUNNING_EXIT_CODE);
   }
+  // ESM adapter 的预加载必须在单实例守卫之后：重复 daemon 不应先执行第三方插件顶层代码。
+  log.info("preloading agent adapters…");
+  const preloaded = await preloadAgentAdapters();
+  for (const problem of preloaded.problems) log.warn(problem);
   // 启动即校验大脑：早失败、说人话——避免「进程看着正常、直到第一条消息才炸」（历史上表现为反复「⏳ 响应中断了，正在自动重试…」，实为默认大脑的二进制没装）。
   // 先种槽位再校验：此后运行期一律从槽位取 agent（热切换会更新它，见 agent-slot.ts），启动期与运行期同一个来源。
   const registry = getAgentRegistry();

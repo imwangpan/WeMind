@@ -151,14 +151,10 @@ function inheritOpencodeSettings(realHome: string, targetConfigDir: string): voi
 
 /** 副本 profile 文件里剔除微信 MCP 条目（真实文件不动）。 */
 function stripManagedWechat(file: string): string[] {
-  try {
-    const { text, removed } = stripWechatMcpEntries(fs.readFileSync(file, "utf-8"));
-    if (!removed.length) return [];
-    writeFileAtomic(file, text);
-    return removed;
-  } catch {
-    return [];
-  }
+  const { text, removed } = stripWechatMcpEntries(fs.readFileSync(file, "utf-8"));
+  if (!removed.length) return [];
+  writeFileAtomic(file, text);
+  return removed;
 }
 
 const clineAdapter: AgentAdapter = {
@@ -252,14 +248,18 @@ const deepseekAdapter: AgentAdapter = {
     },
   },
   fingerprint: {
+    volatile: ["history.jsonl", "todos.json", "statsig"],
     extraFiles: ({ base, agent }) => {
       if (!agent.realProfile) return [];
       const dir = path.join(base, "profiles", agent.realProfile);
       try {
-        return fs
-          .readdirSync(dir, { withFileTypes: true })
-          .filter((e) => e.isFile())
-          .map((e) => path.join(dir, e.name));
+        return (
+          fs
+            .readdirSync(dir, { withFileTypes: true })
+            // DSH 会在 profile 目录写 history/todos/statsig；只盯 YAML 配置，避免每轮指纹翻转。
+            .filter((e) => e.isFile() && /\.ya?ml$/i.test(e.name))
+            .map((e) => path.join(dir, e.name))
+        );
       } catch {
         return [];
       }

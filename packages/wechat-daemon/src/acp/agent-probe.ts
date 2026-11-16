@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,9 +6,13 @@ import {
   AGENT_DEFINITION_SCHEMA_VERSION,
   type AgentDefinition,
 } from "../agents/agent-definition.js";
+import { normalizeAcpMcpServers } from "../agents/managed/agent-mcp.js";
 import { LineDecoder } from "../shared/io/line-decoder.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
+import { isShellScriptPath, locateExecutable } from "../shared/process/executable.js";
+import { disposeAgentProcess } from "../shared/process/dispose-agent.js";
 import { handleReverseRequest } from "./protocol/acp-reverse.js";
+import { writeAcpFrame } from "./protocol/write-frame.js";
 
 /**
  * ACP 能力探针。
@@ -115,11 +118,12 @@ export function probeUsesShell(
   bin: string,
   explicit: boolean | undefined,
   platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (explicit !== undefined) return explicit;
   if (platform !== "win32") return false;
-  const clean = bin.trim().replace(/^["']+|["']+$/g, "");
-  return [".cmd", ".bat"].includes(path.win32.extname(clean).toLowerCase());
+  const resolved = locateExecutable(bin, { platform, env }) ?? bin;
+  return isShellScriptPath(resolved, platform);
 }
 
 function errText(e: unknown): string {
@@ -211,8 +215,11 @@ class ProbeClient {
   private updateTypes = new Set<string>();
   private toolCallCount = 0;
   private stderrTail: string[] = [];
+  private mcpServers: unknown[] = [];
+  private disposed = false;
   readonly reverse: string[] = [];
   frameSeq = 0;
+  messageFrameSeq = 0;
   sid?: string;
 
   constructor(
@@ -240,9 +247,14 @@ class ProbeClient {
     this.child.stderr.on("data", (d) => {
       const text = d.toString().trim();
       if (!text) return;
-      this.stderrTail.push(text);
+      this.stderrTail.push(text.slice(0, 2000));
       if (this.stderrTail.length > 20) this.stderrTail.shift();
       this.log(`[stderr] ${text.slice(0, 500)}`);
+    });
+    this.child.stdin.on("error", (e) => {
+      const message = `stdin 写入失败：${errText(e)}`;
+      this.log(message);
+      this.failPending(message);
     });
     this.child.on("error", (e) => {
       const message = `进程启动或运行失败：${errText(e)}`;
@@ -281,9 +293,12 @@ class ProbeClient {
       this.reverse.push(String(frame.method));
       handleReverseRequest(
         frame,
-        (payload) => this.child.stdin.write(JSON.stringify(payload) + "\n"),
+        (payload) =>
+          writeAcpFrame(this.child.stdin, payload, (error) =>
+            this.log(`反向请求写回失败：${error.message}`),
+          ),
         this.log,
-        { autoAllow: this.opts.rejectPermissions !== true },
+        { autoAllow: this.opts.rejectPermissions === true ? false : undefined },
       );
       return;
     }
@@ -303,6 +318,7 @@ class ProbeClient {
       if (this.promptStart && this.firstTextMs === null && now >= this.promptStart)
         this.firstTextMs = now - this.promptStart;
       this.answer.push(update.content.text);
+      this.messageFrameSeq++;
     }
     if (type === "tool_call" || type === "tool_call_update") this.toolCallCount++;
   }
@@ -319,24 +335,23 @@ class ProbeClient {
         reject(new Error(`${method} 超时（${timeoutMs}ms）`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-      try {
-        this.child.stdin.write(
-          JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n",
-          (error) => {
-            if (!error) return;
-            const pending = this.pending.get(id);
-            if (!pending) return;
-            this.pending.delete(id);
-            clearTimeout(pending.timer);
-            pending.reject(new Error(`${method} 写入失败：${error.message}`));
-          },
-        );
-      } catch (e) {
+      const written = writeAcpFrame(
+        this.child.stdin,
+        { jsonrpc: "2.0", id, method, params },
+        (error) => {
+          const pending = this.pending.get(id);
+          if (!pending) return;
+          this.pending.delete(id);
+          clearTimeout(pending.timer);
+          pending.reject(new Error(`${method} 写入失败：${error.message}`));
+        },
+      );
+      if (!written) {
         const pending = this.pending.get(id);
         if (!pending) return;
         this.pending.delete(id);
         clearTimeout(pending.timer);
-        pending.reject(new Error(`${method} 写入失败：${errText(e)}`));
+        pending.reject(new Error(`${method} 写入失败：stdin 不可写`));
       }
     });
   }
@@ -351,17 +366,23 @@ class ProbeClient {
 
   async newSession(mcpServers: unknown[]): Promise<any> {
     const params: Record<string, unknown> = { cwd: this.cwd, mcpServers };
+    this.mcpServers = mcpServers;
     if (this.opts.sessionMeta !== undefined) params._meta = this.opts.sessionMeta;
     const result = await this.request("session/new", params, this.timeout());
     this.sid = result?.sessionId;
     return result;
   }
 
+  /** 恢复发生在第二个进程；沿用它实际测试过的 MCP 声明，不能退化成空数组。 */
+  useMcpServers(mcpServers: unknown[]): void {
+    this.mcpServers = mcpServers;
+  }
+
   async load(sessionId: string): Promise<any> {
     const params: Record<string, unknown> = {
       sessionId,
       cwd: this.cwd,
-      mcpServers: [],
+      mcpServers: this.mcpServers,
     };
     if (this.opts.sessionMeta !== undefined) params._meta = this.opts.sessionMeta;
     const result = await this.request("session/load", params, this.timeout());
@@ -373,7 +394,7 @@ class ProbeClient {
     const params: Record<string, unknown> = {
       sessionId,
       cwd: this.cwd,
-      mcpServers: [],
+      mcpServers: this.mcpServers,
     };
     if (this.opts.sessionMeta !== undefined) params._meta = this.opts.sessionMeta;
     const result = await this.request("session/resume", params, this.timeout());
@@ -435,17 +456,9 @@ class ProbeClient {
   }
 
   kill(): void {
-    const pid = this.child.pid;
-    try {
-      if (process.platform === "win32" && pid)
-        spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
-          stdio: "ignore",
-          windowsHide: true,
-        });
-      else this.child.kill();
-    } catch {
-      /* ignore */
-    }
+    if (this.disposed) return;
+    this.disposed = true;
+    disposeAgentProcess(this.child);
   }
 
   private timeout(): number {
@@ -481,8 +494,10 @@ function inferRestore(
 }
 
 export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbeResult> {
+  const resolvedBin = locateExecutable(rawOpts.bin) ?? rawOpts.bin;
   const opts: AgentProbeOptions = {
     ...rawOpts,
+    bin: resolvedBin,
     shell: probeUsesShell(rawOpts.bin, rawOpts.shell),
   };
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-agent-probe-"));
@@ -491,15 +506,18 @@ export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbe
   fs.mkdirSync(cwd, { recursive: true });
   if (home) fs.mkdirSync(home, { recursive: true });
   const logLines: string[] = [];
+  let logBytes = 0;
   const log = (line: string): void => {
-    logLines.push(line);
-    opts.onLog?.(line);
+    const text = line.length > 4000 ? `${line.slice(0, 4000)}…（已截断）` : line;
+    logBytes += Buffer.byteLength(text, "utf8");
+    if (logLines.length < 500 && logBytes <= 64 * 1024) logLines.push(text);
+    opts.onLog?.(text);
   };
   const env = probeEnv(opts, home);
   const result: AgentProbeResult = {
     ok: false,
     at: new Date().toISOString(),
-    bin: opts.bin,
+    bin: rawOpts.bin,
     args: opts.args,
     shell: opts.shell === true,
     cwd,
@@ -532,16 +550,33 @@ export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbe
         /* ignore */
       }
     }
+    const resolvedHome = home ? path.resolve(home) : "";
+    const resolvedRoot = path.resolve(root);
+    if (
+      !opts.keep &&
+      opts.home &&
+      resolvedHome &&
+      isTempPath(resolvedHome) &&
+      resolvedHome !== resolvedRoot &&
+      !resolvedHome.startsWith(resolvedRoot + path.sep)
+    ) {
+      try {
+        fs.rmSync(resolvedHome, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
   };
   try {
     first = new ProbeClient(opts, cwd, env, log);
     result.initialize = await first.initialize();
     result.agentVersion = extractAgentVersion(result.initialize);
 
-    const mcpTest = opts.testMcp !== false;
     let mcpServers: unknown[] = [];
-    if (opts.mcpServers !== undefined) mcpServers = opts.mcpServers;
-    else if (mcpTest) {
+    if (opts.mcpServers !== undefined) {
+      mcpServers = normalizeAcpMcpServers(opts.mcpServers);
+      result.mcpServers.tested = mcpServers.length > 0;
+    } else if (opts.testMcp !== false) {
       const fake = createFakeMcp(root);
       mcpServers = [
         {
@@ -551,8 +586,8 @@ export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbe
           env: [],
         },
       ];
+      result.mcpServers.tested = true;
     }
-    result.mcpServers.tested = mcpTest || opts.mcpServers !== undefined;
     if (mcpServers.length) {
       try {
         result.sessionNew = await first.newSession(mcpServers);
@@ -561,6 +596,9 @@ export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbe
         result.mcpServers.accepted = false;
         result.mcpServers.error = errText(e);
         log(`session/new 带非空 mcpServers 失败：${result.mcpServers.error}`);
+        // 回退后的空列表才是实际建立的会话参数；第二个进程恢复时必须沿用它，
+        // 否则会把刚才被拒绝的非空列表再发一遍，导致 load/resume 失败。
+        mcpServers = [];
         result.sessionNew = await first.newSession([]);
       }
     } else {
@@ -644,7 +682,9 @@ export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbe
     await sleep(500);
 
     second = new ProbeClient(opts, cwd, env, log);
+    second.useMcpServers(mcpServers);
     await second.initialize();
+    const replayBefore = second.messageFrameSeq;
     try {
       await second.load(originalSession);
       result.restore.used = "load";
@@ -663,9 +703,8 @@ export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbe
 
     if (opts.deep && second.sid) {
       const deep = result.deep ?? (result.deep = {});
-      const replayBefore = second.frameSeq;
       await sleep(400);
-      result.restore.replayFrames = second.frameSeq - replayBefore;
+      result.restore.replayFrames = second.messageFrameSeq - replayBefore;
       deep.prompt2 = await second.prompt([
         { type: "text", text: opts.secondPrompt || DEFAULT_SECOND_PROMPT },
       ]);
@@ -681,9 +720,11 @@ export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbe
     const deepOk =
       !opts.deep ||
       (result.deep?.prompt1?.ok === true &&
-        (result.restore.used
-          ? result.deep?.prompt2?.ok === true && result.deep?.contextKept === true
-          : true));
+        result.restore.used !== undefined &&
+        result.deep?.prompt2?.ok === true &&
+        result.deep?.contextKept === true &&
+        (!opts.image || result.deep?.image?.ok === true) &&
+        (!opts.tool || result.deep?.tool?.ok === true));
     result.ok = deepOk;
   } catch (e) {
     result.fatal = errText(e);

@@ -49,7 +49,7 @@ WeMind 把 API key 的 `.env`，以及 Google 登录用的 `oauth_creds.json` / 
 
 | 项 | 结果 |
 |---|---|
-| `initialize` | `protocolVersion: 1`；`agentInfo = gemini-cli 0.66.0`；`loadSession: true`；`promptCapabilities: { image: true, audio: true, embeddedContext: true }`（**WeMind 只用预设的 `images` 字段决定发不发图，`audio` / `embeddedContext` 未使用**）；`mcpCapabilities: { http: true, sse: true }`（**没有 acp 字段**）；`authMethods` 含 oauth-personal / gemini-api-key / vertex-ai / gateway |
+| `initialize` | `protocolVersion: 1`；`agentInfo = gemini-cli 0.66.0`；`loadSession: true`；`promptCapabilities: { image: true, audio: true, embeddedContext: true }`（**WeMind 只用定义里的 `images` 字段决定发不发图，`audio` / `embeddedContext` 未使用**）；`mcpCapabilities: { http: true, sse: true }`（**没有 acp 字段**）；`authMethods` 含 oauth-personal / gemini-api-key / vertex-ai / gateway |
 | `session/new` | OK；回包有 `modes`（default / autoEdit / yolo / plan，当前 yolo）与 `models`（`currentModelId` = 用户 settings 里的模型，如 `auto/hy3`） |
 | prompt | 首帧 ~1ms（usage/thought），**首段正文 3.4s**，整轮 ~3.6s；update 类型 `user_message_chunk` / `agent_thought_chunk` / `agent_message_chunk` / `available_commands_update` / `usage_update`（有 activity 帧，心跳无忧） |
 | 图片 | ✅ 接受（1×1 PNG → `end_turn`，无报错） |

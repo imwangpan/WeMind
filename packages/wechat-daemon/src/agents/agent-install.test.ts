@@ -158,4 +158,73 @@ describe("agent add/remove（复制即安装）", () => {
     expect(result.text).toContain("重复的 agent 名");
     expect(fs.existsSync(path.join(agents, "ext-dup.json"))).toBe(false);
   });
+
+  it("remove 拒绝路径穿越，不会删到定义目录之外", () => {
+    const outside = path.join(root, "acct", "brain.json");
+    fs.mkdirSync(path.dirname(outside), { recursive: true });
+    fs.writeFileSync(outside, "keep", "utf-8");
+    const result = removeAgentDefinition("../acct/brain");
+    expect(result.ok).toBe(false);
+    expect(fs.readFileSync(outside, "utf-8")).toBe("keep");
+  });
+
+  it("覆盖本机手写定义时生成 .bak 并在回执里说明", async () => {
+    fs.mkdirSync(agents, { recursive: true });
+    const file = path.join(agents, "ext-local.json");
+    fs.writeFileSync(file, '{"old":true}\n', "utf-8");
+    const dir = writePackage("local-pack", { name: "ext-local" });
+    const result = await installAgentPackage(dir);
+    expect(result.ok, result.text).toBe(true);
+    expect(result.text).toContain("覆盖本机手写定义");
+    expect(fs.readFileSync(`${file}.bak`, "utf-8")).toBe('{"old":true}\n');
+  });
+
+  it(".sources.json 损坏时拒绝写入并保留原文件", async () => {
+    fs.mkdirSync(agents, { recursive: true });
+    const sources = path.join(agents, ".sources.json");
+    fs.writeFileSync(sources, "{broken", "utf-8");
+    const dir = writePackage("sources-broken", { name: "ext-sources-broken" });
+    const result = await installAgentPackage(dir);
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("不写入");
+    expect(fs.readFileSync(sources, "utf-8")).toBe("{broken");
+    expect(fs.existsSync(path.join(agents, "ext-sources-broken.json"))).toBe(false);
+  });
+
+  it("重装会清掉旧 adapter 文件；去掉 adapter 后清空目录", async () => {
+    const first = writePackage(
+      "adapter-a",
+      { name: "ext-adapter", adapter: { module: "./a.cjs", apiVersion: 1 } },
+      "a.cjs",
+      "module.exports = { apiVersion: 1 };",
+    );
+    expect((await installAgentPackage(first)).ok).toBe(true);
+    const adapterDir = path.join(agents, "adapters", "ext-adapter");
+    expect(fs.existsSync(path.join(adapterDir, "a.cjs"))).toBe(true);
+
+    const second = writePackage(
+      "adapter-b",
+      { name: "ext-adapter", adapter: { module: "./b.cjs", apiVersion: 1 } },
+      "b.cjs",
+      "module.exports = { apiVersion: 1 };",
+    );
+    expect((await installAgentPackage(second)).ok).toBe(true);
+    expect(fs.existsSync(path.join(adapterDir, "a.cjs"))).toBe(false);
+    expect(fs.existsSync(path.join(adapterDir, "b.cjs"))).toBe(true);
+
+    const third = writePackage("adapter-none", { name: "ext-adapter" });
+    expect((await installAgentPackage(third)).ok).toBe(true);
+    expect(fs.existsSync(adapterDir)).toBe(false);
+  });
+
+  it("并发安装不同定义时不会丢掉先写者的来源记录", async () => {
+    const a = writePackage("parallel-a", { name: "ext-parallel-a" });
+    const b = writePackage("parallel-b", { name: "ext-parallel-b" });
+    const [ra, rb] = await Promise.all([installAgentPackage(a), installAgentPackage(b)]);
+    expect(ra.ok, ra.text).toBe(true);
+    expect(rb.ok, rb.text).toBe(true);
+    const sources = JSON.parse(fs.readFileSync(path.join(agents, ".sources.json"), "utf-8"));
+    expect(sources["ext-parallel-a"]?.kind).toBe("package");
+    expect(sources["ext-parallel-b"]?.kind).toBe("package");
+  });
 });

@@ -560,6 +560,8 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | `WEMIND_BRAIN_EXTRA_ARGS` | 追加启动参数（空格分隔，拼在预设/覆盖参数之后）   | 无           |
 | `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off`/`no` 关闭，其它值 = 该 modeId | 用预设值 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（仅 managed 指向账号副本） | 内置默认值   |
+| `WEMIND_BRAIN_REAL_HOME` | 覆盖被继承的真实配置目录（默认取该 agent 的 `realHome`） | 内置默认值 |
+| `WECHAT_REAL_KIRO_HOME` | 旧的 kiro 专用 realHome 覆盖（仍兼容；优先级低于 `WEMIND_BRAIN_REAL_HOME`） | — |
 | `COPILOT_HOME` | 仅运行 Copilot CLI 时由 WeMind 给子进程设置，managed 下指向账号副本；不要手动固定 | 内部变量 |
 | `KIRO_CLI_BIN`          | 旧的 kiro 专用二进制覆盖（仍兼容）                  | —            |
 

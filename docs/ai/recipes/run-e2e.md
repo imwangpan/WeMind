@@ -22,6 +22,8 @@
 > 没有 L4 的证据，不要写「已端到端验证」。
 > L7 会**改账号状态**（切大脑 / 删会话 / 派任务），跑之前想清楚你是在哪个账号上跑。
 
+> **探针临时目录（2026-11-17）**：`wemind agent probe` 每次自建 `wemind-agent-probe-*` 临时根，默认 cwd 是其中的 `cwd/`；显式 `--home` / `ACP_HOME` 如果位于系统临时目录，也会在结束时删除（`--keep` / `ACP_KEEP=1` 才保留）。因此 `drift-check.txt` 写在本次探针的临时 cwd 里，**默认随目录删除**；不要再按旧路径 `%TEMP%\wemind-acp-probe` 去找，需要检查产物时加 `--keep` 并从输出的 `cwd` 字段取路径。
+
 DSH 的 L3 示例（隔离凭据；不要把真实 `~/.dsh` 交给探针）：
 
 ```powershell
@@ -321,7 +323,7 @@ MCP
 | 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 watchdog + daemon + worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
 | 6 | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。 |
 | 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑已实测（2026-10-27，1.1.78：`session/load ok`，STEP-A/STEP-B 产物齐全，见 `docs/接入方案/接入-Qoder.md` M3-3）。 |
-| 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 声明 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**声明 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 预设 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进副本（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
+| 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 声明 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**声明 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 定义 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由内置 adapter 的 `env.derive`（`clineCredentialEnv()`）从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进副本（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
 
 ### 7.4 真机踩到的坑：重启后旧 `context_token`（2026-10-29 已修）
 

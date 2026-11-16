@@ -13,6 +13,7 @@
  *   是本项目最难排查的一类故障。同一 `schemaVersion` 内允许新增**可选**字段，所以正常的兼容升级不需要动这个常量。
  * - **版本不匹配 fail-closed**：`schemaVersion` 与实际支持不符时如实报错，不做"尽力解释"，避免静默半生效。
  */
+import path from "node:path";
 
 /** 当前定义的数据面版本。新增可选字段不用改它；改字段语义/删字段/改必填性才需要升。 */
 export const AGENT_DEFINITION_SCHEMA_VERSION = 1;
@@ -133,6 +134,13 @@ export type AgentDefinition = {
   probe?: AgentDefinitionProbe;
 };
 
+export const AGENT_NAME_PATTERN = /^(?!auto$)[a-z0-9][a-z0-9._-]*$/;
+
+/** 可安全拼成 `<name>.json` / `adapters/<name>/` 的 agent 名。 */
+export function isSafeAgentName(name: string): boolean {
+  return AGENT_NAME_PATTERN.test(name);
+}
+
 /**
  * 编译期守卫：`AgentDefinition` 的每个数据字段都必须在这里出现一次，漏一个就编译不过。
  * （`schemaVersion` / `adapter` / `probe` 不是"数据字段"，单独处理。）
@@ -224,9 +232,9 @@ export const AGENT_DEFINITION_FIELDS: readonly AgentDefinitionField[] = [
   // —— 身份与启动 ——
   {
     key: "name",
-    kind: { kind: "string", nonEmpty: true, pattern: "^[a-z0-9][a-z0-9._-]*$" },
+    kind: { kind: "string", nonEmpty: true, pattern: AGENT_NAME_PATTERN.source },
     required: true,
-    desc: "agent 名（同时用作定义文件名、brain.json 键与微信指令里的名字）：小写字母/数字开头，后接小写字母、数字、`.`、`_`、`-`",
+    desc: "agent 名（同时用作定义文件名、brain.json 键与微信指令里的名字）：小写字母/数字开头，后接小写字母、数字、`.`、`_`、`-`；`auto` 是自动探测开关，不能作为名字",
   },
   {
     key: "bin",
@@ -503,10 +511,10 @@ function validateProbe(raw: unknown): AgentDefinitionProblem[] {
   const at = raw.at;
   if (typeof at !== "string" || at === "")
     problems.push({ path: "probe.at", message: "应为非空字符串（探测时间）" });
-  else if (Number.isNaN(Date.parse(at)))
+  else if (!isProbeTimestamp(at))
     problems.push({
       path: "probe.at",
-      message: `无法解析为时间：「${at}」（建议 ISO 8601，如 2026-11-16T10:00:00Z）`,
+      message: `应为 ISO 8601 时间：「${at}」（如 2026-11-16T10:00:00Z）`,
     });
   const agentVersion = raw.agentVersion;
   if (agentVersion !== undefined && (typeof agentVersion !== "string" || agentVersion === ""))
@@ -515,6 +523,97 @@ function validateProbe(raw: unknown): AgentDefinitionProblem[] {
     if (k !== "at" && k !== "agentVersion")
       problems.push({ path: `probe.${k}`, message: "未知字段（probe 只接受 at / agentVersion）" });
   return problems;
+}
+
+const PROBE_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function isProbeTimestamp(value: string): boolean {
+  return PROBE_TIMESTAMP_RE.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+type RelativePathMode = "safe" | "parent-file" | "segment";
+
+function relativePathProblem(
+  pathName: string,
+  value: string,
+  mode: RelativePathMode,
+): AgentDefinitionProblem | null {
+  if (value.startsWith("~")) return { path: pathName, message: "应为相对路径（不能以 ~ 开头）" };
+  if (
+    path.isAbsolute(value) ||
+    path.win32.isAbsolute(value) ||
+    value.startsWith("/") ||
+    value.startsWith("\\")
+  )
+    return { path: pathName, message: "应为相对路径（不能是绝对路径）" };
+
+  if (mode === "segment") {
+    if (value === "." || value === ".." || /[\\/]/.test(value))
+      return { path: pathName, message: "应为单段名称（不能包含目录分隔符或 ..）" };
+    return null;
+  }
+
+  const normalized = value.replaceAll("\\", "/");
+  if (mode === "parent-file" && normalized.startsWith("../")) {
+    const rest = normalized.slice(3);
+    if (!rest || rest.includes("/") || rest === ".." || rest === ".")
+      return {
+        path: pathName,
+        message: "最多允许引用 realHome 的同级单个文件（形如 ../name.json）",
+      };
+    return null;
+  }
+  if (normalized.split("/").includes(".."))
+    return { path: pathName, message: "不能包含 ..（不得逃出 agent 配置目录）" };
+  return null;
+}
+
+function validateRelativePathFields(raw: Record<string, unknown>): AgentDefinitionProblem[] {
+  const problems: AgentDefinitionProblem[] = [];
+  const single: Array<[string, RelativePathMode]> = [
+    ["mcpConfigFile", "safe"],
+    ["catalogFile", "parent-file"],
+    ["settingsBase", "safe"],
+    ["realProfile", "segment"],
+  ];
+  for (const [key, mode] of single) {
+    const value = raw[key];
+    if (typeof value !== "string") continue;
+    const problem = relativePathProblem(key, value, mode);
+    if (problem) problems.push(problem);
+  }
+  for (const key of ["inheritDirs", "inheritFiles", "credentialFiles", "identityFiles"]) {
+    const value = raw[key];
+    if (!Array.isArray(value)) continue;
+    value.forEach((item, i) => {
+      if (typeof item !== "string") return;
+      const problem = relativePathProblem(`${key}[${i}]`, item, "safe");
+      if (problem) problems.push(problem);
+    });
+  }
+  return problems;
+}
+
+function validateCrossFieldRequirements(raw: Record<string, unknown>): AgentDefinitionProblem[] {
+  if (typeof raw.realHome === "string" && raw.realHome.trim() !== "") return [];
+  const needsRealHome = [
+    "inheritDirs",
+    "inheritFiles",
+    "mcpFormat",
+    "mcpConfigFile",
+    "catalogFile",
+    "settingsBase",
+    "credentialFiles",
+    "identityFiles",
+    "realProfile",
+  ].filter((key) => raw[key] !== undefined);
+  if (needsRealHome.length === 0) return [];
+  return [
+    {
+      path: "realHome",
+      message: `使用 ${needsRealHome.join(" / ")} 时必须同时提供 realHome（这些路径都相对于它）`,
+    },
+  ];
 }
 
 /**
@@ -565,7 +664,12 @@ export function validateAgentDefinition(raw: unknown): AgentDefinitionValidation
     problems.push(...validateField(field, value, hasRequiredAdapterFields));
   }
 
-  problems.push(...adapterProblems, ...probeProblems);
+  problems.push(
+    ...adapterProblems,
+    ...probeProblems,
+    ...validateRelativePathFields(raw),
+    ...validateCrossFieldRequirements(raw),
+  );
   if (problems.length > 0) return { ok: false, problems };
 
   // 只按字段表复制已知键：即使输入里带了 `__proto__` 之类的键也进不来（未知键上面已经拒绝）。
@@ -652,6 +756,31 @@ export function agentDefinitionJsonSchema(): Record<string, unknown> {
       ]);
   }
 
+  const relativePattern = "^(?!(?:[A-Za-z]:)?[/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+$";
+  for (const key of ["mcpConfigFile", "settingsBase"])
+    (properties[key] as Record<string, unknown>).pattern = relativePattern;
+  (properties.catalogFile as Record<string, unknown>).pattern = "^(?:\\.\\./)?[^/\\\\]+$";
+  (properties.realProfile as Record<string, unknown>).pattern = "^(?!\\.{1,2}$)[^/\\\\]+$";
+  for (const key of ["inheritDirs", "inheritFiles", "credentialFiles", "identityFiles"])
+    (properties[key] as Record<string, unknown>).items = {
+      type: "string",
+      minLength: 1,
+      pattern: relativePattern,
+    };
+
+  for (const key of [
+    "inheritDirs",
+    "inheritFiles",
+    "mcpFormat",
+    "mcpConfigFile",
+    "catalogFile",
+    "settingsBase",
+    "credentialFiles",
+    "identityFiles",
+    "realProfile",
+  ])
+    requirementGroups.push([{ not: { required: [key] } }, { required: ["realHome"] }]);
+
   properties.adapter = {
     type: "object",
     additionalProperties: false,
@@ -671,7 +800,12 @@ export function agentDefinitionJsonSchema(): Record<string, unknown> {
     additionalProperties: false,
     required: ["at"],
     properties: {
-      at: { type: "string", minLength: 1, description: "探测时间（ISO 8601）" },
+      at: {
+        type: "string",
+        minLength: 1,
+        pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$",
+        description: "探测时间（ISO 8601，如 2026-11-16T10:00:00Z）",
+      },
       agentVersion: {
         type: "string",
         minLength: 1,

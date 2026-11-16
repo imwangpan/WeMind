@@ -6,6 +6,7 @@ import {
   parseJsonc,
   toAcpMcpServers,
   isConvertibleToAcp,
+  normalizeAcpMcpServers,
 } from "./agent-mcp.js";
 
 describe("readMcpServers", () => {
@@ -177,5 +178,43 @@ describe("isConvertibleToAcp（addMcp 预校验）", () => {
     expect(isConvertibleToAcp("x")).toBe(false);
     expect(isConvertibleToAcp({ command: "" })).toBe(false);
     expect(isConvertibleToAcp({ command: [] })).toBe(false);
+  });
+});
+
+describe("normalizeAcpMcpServers（探针 --mcp 输入）", () => {
+  it("stdio 补空 env/args，map 形式转成 ACP 的 {name,value}[]", () => {
+    expect(
+      normalizeAcpMcpServers([
+        { name: "stdio", command: "node" },
+        { name: "mapped", command: "x", args: ["a"], env: { A: 1 } },
+      ]),
+    ).toEqual([
+      { name: "stdio", command: "node", args: [], env: [] },
+      {
+        name: "mapped",
+        command: "x",
+        args: ["a"],
+        env: [{ name: "A", value: "1" }],
+      },
+    ]);
+  });
+
+  it("HTTP 条目补 type/headers，缺少 name 或不是对象的条目丢弃", () => {
+    expect(
+      normalizeAcpMcpServers([
+        { name: "remote", url: "https://example.test/x", headers: { X: "1" } },
+        { url: "https://example.test/missing-name" },
+        { command: "missing-name" },
+        null,
+        "bad",
+      ]),
+    ).toEqual([
+      {
+        name: "remote",
+        type: "http",
+        url: "https://example.test/x",
+        headers: [{ name: "X", value: "1" }],
+      },
+    ]);
   });
 });

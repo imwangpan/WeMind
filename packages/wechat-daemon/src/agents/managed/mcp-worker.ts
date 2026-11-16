@@ -56,7 +56,7 @@ function excludeSet(): Set<string> {
 
 function loadCatalog(ag: ResolvedAgent, dir: string = DATA_DIR): Record<string, unknown> {
   const file = mcpCatalogPath(ag);
-  const base = mcpAdapterForFile(ag, file).readCatalog(file);
+  const base = file ? mcpAdapterForFile(ag, file).readCatalog(file) : {};
   const overlay = readOverlay(ag.name, dir).overlay;
   return { ...base, ...overlayExtraServers(overlay) };
 }

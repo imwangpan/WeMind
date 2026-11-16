@@ -175,4 +175,15 @@ describe("adapter 选择与路径", () => {
       path.join("managed", "demo", "settings", "mcp.json"),
     );
   });
+
+  it("没有 realHome 的纯协议定义返回 null，而不是抛错", () => {
+    const prev = process.env.WEMIND_MCP_CATALOG;
+    delete process.env.WEMIND_MCP_CATALOG;
+    try {
+      expect(mcpCatalogPath(agent({ realHome: undefined }))).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.WEMIND_MCP_CATALOG;
+      else process.env.WEMIND_MCP_CATALOG = prev;
+    }
+  });
 });

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ResolvedAgent } from "../brain-agents.js";
+import { resolveAgentByName, type ResolvedAgent } from "../brain-agents.js";
 import { agentRuntime, mediaDirFor } from "./runtime.js";
 import { readOverlay } from "./overlay.js";
 import {
@@ -282,6 +282,35 @@ describe("configFingerprint", () => {
     );
     const afterOverlay = configFingerprint(ag, rt, dir);
     expect(afterOverlay).not.toBe(afterReal);
+  });
+
+  it("DSH profile 的历史/待办/统计文件不翻转指纹，YAML 配置变化才翻转", () => {
+    const dir = tmp();
+    const realHome = path.join(dir, "real-dsh");
+    const profileDir = path.join(realHome, "profiles", "acp");
+    fs.mkdirSync(profileDir, { recursive: true });
+    const patch = path.join(profileDir, "cordis.patch.yml");
+    fs.writeFileSync(patch, "- id: acp\n", "utf-8");
+    const history = path.join(profileDir, "history.jsonl");
+    const todos = path.join(profileDir, "todos.json");
+    const statsig = path.join(profileDir, "statsig");
+    fs.writeFileSync(history, "one\n", "utf-8");
+    fs.writeFileSync(todos, "[]", "utf-8");
+    fs.mkdirSync(statsig);
+    fs.writeFileSync(path.join(statsig, "state.json"), "{}", "utf-8");
+
+    const base = resolveAgentByName("deepseek");
+    const ag: ResolvedAgent = { ...base, realHome, realProfile: "acp" };
+    const rt = agentRuntime("brain", ag, dir);
+    const before = configFingerprint(ag, rt, dir);
+
+    fs.writeFileSync(history, "two\n", "utf-8");
+    fs.writeFileSync(todos, '["changed"]', "utf-8");
+    fs.writeFileSync(path.join(statsig, "state.json"), '{"changed":true}', "utf-8");
+    expect(configFingerprint(ag, rt, dir)).toBe(before);
+
+    fs.writeFileSync(patch, "- id: acp\n# changed\n", "utf-8");
+    expect(configFingerprint(ag, rt, dir)).not.toBe(before);
   });
 });
 

@@ -16,9 +16,14 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { writeJsonAtomic } from "../shared/io/atomic-json.js";
-import { validateAgentDefinition, type AgentDefinition } from "./agent-definition.js";
+import { writeFileAtomic, writeJsonAtomic } from "../shared/io/atomic-json.js";
+import {
+  isSafeAgentName,
+  validateAgentDefinition,
+  type AgentDefinition,
+} from "./agent-definition.js";
 import { preloadAgentAdapter, resetAgentAdapterCache } from "./agent-adapter-loader.js";
 import { agentSourcesFile, agentsDir } from "./agent-paths.js";
 import { builtinDefinitionNames, resetAgentRegistryCache } from "./agent-registry.js";
@@ -41,16 +46,14 @@ function readJson(file: string): unknown {
   return JSON.parse(fs.readFileSync(file, "utf-8").replace(/^\uFEFF/, ""));
 }
 
-function resolvePackageDir(source: string): string | null {
+function findPackageDirWith(req: NodeJS.Require, source: string): string | null {
   try {
-    const req = createRequire(path.join(process.cwd(), "__wemind_install__.cjs"));
     const pkgJson = req.resolve(`${source}/package.json`);
     return path.dirname(pkgJson);
   } catch {
     /* 包的 exports 可能不暴露 package.json；下面从入口向上找 */
   }
   try {
-    const req = createRequire(path.join(process.cwd(), "__wemind_install__.cjs"));
     let dir = path.dirname(req.resolve(source));
     for (;;) {
       if (fs.existsSync(path.join(dir, "package.json"))) return dir;
@@ -61,6 +64,25 @@ function resolvePackageDir(source: string): string | null {
   } catch {
     return null;
   }
+}
+
+function resolvePackageDir(source: string): string | null {
+  // 先按调用者 cwd 解析（本地项目里的包）；再按 CLI 自己所在模块解析（全局安装）。
+  const roots = [path.join(process.cwd(), "__wemind_install__.cjs")];
+  try {
+    roots.push(fileURLToPath(new URL("./__wemind_install__.cjs", import.meta.url)));
+  } catch {
+    /* ignore */
+  }
+  for (const root of roots) {
+    try {
+      const found = findPackageDirWith(createRequire(root), source);
+      if (found) return found;
+    } catch {
+      /* 继续下一个解析根 */
+    }
+  }
+  return null;
 }
 
 function readPackageSpec(source: string): PackageSpec {
@@ -98,7 +120,9 @@ function readPackageDir(dir: string, label: string): PackageSpec {
 
   const single = path.join(dir, "wemind-agent.json");
   const declared =
-    typeof wemind?.definition === "string" ? path.resolve(dir, wemind.definition) : "";
+    typeof wemind?.definition === "string"
+      ? packagePath(dir, wemind.definition, "wemind.definition")
+      : "";
   if (declared || fs.existsSync(single)) {
     const file = declared || single;
     if (!fs.existsSync(file))
@@ -108,7 +132,7 @@ function readPackageDir(dir: string, label: string): PackageSpec {
 
   const definitionsDir =
     typeof wemind?.definitions === "string"
-      ? path.resolve(dir, wemind.definitions)
+      ? packagePath(dir, wemind.definitions, "wemind.definitions")
       : path.join(dir, "agents");
   if (fs.existsSync(definitionsDir) && fs.statSync(definitionsDir).isDirectory()) {
     const files = fs
@@ -126,6 +150,13 @@ function readPackageDir(dir: string, label: string): PackageSpec {
   throw new Error(
     `包「${dir}」没有定义：需要 wemind-agent.json，或 package.json 的 wemind.definition / wemind.definitions，或 agents/*.json`,
   );
+}
+
+function packagePath(dir: string, rel: string, label: string): string {
+  const target = path.resolve(dir, rel);
+  if (!isWithin(dir, target))
+    throw new Error(`${label} 必须位于包目录内：${rel}（解析为 ${target}）`);
+  return target;
 }
 
 function parseDefinitionFile(file: string): AgentDefinition {
@@ -161,18 +192,78 @@ function isRelativeAdapterSpec(module: string): boolean {
   );
 }
 
-function readSources(): Record<string, SourceEntry> {
+type SourcesRead = {
+  sources: Record<string, SourceEntry>;
+  problem?: string;
+};
+
+function readSources(): SourcesRead {
   try {
     const raw = readJson(agentSourcesFile());
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-    return raw as Record<string, SourceEntry>;
-  } catch {
-    return {};
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      return {
+        sources: {},
+        problem: `${agentSourcesFile()} 不是对象；为避免覆盖来源记录，本次不写入`,
+      };
+    return { sources: raw as Record<string, SourceEntry> };
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return { sources: {} };
+    return {
+      sources: {},
+      problem: `无法读取 ${agentSourcesFile()}：${e instanceof Error ? e.message : String(e)}；为避免丢来源记录，本次不写入`,
+    };
   }
 }
 
 function writeSources(sources: Record<string, SourceEntry>): void {
   writeJsonAtomic(agentSourcesFile(), sources);
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** 来源文件是跨进程 read-modify-write：用短锁把最后一次合并串行化。 */
+function withSourcesLock<T>(fn: () => T): T {
+  const lock = `${agentSourcesFile()}.lock`;
+  const deadline = Date.now() + 5000;
+  let fd: number | null = null;
+  while (fd === null) {
+    try {
+      fs.mkdirSync(path.dirname(lock), { recursive: true });
+      fd = fs.openSync(lock, "wx", 0o600);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code !== "EEXIST")
+        throw new Error(
+          `无法锁定 ${agentSourcesFile()}：${e instanceof Error ? e.message : String(e)}`,
+        );
+      try {
+        const age = Date.now() - fs.statSync(lock).mtimeMs;
+        if (age > 30_000) {
+          fs.rmSync(lock, { force: true });
+          continue;
+        }
+      } catch {
+        /* 锁刚被释放，继续重试 */
+      }
+      if (Date.now() >= deadline) throw new Error(`等待 ${agentSourcesFile()} 锁超时；请稍后重试`);
+      sleepSync(50);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.rmSync(lock, { force: true });
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 /** 把定义里相对路径的 adapter 复制进定义目录，并返回改写后的定义。 */
@@ -192,6 +283,8 @@ function stageAdapter(
   if (!isRelativeAdapterSpec(module)) return { def, copies: [] };
 
   const source = path.resolve(baseDir, adapterOverride || module);
+  if (!isWithin(baseDir, source))
+    throw new Error(`adapter 必须位于定义包目录内：${source}（来自 ${label}）`);
   if (!fs.existsSync(source)) throw new Error(`adapter 文件不存在：${source}（来自 ${label}）`);
   if (path.extname(source).toLowerCase() === ".ts")
     throw new Error(`adapter 不能是 TypeScript 源码（${source}）：先编译成 .js/.cjs/.mjs`);
@@ -222,6 +315,14 @@ function stageAdapter(
  */
 export async function installAgentPackage(source: string): Promise<AgentInstallResult> {
   const spec = readPackageSpec(source);
+  const sourcesRead = readSources();
+  if (sourcesRead.problem)
+    return {
+      ok: false,
+      text: `❌ 安装失败：${sourcesRead.problem}`,
+      installed: [],
+    };
+  const previousSources = sourcesRead.sources;
   const duplicate = spec.definitions.find(
     (def, i) => spec.definitions.findIndex((other) => other.name === def.name) !== i,
   );
@@ -250,26 +351,34 @@ export async function installAgentPackage(source: string): Promise<AgentInstallR
   const written: string[] = [];
   const backups = new Map<string, Buffer | null>();
   const adapterBackups = new Map<string, Buffer | null>();
-  const previousSources = readSources();
+  const backupFiles = new Map<string, string>();
+  const installedAdapterDirs = new Map<string, Set<string>>();
+  const cleanupWarnings: string[] = [];
 
   try {
     for (const s of staged)
       for (const copy of s.copies) {
         adapterBackups.set(copy.dest, copy.previous);
         fs.mkdirSync(path.dirname(copy.dest), { recursive: true });
-        fs.writeFileSync(copy.dest, copy.data);
+        writeFileAtomic(copy.dest, copy.data);
         written.push(copy.dest);
+        const dir = path.dirname(copy.dest);
+        const names = installedAdapterDirs.get(dir) ?? new Set<string>();
+        names.add(path.basename(copy.dest));
+        installedAdapterDirs.set(dir, names);
       }
     for (const def of definitions) {
       const file = path.join(targetDir, `${def.name}.json`);
-      backups.set(file, fs.existsSync(file) ? fs.readFileSync(file) : null);
+      const existing = fs.existsSync(file);
+      backups.set(file, existing ? fs.readFileSync(file) : null);
+      if (existing) {
+        const bak = `${file}.bak`;
+        fs.copyFileSync(file, bak);
+        backupFiles.set(def.name, bak);
+      }
       writeJsonAtomic(file, def);
       written.push(file);
     }
-    const sources = { ...previousSources };
-    for (const def of definitions)
-      sources[def.name] = { kind: "package", source: spec.label, at: new Date().toISOString() };
-    writeSources(sources);
 
     resetAgentRegistryCache();
     resetAgentAdapterCache();
@@ -279,16 +388,65 @@ export async function installAgentPackage(source: string): Promise<AgentInstallR
       const loaded = await preloadAgentAdapter(def, file, { refresh: true });
       if (!loaded.ok) throw new Error(loaded.error);
     }
+    withSourcesLock(() => {
+      const latest = readSources();
+      if (latest.problem) throw new Error(latest.problem);
+      const sources = { ...latest.sources };
+      for (const def of definitions)
+        sources[def.name] = {
+          kind: "package",
+          source: spec.label,
+          at: new Date().toISOString(),
+        };
+      writeSources(sources);
+    });
+    // 重装可能换 adapter 文件名或去掉 adapter；成功落盘后清掉旧文件，避免运行期仍能加载残留 hook。
+    for (const def of definitions) {
+      const adapterDir = path.join(targetDir, "adapters", def.name);
+      if (!isWithin(targetDir, adapterDir)) continue;
+      if (!def.adapter) {
+        try {
+          fs.rmSync(adapterDir, { recursive: true, force: true });
+        } catch (e) {
+          cleanupWarnings.push(
+            `${adapterDir} 未能清理：${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+        continue;
+      }
+      const keep = installedAdapterDirs.get(adapterDir) ?? new Set<string>();
+      try {
+        for (const child of fs.readdirSync(adapterDir, { withFileTypes: true })) {
+          if (keep.has(child.name)) continue;
+          fs.rmSync(path.join(adapterDir, child.name), { recursive: true, force: true });
+        }
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT")
+          cleanupWarnings.push(
+            `${adapterDir} 的旧文件未能清理：${e instanceof Error ? e.message : String(e)}`,
+          );
+      }
+    }
+    resetAgentRegistryCache();
 
     const lines = [
       `已安装 ${definitions.length} 个定义到 ${targetDir}：`,
       ...definitions.map((def) => {
+        const previous = previousSources[def.name];
+        const hadLocalFile = backups.get(path.join(targetDir, `${def.name}.json`)) !== null;
         const shadow = builtinDefinitionNames().includes(def.name)
-          ? "（覆盖同名内置；remove 后恢复）"
-          : "";
+          ? hadLocalFile && !previous
+            ? `（覆盖同名内置的本机手写定义；原文件备份为 ${backupFiles.get(def.name)}）`
+            : "（覆盖同名内置；remove 后恢复）"
+          : previous
+            ? "（覆盖已安装数据包定义）"
+            : hadLocalFile
+              ? `（覆盖本机手写定义；原文件备份为 ${backupFiles.get(def.name)}）`
+              : "";
         const code = def.adapter ? `  adapter=${def.adapter.module}（会执行代码）` : "";
         return `  - ${def.name}${shadow}${code}`;
       }),
+      ...cleanupWarnings.map((w) => `⚠ ${w}（新定义不引用这些旧文件，但建议手动清理）`),
       "下一步：wemind agent check <name>；要切换大脑说「切到 <name>」（不会自动切换）。",
     ];
     return { ok: true, text: lines.join("\n"), installed: definitions.map((d) => d.name) };
@@ -323,11 +481,7 @@ export async function installAgentPackage(source: string): Promise<AgentInstallR
         /* 目录非空或不存在：保留 */
       }
     }
-    try {
-      writeSources(previousSources);
-    } catch {
-      /* best-effort */
-    }
+    resetAgentAdapterCache();
     resetAgentRegistryCache();
     return {
       ok: false,
@@ -341,12 +495,27 @@ export async function installAgentPackage(source: string): Promise<AgentInstallR
 export function removeAgentDefinition(name: string): AgentInstallResult {
   const key = name.trim().toLowerCase();
   if (!key) return { ok: false, text: "❌ 需要 agent 名", installed: [] };
+  if (!isSafeAgentName(key))
+    return {
+      ok: false,
+      text: `❌ 非法 agent 名「${name}」：只能使用小写字母/数字/./_/-，且不能以 . 或 - 开头。`,
+      installed: [],
+    };
   const dir = agentsDir();
   const file = path.join(dir, `${key}.json`);
+  if (!isWithin(dir, file))
+    return { ok: false, text: `❌ agent 名越出定义目录：${name}`, installed: [] };
   if (!fs.existsSync(file))
     return {
       ok: false,
       text: `❌ ${key} 不是本机/数据包定义，不能 remove（内置定义不在 ${dir}）。`,
+      installed: [],
+    };
+  const preflightSources = readSources();
+  if (preflightSources.problem)
+    return {
+      ok: false,
+      text: `❌ 移除失败：${preflightSources.problem}`,
       installed: [],
     };
   try {
@@ -354,9 +523,14 @@ export function removeAgentDefinition(name: string): AgentInstallResult {
     const adapterDir = path.join(dir, "adapters", key);
     if (isWithin(dir, adapterDir) && fs.existsSync(adapterDir))
       fs.rmSync(adapterDir, { recursive: true, force: true });
-    const sources = readSources();
-    delete sources[key];
-    writeSources(sources);
+    withSourcesLock(() => {
+      const read = readSources();
+      if (read.problem) throw new Error(read.problem);
+      const sources = read.sources;
+      delete sources[key];
+      writeSources(sources);
+    });
+    resetAgentAdapterCache();
     resetAgentRegistryCache();
     const restored = builtinDefinitionNames().includes(key) ? "；同名内置定义已恢复" : "";
     return { ok: true, text: `已移除 ${key}${restored}。`, installed: [] };

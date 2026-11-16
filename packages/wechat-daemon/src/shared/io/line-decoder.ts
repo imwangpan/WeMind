@@ -9,9 +9,16 @@ export class LineDecoder {
   private decoder = new StringDecoder("utf8");
   private buf = "";
 
+  constructor(private readonly maxBufferBytes = 8 * 1024 * 1024) {}
+
   /** 喂一段 stdout，返回本次能完整切出的行（已 trim，空行丢弃）。 */
   push(chunk: Buffer): string[] {
     this.buf += this.decoder.write(chunk);
+    if (Buffer.byteLength(this.buf, "utf8") > this.maxBufferBytes) {
+      // 没有换行的超大行不是合法 ACP 帧；丢掉半截，避免话痨 agent 把内存吃满。
+      this.reset();
+      return [];
+    }
     const lines: string[] = [];
     let i: number;
     while ((i = this.buf.indexOf("\n")) >= 0) {

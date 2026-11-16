@@ -202,7 +202,7 @@ function scanLocalFiles(dir: string): {
   const files: LocalFile[] = [];
   const parts = [`dir:${dir}`];
   for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-    if (!entry.isFile() || entry.name.startsWith(".")) continue;
+    if ((!entry.isFile() && !entry.isSymbolicLink()) || entry.name.startsWith(".")) continue;
     if (!entry.name.toLowerCase().endsWith(".json")) continue;
     const file = path.join(dir, entry.name);
     let st: fs.Stats;
@@ -213,6 +213,42 @@ function scanLocalFiles(dir: string): {
     }
     files.push({ file, name: entry.name, mtimeMs: st.mtimeMs, size: st.size });
     parts.push(`${entry.name}:${st.mtimeMs}:${st.size}`);
+  }
+  const addAux = (label: string, file: string): void => {
+    try {
+      const st = fs.statSync(file);
+      if (!st.isFile()) return;
+      parts.push(`${label}:${st.mtimeMs}:${st.size}`);
+    } catch {
+      parts.push(`${label}:missing`);
+    }
+  };
+  // 安装来源与 adapter 代码也决定解析结果：只盯 *.json 会让长驻 daemon
+  // 继续使用旧 hook，而新进程/agent check 已经加载新代码。
+  addAux("sources", agentSourcesFile());
+  const scanAdapterTree = (root: string, rel: string): void => {
+    let nested: fs.Dirent[];
+    try {
+      nested = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const child of nested.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const childRel = path.join(rel, child.name);
+      const file = path.join(root, child.name);
+      if (child.isDirectory()) {
+        scanAdapterTree(file, childRel);
+        continue;
+      }
+      if (!child.isFile() && !child.isSymbolicLink()) continue;
+      addAux(`file:${childRel}`, file);
+    }
+  };
+  scanAdapterTree(path.join(dir, "adapters"), "adapters");
+  for (const entry of entries) {
+    if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+    if (!/\.(?:cjs|mjs|js)$/i.test(entry.name)) continue;
+    addAux(`file:${entry.name}`, path.join(dir, entry.name));
   }
   return { files, fingerprint: parts.join("|") };
 }
@@ -261,12 +297,6 @@ function readLocalDefinition(
         },
       ]),
     };
-  if (def.name === "auto")
-    return {
-      broken: brokenOf(key, file, [
-        { path: "name", message: "`auto` 是自动探测开关，不能作为 agent 名" },
-      ]),
-    };
   let preset: AcpAgentPreset;
   try {
     preset = presetForDefinition(normalizeDefinition(def), file);
@@ -282,7 +312,9 @@ function readLocalDefinition(
 
 function buildRegistry(dir: string, scan: ReturnType<typeof scanLocalFiles>): AgentRegistry {
   const definitions = { ...builtinRegistry.definitions };
-  const presets = { ...builtinRegistry.presets };
+  const presets = Object.fromEntries(
+    Object.entries(builtinRegistry.presets).map(([name, preset]) => [name, clonePreset(preset)]),
+  );
   const sources: Record<string, AgentDefinitionSource> = {};
   const broken: Record<string, BrokenAgentDefinition> = {};
   const installed = readInstalledSources();
@@ -331,7 +363,6 @@ function buildRegistry(dir: string, scan: ReturnType<typeof scanLocalFiles>): Ag
       kind: installed[name]?.kind === "package" ? "package" : "local",
       file: item.file,
     };
-    delete broken[name];
   }
 
   return {
@@ -342,6 +373,11 @@ function buildRegistry(dir: string, scan: ReturnType<typeof scanLocalFiles>): Ag
     sources,
     broken,
   };
+}
+
+function clonePreset(preset: AcpAgentPreset): AcpAgentPreset {
+  const { hooks, ...data } = preset;
+  return { ...structuredClone(data), ...(hooks ? { hooks } : {}) };
 }
 
 type InstalledSource = { kind: "package"; source: string; at?: string };
@@ -369,6 +405,50 @@ function readInstalledSources(): Record<string, InstalledSource> {
 }
 
 let cached: { fingerprint: string; registry: AgentRegistry } | null = null;
+
+type SensitivePathSnapshot = {
+  roots: string[];
+  paths: string[];
+};
+
+const sensitivePathSnapshots = new WeakMap<AgentRegistry, SensitivePathSnapshot>();
+
+/**
+ * 出站附件使用的 agent 敏感路径快照。
+ *
+ * **内置定义是安全底线**：本机/数据包里的坏定义只能遮住同名内置的运行视图，
+ * 不能让它从 denylist 掉出去。有效自定义定义再补充自己的覆盖；两者取并集。
+ * 快照按 registry 对象缓存，出站热路径不会反复执行第三方 adapter hook。
+ */
+export function agentSensitivePathSnapshot(): SensitivePathSnapshot {
+  const registry = getAgentRegistry();
+  const cachedSnapshot = sensitivePathSnapshots.get(registry);
+  if (cachedSnapshot) return cachedSnapshot;
+
+  const roots = new Set<string>();
+  const paths = new Set<string>();
+  const presets = [...Object.values(builtinRegistry.presets), ...Object.values(registry.presets)];
+  for (const preset of presets) {
+    if (preset.realHome) roots.add(preset.realHome);
+    for (const file of preset.extraConfigFiles ?? []) paths.add(file);
+    try {
+      for (const file of preset.hooks?.paths?.sensitive?.({
+        agent: {
+          name: preset.name,
+          realHome: preset.realHome,
+          realProfile: preset.realProfile,
+          extraConfigFiles: preset.extraConfigFiles ?? [],
+        },
+      }) ?? [])
+        if (file) paths.add(file);
+    } catch {
+      /* 第三方插件坏了不能把其它静态名单一起拖垮 */
+    }
+  }
+  const snapshot = { roots: [...roots], paths: [...paths] };
+  sensitivePathSnapshots.set(registry, snapshot);
+  return snapshot;
+}
 
 /**
  * 合并后的注册表：内置 < 本机（同名整条替换）。
@@ -432,11 +512,16 @@ export function brokenAgentDefinitionMessage(b: BrokenAgentDefinition): string {
 export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = new Proxy(
   {},
   {
-    get(_target, prop) {
-      return typeof prop === "string" ? ownValue(getAgentRegistry().presets, prop) : undefined;
+    get(target, prop, receiver) {
+      if (typeof prop !== "string") return Reflect.get(target, prop, receiver);
+      const preset = ownValue(getAgentRegistry().presets, prop);
+      if (preset !== undefined) return preset;
+      // 保持普通对象的原型语义（hasOwnProperty / toString / constructor）。
+      return prop in Object.prototype ? Reflect.get(target, prop, receiver) : undefined;
     },
     has(_target, prop) {
-      return typeof prop === "string" && Object.hasOwn(getAgentRegistry().presets, prop);
+      if (typeof prop !== "string") return false;
+      return Object.hasOwn(getAgentRegistry().presets, prop) || prop in Object.prototype;
     },
     ownKeys() {
       return Reflect.ownKeys(getAgentRegistry().presets);

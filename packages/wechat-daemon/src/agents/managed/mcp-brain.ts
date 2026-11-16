@@ -82,6 +82,7 @@ function linkRealKnowledge(ag: ResolvedAgent, rt: AgentRuntime): void {
 /** 读「目录」文件：格式由实际文件后缀与 agent 配置决定（JSON/JSONC/TOML）。 */
 function readCatalog(ag: ResolvedAgent): Record<string, unknown> {
   const file = mcpCatalogPath(ag);
+  if (!file) return {};
   return mcpAdapterForFile(ag, file).readCatalog(file);
 }
 
@@ -129,7 +130,10 @@ function nativeScanFiles(ag: ResolvedAgent, rt?: AgentRuntime): string[] {
   if (ag.catalogFile && base) {
     out.add(path.resolve(base, ag.catalogFile));
   }
-  if (ag.mcpDelivery !== "acp" && ag.realHome) out.add(mcpCatalogPath(ag));
+  if (ag.mcpDelivery !== "acp" && ag.realHome) {
+    const catalog = mcpCatalogPath(ag);
+    if (catalog) out.add(catalog);
+  }
   if (ag.mcpDelivery !== "acp" && ag.settingsBase && base) {
     out.add(path.join(base, ag.settingsBase));
   }

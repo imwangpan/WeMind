@@ -116,26 +116,28 @@ WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文�
 
 #### Step 1 · 新增 `opencode` agent（现为 `packages/wechat-daemon/src/agents/definitions/opencode.json`）
 
-```ts
-opencode: {
-  name: "opencode",
-  bin: "opencode",
-  binWin: "opencode",            // 经 shell 启动：裸名让 cmd.exe 解析 opencode.cmd / .exe 均可
-  args: ["acp"],
-  shell: true,                   // Windows 必需（PATH 上是 opencode.cmd shim）
-  homeEnvVar: "XDG_CONFIG_HOME", // 指向副本 → 配置落在 <副本>/opencode/，真正替换 global
-  realHome: path.join(os.homedir(), ".config", "opencode"),
-  inheritDirs: ["skills", "agents", "commands"],
-  inheritFiles: ["AGENTS.md"],
-  configSubdir: "opencode",      // agent 配置目录相对副本的子路径（kiro 为空）
-  mcpFormat: "mcp.servers",      // opencode.json 的 mcp.servers
-  mcpConfigFile: "opencode.json",
-  catalogFile: "opencode.json",
-  env: { OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, // 不从 cwd 祖先目录发现用户 opencode.json
-},
+```json
+{
+  "schemaVersion": 1,
+  "name": "opencode",
+  "bin": "opencode",
+  "binWin": "opencode",
+  "args": ["acp"],
+  "shell": true,
+  "homeEnvVar": "XDG_CONFIG_HOME",
+  "realHome": "~/.config/opencode",
+  "configSubdir": "opencode",
+  "inheritDirs": ["skills", "agents", "commands"],
+  "inheritFiles": ["AGENTS.md"],
+  "mcpFormat": "mcp.servers",
+  "mcpConfigFile": "opencode.json",
+  "catalogFile": "opencode.json",
+  "env": { "OPENCODE_DISABLE_PROJECT_CONFIG": "1" },
+  "adapter": { "module": "builtin:opencode", "apiVersion": 1 }
+}
 ```
 
-新增字段（`AcpAgentPreset`）：
+对应定义字段：
 - `configSubdir?: string` —— agent 配置目录相对副本根的子路径（kiro `""`；opencode `"opencode"`）。
 - `mcpFormat` / `mcpConfigFile` / `catalogFile` —— MCP 格式与文件名（见 Step 3）。
 - `inheritFiles` —— 单文件继承（`AGENTS.md`）。
@@ -280,7 +282,7 @@ npm run build; npm run daemon
 
 ## 5. 预设与副本
 
-`opencode` 是内置预设（`ACP_AGENT_PRESETS`），字段定义见 §3.4 Step 1；落地结果如下：
+`opencode` 是内置定义（`packages/wechat-daemon/src/agents/definitions/opencode.json`），字段定义见 §3.4 Step 1；落地结果如下：
 
 > 本节表格已按 2026-11-13 的默认 `homeMode=direct` 校正；§3 的 Step 1–8 是当时 M2/M3 副本阶段的实现记录，其中「副本」现在只对应显式 `homeMode=managed` 的 `brain-home` / `worker-home`；`direct` 不生成任何副本。
 

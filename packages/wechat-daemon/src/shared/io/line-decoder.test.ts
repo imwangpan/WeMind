@@ -32,4 +32,10 @@ describe("LineDecoder", () => {
     d.reset();
     expect(d.push(bytes("新行\n"))).toEqual(["新行"]);
   });
+
+  it("超过缓冲区上限的半截行被丢弃，后续完整行仍可解析", () => {
+    const d = new LineDecoder(8);
+    expect(d.push(bytes("123456789"))).toEqual([]);
+    expect(d.push(bytes("ok\n"))).toEqual(["ok"]);
+  });
 });

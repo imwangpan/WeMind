@@ -39,10 +39,16 @@ packages/wechat-daemon/src/
 │       ├── acp-connection.ts # 帧处理、请求与回合超时、模型/模式、load 后回放静默（→ 第 6 章）
 │       ├── acp-reverse.ts    # 反向请求应答器（权限默认 yolo 放行；WEMIND_ACP_AUTO_ALLOW=0 恢复拒绝；未知 method 回 -32601）
 │       └── acp-quiet.ts      # 恢复会话后等回放帧安静（200ms 静默窗口 / 最多 3s）
-├── agents/                   # agent 预设、配置状态、direct / managed 运行时
+├── agents/                   # agent 定义、配置状态、direct / managed 运行时
 │   ├── agent-definition.ts   # Agent 定义（数据面）契约：字段表、校验、JSON Schema（→ 第 6 章）
 │   ├── agent-registry.ts     # 定义注册表：内置 JSON + ~/.wemind/.agents/*.json，校验/合并/坏定义
+│   ├── agent-paths.ts        # 定义目录/来源文件路径（WEMIND_AGENTS_DIR 覆盖）
+│   ├── agent-install.ts      # wemind agent add/remove：定义包复制、相对 adapter、来源记录
+│   ├── agent-spec.ts         # wemind agent spec：字段说明书、JSON Schema、正反例
+│   ├── agent-adapter.ts      # 外部 adapter hook 契约（apiVersion=1）
+│   ├── agent-adapter-loader.ts # CJS 同步加载 / ESM 启动预加载、缓存与失败回滚
 │   ├── definitions/          # 10 个内置 agent 定义（纯 JSON，构建期内联进产物）
+│   ├── adapters/             # 内置 adapter hook 实现（Cline 凭据、kiro 引擎、DSH profile 等）
 │   ├── brain-agents.ts       # resolveAgent、agentProblem、派生配置落盘（→ 第 6 章）
 │   ├── brain-config.ts       # brain.json 读写
 │   ├── brain-state.ts        # brain-runtime.json：daemon 实际生效的大脑

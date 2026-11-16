@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,7 +6,9 @@ import { parseJsonc } from "../agents/managed/agent-mcp.js";
 import { mcpAdapterFor } from "../agents/managed/mcp-adapters.js";
 import { agentEnv, authHint, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
+import { disposeAgentProcess } from "../shared/process/dispose-agent.js";
 import { handleReverseRequest } from "./protocol/acp-reverse.js";
+import { writeAcpFrame } from "./protocol/write-frame.js";
 import { LineDecoder } from "../shared/io/line-decoder.js";
 
 /**
@@ -66,7 +67,6 @@ export async function checkAgent(
   if (copyProfile && ag.inherit && ag.realProfile && ag.realHome) {
     try {
       // 自检会真起一个 agent：MCP 条目全部剥掉，不能让第二个收消息实例被带进临时副本。
-      // 文件是否存在由 profile hook 自己判断，核心不再知道任何 agent 的 profile 路径。
       copyProfile({
         agent: ag,
         realHome: ag.realHome,
@@ -79,8 +79,22 @@ export async function checkAgent(
     }
   }
 
-  prepareAgent(ag); // 与 daemon 对齐：DSH 的 session-root patch 必须在 spawn 前存在
-  const proc = spawnAgent(ag, { cwd: home, env });
+  let proc: ReturnType<typeof spawnAgent>;
+  try {
+    prepareAgent(ag); // 与 daemon 对齐：DSH 的 session-root patch 必须在 spawn 前存在
+    proc = spawnAgent(ag, { cwd: home, env });
+  } catch (e) {
+    try {
+      fs.rmSync(home, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    return {
+      ok: false,
+      detail: `无法启动 agent：${e instanceof Error ? e.message : String(e)}`,
+      ms: Date.now() - started,
+    };
+  }
 
   const stdoutLines = new LineDecoder();
   const answer: string[] = [];
@@ -104,7 +118,11 @@ export async function checkAgent(
       // 反向请求（带 method + id）必须先应答；它与我们的请求 id 分属两个空间，数值可能撞车。
       // 以前这里只处理「响应」，agent 一发权限请求就没人回 → `brain check` 白等 60s，误报「不可用」。
       if (frame.method && frame.id !== undefined) {
-        handleReverseRequest(frame, (payload) => proc.stdin!.write(JSON.stringify(payload) + "\n"));
+        handleReverseRequest(frame, (payload) =>
+          writeAcpFrame(proc.stdin, payload, (error) =>
+            settleAll(`反向请求写回失败：${error.message}`),
+          ),
+        );
         continue;
       }
       if (frame.method === "session/update") {
@@ -131,6 +149,7 @@ export async function checkAgent(
   });
   proc.on("error", (e) => settleAll(`无法启动：${String(e)}`));
   proc.on("exit", (code) => settleAll(`进程已退出（code=${code}）`));
+  proc.stdin.on("error", (e) => settleAll(`stdin 写入失败：${e.message}`));
 
   const req = (method: string, params: unknown): Promise<any> =>
     new Promise((resolve, reject) => {
@@ -147,7 +166,13 @@ export async function checkAgent(
           );
         else resolve(frame?.result);
       });
-      proc.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      writeAcpFrame(proc.stdin, { jsonrpc: "2.0", id, method, params }, (error) => {
+        const done = pending.get(id);
+        if (!done) return;
+        pending.delete(id);
+        clearTimeout(t);
+        reject(new Error(`${method} 写入失败：${error.message}`));
+      });
     });
 
   try {
@@ -212,23 +237,9 @@ export async function checkAgent(
       ms: Date.now() - started,
     };
   } finally {
-    try {
-      if (process.platform === "win32" && proc.pid) {
-        spawnSync("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
-          stdio: "ignore",
-          windowsHide: true,
-        });
-      }
-      if (!proc.killed) proc.kill();
-    } catch {
-      /* ignore */
-    }
     // 有些 agent 会再拉起脱离进程树的子进程并继承 stdio；只杀直接子进程时，残留管道会让 CLI 一直不退出。
-    // 自检已经拿到结论，主动关掉管道并 unref，避免 `agent check` 成功打印后仍挂住终端。
-    proc.stdin.destroy();
-    proc.stdout.destroy();
-    proc.stderr.destroy();
-    proc.unref();
+    // 自检已经拿到结论，主动杀进程树、关掉管道并 unref，避免 `agent check` 成功打印后仍挂住终端。
+    disposeAgentProcess(proc);
     try {
       fs.rmSync(home, { recursive: true, force: true });
     } catch {

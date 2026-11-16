@@ -18,7 +18,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 | `session/new` | 新建会话 | 绝对 `cwd`；可传 `mcpServers` |
 | `session/load` | 按 sessionId 恢复会话 | **不是所有 agent 都实现**（DSH 返回 `-32601`） |
 | `session/resume` | 恢复持久会话 | DSH 用这个；恢复日志但不回放旧更新 |
-| `session/prompt` | 发一轮提问 | 图片能力看预设的 `images` 字段（不是 `initialize` 回包） |
+| `session/prompt` | 发一轮提问 | 图片能力看定义里的 `images` 字段（不是 `initialize` 回包） |
 | `session/update`（通知） | 流式回包：`agent_message_chunk`（正文）、`agent_thought_chunk`（思考）、`tool_call`/`tool_call_update`（工具进度） | committed-only agent 可能整段提交；`tool_call` 首帧报 start、终态 `tool_call_update` 报 end，同一 `toolCallId` 的终态只报一次 |
 | `session/request_permission`（反向请求） | agent 请求权限 | 客户端内置应答器（`acp-reverse.ts`，brain / worker / `brain check` 三处共用）：**默认 yolo**，自动选择 `allow_once` / `allow_always`；`WEMIND_ACP_AUTO_ALLOW=0` 恢复逐次拒绝（`cancelled`），空白串/未设置都按默认 yolo；allow 候选项必须有非空字符串 `optionId`，一个合法项都没有就回 `cancelled` 并记 WARN（防非法 `selected` 把回合挂住）；未知 method 回 `-32601`；接入前仍建议验证 |
 
@@ -147,7 +147,7 @@ graph TD
 >
 > 实际间隔由 `heartbeatMsValue` 现算，**三层可覆盖**（优先级从高到低）：`WECHAT_BRAIN_HEARTBEAT_MS` env → 配置里的 `heartbeatMs`（DSH 已设为 60s）→ `HEARTBEAT_DEFAULT_MS`（15s）。接新 agent 时优先在 agent 里设 `heartbeatMs`，而不是让用户配 env。
 
-每个会话首轮会带上一段「可发图」系统提示，告诉大脑：需要发图时用 Markdown `![](图片链接或本地绝对路径)`，并提示**服务器从中国大陆下载图片**，优先选可直链下载的源（如 `raw.githubusercontent.com`），避开被墙或带热链保护的图床。该提示只影响「发图」；「收图」取决于 agent 的 `image` 能力。
+每个会话**首轮会注入一次**系统提示（`acp-brain.ts` 的 `SYSTEM_PROMPT`；不每轮重复）：除告知大脑「你正在通过微信和用户对话」外，还说明：需要发图时用 Markdown `![](图片链接或本地绝对路径)`；需要发文件/视频时用显式链接 `[附件](file:///绝对路径)` / `[文件](...)` / `[视频](...)`（音频按文件发）；服务器从中国大陆下载图片，优先选可直接下载的直链，避开被墙或带热链保护的图床；以及「用户想接入新的 ACP agent 时先运行 `wemind agent spec`，不要凭记忆猜字段」。该提示只影响「发图/发文件/自助接入」；「收图」取决于 agent 的 `image` 能力。
 
 ## 6.3 brain 的工作模式与 MCP（runtime.ts / mcp-brain.ts / mcp-adapters.ts）
 

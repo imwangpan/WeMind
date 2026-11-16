@@ -69,4 +69,42 @@ describe("managed 副本日志文案", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("adapter 清洗抛错时留下可诊断的 ERROR，而不是静默保留微信条目", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-copy-error-"));
+    try {
+      const configDir = path.join(root, "brain-home");
+      const patchFile = path.join(configDir, "profiles", "acp", "cordis.patch.yml");
+      fs.mkdirSync(path.dirname(patchFile), { recursive: true });
+      fs.writeFileSync(patchFile, "- id: acp\n", "utf-8");
+      const base = resolveAgentByName("deepseek");
+      const ag = {
+        ...base,
+        realProfile: "acp",
+        hooks: {
+          apiVersion: 1,
+          profile: {
+            managedFiles: () => [patchFile],
+            stripManagedWechat: () => {
+              throw new Error("EACCES: permission denied");
+            },
+          },
+        },
+      } as ResolvedAgent;
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        stripWechatFromConfigCopy(ag, {
+          mode: "managed",
+          configDir,
+        } as unknown as AgentRuntime);
+        const joined = error.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
+        expect(joined).toContain("副本清洗失败");
+        expect(joined).toContain("EACCES");
+      } finally {
+        error.mockRestore();
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -98,7 +98,11 @@ export function collectEnvVars() {
       const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
       lines.forEach((line, index) => {
         // 变量名允许大小写混合（Windows 的 SystemRoot），系统运行环境变量随后过滤。
-        for (const m of line.matchAll(/process\.env\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
+        // `parentEnv.X` 也是 agent adapter 读取宿主环境变量的真实入口；
+        // 只认 process.env 会让 KIRO_CLI_BIN 这类兼容变量从自动表里消失。
+        for (const m of line.matchAll(
+          /(?:process\.env|parentEnv)\.([A-Za-z_][A-Za-z0-9_]*)/g,
+        )) {
           const name = m[1];
           if (RUNTIME_ENV.has(name)) continue;
           if (!seen.has(name)) {

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
-import { ACP_AGENT_PRESETS } from "../../agents/agent-registry.js";
+import { ACP_AGENT_PRESETS, resetAgentRegistryCache } from "../../agents/agent-registry.js";
 import {
   attachmentFailureNote,
   extractAttachments,
@@ -210,6 +210,40 @@ describe("resolveAttachment（读取与安全闸）", () => {
     expect(isSensitiveFilePath(path.join(os.homedir(), ".pi", "agent", "models-cache.json"))).toBe(
       true,
     );
+  });
+
+  it("坏的本机定义不能把同名内置从敏感路径底线里删掉", () => {
+    const prev = process.env.WEMIND_AGENTS_DIR;
+    const dir = tmpDir();
+    process.env.WEMIND_AGENTS_DIR = dir;
+    resetAgentRegistryCache();
+    try {
+      fs.writeFileSync(
+        path.join(dir, "claude-code.json"),
+        '{"schemaVersion":1,"name":"claude-code"}',
+        "utf-8",
+      );
+      resetAgentRegistryCache();
+      expect(isSensitiveFilePath(path.join(os.homedir(), ".claude.json"))).toBe(true);
+      expect(isSensitiveFilePath(path.join(os.homedir(), ".claude", "settings.json"))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.WEMIND_AGENTS_DIR;
+      else process.env.WEMIND_AGENTS_DIR = prev;
+      resetAgentRegistryCache();
+    }
+  });
+
+  it("真实 home 的环境变量覆盖也进入敏感路径判定", () => {
+    const prev = process.env.WEMIND_BRAIN_REAL_HOME;
+    const home = tmpDir();
+    process.env.WEMIND_BRAIN_REAL_HOME = home;
+    try {
+      expect(isSensitiveFilePath(path.join(home, "settings.json"))).toBe(true);
+      expect(isSensitiveFilePath(path.join(home, "models-cache.json"))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.WEMIND_BRAIN_REAL_HOME;
+      else process.env.WEMIND_BRAIN_REAL_HOME = prev;
+    }
   });
 
   it("软链接指向敏感文件仍被拦截（realpath 后判定）", () => {

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 import { describe, it, expect } from "vitest";
 
 import {
@@ -217,13 +219,15 @@ describe("validateAgentDefinition 失败路径", () => {
       "firstFrameMs: 应为正整数（毫秒）",
       "env.BAD: 值应为字符串",
       "settingsDefaults: 应为对象",
+      "realHome: 使用 inheritDirs 时必须同时提供 realHome（这些路径都相对于它）",
     ]);
   });
 
   it("name 必须是可作文件名/键的安全形态", () => {
     expect(problemsOf({ ...minimal(), name: "Acme Agent" })).toEqual([
-      "name: 应为 ^[a-z0-9][a-z0-9._-]*$ 形式（agent 名（同时用作定义文件名、brain.json 键与微信指令里的名字）：小写字母/数字开头，后接小写字母、数字、`.`、`_`、`-`）",
+      "name: 应为 ^(?!auto$)[a-z0-9][a-z0-9._-]*$ 形式（agent 名（同时用作定义文件名、brain.json 键与微信指令里的名字）：小写字母/数字开头，后接小写字母、数字、`.`、`_`、`-`；`auto` 是自动探测开关，不能作为名字）",
     ]);
+    expect(problemsOf({ ...minimal(), name: "auto" })).toHaveLength(1);
   });
 
   it("restore / mcpDelivery 只接受枚举值", () => {
@@ -236,12 +240,13 @@ describe("validateAgentDefinition 失败路径", () => {
   });
 
   it("内置 mcpFormat 直接通过；自定义格式缺 adapter 时被拒，给了 adapter 才放行", () => {
-    expect(validateAgentDefinition({ ...minimal(), mcpFormat: "mcp.servers" }).ok).toBe(true);
-    expect(problemsOf({ ...minimal(), mcpFormat: "acme-yaml" })).toEqual([
+    const withHome = { ...minimal(), realHome: "/home/user/.acme" };
+    expect(validateAgentDefinition({ ...withHome, mcpFormat: "mcp.servers" }).ok).toBe(true);
+    expect(problemsOf({ ...withHome, mcpFormat: "acme-yaml" })).toEqual([
       "mcpFormat: 未知的取值「acme-yaml」：内置只支持 mcpServers / mcp.servers / dshProfileYaml，自定义格式需要 adapter",
     ]);
     const withAdapter = validateAgentDefinition({
-      ...minimal(),
+      ...withHome,
       mcpFormat: "acme-yaml",
       adapter: { module: "wemind-agent-acme", apiVersion: AGENT_ADAPTER_API_VERSION },
     });
@@ -264,16 +269,18 @@ describe("validateAgentDefinition 失败路径", () => {
   });
 
   it("probe 只接受 at + 可选的 agentVersion，且 at 要能解析成时间", () => {
-    expect(validateAgentDefinition({ ...minimal(), probe: { at: "2026-11-16" } }).ok).toBe(true);
+    expect(
+      validateAgentDefinition({ ...minimal(), probe: { at: "2026-11-16T10:00:00Z" } }).ok,
+    ).toBe(true);
     expect(problemsOf({ ...minimal(), probe: { at: "昨天" } })).toEqual([
-      "probe.at: 无法解析为时间：「昨天」（建议 ISO 8601，如 2026-11-16T10:00:00Z）",
+      "probe.at: 应为 ISO 8601 时间：「昨天」（如 2026-11-16T10:00:00Z）",
     ]);
-    expect(problemsOf({ ...minimal(), probe: { at: "2026-11-16", agentVersion: "" } })).toEqual([
-      "probe.agentVersion: 应为非空字符串",
-    ]);
-    expect(problemsOf({ ...minimal(), probe: { at: "2026-11-16", source: "probe" } })).toEqual([
-      "probe.source: 未知字段（probe 只接受 at / agentVersion）",
-    ]);
+    expect(
+      problemsOf({ ...minimal(), probe: { at: "2026-11-16T10:00:00Z", agentVersion: "" } }),
+    ).toEqual(["probe.agentVersion: 应为非空字符串"]);
+    expect(
+      problemsOf({ ...minimal(), probe: { at: "2026-11-16T10:00:00Z", source: "probe" } }),
+    ).toEqual(["probe.source: 未知字段（probe 只接受 at / agentVersion）"]);
   });
 });
 
@@ -296,7 +303,7 @@ describe("agentDefinitionJsonSchema", () => {
     expect(Object.keys(props).sort()).toEqual(
       [...EXPECTED_DATA_KEYS, "adapter", "probe", "schemaVersion"].sort(),
     );
-    expect(props.name.pattern).toBe("^[a-z0-9][a-z0-9._-]*$");
+    expect(props.name.pattern).toBe("^(?!auto$)[a-z0-9][a-z0-9._-]*$");
     expect(props.firstFrameMs).toEqual({
       type: "integer",
       minimum: 1,
@@ -318,11 +325,23 @@ describe("agentDefinitionJsonSchema", () => {
 
   it("自定义 mcpFormat 必须同时给 adapter（条件必填也进了 schema）", () => {
     const schema = agentDefinitionJsonSchema();
-    expect(schema.anyOf).toEqual([
-      { required: ["adapter"] },
-      { properties: { mcpFormat: { enum: ["mcpServers", "mcp.servers", "dshProfileYaml"] } } },
-    ]);
-    expect(schema.allOf).toBeUndefined();
+    expect(schema.anyOf).toBeUndefined();
+    expect(schema.allOf).toContainEqual({
+      anyOf: [
+        { required: ["adapter"] },
+        { properties: { mcpFormat: { enum: ["mcpServers", "mcp.servers", "dshProfileYaml"] } } },
+      ],
+    });
+  });
+
+  it("相对路径字段与 realHome 的条件必填也进了 schema", () => {
+    const schema = agentDefinitionJsonSchema();
+    const props = schema.properties as Record<string, Record<string, unknown>>;
+    expect(props.catalogFile.pattern).toBe("^(?:\\.\\./)?[^/\\\\]+$");
+    expect(props.realProfile.pattern).toBe("^(?!\\.{1,2}$)[^/\\\\]+$");
+    expect(schema.allOf).toContainEqual({
+      anyOf: [{ not: { required: ["catalogFile"] } }, { required: ["realHome"] }],
+    });
   });
 
   it("语义由 adapter 解释的字段在描述里被标出来", () => {
@@ -330,5 +349,21 @@ describe("agentDefinitionJsonSchema", () => {
     expect(String(props.kiroEngine.description)).toContain("语义由 adapter 解释");
     expect(String(props.realProfile.description)).toContain("语义由 adapter 解释");
     expect(String(props.images.description)).not.toContain("语义由 adapter 解释");
+  });
+
+  it("接入文档 §4.3 的字段表覆盖全部定义字段", () => {
+    const doc = fs.readFileSync(
+      new URL("../../../../docs/接入方案/接入其它-ACP-Agent.md", import.meta.url),
+      "utf8",
+    );
+    const start = doc.indexOf("### 4.3 ");
+    const end = doc.indexOf("## 5. ", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const section = doc.slice(start, end);
+    for (const field of AGENT_DEFINITION_FIELDS)
+      expect(section, `§4.3 缺少字段 ${field.key}`).toContain(`| \`${field.key}\` |`);
+    for (const key of ["adapter", "probe"])
+      expect(section, `§4.3 缺少顶层字段 ${key}`).toContain(`| \`${key}\` |`);
   });
 });

@@ -18,11 +18,12 @@ const argv = process.argv.slice(2);
 const hook = cliHook(argv);
 
 async function main(): Promise<void> {
+  // daemon 的单实例守卫必须先于第三方 adapter 顶层代码执行：重复启动不应先跑插件再退出。
+  if (hook === "daemon") return runDaemon();
+  if (hook === "watchdog") return runWatchdog();
   // ESM adapter 只能异步 import；在同步解析器看到定义前先把它们放进缓存。
   const preloaded = await preloadAgentAdapters();
   for (const problem of preloaded.problems) log.warn(problem);
-  if (hook === "daemon") return runDaemon();
-  if (hook === "watchdog") return runWatchdog();
   return runManage(argv);
 }
 

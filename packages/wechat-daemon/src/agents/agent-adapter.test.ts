@@ -126,6 +126,7 @@ describe("外部 adapter 插件", () => {
     const file = path.join(dir, "ext-mcp.json");
     const raw = JSON.parse(fs.readFileSync(file, "utf-8"));
     raw.mcpFormat = "custom-yaml";
+    raw.realHome = path.join(dir, "ext-home");
     fs.writeFileSync(file, JSON.stringify(raw, null, 2), "utf-8");
     fs.writeFileSync(
       path.join(dir, "mcp-adapter.cjs"),
@@ -156,6 +157,7 @@ describe("外部 adapter 插件", () => {
     const file = path.join(dir, "ext-bad-mcp.json");
     const raw = JSON.parse(fs.readFileSync(file, "utf-8"));
     raw.mcpFormat = "custom-yaml";
+    raw.realHome = path.join(dir, "ext-home");
     fs.writeFileSync(file, JSON.stringify(raw, null, 2), "utf-8");
     fs.writeFileSync(
       path.join(dir, "bad-mcp.cjs"),
