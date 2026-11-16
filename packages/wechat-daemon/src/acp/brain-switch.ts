@@ -2,6 +2,7 @@ import { DATA_DIR } from "@wemind/wechat-ilink-core";
 
 import { getAgent, setAgent } from "../agents/agent-slot.js";
 import { resolvePresetByName, type ResolvedAgent } from "../agents/brain-agents.js";
+import { findAgentDefinitionSource } from "../agents/agent-registry.js";
 import { loadBrainConfig, updateBrainConfig } from "../agents/brain-config.js";
 import { ensureBrainHome } from "../agents/managed/mcp-brain.js";
 import { writeBrainState } from "../agents/brain-state.js";
@@ -118,6 +119,12 @@ function sameAgent(a: ResolvedAgent, b: ResolvedAgent): boolean {
   );
 }
 
+/** 本机定义覆盖内置时，切换结果里明说来源（可见性三处之一；另两处是 `agent list/show` 与 daemon 日志）。 */
+function definitionNote(name: string): string {
+  const source = findAgentDefinitionSource(name);
+  return source?.kind === "local" ? `\n定义来源：本机 ${source.file}` : "";
+}
+
 /**
  * 预检一个切换目标：名字 → 可用 agent，并告诉你「是不是本来就已经是它」。
  * **不 spawn、不碰磁盘**（只读配置），所以调用方可以在发 ack 之前先判一次——
@@ -179,7 +186,7 @@ async function runSwitch(
       agent: target,
       changed: false,
       ms: 0,
-      notice: `当前对话大脑已经是「${target.name}」，无需切换。${note}`,
+      notice: `当前对话大脑已经是「${target.name}」，无需切换。${note}${definitionNote(target.name)}`,
     };
   }
 
@@ -210,7 +217,7 @@ async function runSwitch(
         agent: target,
         changed: true,
         ms,
-        notice: `✅ 已切换对话大脑：${current.name} → ${target.name}（${(ms / 1000).toFixed(1)}s）。${note}`,
+        notice: `✅ 已切换对话大脑：${current.name} → ${target.name}（${(ms / 1000).toFixed(1)}s）。${note}${definitionNote(target.name)}`,
       };
     } catch (e) {
       restart(); // 清掉半截进程与 pid 记录

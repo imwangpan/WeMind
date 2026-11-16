@@ -114,28 +114,30 @@ WeMind 的大脑通过**标准 ACP**驱动，与具体 agent 无关。项目文�
 
 > 以下为**已实现**的实现说明（M2 已落地）；代码路径对应现仓库结构。
 
-#### Step 1 · 新增 `opencode` agent（`packages/wechat-daemon/src/agents/brain-presets.ts`）
+#### Step 1 · 新增 `opencode` agent（现为 `packages/wechat-daemon/src/agents/definitions/opencode.json`）
 
-```ts
-opencode: {
-  name: "opencode",
-  bin: "opencode",
-  binWin: "opencode",            // 经 shell 启动：裸名让 cmd.exe 解析 opencode.cmd / .exe 均可
-  args: ["acp"],
-  shell: true,                   // Windows 必需（PATH 上是 opencode.cmd shim）
-  homeEnvVar: "XDG_CONFIG_HOME", // 指向副本 → 配置落在 <副本>/opencode/，真正替换 global
-  realHome: path.join(os.homedir(), ".config", "opencode"),
-  inheritDirs: ["skills", "agents", "commands"],
-  inheritFiles: ["AGENTS.md"],
-  configSubdir: "opencode",      // agent 配置目录相对副本的子路径（kiro 为空）
-  mcpFormat: "mcp.servers",      // opencode.json 的 mcp.servers
-  mcpConfigFile: "opencode.json",
-  catalogFile: "opencode.json",
-  env: { OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, // 不从 cwd 祖先目录发现用户 opencode.json
-},
+```json
+{
+  "schemaVersion": 1,
+  "name": "opencode",
+  "bin": "opencode",
+  "binWin": "opencode",
+  "args": ["acp"],
+  "shell": true,
+  "homeEnvVar": "XDG_CONFIG_HOME",
+  "realHome": "~/.config/opencode",
+  "configSubdir": "opencode",
+  "inheritDirs": ["skills", "agents", "commands"],
+  "inheritFiles": ["AGENTS.md"],
+  "mcpFormat": "mcp.servers",
+  "mcpConfigFile": "opencode.json",
+  "catalogFile": "opencode.json",
+  "env": { "OPENCODE_DISABLE_PROJECT_CONFIG": "1" },
+  "adapter": { "module": "builtin:opencode", "apiVersion": 1 }
+}
 ```
 
-新增字段（`AcpAgentPreset`）：
+对应定义字段：
 - `configSubdir?: string` —— agent 配置目录相对副本根的子路径（kiro `""`；opencode `"opencode"`）。
 - `mcpFormat` / `mcpConfigFile` / `catalogFile` —— MCP 格式与文件名（见 Step 3）。
 - `inheritFiles` —— 单文件继承（`AGENTS.md`）。
@@ -149,7 +151,7 @@ opencode: {
 export function agentEnv(ag: ResolvedAgent, home: string, skipped: string[] = []) {
   const env = { ...process.env };
   if (ag.homeEnvVar) env[ag.homeEnvVar] = home;                      // 副本目录
-  for (const [k, v] of Object.entries(ag.credentialEnv?.(...) ?? {})) … // 凭据派生
+  for (const [k, v] of Object.entries(ag.hooks?.env?.derive?.({ realHome: ag.realHome, parentEnv: process.env }) ?? {})) … // 凭据派生
   for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
   for (const [k, v] of Object.entries(ag.envDefaults ?? {})) …       // 父进程已设则保留父进程
   return env;
@@ -240,7 +242,7 @@ npm run build; npm run daemon
 
 | 文件 | 改动 |
 |---|---|
-| `packages/wechat-daemon/src/agents/brain-presets.ts` | 新增 `opencode` agent；`AcpAgentPreset` 增加 `configSubdir`/`mcpFormat`/`mcpConfigFile`/`catalogFile`/`env`/`inheritFiles`（`ResolvedAgent` 透传在 `agents/brain-agents.ts`） |
+| `packages/wechat-daemon/src/agents/definitions/opencode.json`（原 `brain-presets.ts`） | 新增 `opencode` agent；定义增加 `configSubdir`/`mcpFormat`/`mcpConfigFile`/`catalogFile`/`env`/`inheritFiles`（`ResolvedAgent` 透传在 `agents/brain-agents.ts`） |
 | `packages/wechat-daemon/src/agents/managed/agent-mcp.ts`（新） | MCP 格式纯函数：`readMcpServers`/`withMcpServers`/`parseJsonc` |
 | `packages/wechat-daemon/src/agents/managed/mcp-brain.ts` | 按 agent 分派配置目录与 MCP 格式；opencode 继承 `model` 基底；`inheritFiles` 支持 |
 | `packages/wechat-daemon/src/agents/managed/mcp-worker.ts` | 同上（worker 策略：继承全量 MCP 除 wechat） |
@@ -280,7 +282,7 @@ npm run build; npm run daemon
 
 ## 5. 预设与副本
 
-`opencode` 是内置预设（`ACP_AGENT_PRESETS`），字段定义见 §3.4 Step 1；落地结果如下：
+`opencode` 是内置定义（`packages/wechat-daemon/src/agents/definitions/opencode.json`），字段定义见 §3.4 Step 1；落地结果如下：
 
 > 本节表格已按 2026-11-13 的默认 `homeMode=direct` 校正；§3 的 Step 1–8 是当时 M2/M3 副本阶段的实现记录，其中「副本」现在只对应显式 `homeMode=managed` 的 `brain-home` / `worker-home`；`direct` 不生成任何副本。
 

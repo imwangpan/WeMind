@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 
 import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
-import { ensureKiroV3Permissions, type ResolvedAgent } from "../brain-agents.js";
+import { prepareManagedAgent, type ResolvedAgent } from "../brain-agents.js";
 import { getAgent } from "../agent-slot.js";
 import type { AgentRole } from "../brain-config.js";
 import {
@@ -82,6 +82,7 @@ function linkRealKnowledge(ag: ResolvedAgent, rt: AgentRuntime): void {
 /** 读「目录」文件：格式由实际文件后缀与 agent 配置决定（JSON/JSONC/TOML）。 */
 function readCatalog(ag: ResolvedAgent): Record<string, unknown> {
   const file = mcpCatalogPath(ag);
+  if (!file) return {};
   return mcpAdapterForFile(ag, file).readCatalog(file);
 }
 
@@ -124,15 +125,15 @@ export function nativeMcpServers(ag: ResolvedAgent): Record<string, unknown> {
 function nativeScanFiles(ag: ResolvedAgent, rt?: AgentRuntime): string[] {
   const out = new Set<string>();
   const base = rt?.mode === "managed" ? rt.configDir : ag.realHome;
-  if (ag.realProfile && base) {
-    for (const name of ["cordis.patch.yml", "cordis.yml"]) {
-      out.add(path.join(base, "profiles", ag.realProfile, name));
-    }
-  }
+  if (base && ag.hooks?.profile?.managedFiles)
+    for (const file of ag.hooks.profile.managedFiles({ agent: ag, base })) out.add(file);
   if (ag.catalogFile && base) {
     out.add(path.resolve(base, ag.catalogFile));
   }
-  if (ag.mcpDelivery !== "acp" && ag.realHome) out.add(mcpCatalogPath(ag));
+  if (ag.mcpDelivery !== "acp" && ag.realHome) {
+    const catalog = mcpCatalogPath(ag);
+    if (catalog) out.add(catalog);
+  }
   if (ag.mcpDelivery !== "acp" && ag.settingsBase && base) {
     out.add(path.join(base, ag.settingsBase));
   }
@@ -174,7 +175,7 @@ export function warnForbiddenNativeMcp(ag: ResolvedAgent, rt?: AgentRuntime): vo
     if (/\.ya?ml$/i.test(file)) {
       try {
         const text = fs.readFileSync(file, "utf-8");
-        if (ag.mcpFormat === "dshProfileYaml") {
+        if (ag.hooks?.mcp || ag.mcpFormat === "dshProfileYaml") {
           for (const [name, def] of Object.entries(mcpAdapterFor(ag).readCatalog(file))) {
             if (forbiddenMcpServer(name, def)) bad.push(`${name}（${file}）`);
           }
@@ -328,9 +329,12 @@ export function activeMcpServers(
 
 /** 按适配器继承该 Agent 的「非 MCP」设置（kiro 的 settings/*；opencode 的 model 等同文件设置）。 */
 function syncFormatSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
-  const adapter = mcpAdapterFor(ag);
-  if (!adapter.inheritSettings || !ag.realHome) return;
-  adapter.inheritSettings(ag, ag.realHome, brainConfigDir(ag, rt));
+  if (!ag.hooks?.settings?.inherit || !ag.realHome) return;
+  ag.hooks.settings.inherit({
+    agent: ag,
+    realHome: ag.realHome,
+    targetConfigDir: brainConfigDir(ag, rt),
+  });
 }
 
 /** 继承真实配置目录的「非 MCP」设置（模型/免确认等）；MCP 段保持副本权威。 */
@@ -364,7 +368,7 @@ export function ensureBrainHome(forAgent?: ResolvedAgent, dir: string = DATA_DIR
   stripWechatFromConfigCopy(ag, rt);
   applyBrainCopy(ag, rt, dir);
   applySettingsDefaults(ag, brainConfigDir(ag, rt));
-  if (ag.kiroV3) ensureKiroV3Permissions(ag, path.join(rt.configDir, "settings"));
+  prepareManagedAgent(ag, rt.configDir);
   return rt;
 }
 

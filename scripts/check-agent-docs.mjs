@@ -2,7 +2,7 @@
 /**
  * 接入文档完整性检查。
  *
- * 对 packages/wechat-daemon/src/agents/brain-presets.ts 里的每个内置预设，断言：
+ * 对 packages/wechat-daemon/src/agents/definitions/*.json 里的每个内置定义，断言：
  *   1. docs/接入方案/ 下有一篇接入文档（正文提到预设名）；
  *   2. 文档头部有「最后核对」「实测环境」「状态」三个字段；
  *   3. 有五类二级标题：安装/准备、副本/预设、探针/实测、限制（或风险）、验证/复现/验收；
@@ -18,8 +18,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readBuiltinDefinitions } from "./agent-definitions.mjs";
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PRESET_SOURCE = "packages/wechat-daemon/src/agents/brain-presets.ts";
 const DOC_DIR = "docs/接入方案";
 // AGENTS.md §6 已于 2026-11-06 拆到 docs/ai/已知坑.md：预设名现在在那里出现。
 const INDEX_FILES = [
@@ -37,20 +38,6 @@ const REQUIRED_SECTIONS = [
   { key: "限制", patterns: /限制|坑|风险|待实测/ },
   { key: "验证", patterns: /验证|复现|验收/ },
 ];
-
-/** 从 ACP_AGENT_PRESETS 的对象字面量里取出预设名（顶层键）。 */
-export function extractPresetNames(source) {
-  const start = source.indexOf("export const ACP_AGENT_PRESETS");
-  if (start < 0) return [];
-  const body = source.slice(start);
-  const end = body.indexOf("\n};");
-  const block = end >= 0 ? body.slice(0, end) : body;
-  const names = [];
-  for (const match of block.matchAll(/^ {2}"?([\w-]+)"?:\s*\{/gm)) {
-    names.push(match[1]);
-  }
-  return names;
-}
 
 /** 名称归一化：大小写与连字符不参与比较（claude-code ↔ 接入-ClaudeCode.md）。 */
 export function normName(text) {
@@ -111,9 +98,9 @@ function readText(rel) {
 }
 
 function main() {
-  const names = extractPresetNames(readText(PRESET_SOURCE));
+  const names = readBuiltinDefinitions(ROOT).map((def) => def.name);
   if (names.length === 0) {
-    console.error(`从 ${PRESET_SOURCE} 解析不出预设名，脚本需要更新。`);
+    console.error("内置定义目录里没有任何 JSON，脚本或目录结构需要更新。");
     return 1;
   }
 

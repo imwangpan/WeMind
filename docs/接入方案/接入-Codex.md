@@ -30,7 +30,7 @@ codex-acp --version     # → @agentclientprotocol/codex-acp 2.6.0
 
 > 结论：**适配器一律全局安装**；`npx` 只在「不想装、且能接受每次联网」时用（此时用 `wemind brain set codex --bin npx --args "-y @agentclientprotocol/codex-acp" --shell` 显式指定）。
 >
-> WeMind 侧的落点：`agentProblem()` 在找不到适配器时**直接给出可粘贴的 `npm i -g …` 命令**（见 `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`），不再只说一句「找不到二进制」。
+> WeMind 侧的落点：`agentProblem()` 在找不到适配器时**直接给出可粘贴的 `npm i -g …` 命令**（见内置 adapter 的 `hints.install`），不再只说一句「找不到二进制」。
 
 **Windows 注意**：
 

@@ -62,10 +62,13 @@ describe("core 是 JIT 源码包（source-first）", () => {
 
   it("CLI / daemon / MCP 的错误出口都走 describeError（日志自动带 .ts 行号）", () => {
     const cli = readText("packages/wechat-daemon/src/cli.ts");
-    expect(cli.match(/describeError\(/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(cli.match(/describeError\(/g)?.length).toBeGreaterThanOrEqual(1);
     // 管理命令的 fatal 出口用 log.child("cli")：前缀与级别由 logger 生成，调用点不再自带前缀，也不能退回裸 console.error。
     expect(cli).toContain('const cliLog = log.child("cli")');
-    expect(cli).toContain("cliLog.error(describeError(e, import.meta.url))");
+    expect(cli).toContain(
+      'const target = hook === "watchdog" ? watchdogLog : hook === "daemon" ? log : cliLog',
+    );
+    expect(cli).toContain('target.error("fatal:", describeError(err, import.meta.url))');
     expect(cli).not.toContain('console.error("error:"');
     expect(readText("packages/wechat-daemon/src/index.ts")).toContain(
       'process.on("unhandledRejection"',

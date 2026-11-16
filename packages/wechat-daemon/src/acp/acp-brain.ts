@@ -70,6 +70,13 @@ const PROMPT_IDLE_MS = Number(process.env.WECHAT_BRAIN_IDLE_MS) || 120_000; // �
 const PROMPT_CAP_MS = Number(process.env.WECHAT_BRAIN_CAP_MS) || 900_000; // 单回合硬上限 15min。实测重任务(联网核实)需 ~6.5min；context_token 无时间 TTL(官方)，长回合用本消息 token 仍可送达。卡死由 idle/首帧超时兜底
 const BRAIN_PID_FILE = path.join(DATA_DIR, "brain.pid"); // 身份记录（JSON，见 pid-record.ts）；跨入口用同一文件名
 
+/**
+ * 每会话首轮注入一次的系统提示。
+ * 自助接入入口只在这里出现一次：不做每轮注入，也不往 agent 的技能目录塞文件（direct 下那会破坏“不写 agent 目录”的边界）。
+ */
+export const BRAIN_SYSTEM_HINT =
+  "（系统提示：你正在通过微信和用户对话。需要给用户发图片时，在回复里用 Markdown 图片语法 ![](图片的 http 链接或本地文件绝对路径)，系统会自动把它作为图片消息发出（你本身不会文生图，可发联网搜到的图、本地已有的图、或自己用代码渲染保存的图表）。需要发文件/视频时，用显式链接 [附件](file:///绝对路径)、[文件](file:///绝对路径) 或 [视频](file:///绝对路径)；系统会读取本地文件并作为文件/视频消息发出（音频请按文件发，不支持语音气泡）。服务器从中国大陆下载图片，请选「可直接下载的直链」——优先 raw.githubusercontent.com 等原始文件直链；避免 wikipedia/wikimedia（大陆被墙）以及 pixabay/unsplash 等带热链保护、直链常返回 403 的图床。拿不准时优先把图先下载到本地再用本地绝对路径引用，或直接发链接让用户自己点。其余正常用文字/Markdown 回复。如果用户想接入新的 ACP agent，先运行 `wemind agent spec` 获取定义规格与自助接入步骤；不要凭记忆猜字段。此提示只出现一次，无需理会本句。）";
+
 /** 首帧超时：env 覆盖 > 配置覆盖（DSH 实测首帧 1–4s，兜底 60s）> 默认 25s。
  *  按 agent 算而不是模块常量——热切换后新 agent 的启动快慢与旧的不同。 */
 function firstFrameMs(ag: ResolvedAgent): number {
@@ -439,7 +446,7 @@ async function runTurn(
     hintedSessions.add(sid);
     prompt.push({
       type: "text",
-      text: "（系统提示：你正在通过微信和用户对话。需要给用户发图片时，在回复里用 Markdown 图片语法 ![](图片的 http 链接或本地文件绝对路径)，系统会自动把它作为图片消息发出（你本身不会文生图，可发联网搜到的图、本地已有的图、或自己用代码渲染保存的图表）。需要发文件/视频时，用显式链接 [附件](file:///绝对路径)、[文件](file:///绝对路径) 或 [视频](file:///绝对路径)；系统会读取本地文件并作为文件/视频消息发出（音频请按文件发，不支持语音气泡）。服务器从中国大陆下载图片，请选「可直接下载的直链」——优先 raw.githubusercontent.com 等原始文件直链；避免 wikipedia/wikimedia（大陆被墙）以及 pixabay/unsplash 等带热链保护、直链常返回 403 的图床。拿不准时优先把图先下载到本地再用本地绝对路径引用，或直接发链接让用户自己点。其余正常用文字/Markdown 回复。此提示只出现一次，无需理会本句。）",
+      text: BRAIN_SYSTEM_HINT,
     });
   }
   prompt.push({ type: "text", text: message || "（用户发来一张图片，请查看并回应）" });

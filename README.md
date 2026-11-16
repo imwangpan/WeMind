@@ -211,6 +211,8 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 
 运行时状态保存在 **`~/.wemind/<account>/`** 下（默认账号 `default`，即 `~/.wemind/default/`）。该目录**独立于代码仓库**——改名/重装/重新 clone 代码都不影响登录态。
 
+与账号目录平级的 `~/.wemind/.agents/` 存**本机 agent 定义**（`<name>.json`；同名整条覆盖内置，不存在则只用内置；目录默认不创建）。它属于这台机器而不是某个账号，格式见 [`docs/接入方案/接入其它-ACP-Agent.md`](docs/接入方案/接入其它-ACP-Agent.md) §4.1。
+
 | 文件/目录                                     | 说明                                                                                                        |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `account.json`                                | Bot Token、botId、userId、baseUrl（POSIX 下权限 600；**Windows 下为明文**，见「安全说明」）                 |
@@ -293,6 +295,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 | 命令 |
 |:---|
 | `adopt` |
+| `agent` |
 | `allow` |
 | `allowlist` |
 | `autostart` |
@@ -381,6 +384,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WECHAT_ACCOUNT`                                        | 账号 key，决定状态子目录 `~/.wemind/<key>/`（默认 `default`）。**必须是 `wemind login` 登记过的 key**（见上文「多账号」），日常用 `wemind start <key\|label>` 即可 |
 | `WECHAT_DATA_DIR`                                       | 直接指定完整状态目录路径，覆盖 `~/.wemind/<account>` 规则。**只对 `wemind daemon` 直跑有效**：`wemind start` / `login --start` / pm2 / 自启一律忽略它（并按账号 key 寻址），检测到时会向 stderr 打迁移指引 |
 | `WEMIND_HOME`                                           | 数据根目录（默认 `~/.wemind`）                                                                                                      |
+| `WEMIND_AGENTS_DIR`                                     | 本机 agent 定义目录（默认 `<WEMIND_HOME>/.agents`；可单独覆盖；同名整条覆盖内置，坏定义按文件名遮住内置；默认不创建）                 |
 | `WEMIND_HOME_MODE`                                      | 一次性覆盖账号 `homeMode`：`direct`（默认）/ `managed`。持久值在 `<账号>/runtime.json`，不要写进 profile；缺失/损坏/无法识别的取值回落 `direct`。daemon 启动时快照为 `homeModeAtBoot`，运行期只读快照；迁移旧 `brain-home` / `worker-home` 只看磁盘持久值，不被这次一次性覆盖带偏 |
 | `WECHAT_BRAIN_HOME`                                     | **仅 `managed` 模式**的 brain 副本目录（默认 `<数据目录>/brain-home`）；`direct` 直接用真实 home |
 | `WECHAT_BRAIN_IDLE_MS` / `WECHAT_BRAIN_CAP_MS`          | 大脑单回合空闲/硬超时（默认 120000 / 900000；重任务实测需 ~6.5min）                                                                 |
@@ -546,7 +550,7 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | 3 | ACP 实现覆盖**最小方法集** | 至少 `initialize` + `session/new` + 能流式回包的 `session/prompt`；先用 `wemind brain check` 真握手 |
 | 4 | 能**完成认证**且二进制可解析 | PATH 上能找到，或用 `--bin` 给绝对路径；`.cmd`/`.bat` 需经 shell |
 
-> **「支持 ACP」四个字不足以说明可用**：`session/load`、`session/resume`、图片输入、MCP 传输、反向请求都是**可降级项**（agent 没实现就退到简单做法），按 agent 而异（见 `packages/wechat-daemon/src/agents/brain-presets.ts` 的 `AcpAgentPreset` 字段与 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md) §9）。接入前先跑能力探针。
+> **「支持 ACP」四个字不足以说明可用**：`session/load`、`session/resume`、图片输入、MCP 传输、反向请求都是**可降级项**（agent 没实现就退到简单做法），按 agent 而异（见 `packages/wechat-daemon/src/agents/definitions/*.json` 的字段与 [docs/接入方案/接入其它-ACP-Agent.md](docs/接入方案/接入其它-ACP-Agent.md) §9）。接入前先跑 `wemind agent spec` + `wemind agent probe <bin> ...`（旧的 `scripts/acp-probe.mjs` 仍兼容）。
 
 | 环境变量                | 作用                                                | 默认         |
 | ----------------------- | --------------------------------------------------- | ------------ |
@@ -556,10 +560,14 @@ daemon 的大脑通过 **ACP（Agent Client Protocol，JSON-RPC 2.0 over 标准�
 | `WEMIND_BRAIN_EXTRA_ARGS` | 追加启动参数（空格分隔，拼在预设/覆盖参数之后）   | 无           |
 | `WEMIND_ACP_SESSION_MODE` | 覆盖/关闭预设的会话模式（`session/set_mode`）：`0`/`false`/`off`/`no` 关闭，其它值 = 该 modeId | 用预设值 |
 | `WEMIND_BRAIN_HOME_ENV` | 覆盖「agent 配置目录环境变量名」（仅 managed 指向账号副本） | 内置默认值   |
+| `WEMIND_BRAIN_REAL_HOME` | 覆盖被继承的真实配置目录（默认取该 agent 的 `realHome`） | 内置默认值 |
+| `WECHAT_REAL_KIRO_HOME` | 旧的 kiro 专用 realHome 覆盖（仍兼容；优先级低于 `WEMIND_BRAIN_REAL_HOME`） | — |
 | `COPILOT_HOME` | 仅运行 Copilot CLI 时由 WeMind 给子进程设置，managed 下指向账号副本；不要手动固定 | 内部变量 |
 | `KIRO_CLI_BIN`          | 旧的 kiro 专用二进制覆盖（仍兼容）                  | —            |
 
-`kiro`（内置）= `kiro-cli acp --trust-all-tools`；`managed` 下 `KIRO_HOME` 指向账号副本，`direct` 不注入、用真实 `~/.kiro`。要接入新 agent，在 `ACP_AGENT_PRESETS` 里加一条、或直接用上面四个变量。持久化选择用 `wemind brain set <agent 名> [--bin ...] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model ...] [--restart]`（写入 `<数据目录>/brain.json`，任何入口重启都复现；`--args` 是**整段替换**、`--extra-args` 追加在末尾——只加开关（如免确认）用后者，漏掉 `acp` 这类模式参数会握手超时，`wemind brain` 会给出警告；只给 agent 名且 daemon 在跑并认控制桥时会**立刻当场应用（不用重启）**，带 `--bin/--args/--extra-args/--shell/--model` 则只写盘——其中 `--bin`/`--args`/`--extra-args`/`--model` 的改动可由随后的 `wemind brain switch <同名 agent>` 当场应用（「是不是同一个」按 name/bin/args/model 判），`--shell` 要重启）。**模型**同样可配：`--model '["provider 路由","模型名"]'` 指定；**`--model auto` = 跟随你日常那个 agent 的默认**——DSH 读真实 `~/.dsh/profiles/acp/cordis.patch.yml`（优先你自己写的 `- id: acp`，否则 `agent-default-model`；具体值由你的 DSH 配置决定；读不到就不下发）。**运行时切换**用 `wemind brain switch <agent 名>` 或微信里发 `切换大脑 <agent 名>`——进程内换、失败自动退回原来那个，见 [`docs/repowiki/06-ACP-大脑与副本.md`](docs/repowiki/06-ACP-大脑与副本.md)。
+`kiro`（内置）= `kiro-cli acp --trust-all-tools`；`managed` 下 `KIRO_HOME` 指向账号副本，`direct` 不注入、用真实 `~/.kiro`。要接入新 agent：**只给自己这台机器用**，先 `wemind agent spec` 看字段规格，再用 `wemind agent probe <bin> --args "…" --draft` 产草稿；补齐人工字段后先 `wemind agent check <文件> --schema`，再 `wemind agent check <文件>` 做真实握手，最后用 `wemind agent add <包目录|package.json|定义.json>` 安装（也可手工写 `~/.wemind/.agents/<name>.json`；`wemind agent list` / `show <name> [--explain]`；同名整条覆盖内置，无需改代码或发版；探针默认不发真实 prompt，`--deep` 才发）；需要自定义文件格式/凭据派生/启动前文件时，在定义里指向 adapter 插件（CJS/ESM 均可，安装即授权）；要随包发布内置定义，才改 `packages/wechat-daemon/src/agents/definitions/<name>.json` 并重新构建。持久化选择用 `wemind brain set <agent 名> [--bin ...] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model ...] [--restart]`（写入 `<数据目录>/brain.json`，任何入口重启都复现；`--args` 是**整段替换**、`--extra-args` 追加在末尾——只加开关（如免确认）用后者，漏掉 `acp` 这类模式参数会握手超时，`wemind brain` 会给出警告；只给 agent 名且 daemon 在跑并认控制桥时会**立刻当场应用（不用重启）**，带 `--bin/--args/--extra-args/--shell/--model` 则只写盘——其中 `--bin`/`--args`/`--extra-args`/`--model` 的改动可由随后的 `wemind brain switch <同名 agent>` 当场应用（「是不是同一个」按 name/bin/args/model 判），`--shell` 要重启）。**模型**同样可配：`--model '["provider 路由","模型名"]'` 指定；**`--model auto` = 跟随你日常那个 agent 的默认**——DSH 读真实 `~/.dsh/profiles/acp/cordis.patch.yml`（优先你自己写的 `- id: acp`，否则 `agent-default-model`；具体值由你的 DSH 配置决定；读不到就不下发）。**运行时切换**用 `wemind brain switch <agent 名>` 或微信里发 `切换大脑 <agent 名>`——进程内换、失败自动退回原来那个，见 [`docs/repowiki/06-ACP-大脑与副本.md`](docs/repowiki/06-ACP-大脑与副本.md)。
+
+> `wemind agent probe` 在 Windows 上对 `.cmd/.bat` 自动经 shell；无扩展名的 wrapper 才需要显式 `--shell`。
 
 **ACP 帧与模型的边界**：`applyAcpModel()` 只吞 agent 明确回的 JSON-RPC error 帧（带数字 `code`）；超时、`acp process reset`、无进程、写帧失败一律抛出，让上层 kill 重建，不把「模型没设上」当成旧进程还能继续用。`session/prompt` 的响应帧也算首帧（只在回合结束回一帧的 agent 不会误报「开局即卡死」），`clearAcpTurn()` 同时归零回合计时，不串到下一轮。`brain check` 起的自检副本在 `mcpDelivery: "acp"` 时同样剥离全部 MCP 条目，按真实投递方式验证。
 

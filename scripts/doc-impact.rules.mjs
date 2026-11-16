@@ -40,20 +40,35 @@ export const RULES = [
   {
     id: 'preset',
     why: '接一个新 ACP agent 必须同时产出接入文档与四处索引；只加预设不写文档，用户查不到怎么装、有什么限制。',
+    files: ['packages/wechat-daemon/src/agents/definitions/'],
     trigger: (diffLines) =>
       diffLines.some(
-        (line) =>
-          line.startsWith('+packages/wechat-daemon/src/agents/brain-presets.ts\t') &&
-          /name:\s*["'][a-z0-9_-]+["']/.test(line),
+        (line) => /^A\s+packages\/wechat-daemon\/src\/agents\/definitions\/[\w.-]+\.json$/.test(line),
       ),
     // 文档路径根据 name 的值动态生成：docs/接入方案/接入-<name>.md
-    dynamicDoc: /name:\s*["']([a-z0-9_-]+)["']/,
+    dynamicDoc: /"name":\s*"([a-z0-9._-]+)"/,
     docs: [
       'docs/接入方案/接入其它-ACP-Agent.md §5 agent 表',
       'docs/ai/已知坑.md',
       'docs/README.md 各 agent 实测行',
       'llms.txt',
       'docs/ai/README.md 事实状态表',
+    ],
+  },
+  {
+    id: 'agent-definition-fields',
+    why: '定义字段表是用户写本机定义与 `agent spec` 的事实源；字段增删、改名或必填性变化必须同步字段说明与 AI 上下文。',
+    files: ['packages/wechat-daemon/src/agents/agent-definition.ts'],
+    trigger: (diffLines) =>
+      diffLines.some(
+        (line) =>
+          /^[MAD] /.test(line) &&
+          line.slice(2).trim() === 'packages/wechat-daemon/src/agents/agent-definition.ts',
+      ),
+    docs: [
+      'docs/接入方案/接入其它-ACP-Agent.md §4.3 字段说明',
+      'docs/ai/README.md 事实状态表',
+      'AGENTS.md §4.2',
     ],
   },
   {
@@ -81,7 +96,9 @@ export const RULES = [
       diffLines.some(
         (line) =>
           /^[MAD] /.test(line) &&
-          /(\/store\/|(^|\/)[\w-]+-store\.ts$)/.test(line.slice(2).trim()),
+          /(\/store\/|(^|\/)[\w-]+-store\.ts$|\/agents\/agent-paths\.ts$|\/agents\/agent-install\.ts$|\/agents\/definitions\/[\w.-]+\.json$)/.test(
+            line.slice(2).trim(),
+          ),
       ),
     docs: [
       'docs/repowiki/08-数据存储与多账号.md',
@@ -376,5 +393,45 @@ export const STALE_FACTS = [
         why: '测试用例故意保留反例字符串，用于断言源码里不再出现它。',
       },
     ],
+  },
+  {
+    id: 'acp-agent-presets-source',
+    since: '2026-11-16',
+    why: '内置 agent 定义的唯一事实源已迁到 `agents/definitions/*.json`；运行期 `ACP_AGENT_PRESETS` 只是内置 + 本机定义的合并视图。仍把「预设定义」说成代码里 `ACP_AGENT_PRESETS` 一条的表述已过时。',
+    pattern: /`ACP_AGENT_PRESETS` 里的一条|`ACP_AGENT_PRESETS` 里的每个预设|代码里的 `ACP_AGENT_PRESETS`|唯一事实源[^。\n]*`ACP_AGENT_PRESETS`/,
+    allow: [
+      {
+        path: 'docs/发布与变更记录/CHANGELOG.md',
+        section: /^## \[(?!Unreleased)/,
+        marker: /\*\*版本边界\*\*/,
+        why: '已发布段按版本边界保留发布当时的代码结构。',
+      },
+      {
+        path: 'docs/设计文档/源码目录分层设计.md',
+        marker: /本文是\*\*历史实施记录\*\*/,
+        why: '目录分层设计是 2026-11-06 的历史实施记录；头部已声明 brain-presets 后来被 definitions/*.json 取代。',
+      },
+    ],
+  },
+  {
+    id: 'brain-shell-default-false',
+    since: '2026-11-17',
+    why: '`WEMIND_BRAIN_SHELL` 不设时按所选 agent 定义的 `shell`；10 个内置定义里 8 个是 `true`，不是全局默认 `false`。',
+    pattern: /`WEMIND_BRAIN_SHELL`[^\n]*默认 false|内置默认值（默认 false）|agent 里设 `shell: true`（`claude-code`、`gemini` agent 已设）/,
+    allow: [
+      {
+        path: 'docs/发布与变更记录/CHANGELOG.md',
+        section: /^## \[(?!Unreleased)/,
+        marker: /\*\*版本边界\*\*/,
+        why: '已发布段按版本边界保留发布当时的默认值描述。',
+      },
+    ],
+  },
+  {
+    id: 'preset-images-wording',
+    since: '2026-11-17',
+    why: '`images` 是 agent 定义的数据字段，不再叫「预设的 images 字段」；定义来源已统一为 `agents/definitions/*.json` 或本机定义。',
+    pattern: /预设的 `images` 字段/,
+    allow: [],
   },
 ];

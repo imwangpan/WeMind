@@ -67,7 +67,7 @@
 
 ### 2.2 agent 与副本
 
-- agent 表：`packages/wechat-daemon/src/agents/brain-presets.ts` 的 `ACP_AGENT_PRESETS`。
+- agent 定义：`packages/wechat-daemon/src/agents/definitions/deepseek.json`。
 - 选择优先级：`WEMIND_BRAIN`（env）> `<数据目录>/brain.json` > `auto`（`opencode → cline → qoder → gemini → deepseek → kiro`）。
 - 配置目录：默认 `direct` 不注入 `DSH_HOME`，直接用真实 `~/.dsh`；`managed` 才用 `<账号>/brain-home` 或 `<账号>/worker-home`。`configSubdir` 决定配置目录在副本内的相对位置。
 - MCP：`direct` 由真实配置决定（DSH 自己读 profile 里的 `dsh-mcp-client` 条目，WeMind 不重发 catalog，只补 `overlay.mcp.extra`）；`managed` 下 brain 默认空，微信指令「加载/卸载」改激活集，**只有激活集真变了才重启 ACP 生效**（`daemon-control.ts` 只在 `changed` 时调 `restartForMcpChange()`）；`wechat` 永久禁止（防它把消息发回自己）。**传输方式按 agent 分派**：kiro/opencode 写各自的配置文件；DSH 在 `managed` 下走 ACP `session/new` 的 `mcpServers`；catalog 也按 agent 各自的约定读取（详见 §5.3 M3）。
@@ -465,7 +465,7 @@ agent 用 `realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGEN
 
 | 文件 | 改动 | 阶段 |
 |---|---|---|
-| `packages/wechat-daemon/src/agents/brain-presets.ts` | 新增 `deepseek` agent（`binWin: "dsh.cmd"`）；`AcpAgentPreset` 增 `model?` / `restore?` / `firstFrameMs?` / `heartbeatMs?` / `images?` / `credentialFiles?` / `identityFiles?` / `acpMcpServers?` / `mcpDelivery?` / `isolateSessions?`；解析侧 `ResolvedAgent` 透传与 `prepareAgent()` 落盘在 `agents/brain-agents.ts`；`AUTO_PROBE_ORDER` 末尾加 `deepseek` | M1 / 2026-11-03 |
+| `packages/wechat-daemon/src/agents/definitions/deepseek.json`（2026-11-03 当时为 `brain-presets.ts`） | 新增 `deepseek` 定义（`binWin: "dsh.cmd"`）；定义字段增 `model` / `restore` / `firstFrameMs` / `heartbeatMs` / `images` / `credentialFiles` / `identityFiles` / `acpMcpServers` / `mcpDelivery` / `isolateSessions`；解析侧 `ResolvedAgent` 透传与 `prepareAgent()` 落盘在 `agents/brain-agents.ts`；`AUTO_PROBE_ORDER` 末尾加 `deepseek` | M1 / 2026-11-03 |
 | `packages/wechat-daemon/src/agents/profile-model.ts` | `acpModelHint()`：`- id: acp` 的 model 不在 provider 目录时给替换提示（`wemind brain` 输出） | 2026-11-03 |
 | `packages/wechat-daemon/src/acp/acp-brain.ts` / `tasks/worker-acp.ts` / `acp/brain-check.ts` | 起进程前调 `prepareAgent(ag)`（DSH 的 `--patch` 文件必须先存在） | 2026-11-03 |
 | `packages/wechat-daemon/src/acp/acp-brain.ts` | `session/set_config_option` 选 model；`session/resume` 兜底；反向请求应答器；首帧按配置覆盖；图片能力拦截；导出 `supportsImages`/`heartbeatMs` | M2 |
@@ -670,7 +670,7 @@ node scripts/acp-probe.mjs          # 看 session/new.configOptions.currentValue
 
 ## 12. 预设与副本
 
-`brain-presets.ts` 的 `ACP_AGENT_PRESETS.deepseek`（§5.3 M1）关键字段：
+`packages/wechat-daemon/src/agents/definitions/deepseek.json`（§5.3 M1）关键字段：
 
 - 启动：`bin: "dsh"`、`binWin: "dsh.cmd"`、`args: ["--profile", "acp"]`、`shell: true`。
 - 副本：`homeEnvVar: "DSH_HOME"`、`realHome: ~/.dsh`、`inheritDirs: ["skills"]`、`inheritFiles: ["AGENTS.md"]`、`credentialFiles: [".credentials.yaml"]`；`configSubdir` 留空（`DSH_HOME` 本身就是 home）。

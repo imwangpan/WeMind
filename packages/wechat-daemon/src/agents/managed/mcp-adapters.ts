@@ -1,23 +1,21 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import type { ResolvedAgent } from "../brain-agents.js";
+import type {
+  AgentMcpCatalog,
+  AgentMcpConversion,
+  AgentMcpDeclaration,
+  AgentMcpFormatAdapter,
+} from "../agent-adapter.js";
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
-import {
-  parseJsonc,
-  readMcpServers,
-  toAcpMcpServers,
-  withMcpServers,
-  type AcpMcpHttpServer,
-  type AcpMcpServer,
-} from "./agent-mcp.js";
+import { parseJsonc, readMcpServers, toAcpMcpServers, withMcpServers } from "./agent-mcp.js";
 import { parseDshMcpServers } from "./dsh-mcp.js";
 import { parseTomlMcpServers } from "./toml-mcp.js";
 
-export type McpCatalog = Record<string, unknown>;
-export type AcpMcpDeclaration = AcpMcpServer | AcpMcpHttpServer;
-export type AcpConversion = { servers: AcpMcpDeclaration[]; skipped: string[] };
+export type McpCatalog = AgentMcpCatalog;
+export type AcpConversion = AgentMcpConversion;
+export type { AgentMcpDeclaration };
 
 /**
  * 一种 MCP **文件格式**的适配器：把「这种格式的 MCP 放在哪、长什么样、怎么写、怎么交给 ACP」
@@ -29,40 +27,15 @@ export type AcpConversion = { servers: AcpMcpDeclaration[]; skipped: string[] };
  * - `tomlMcpServers`：Codex `config.toml` 的 `[mcp_servers.*]`，只读；写入一律视为配置错误
  * - `dshProfileYaml`：DSH `profiles/<profile>/cordis.patch.yml` 里的 `@deepseek-ai/dsh-mcp-client` 条目，只读
  */
-export interface McpAdapter {
-  readonly id: "jsonMcpServers" | "jsonMcpNested" | "tomlMcpServers" | "dshProfileYaml";
-  /** Agent 自己会加载、WeMind 改不了的真实配置文件（Codex TOML、DSH profile YAML） */
-  readonly nativeOwned: boolean;
-  /** 读真实目录文件里的 MCP 定义（只读；缺失/损坏返回空表） */
-  readCatalog(file: string): McpCatalog;
-  /** 把「当前有效集合」写进副本文件，保留同文件的其它键 */
-  writeCatalog(file: string, servers: McpCatalog): void;
-  /** 从设置基底里删掉该格式的 MCP 段（副本里 MCP 只能来自 curated 集；段键名按格式不同） */
-  stripSettings(base: McpCatalog): void;
-  /** 转成 ACP `session/new|resume` 的 mcpServers */
-  toAcp(servers: McpCatalog, exclude?: Iterable<string>): AcpConversion;
-  /** 该 Agent 原生加载的 MCP（非原生适配器返回空表） */
-  nativeCatalog(file: string): McpCatalog;
-  /** `managed` 模式下继承「除 MCP 外」的设置；direct 不调用（直接用真实文件） */
-  inheritSettings?(ag: ResolvedAgent, realHome: string, targetConfigDir: string): void;
-}
+/** 兼容旧名字：外部 adapter 提供的 MCP 格式实现与内置实现同一接口。 */
+export type McpAdapter = AgentMcpFormatAdapter;
 
 /** 可选 MCP 的定义来源文件；`WEMIND_MCP_CATALOG` / `WECHAT_MCP_CATALOG` 可覆盖为任意路径。 */
-export function mcpCatalogPath(ag: ResolvedAgent): string {
+export function mcpCatalogPath(ag: ResolvedAgent): string | null {
   const override = process.env.WEMIND_MCP_CATALOG?.trim() || process.env.WECHAT_MCP_CATALOG?.trim();
   if (override) return override;
-  if (ag.mcpFormat === "dshProfileYaml") {
-    return path.join(
-      ag.realHome || path.join(os.homedir(), ".dsh"),
-      "profiles",
-      ag.realProfile || "acp",
-      "cordis.patch.yml",
-    );
-  }
-  return path.join(
-    ag.realHome || path.join(os.homedir(), ".kiro"),
-    ag.catalogFile || "settings/mcp.json",
-  );
+  if (!ag.realHome) return null;
+  return path.join(ag.realHome, ag.catalogFile || "settings/mcp.json");
 }
 
 /** 该 Agent 的 MCP 配置文件（相对配置目录的 `mcpConfigFile`）。 */
@@ -145,30 +118,6 @@ const jsonMcpServersAdapter: McpAdapter = {
   },
   toAcp: (servers, exclude) => toAcpMcpServers(servers, { exclude }),
   nativeCatalog: () => ({}),
-  inheritSettings: (_ag, realHome, targetConfigDir) => {
-    const realSettings = path.join(realHome, "settings");
-    const targetSettings = path.join(targetConfigDir, "settings");
-    try {
-      fs.mkdirSync(targetSettings, { recursive: true });
-    } catch {
-      /* ignore */
-    }
-    let names: string[] = [];
-    try {
-      names = fs.readdirSync(realSettings);
-    } catch {
-      /* 真实配置目录不存在：没有可继承的 settings */
-    }
-    for (const name of names) {
-      if (name === "mcp.json") continue; // MCP 必须由激活集/全量集权威生成
-      try {
-        const src = path.join(realSettings, name);
-        if (fs.statSync(src).isFile()) copyFileIndependent(src, path.join(targetSettings, name));
-      } catch {
-        /* best-effort */
-      }
-    }
-  },
 };
 
 /** 嵌套 `{ "mcp": { "servers": { ... } } }`。 */
@@ -186,23 +135,6 @@ const jsonMcpNestedAdapter: McpAdapter = {
   },
   toAcp: (servers, exclude) => toAcpMcpServers(servers, { exclude }),
   nativeCatalog: () => ({}),
-  inheritSettings: (ag, realHome, targetConfigDir) => {
-    const src = ["opencode.json", "opencode.jsonc"]
-      .map((name) => path.join(realHome, name))
-      .find((file) => fs.existsSync(file));
-    if (!src) return;
-    let parsed: McpCatalog | null = null;
-    try {
-      const raw = fs.readFileSync(src, "utf-8");
-      parsed = src.endsWith(".jsonc") ? parseJsonc(raw) : (JSON.parse(raw) as McpCatalog);
-    } catch {
-      return;
-    }
-    if (!parsed) return;
-    delete parsed.mcp; // MCP 由激活集/全量集权威覆盖
-    const file = mcpConfigPath(ag, targetConfigDir);
-    writeJsonAtomic(file, parsed);
-  },
 };
 
 /** TOML `[mcp_servers.*]`，只读。 */
@@ -252,6 +184,7 @@ export const MCP_ADAPTERS = {
 
 /** 按 Agent 的配置格式选写入/设置继承适配器；原生只读格式（TOML / DSH profile）不参与写回。 */
 export function mcpAdapterFor(ag: ResolvedAgent): McpAdapter {
+  if (ag.hooks?.mcp) return ag.hooks.mcp;
   if (ag.mcpFormat === "dshProfileYaml") {
     return dshProfileYamlAdapter;
   }
@@ -263,6 +196,7 @@ export function mcpAdapterFor(ag: ResolvedAgent): McpAdapter {
 
 /** 按实际目录文件后缀读定义（`WEMIND_MCP_CATALOG` 可把目录指到 TOML）。 */
 export function mcpAdapterForFile(ag: ResolvedAgent, file: string): McpAdapter {
+  if (ag.hooks?.mcp) return ag.hooks.mcp;
   if (ag.mcpFormat === "dshProfileYaml") {
     return /\.ya?ml$/i.test(file) ? dshProfileYamlAdapter : jsonMcpServersAdapter;
   }

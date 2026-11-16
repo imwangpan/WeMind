@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,9 +5,10 @@ import path from "node:path";
 import { parseJsonc } from "../agents/managed/agent-mcp.js";
 import { mcpAdapterFor } from "../agents/managed/mcp-adapters.js";
 import { agentEnv, authHint, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
-import { copyProfilePatch } from "../agents/profile-model.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
+import { disposeAgentProcess } from "../shared/process/dispose-agent.js";
 import { handleReverseRequest } from "./protocol/acp-reverse.js";
+import { writeAcpFrame } from "./protocol/write-frame.js";
 import { LineDecoder } from "../shared/io/line-decoder.js";
 
 /**
@@ -17,9 +17,13 @@ import { LineDecoder } from "../shared/io/line-decoder.js";
  * 用**临时副本目录**（避免污染真实配置与账号副本），结束后杀进程、删临时目录。
  * 供 `wemind brain check` 使用；不影响正在运行的 daemon（各起各的进程）。
  */
-export type CheckResult = { ok: boolean; detail: string; ms: number };
+export type CheckResult = { ok: boolean; detail: string; ms: number; reply?: string };
 
-export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise<CheckResult> {
+export async function checkAgent(
+  ag: ResolvedAgent,
+  timeoutMs = 60_000,
+  opts: { deep?: boolean; prompt?: string } = {},
+): Promise<CheckResult> {
   const started = Date.now();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-check-"));
   const env = agentEnv(ag, home); // 父进程 env → 临时副本目录 → 预设 env → 预设 envDefaults（与 daemon 的 spawn 口径一致）
@@ -59,21 +63,41 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
 
   // 与 daemon 的大脑副本对齐：配了 realProfile 的 agent（DSH）启动时就解析 profiles/<名>/cordis.patch.yml，
   // 语法错误会直接 exit 1（initialize 都不会发生）。不复制的话，坏 profile 上自检仍报 ✅，而 daemon 每条消息都起不来。
-  if (ag.inherit && ag.realProfile && ag.realHome) {
+  const copyProfile = ag.hooks?.profile?.copyForManaged;
+  if (copyProfile && ag.inherit && ag.realProfile && ag.realHome) {
     try {
-      const rel = path.join("profiles", ag.realProfile, "cordis.patch.yml");
-      if (fs.existsSync(path.join(ag.realHome, rel)))
-        // 自检会真起一个 agent：MCP 条目全部剥掉，不能让第二个收消息实例被带进临时副本。
-        copyProfilePatch(ag.realHome, ag.realProfile, home, { stripAllMcp: true });
+      // 自检会真起一个 agent：MCP 条目全部剥掉，不能让第二个收消息实例被带进临时副本。
+      copyProfile({
+        agent: ag,
+        realHome: ag.realHome,
+        profile: ag.realProfile,
+        targetHome: home,
+        stripAllMcp: true,
+      });
     } catch {
       /* best-effort（与 daemon 的 syncProfilePatch 一致） */
     }
   }
 
-  prepareAgent(ag); // 与 daemon 对齐：DSH 的 session-root patch 必须在 spawn 前存在
-  const proc = spawnAgent(ag, { cwd: home, env });
+  let proc: ReturnType<typeof spawnAgent>;
+  try {
+    prepareAgent(ag); // 与 daemon 对齐：DSH 的 session-root patch 必须在 spawn 前存在
+    proc = spawnAgent(ag, { cwd: home, env });
+  } catch (e) {
+    try {
+      fs.rmSync(home, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    return {
+      ok: false,
+      detail: `无法启动 agent：${e instanceof Error ? e.message : String(e)}`,
+      ms: Date.now() - started,
+    };
+  }
 
   const stdoutLines = new LineDecoder();
+  const answer: string[] = [];
   let seq = 0;
   const pending = new Map<number, (frame: any) => void>();
   const settleAll = (msg: string): void => {
@@ -94,7 +118,21 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
       // 反向请求（带 method + id）必须先应答；它与我们的请求 id 分属两个空间，数值可能撞车。
       // 以前这里只处理「响应」，agent 一发权限请求就没人回 → `brain check` 白等 60s，误报「不可用」。
       if (frame.method && frame.id !== undefined) {
-        handleReverseRequest(frame, (payload) => proc.stdin!.write(JSON.stringify(payload) + "\n"));
+        handleReverseRequest(frame, (payload) =>
+          writeAcpFrame(proc.stdin, payload, (error) =>
+            settleAll(`反向请求写回失败：${error.message}`),
+          ),
+        );
+        continue;
+      }
+      if (frame.method === "session/update") {
+        const update = frame.params?.update;
+        if (
+          update?.sessionUpdate === "agent_message_chunk" &&
+          update?.content?.type === "text" &&
+          typeof update.content.text === "string"
+        )
+          answer.push(update.content.text);
         continue;
       }
       if (typeof frame.id === "number" && pending.has(frame.id)) {
@@ -111,6 +149,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
   });
   proc.on("error", (e) => settleAll(`无法启动：${String(e)}`));
   proc.on("exit", (code) => settleAll(`进程已退出（code=${code}）`));
+  proc.stdin.on("error", (e) => settleAll(`stdin 写入失败：${e.message}`));
 
   const req = (method: string, params: unknown): Promise<any> =>
     new Promise((resolve, reject) => {
@@ -127,7 +166,13 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
           );
         else resolve(frame?.result);
       });
-      proc.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      writeAcpFrame(proc.stdin, { jsonrpc: "2.0", id, method, params }, (error) => {
+        const done = pending.get(id);
+        if (!done) return;
+        pending.delete(id);
+        clearTimeout(t);
+        reject(new Error(`${method} 写入失败：${error.message}`));
+      });
     });
 
   try {
@@ -145,6 +190,25 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
       } catch (e) {
         modeNote = `，但 session/set_mode ${ag.sessionMode} 失败（${e instanceof Error ? e.message : String(e)}）——免审批模式可能不可用，回合仍可跑但会按 agent 自己的审批流程走`;
       }
+    }
+    if (opts.deep) {
+      const promptStarted = Date.now();
+      await req("session/prompt", {
+        sessionId: s.sessionId,
+        prompt: [
+          {
+            type: "text",
+            text: opts.prompt || "Reply with exactly: OK",
+          },
+        ],
+      });
+      const reply = answer.join("").trim();
+      return {
+        ok: true,
+        detail: `ACP 握手成功（initialize + session/new，sessionId=${s.sessionId}${modeNote}）；真实 prompt 成功（${Date.now() - promptStarted}ms）${reply ? `：${reply.slice(0, 160)}` : "（没有文本回复）"}`,
+        ms: Date.now() - started,
+        reply,
+      };
     }
     return {
       ok: true,
@@ -173,16 +237,9 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
       ms: Date.now() - started,
     };
   } finally {
-    try {
-      if (process.platform === "win32" && proc.pid)
-        spawnSync("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
-          stdio: "ignore",
-          windowsHide: true,
-        });
-      else proc.kill();
-    } catch {
-      /* ignore */
-    }
+    // 有些 agent 会再拉起脱离进程树的子进程并继承 stdio；只杀直接子进程时，残留管道会让 CLI 一直不退出。
+    // 自检已经拿到结论，主动杀进程树、关掉管道并 unref，避免 `agent check` 成功打印后仍挂住终端。
+    disposeAgentProcess(proc);
     try {
       fs.rmSync(home, { recursive: true, force: true });
     } catch {

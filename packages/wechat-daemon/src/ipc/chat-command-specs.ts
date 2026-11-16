@@ -1,4 +1,4 @@
-import { ACP_AGENT_PRESETS } from "../agents/brain-agents.js";
+import { isAgentName } from "../agents/brain-agents.js";
 
 /**
  * 微信指令表：**解析与帮助是同一张表**（一处改动不会让「帮助里写的」和「真正认的」不一致）。
@@ -90,8 +90,8 @@ export type CommandSpec<C> = {
 
 /** 可作为 agent 名的集合（小写）：`任务 <agent 名>：正文` 的判定表；`auto` 也算（自动探测）。 */
 function agentTokenOk(token: string): boolean {
-  const k = token.trim().toLowerCase();
-  return k === "auto" || Object.prototype.hasOwnProperty.call(ACP_AGENT_PRESETS, k);
+  // 坏定义也要接住：否则「任务 bad：…」会被当成普通正文发给大脑，用户看不到定义哪里坏了。
+  return isAgentName(token);
 }
 
 /** 中文里常见的「页」写法：`会话列表 2` / `会话列表 第2页` / `会话列表 2 页`。 */

@@ -210,6 +210,8 @@ $env:ACP_HARD_KILL = "1"
 node scripts/acp-probe.mjs
 ```
 
+> `ACP_HOME` / `CLAUDE_CONFIG_DIR` 指向系统临时目录时，探针结束会自动删除（`ACP_KEEP=1` 保留）；要检查探针写出的文件，加 `ACP_KEEP=1` 并从结果的 `cwd` 字段取路径。旧文档里的 `%TEMP%\claude-acp-probe` 只是本次运行的临时 home，不是长期目录。
+
 重点看：
 
 - `initialize` 的 `loadSession` / `promptCapabilities.image` / `mcpCapabilities`；

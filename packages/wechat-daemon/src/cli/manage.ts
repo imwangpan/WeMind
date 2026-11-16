@@ -11,6 +11,7 @@ import {
   readAllowFrom,
 } from "@wemind/wechat-ilink-core";
 import { cmdBrain } from "./subcommands/cli-brain.js";
+import { cmdAgent } from "./subcommands/cli-agent.js";
 import { cmdLogin, finalizeStaging } from "./subcommands/cli-login.js";
 import { cmdSession, cmdSessionCurrent } from "./subcommands/cli-session.js";
 import { cmdAutostart } from "./subcommands/autostart.js";
@@ -38,6 +39,7 @@ import {
 import { startDaemon, stopDaemon } from "./process-lifecycle.js";
 import { CLI_VERSION, versionLine } from "../shared/version.js";
 import { renderHelp } from "../ipc/chat-commands.js";
+import { preloadAgentAdapters } from "../agents/agent-adapter-loader.js";
 
 export { pickKey } from "./cli-context.js";
 export { agentLabel } from "./subcommands/cli-brain.js";
@@ -60,6 +62,8 @@ export { brainRecord, descendantPids, stopSummary, deleteGuard } from "./process
 const LEGACY_STAGING = path.join(WEMIND_ROOT, ".staging");
 
 export async function runManage(argv: string[]): Promise<void> {
+  // cli.ts 已预加载；这里再调一次是幂等的，方便测试/其它入口直接调用 runManage。
+  await preloadAgentAdapters();
   const cmd = argv.shift();
   const rest = [...argv];
   // autostart 的 --key / --label 是**子命令参数**：跳过下面的全局开关解析，否则会被 takeValue("--label") 抽走。
@@ -110,6 +114,9 @@ export async function runManage(argv: string[]): Promise<void> {
     }
     case "brain":
       print(await cmdBrain(rest, { startDaemon }));
+      break;
+    case "agent":
+      print(await cmdAgent(rest));
       break;
     case "config":
       print(await cmdConfig(rest));
@@ -249,6 +256,8 @@ export function helpText(): string {
   brain set <agent 名|auto> [--bin X] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]
                                  改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--extra-args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用；--extra-args 追加在预设参数后，不会漏掉 ACP 子命令）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
+  agent list|show|spec|probe|check [...]
+                                 查看/校验/探测 agent 定义（本机定义放 ${WEMIND_ROOT}/.agents/<name>.json；probe --draft 产草稿）
   config show|home-mode|reload [--key <key|label>]
                                  查看/设置 homeMode（direct/managed）与运行时路径
   config reply-style [concise|off] [--key <key|label>]

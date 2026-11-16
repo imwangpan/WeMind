@@ -61,7 +61,7 @@ describe("kiro 副本（v3 免审批）", () => {
     const body = "rules:\n  - capability: all\n    effect: allow\n";
     expect(fs.readFileSync(brainSettings(), "utf-8")).toBe(body);
     expect(fs.readFileSync(brainSettings("worker-home"), "utf-8")).toBe(body);
-    expect(resolveAgent().kiroV3).toBe(true);
+    expect(resolveAgent().engine).toBe("v3");
     expect(resolveAgent().args).toEqual(["acp", "--agent-engine", "v3"]);
   });
 
@@ -78,7 +78,7 @@ describe("kiro 副本（v3 免审批）", () => {
     process.env.WEMIND_BRAIN_REAL_HOME = v2Home;
     resetSlotsForTest();
     ensureWorkerHome();
-    expect(resolveAgent().kiroV3).toBe(false);
+    expect(resolveAgent().engine).toBe("v2");
     expect(resolveAgent().args).toEqual(["acp", "--trust-all-tools"]);
     expect(fs.existsSync(brainSettings("worker-home"))).toBe(false);
   });

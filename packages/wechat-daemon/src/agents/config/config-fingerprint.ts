@@ -8,16 +8,6 @@ import type { ResolvedAgent } from "../brain-agents.js";
 import type { AgentRuntime } from "./runtime.js";
 import { overlayPath } from "./overlay.js";
 
-/** 这些文件由 agent 自己高频写入（会话/历史/统计），不是「配置」；拿内容当指纹会让进程每轮重启。 */
-const VOLATILE = new Set([
-  ".claude.json",
-  "history.jsonl",
-  "todos.json",
-  "statsig",
-  "shell-snapshots",
-  "projects",
-]);
-
 /** overlay 也是「下一次启动该看到的配置」，单独哈希后喂进指纹。 */
 function hashOverlay(h: crypto.Hash, ag: ResolvedAgent, dir: string): void {
   try {
@@ -59,30 +49,25 @@ export function configFingerprint(
     return h.digest("hex");
   }
   const files = new Set<string>();
+  /** 由 agent 自己高频写入（会话/历史/统计）的文件名；由 adapter 声明，避免核心按 agent 名维护清单。 */
+  const volatile = new Set(ag.hooks?.fingerprint?.volatile ?? []);
   const add = (rel: string | undefined): void => {
     if (!rel) return;
     const p = path.resolve(base, rel);
-    if (VOLATILE.has(path.basename(p))) return;
+    if (volatile.has(path.basename(p))) return;
     files.add(p);
   };
   add(ag.settingsBase);
   add(ag.mcpConfigFile);
   add(ag.catalogFile);
   for (const f of ag.extraConfigFiles ?? []) {
-    if (VOLATILE.has(path.basename(f))) continue;
+    if (volatile.has(path.basename(f))) continue;
     add(path.relative(base, f));
   }
-  // DSH 这类 provider/默认模型在 profile 目录里：只取一层文件内容，不递归整个 home。
-  if (ag.realProfile) {
-    const profile = path.join(base, "profiles", ag.realProfile);
-    try {
-      for (const e of fs.readdirSync(profile, { withFileTypes: true })) {
-        if (e.isFile() && !VOLATILE.has(e.name))
-          add(path.relative(base, path.join(profile, e.name)));
-      }
-    } catch {
-      /* profile 不存在：不参与指纹 */
-    }
+  // profile/默认模型等额外配置文件由 adapter 声明（只取一层，不递归整个 home）。
+  for (const f of ag.hooks?.fingerprint?.extraFiles?.({ agent: ag, base }) ?? []) {
+    if (volatile.has(path.basename(f))) continue;
+    add(path.relative(base, f));
   }
   for (const p of [...files].sort()) {
     let st: fs.Stats;

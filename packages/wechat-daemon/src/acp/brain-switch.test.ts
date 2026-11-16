@@ -31,6 +31,7 @@ const { switchBrain, preflightSwitch, switchInFlightTarget } = await import("./b
 const {
   askBrain,
   askBrainTurn,
+  BRAIN_SYSTEM_HINT,
   beginSwitch,
   endSwitch,
   newSession,
@@ -75,7 +76,7 @@ process.stdin.on("data", (d) => {
   }
 });
 function handle(f) {
-  if (methods) fs.appendFileSync(methods, f.method + " " + JSON.stringify(f.params ?? {}).slice(0, 200) + "\\n");
+  if (methods) fs.appendFileSync(methods, f.method + " " + JSON.stringify(f.params ?? {}).slice(0, 2000) + "\\n");
   if (mode === "fail-init" && f.method === "initialize") {
     out({ jsonrpc: "2.0", id: f.id, error: { code: -32603, message: "boom: 握手被拒" } });
     return;
@@ -93,7 +94,7 @@ function handle(f) {
   const delay = (mode === "slow-init" && f.method === "initialize") || (mode === "slow-prompt" && f.method === "session/prompt") ? 700 : 0;
   setTimeout(() => {
     if (f.method === "initialize") out({ jsonrpc: "2.0", id: f.id, result: { protocolVersion: 1, agentCapabilities: {} } });
-    else if (f.method === "session/new") out({ jsonrpc: "2.0", id: f.id, result: mode === "modes" ? { sessionId: "sess-new", modes: { availableModes: [{ id: "default", name: "Default" }], currentModeId: "default" } } : { sessionId: "sess-new" } });
+    else if (f.method === "session/new") out({ jsonrpc: "2.0", id: f.id, result: mode === "modes" ? { sessionId: process.env.FAKE_ACP_SESSION_ID || "sess-new", modes: { availableModes: [{ id: "default", name: "Default" }], currentModeId: "default" } } : { sessionId: process.env.FAKE_ACP_SESSION_ID || "sess-new" } });
     else if (f.method === "session/load" || f.method === "session/resume") out({ jsonrpc: "2.0", id: f.id, result: {} });
     else if (f.method === "session/set_config_option") out({ jsonrpc: "2.0", id: f.id, result: {} });
     // 只有 "modes" 模式的假 agent 认识 session/set_mode；其余回 -32601，模拟不支持该方法的 agent
@@ -223,6 +224,23 @@ describe("switchBrain", () => {
     const out = await switchBrain("kiro", { userId: "u1", dir: dataDir });
     expect(out.ok).toBe(true);
     expect(await askBrain("u1", "噪音测试")).toContain("答:"); // 系统提示在前，假 agent 只回显前 20 字
+  });
+
+  it("自助接入提示只在会话首个回合注入一次", async () => {
+    process.env.FAKE_ACP_SESSION_ID = "sess-hint";
+    try {
+      setup("ok");
+      await askBrain("u1", "第一轮");
+      await askBrain("u1", "第二轮");
+      const prompts = methods()
+        .filter((line) => line.startsWith("session/prompt "))
+        .map((line) => JSON.parse(line.slice("session/prompt ".length)));
+      expect(JSON.stringify(prompts[0])).toContain("wemind agent spec");
+      expect(JSON.stringify(prompts[1])).not.toContain("wemind agent spec");
+      expect(BRAIN_SYSTEM_HINT).toContain("只出现一次");
+    } finally {
+      delete process.env.FAKE_ACP_SESSION_ID;
+    }
   });
 
   it("切回旧大脑：该 agent 的旧会话用 session/load 恢复（不是新建）", async () => {

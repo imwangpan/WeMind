@@ -15,13 +15,14 @@ import {
   acpModeTokens,
   agentEnv,
   prepareAgent,
-  ensureKiroV3Permissions,
+  prepareManagedAgent,
 } from "./brain-agents.js";
 import {
   presetAvailable,
   presetBinPath,
   presetNames,
   resolveAgentFor,
+  resolveAgentFromDefinition,
   resolvePresetByName,
 } from "./brain-agents.js";
 
@@ -210,38 +211,40 @@ describe("resolveAgent agent", () => {
     process.env.WEMIND_BRAIN = "kiro";
     process.env.WEMIND_BRAIN_REAL_HOME = kiroV3Home;
     const ag = resolveAgent();
-    expect(ag.kiroV3).toBe(true);
+    expect(ag.engine).toBe("v3");
     expect(ag.args).toEqual(["acp", "--agent-engine", "v3"]);
     // 用户自己的 --agent-engine v3 也认；v2 专属信任参数一并清掉，且不重复追加
     const explicit = resolveAgent({
       agent: "kiro",
       args: ["acp", "--trust-all-tools", "--agent-engine", "v3"],
     });
-    expect(explicit.kiroV3).toBe(true);
+    expect(explicit.engine).toBe("v3");
     expect(explicit.args).toEqual(["acp", "--agent-engine", "v3"]);
     // 显式 v2 优先于设置里的 v3（用户可临时回退）
     const v2 = resolveAgent({
       agent: "kiro",
       args: ["acp", "--trust-all-tools", "--agent-engine", "v2"],
     });
-    expect(v2.kiroV3).toBe(false);
+    expect(v2.engine).toBe("v2");
     expect(v2.args).toEqual(["acp", "--trust-all-tools", "--agent-engine", "v2"]);
   });
 
   it("kiro v3 的免审批：副本 settings/permissions.yaml 缺失时补 allow-all；已有用户规则不覆盖", () => {
-    const ag = { ...resolveAgent({ agent: "kiro" }), kiroV3: true };
-    const settings = path.join(scratch, "kiro-v3-settings");
-    ensureKiroV3Permissions(ag, settings);
-    expect(fs.readFileSync(path.join(settings, "permissions.yaml"), "utf-8")).toBe(
+    const ag = { ...resolveAgent({ agent: "kiro" }), engine: "v3" };
+    const configDir = path.join(scratch, "kiro-v3-settings");
+    prepareManagedAgent(ag, configDir);
+    expect(fs.readFileSync(path.join(configDir, "settings", "permissions.yaml"), "utf-8")).toBe(
       "rules:\n  - capability: all\n    effect: allow\n",
     );
-    fs.writeFileSync(path.join(settings, "permissions.yaml"), "rules: []\n", "utf-8");
-    ensureKiroV3Permissions(ag, settings);
-    expect(fs.readFileSync(path.join(settings, "permissions.yaml"), "utf-8")).toBe("rules: []\n");
+    fs.writeFileSync(path.join(configDir, "settings", "permissions.yaml"), "rules: []\n", "utf-8");
+    prepareManagedAgent(ag, configDir);
+    expect(fs.readFileSync(path.join(configDir, "settings", "permissions.yaml"), "utf-8")).toBe(
+      "rules: []\n",
+    );
     // v2 不写这个文件（免审批仍由 --trust-all-tools 承担）
     const v2Settings = path.join(scratch, "kiro-v2-settings");
-    ensureKiroV3Permissions({ ...ag, kiroV3: false }, v2Settings);
-    expect(fs.existsSync(path.join(v2Settings, "permissions.yaml"))).toBe(false);
+    prepareManagedAgent({ ...ag, engine: "v2" }, v2Settings);
+    expect(fs.existsSync(path.join(v2Settings, "settings", "permissions.yaml"))).toBe(false);
   });
 
   it("opencode：XDG_CONFIG_HOME 隔离 + opencode.json / mcp.servers + 目录与单文件继承", () => {
@@ -324,6 +327,7 @@ describe("resolveAgent agent", () => {
         file: path.join(scratch, "dsh-sessions", "session-root-brain.patch.yml"),
         root: path.join(scratch, "dsh-sessions", "brain"),
       },
+      hooks: ACP_AGENT_PRESETS.deepseek.hooks,
     } as unknown as Parameters<typeof prepareAgent>[0];
     prepareAgent(fake);
     expect(fs.readFileSync(fake.sessionPatch!.file, "utf-8")).toBe(
@@ -589,7 +593,7 @@ describe("resolveAgent agent", () => {
     // MCP：走 ACP session/new|load 的 mcpServers；目录是真实 ~/.claude.json（与 realHome 同级）
     expect(ag.acpMcpServers).toBe(true);
     expect(ag.mcpDelivery).toBe("acp");
-    expect(ag.catalogFile).toBe(path.join("..", ".claude.json"));
+    expect(ag.catalogFile).toBe("../.claude.json");
     // 能力默认：load 恢复、支持图片、不覆盖模型
     expect(ag.restore).toBeUndefined();
     expect(ag.images).toBe(true);
@@ -1080,5 +1084,19 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
     });
     expect(r2.ok).toBe(true);
     if (r2.ok) expect(r2.agent.model).toBeUndefined();
+  });
+
+  it("agent check 的定义解析隔离 ambient env：切脑命令仍尊重的 realHome/inherit/mode 不混进来", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN_REAL_HOME = profileHome;
+    process.env.WEMIND_BRAIN_INHERIT = "0";
+    process.env.WEMIND_ACP_SESSION_MODE = "read-only";
+    const ag = resolveAgentFromDefinition({
+      ...ACP_AGENT_PRESETS.deepseek,
+      realHome: emptyRealHome,
+    });
+    expect(ag.realHome).toBe(emptyRealHome);
+    expect(ag.inherit).toBe(true);
+    expect(ag.sessionMode).toBeUndefined();
   });
 });

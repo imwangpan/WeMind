@@ -3,7 +3,11 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 import type { ResolvedAgent } from "../brain-agents.js";
-import { ACP_AGENT_PRESETS } from "../brain-presets.js";
+import {
+  ACP_AGENT_PRESETS,
+  brokenAgentDefinitionMessage,
+  findBrokenAgentDefinition,
+} from "../agent-registry.js";
 import { writeJsonAtomic } from "../../shared/io/atomic-json.js";
 import { parseJsonc } from "../managed/agent-mcp.js";
 
@@ -109,7 +113,11 @@ export function resolveAgentConfigFile(ag: ResolvedAgent, file?: string): string
 export function resolveAgentConfigFileByName(agent: string, file?: string): string {
   const key = agent.trim().toLowerCase();
   const preset = ACP_AGENT_PRESETS[key];
-  if (!preset) throw new Error(`未知 agent「${agent}」`);
+  if (!preset) {
+    const broken = findBrokenAgentDefinition(key);
+    if (broken) throw new Error(brokenAgentDefinitionMessage(broken));
+    throw new Error(`未知 agent「${agent}」`);
+  }
   const realHome =
     process.env.WEMIND_BRAIN_REAL_HOME?.trim() ||
     process.env.WECHAT_REAL_KIRO_HOME?.trim() ||

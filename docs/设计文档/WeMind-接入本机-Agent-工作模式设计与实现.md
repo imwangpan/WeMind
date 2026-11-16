@@ -183,7 +183,7 @@ AgentHomeResolver ──► Agent 进程
 | `EnvProvider`（`agents/config/env-snapshot.ts` + `brain-agents.ts`） | 继承 daemon 环境，或加载非敏感快照（PATH/代理/locale）；解析顺序不绑定某个版本管理器 |
 | `SessionBinder`（`agents/config/session-cwd.ts`） | 保存 `<agent>:<sessionId> → cwd`；恢复时使用并校验 cwd |
 | `ReloadCoordinator`（`config-fingerprint.ts` + `config.reload` 控制桥） | 检测真实配置变化；`restartForMcpChange()` 返回 `applied|queued|failed`，排队时写 `runtime.json` 的 `pendingReload`，daemon 启动消费标记；手动 `config.reload` 还会重新 seed 槽位 |
-| `AgentCapabilityMatrix`（`brain-presets.ts`） | 每个 Agent 的 homeMode、MCP 传输、会话布局、yolo 方式、并发注意事项 |
+| `AgentCapabilityMatrix`（现为 `agents/definitions/*.json`） | 每个 Agent 的 homeMode、MCP 传输、会话布局、yolo 方式、并发注意事项 |
 
 ### 5.2 brain 与 worker 的差异
 

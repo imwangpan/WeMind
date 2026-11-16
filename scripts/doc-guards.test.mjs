@@ -7,6 +7,7 @@ import {
   checkStaleFacts,
   commitMessageCoversDiff,
   docPathOf,
+  findExistingPresetDoc,
   isStaleHitAllowed,
   isStaleScanPath,
   matchRules,
@@ -22,10 +23,10 @@ import {
   unquoteGitPath,
 } from "./doc-impact.mjs";
 import { RULES, STALE_FACTS } from "./doc-impact.rules.mjs";
+import { parseDefinition } from "./agent-definitions.mjs";
 import {
   checkDocContent,
   checkIndexes,
-  extractPresetNames,
   findDocForPreset,
   normName,
 } from "./check-agent-docs.mjs";
@@ -201,13 +202,22 @@ describe("doc-impact 规则匹配", () => {
     expect(match(lines).map((h) => h.rule.id)).toContain("restructure");
   });
 
-  it("预设只在 brain-presets.ts 里触发，并标记动态文档", () => {
+  it("新增内置定义 JSON 时触发 preset 规则，并标记动态文档", () => {
     const hit = match([
-      '+packages/wechat-daemon/src/agents/brain-presets.ts\t  acme: { name: "acme",',
+      "A packages/wechat-daemon/src/agents/definitions/acme.json",
+      '+packages/wechat-daemon/src/agents/definitions/acme.json\t  "name": "acme",',
     ]);
     expect(hit.map((h) => h.rule.id)).toContain("preset");
     expect(hit.find((h) => h.rule.id === "preset").dynamic).toBe(true);
     expect(hit.find((h) => h.rule.id === "preset").dynamicNames).toEqual(["acme"]);
+  });
+
+  it("预设名里的点也参与动态文档匹配（定义契约允许点）", () => {
+    const hit = match([
+      "A packages/wechat-daemon/src/agents/definitions/acme.v2.json",
+      '+packages/wechat-daemon/src/agents/definitions/acme.v2.json\t  "name": "acme.v2",',
+    ]);
+    expect(hit.find((h) => h.rule.id === "preset").dynamicNames).toEqual(["acme.v2"]);
   });
 
   it("构建拓扑配置变化触发 build-config", () => {
@@ -231,21 +241,22 @@ describe("doc-impact 规则匹配", () => {
       normalizeDocName("接入-claude-code.md"),
     );
   });
+
+  it("已有接入文档即可满足 preset 规则，不要求本次 diff 再改一遍", () => {
+    expect(findExistingPresetDoc("claude-code")).toBe("接入-ClaudeCode.md");
+    expect(findExistingPresetDoc("definitely-not-an-agent")).toBeNull();
+  });
 });
 
 describe("check-agent-docs", () => {
-  it("解析预设名（含带连字符的键）", () => {
-    const source = [
-      "export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = {",
-      "  kiro: {",
-      '    name: "kiro",',
-      "  },",
-      '  "claude-code": {',
-      '    name: "claude-code",',
-      "  },",
-      "};",
-    ].join("\n");
-    expect(extractPresetNames(source)).toEqual(["kiro", "claude-code"]);
+  it("解析内置定义：name 必须与文件名一致", () => {
+    expect(parseDefinition('{"name":"kiro"}', "kiro.json").name).toBe("kiro");
+    expect(parseDefinition('{"name":"claude-code"}', "claude-code.json").name).toBe(
+      "claude-code",
+    );
+    expect(() => parseDefinition('{"name":"acme"}', "kiro.json")).toThrow("文件名不一致");
+    expect(() => parseDefinition("{}", "acme.json")).toThrow("缺少非空的 name");
+    expect(() => parseDefinition("{", "acme.json")).toThrow("JSON 解析失败");
   });
 
   it("按文件名归一化匹配文档", () => {
@@ -313,18 +324,15 @@ describe("gen-docs-tables", () => {
     expect(table).toContain('| `B` | `""` |');
   });
 
-  it("预设行解析 bin 与 args", () => {
-    const source = [
-      "export const ACP_AGENT_PRESETS = {",
-      "  acme: {",
-      '    name: "acme",',
-      '    bin: "acme-cli",',
-      '    args: ["acp", "--yolo"],',
-      "  },",
-      "};",
-    ].join("\n");
-    expect(parsePresetRows(source)).toEqual([
+  it("预设行解析 bin 与 args（空 args 显示为 —）", () => {
+    expect(
+      parsePresetRows([
+        { name: "acme", bin: "acme-cli", args: ["acp", "--yolo"] },
+        { name: "bridge", bin: "acme-bridge", args: [] },
+      ]),
+    ).toEqual([
       { name: "acme", bin: "acme-cli", args: "acp --yolo" },
+      { name: "bridge", bin: "acme-bridge", args: "—" },
     ]);
   });
 

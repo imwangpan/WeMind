@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { DATA_DIR, classifyMediaByName, type MediaKind } from "@wemind/wechat-ilink-core";
 
-import { ACP_AGENT_PRESETS } from "../../agents/brain-presets.js";
+import { agentSensitivePathSnapshot } from "../../agents/agent-registry.js";
 
 /**
  * 出站附件：brain 用显式 Markdown 链接 `[附件](file:///abs/path)` / `[文件](...)` / `[视频](...)`
@@ -40,7 +40,7 @@ const SENSITIVE_NAMES = new Set([
 ]);
 
 /**
- * 各 agent 同步进副本的登录态/凭据文件名（与 `agents/brain-presets.ts` 的 `credentialFiles` 对齐）。
+ * 各 agent 同步进副本的登录态/凭据文件名（与 `agents/definitions/*.json` 的 `credentialFiles` 对齐）。
  * 这些文件不在数据目录根下，但同样不能外发：提示注入只要让 brain 写一个附件链接就能把
  * OAuth/API 凭据发到微信里。
  */
@@ -83,11 +83,25 @@ function isUnderAgentConfigRoot(file: string): boolean {
   for (const p of [
     process.env.WECHAT_BRAIN_HOME,
     process.env.WEMIND_WORKER_HOME,
-    ...Object.values(ACP_AGENT_PRESETS).map((preset) => preset.realHome),
+    process.env.WEMIND_BRAIN_REAL_HOME,
+    process.env.WECHAT_REAL_KIRO_HOME,
+    ...agentSensitivePathSnapshot().roots,
   ]) {
     if (p?.trim()) roots.push(p);
   }
   return roots.some((root) => isUnderRoot(file, root));
+}
+
+/**
+ * adapter 声明的额外敏感路径（如 `~/.claude.json`）；目录按子树、文件按实时路径精确匹配。
+ * 快照在 registry 构建时算好：出站热路径不重复执行第三方 hook。
+ */
+function isUnderAdapterSensitivePath(file: string): boolean {
+  for (const p of agentSensitivePathSnapshot().paths) {
+    if (!p) continue;
+    if (path.resolve(file) === path.resolve(p) || isUnderRoot(file, p)) return true;
+  }
+  return false;
 }
 
 /**
@@ -97,6 +111,7 @@ function isUnderAgentConfigRoot(file: string): boolean {
  */
 export function isSensitiveFilePath(file: string): boolean {
   const base = path.basename(file).toLowerCase();
+  if (isUnderAdapterSensitivePath(file)) return true;
   if (SENSITIVE_NAMES.has(base)) return true;
   if (CREDENTIAL_NAMES.has(base)) return true;
   if (

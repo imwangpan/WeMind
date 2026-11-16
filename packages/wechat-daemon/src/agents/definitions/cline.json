@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "cline",
+  "bin": "cline",
+  "binWin": "cline.cmd",
+  "args": ["--acp", "--auto-approve", "true"],
+  "shell": true,
+  "images": false,
+  "env": {
+    "CLINE_DIR": "%HOME%/cline",
+    "CLINE_DATA_DIR": "%HOME%/cline/data",
+    "CLINE_MCP_SETTINGS_PATH": "%HOME%/cline/mcp.json"
+  },
+  "realHome": "~/.cline",
+  "configSubdir": "cline",
+  "inheritDirs": ["rules", "skills", "agents"],
+  "mcpFormat": "mcpServers",
+  "mcpConfigFile": "mcp.json",
+  "catalogFile": "data/settings/cline_mcp_settings.json",
+  "credentialFiles": ["data/settings/providers.json", "data/settings/models.json"],
+  "adapter": { "module": "builtin:cline-credentials", "apiVersion": 1 },
+  "notes": [
+    "官方原生 ACP（3.0.74 实测；`cline-acp` 适配器已归档，官方让直接用 `cline --acp`）。",
+    "CLINE_DIR 只在 managed 下指到 `<副本根>/cline`（不用根目录：大脑 cwd 可能就是它，避免把 agent 自己的配置目录当工作区）；direct 不注入，直接用真实 ~/.cline。",
+    "登录态：ACP 只自动恢复它自己的 3 种登录（cline / cline-pass / openai-codex，读 data/settings/providers.json）；自定义/API-key provider（如 openai-compatible）必须由 daemon 进程环境提供 CLINE_PROVIDER + CLINE_API_KEY，否则 `session/new` 直接 `-32000 Authentication required`（Cline 不会去看 lastUsedProvider）。这段派生逻辑在 builtin:cline-credentials 这个 adapter 里。",
+    "MCP：data/settings/cline_mcp_settings.json（{mcpServers}，与 kiro 同格式）；managed 用 CLINE_MCP_SETTINGS_PATH 指到 `<副本>/cline/mcp.json`，真实文件不动。direct **连 mcp.json 也不写**（只读真实配置）。",
+    "免审批：`--auto-approve true`（Cline 自己文档给的 ACP 启动开关）；WeMind 侧权限应答器也默认放行（WEMIND_ACP_AUTO_ALLOW=0 可关闭）。",
+    "3.0.74 实测：`initialize` 声明 image:true，但 ACP prompt 的 de() 只保留 text 块（image 被直接丢弃），模型只会看到「用户发来一张图片」的文字提示。按「实际不支持」处理（images:false），让 daemon 友好拒绝而不是让模型猜。",
+    "providers.json：登录态（OAuth / API-key）；models.json：provider 的模型目录缓存——缺它时 session/new 会回退到 gpt-4o（自定义 provider 下 prompt 直接报「knows no model \"gpt-4o\"」）。",
+    "hooks/plugins 不继承（插件可自带 MCP，副本不允许 wechat 之外的意外入口）。"
+  ]
+}

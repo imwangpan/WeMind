@@ -13,7 +13,7 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
 }
 
 /** 原子写任意文本：同目录唯一临时文件 → rename 覆盖（写 YAML/TOML 副本用）。 */
-export function writeFileAtomic(filePath: string, data: string): void {
+export function writeFileAtomic(filePath: string, data: string | Buffer): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
