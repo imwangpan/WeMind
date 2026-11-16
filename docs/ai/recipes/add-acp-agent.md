@@ -4,6 +4,8 @@
 >
 > 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与副本.md`](../../repowiki/06-ACP-大脑与副本.md)。
 
+> **先选路径**：只给用户自己这台机器接入 → 写 `~/.wemind/.agents/<name>.json`（`wemind agent check` / `show --explain`，同名整条覆盖内置，无需改代码或发版；P1 只支持纯数据字段与内置 hook）。要把 agent 随 `@wemind/cli` 发布 → 走下面的 §2 改仓库内置定义，并按 §5 验收。
+
 ---
 
 ## 0. 先别改代码：跑一次能力探针

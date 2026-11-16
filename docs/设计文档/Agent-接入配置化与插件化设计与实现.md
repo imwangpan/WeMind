@@ -1,6 +1,6 @@
 # Agent 接入：配置化与插件化设计与实现
 
-> **状态**：设计定稿；**P0 契约 + P1 内置定义迁移已实现**，P1 加载层与 P2–P4 未实现（2026-11-16）｜**分支**：`feat/agent-definitions`｜**最后核对**：2026-11-16
+> **状态**：设计定稿；**P0 契约 + P1（内置迁移 + 本机加载层 + `agent list/show/check`）已实现**，P2–P4 未实现（2026-11-16）｜**分支**：`feat/agent-definitions`｜**最后核对**：2026-11-16
 >
 > 本文描述如何把「接入一个新的 ACP Agent」从**改 TypeScript + 发新版**变成**加一份定义（必要时加一个插件）**：让用户在本机自己接入新 agent、让开发侧不再一个一个适配。本文是实现前定稿，进度以文末「实施阶段」与 [`docs/ai/README.md`](../ai/README.md) 事实状态表为准；未实测的结论标注「假设 / 待实测」。
 
@@ -219,7 +219,9 @@
 
 **已实现（2026-11-16）**：新增 `packages/wechat-daemon/src/agents/agent-definition.ts`（字段表 `AGENT_DEFINITION_FIELDS` 同时驱动 `validateAgentDefinition()` 与 `agentDefinitionJsonSchema()`；`AgentDefinition` 类型 + 编译期字段覆盖守卫）与 `agent-definition.test.ts`（22 个用例）。三条实现细节：未知字段一律拒绝（含 JSON 里真实存在的 `__proto__` 键，且断言不污染原型）；相同 `schemaVersion` 内允许新增可选字段，所以正常的兼容升级不用动常量；自定义 `mcpFormat` 必须同时给 `adapter`，这条**条件必填**也由同一份表生成进 JSON Schema（用 `anyOf` 表达，与 `if`/`then` 等价且避开 lint 的 `then` 告警——仓库里不加任何 lint 豁免）。P0 交付时 `brain-presets.ts` 尚未改动，两个既有文档守卫不受影响；键源已在 P1 改掉（见下段）。
 
-**P1 检查点 1（内置迁移）已实现（2026-11-16）**：10 份定义迁到 `src/agents/definitions/*.json`，`agent-registry.ts` 静态导入、展开 `~`、逐份 `validateAgentDefinition()`、按 `adapter.module` 挂 `credentialEnv`；`brain-presets.ts` 删除，6 个 import 点改读注册表；`scripts/check-agent-docs.mjs` 与 `scripts/gen-docs-tables.mjs` 的键源改成 `definitions/*.json`（新增 `scripts/agent-definitions.mjs` 共用读取/文件名校验），`doc-impact.rules.mjs` 的 `preset` 规则改为「新增 definitions/*.json」；迁移保真测试逐字段对照旧表跑过（10 × 35 字段一致），现有 `brain-agents.test.ts` / `attachments.test.ts` / managed 用例不退化。**加载层（`~/.wemind/.agents/`）、`agent list/show`、白名单放开与 `config agent` 语义仍待做。**
+**P1 检查点 1（内置迁移）已实现（2026-11-16）**：10 份定义迁到 `src/agents/definitions/*.json`，`agent-registry.ts` 静态导入、展开 `~`、逐份 `validateAgentDefinition()`、按 `adapter.module` 挂 `credentialEnv`；`brain-presets.ts` 删除，6 个 import 点改读注册表；`scripts/check-agent-docs.mjs` 与 `scripts/gen-docs-tables.mjs` 的键源改成 `definitions/*.json`（新增 `scripts/agent-definitions.mjs` 共用读取/文件名校验），`doc-impact.rules.mjs` 的 `preset` 规则改为「新增 definitions/*.json」；迁移保真测试逐字段对照旧表跑过（10 × 35 字段一致），现有 `brain-agents.test.ts` / `attachments.test.ts` / managed 用例不退化。加载层在检查点 2 补齐（见下段）。
+
+**P1 检查点 2（本机加载层 + 命令面）已实现（2026-11-16）**：`agent-registry.ts` 扫描 `~/.wemind/.agents/*.json`（`WEMIND_AGENTS_DIR` 可覆盖），按目录指纹缓存、下一次解析自动重读；优先级**内置 < 本机定义 < `brain.json` 字段覆盖 < 环境变量**，同名**整条替换**。坏定义（JSON/schema/未知字段/`name` 与文件名不一致/`name: "auto"`/自定义 `mcpFormat`/外部 adapter）按文件名遮住同名内置，`ResolvedAgent.definitionProblem` → `agentProblem()` → 退出码 78，文案含文件与修法；`ACP_AGENT_PRESETS` 改为合并视图 Proxy，`resolvePresetByName()` / 微信「切换大脑」「任务 <agent>」/ CLI 白名单自动接受本机定义；daemon 启动与切脑结果打印本机来源。新增 `wemind agent list|show [--explain]|check <name|文件>`；`config agent` 通过定义的 `realHome` / `mcpConfigFile` / `settingsBase` 工作，不按 agent 名硬编码。测试新增 `agent-registry.test.ts`（本机层/坏定义/热重读）、`cli-agent.test.ts`、`chat-commands.test.ts` 本机名用例、`cli-config.test.ts` 本机定义路径用例；`vitest.setup.ts` 把测试的定义目录指到空临时目录，避免读开发者真实 `~/.wemind`。**未做（按阶段）**：`agent spec/probe/check --deep`（P2）、外部 adapter 插件（P3）、`agent add/remove` 与数据包分发（P4）。
 
 ### P1 内置迁移 + 加载层（交付用户侧目标的大半）
 

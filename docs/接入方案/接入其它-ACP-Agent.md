@@ -148,7 +148,43 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 
 ---
 
-## 4. 配置方式 B：新增一份内置 agent 定义（开发）
+## 4. 配置方式 B：定义文件（用户本机 / 内置开发）
+
+### 4.1 本机定义（用户自助，无需改代码或发版）
+
+只给自己这台机器接入一个新 agent 时，把定义写到 `~/.wemind/.agents/<name>.json`（`WEMIND_HOME` 改根目录；`WEMIND_AGENTS_DIR` 可单独覆盖这个目录）。文件名必须与定义里的 `name` 完全一致（小写字母/数字开头，后接小写字母、数字、`.`、`_`、`-`）：
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "acme",
+  "bin": "acme-agent",
+  "binWin": "acme-agent.exe",
+  "args": ["serve", "--acp"],
+  "homeEnvVar": "ACME_HOME",
+  "notes": ["没有就删掉 homeEnvVar；实测结论与踩坑写在这里（JSON 没有注释）"]
+}
+```
+
+合并与覆盖：
+
+- **优先级**：内置 < 本机定义 < `brain.json` 的字段覆盖 < 一次性环境变量。
+- **同名是整条替换，不做字段合并**：本机的 `kiro.json` 会完全替换内置 `kiro`，没写的字段回到默认值，不会继承内置值。只想改几个启动字段，用 `wemind brain set <名> --bin/--args/--extra-args/--model`。
+- **坏定义 fail-closed**：JSON 语法、未知字段、类型、`schemaVersion`、文件名与 `name` 不一致、`name: "auto"` 都会让这份定义不可用；它仍然按文件名遮住同名内置（不会静默回退到旧定义）。选择它时退出码 78，错误里给出文件与修法。
+- **P1 边界**：本机定义只能用纯数据字段与**内置** adapter hook（目前只有 `builtin:cline-credentials`）；外部 adapter 插件（自定义 MCP 格式、凭据派生、启动前文件生成）在 P3 才开放，现在写外部 `adapter.module` 会直接判为坏定义。
+
+查看与校验（都无需重启 daemon）：
+
+```powershell
+wemind agent list                       # 内置/本机来源、可用性、探测记录、损坏文件
+wemind agent show acme --explain        # 最终生效值 + 每一层来源
+wemind agent check acme                 # schema + 文件名校验（P1 不启动进程）
+wemind brain switch acme                # 建议先 check；daemon 在跑时热切换
+```
+
+新增/修改/删除定义后，daemon 在下一次解析或指令匹配时会按目录指纹自动重读（没有文件监听线程）；已经常驻的大脑进程不会自己换，需要 `wemind brain switch <名>` 或 `wemind config reload`。
+
+### 4.2 内置定义（开发，随包发布）
 
 内置 agent 是纯数据：在 `packages/wechat-daemon/src/agents/definitions/` 放一份 `<name>.json`（文件名必须与 `name` 相同）：
 
@@ -175,6 +211,8 @@ npm run build
 wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 # 或一次性覆盖（仅对本次启动的 daemon 生效）：$env:WEMIND_BRAIN = "acme"
 ```
+
+### 4.3 字段说明（本机与内置共用）
 
 `AgentDefinition` 字段：
 

@@ -46,7 +46,7 @@ export const RULES = [
         (line) => /^A\s+packages\/wechat-daemon\/src\/agents\/definitions\/[\w.-]+\.json$/.test(line),
       ),
     // 文档路径根据 name 的值动态生成：docs/接入方案/接入-<name>.md
-    dynamicDoc: /"name":\s*"([a-z0-9_-]+)"/,
+    dynamicDoc: /"name":\s*"([a-z0-9._-]+)"/,
     docs: [
       'docs/接入方案/接入其它-ACP-Agent.md §5 agent 表',
       'docs/ai/已知坑.md',

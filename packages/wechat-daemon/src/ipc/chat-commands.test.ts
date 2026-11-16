@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, it, expect } from "vitest";
 
 import {
@@ -9,6 +13,7 @@ import {
   parseTaskCommand,
   renderHelp,
 } from "./chat-commands.js";
+import { resetAgentRegistryCache } from "../agents/agent-registry.js";
 
 describe("会话指令", () => {
   it("新会话：裸 / 带名字 / 旧中文别名等价", () => {
@@ -176,6 +181,34 @@ describe("任务指令", () => {
       text: "修一下构建",
       agentToken: "opencode",
     });
+  });
+
+  it("本机定义与坏定义都能被接住（坏定义交给控制层回可读错误）", () => {
+    const prev = process.env.WEMIND_AGENTS_DIR;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-chat-agent-"));
+    process.env.WEMIND_AGENTS_DIR = dir;
+    resetAgentRegistryCache();
+    try {
+      fs.writeFileSync(
+        path.join(dir, "test-agent.json"),
+        JSON.stringify({ schemaVersion: 1, name: "test-agent", bin: "test", args: [] }),
+        "utf-8",
+      );
+      fs.writeFileSync(path.join(dir, "bad-agent.json"), "{ nope", "utf-8");
+      expect(parseTaskCommand("任务 test-agent：跑测试")).toMatchObject({
+        kind: "toWorker",
+        agentToken: "test-agent",
+      });
+      expect(parseTaskCommand("任务 bad-agent：跑测试")).toMatchObject({
+        kind: "toWorker",
+        agentToken: "bad-agent",
+      });
+    } finally {
+      if (prev === undefined) delete process.env.WEMIND_AGENTS_DIR;
+      else process.env.WEMIND_AGENTS_DIR = prev;
+      resetAgentRegistryCache();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("★ 冒号前不是 agent 名 → 整串都是正文（不能误判成指定 agent）", () => {

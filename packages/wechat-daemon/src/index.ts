@@ -40,6 +40,11 @@ import {
 import type { AccountData, ServerState, SendMessageReq } from "@wemind/wechat-ilink-core";
 import { askBrain, supportsImages, heartbeatMs } from "./acp/acp-brain.js";
 import { agentProblem, BRAIN_CONFIG_EXIT_CODE } from "./agents/brain-agents.js";
+import {
+  brokenAgentDefinitionMessage,
+  findAgentDefinitionSource,
+  getAgentRegistry,
+} from "./agents/agent-registry.js";
 import { switchInFlightTarget } from "./acp/brain-switch.js";
 import { loadBrainConfig } from "./agents/brain-config.js";
 import { getAgent, seedSlots } from "./agents/agent-slot.js";
@@ -1418,6 +1423,10 @@ export async function runDaemon(): Promise<void> {
   }
   // 启动即校验大脑：早失败、说人话——避免「进程看着正常、直到第一条消息才炸」（历史上表现为反复「⏳ 响应中断了，正在自动重试…」，实为默认大脑的二进制没装）。
   // 先种槽位再校验：此后运行期一律从槽位取 agent（热切换会更新它，见 agent-slot.ts），启动期与运行期同一个来源。
+  const registry = getAgentRegistry();
+  if (registry.dirError) log.warn(registry.dirError);
+  for (const broken of Object.values(registry.broken))
+    log.warn(`本机 agent 定义不可用（不会被选上）：${brokenAgentDefinitionMessage(broken)}`);
   seedSlots(loadBrainConfig());
   const agent = getAgent("brain");
   const brainProblem = agentProblem(agent);
@@ -1428,6 +1437,9 @@ export async function runDaemon(): Promise<void> {
   log.info(
     `brain=${agent.name} bin=${agent.bin} args=[${agent.args.join(" ")}] shell=${agent.shell} (source: ${agent.source})`,
   );
+  const brainSource = findAgentDefinitionSource(agent.name);
+  if (brainSource?.kind === "local")
+    log.warn(`agent 定义来自本机（整条覆盖同名内置）：${agent.name} ← ${brainSource.file}`);
   // 运行时身份：list 在 daemon 活着时据此显示「实际生效的大脑」（brain.pid 要等 ACP 懒启动才有）
   writeBrainState(DATA_DIR, agent);
   const wagent = getAgent("worker");

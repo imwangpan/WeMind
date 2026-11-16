@@ -28,6 +28,20 @@ beforeAll(async () => {
   fs.mkdirSync(realHome, { recursive: true });
   keep("WEMIND_HOME", home);
   keep("WEMIND_BRAIN_REAL_HOME", realHome);
+  keep("WEMIND_AGENTS_DIR", path.join(home, ".agents"));
+  fs.mkdirSync(path.join(home, ".agents"), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, ".agents", "myagent.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      name: "myagent",
+      bin: "myagent-acp",
+      args: ["--acp"],
+      realHome: path.join(home, "myagent-home"),
+      mcpConfigFile: "settings.json",
+    }),
+    "utf-8",
+  );
   // node --version <file> 一定退出 0，不依赖平台自带编辑器
   keep("VISUAL", `${process.execPath} --version`);
   keep("EDITOR", undefined);
@@ -71,6 +85,18 @@ beforeEach(() => {
 });
 
 describe("config agent edit：不破坏非 JSON 配置", () => {
+  it("本机定义的 realHome / 配置文件按数据字段解析（不按 agent 名硬编码）", async () => {
+    const saved = process.env.WEMIND_BRAIN_REAL_HOME;
+    delete process.env.WEMIND_BRAIN_REAL_HOME;
+    try {
+      const out = await cmdConfig(["agent", "myagent", "show", "--key", KEY]);
+      expect(out).toContain(path.join(home, "myagent-home", "settings.json"));
+    } finally {
+      if (saved === undefined) delete process.env.WEMIND_BRAIN_REAL_HOME;
+      else process.env.WEMIND_BRAIN_REAL_HOME = saved;
+    }
+  });
+
   it("不存在的 config.toml 不被预建成 {}（openEditor 直接拒绝）", async () => {
     const file = path.join(home, "real-home", "config.toml");
     fs.rmSync(file, { force: true });

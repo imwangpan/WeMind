@@ -11,6 +11,7 @@ import {
   readAllowFrom,
 } from "@wemind/wechat-ilink-core";
 import { cmdBrain } from "./subcommands/cli-brain.js";
+import { cmdAgent } from "./subcommands/cli-agent.js";
 import { cmdLogin, finalizeStaging } from "./subcommands/cli-login.js";
 import { cmdSession, cmdSessionCurrent } from "./subcommands/cli-session.js";
 import { cmdAutostart } from "./subcommands/autostart.js";
@@ -110,6 +111,9 @@ export async function runManage(argv: string[]): Promise<void> {
     }
     case "brain":
       print(await cmdBrain(rest, { startDaemon }));
+      break;
+    case "agent":
+      print(cmdAgent(rest));
       break;
     case "config":
       print(await cmdConfig(rest));
@@ -249,6 +253,7 @@ export function helpText(): string {
   brain set <agent 名|auto> [--bin X] [--args "…"] [--extra-args "…"] [--shell|--no-shell] [--model X|auto] [--restart] [<key|label>]
                                  改账号大脑**配置**（写 brain.json；只给 agent 名且 daemon 认桥时当场应用；带 --bin/--args/--extra-args/--shell/--model 只写盘——除 --shell 外可用同名 brain switch 当场应用；--extra-args 追加在预设参数后，不会漏掉 ACP 子命令）
   brain unset|check|show [<key|label>]   清除配置 / 真机 ACP 自检 / 查看配置与生效情况
+  agent list|show|check [...]    查看/校验 agent 定义（本机定义放 ${WEMIND_ROOT}/.agents/<name>.json）
   config show|home-mode|reload [--key <key|label>]
                                  查看/设置 homeMode（direct/managed）与运行时路径
   config reply-style [concise|off] [--key <key|label>]

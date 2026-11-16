@@ -41,8 +41,8 @@ packages/wechat-daemon/src/
 │       └── acp-quiet.ts      # 恢复会话后等回放帧安静（200ms 静默窗口 / 最多 3s）
 ├── agents/                   # agent 预设、配置状态、direct / managed 运行时
 │   ├── agent-definition.ts   # Agent 定义（数据面）契约：字段表、校验、JSON Schema（→ 第 6 章）
-│   ├── agent-registry.ts     # 内置定义注册表：静态加载 definitions/*.json、校验、挂代码 hook
-│   ├── definitions/          # 10 个内置 agent 定义（纯 JSON，无 IO）
+│   ├── agent-registry.ts     # 定义注册表：内置 JSON + ~/.wemind/.agents/*.json，校验/合并/坏定义
+│   ├── definitions/          # 10 个内置 agent 定义（纯 JSON，构建期内联进产物）
 │   ├── brain-agents.ts       # resolveAgent、agentProblem、派生配置落盘（→ 第 6 章）
 │   ├── brain-config.ts       # brain.json 读写
 │   ├── brain-state.ts        # brain-runtime.json：daemon 实际生效的大脑

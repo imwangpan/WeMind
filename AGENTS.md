@@ -81,6 +81,7 @@ wemind autostart install|status|uninstall [--key <key>|--label 名]   # 开机�
 pwsh -File scripts/run-daemon.ps1 [-All | -Account <key>] [-Mode shell] [-DryRun]   # 源码外壳：默认转 wemind start；-Mode shell 为旧循环
 wemind brain / brain check / brain switch <agent> [--worker] / brain handoff
 wemind brain set <agent> --extra-args "…"   # 只追加参数；--args 是整段替换，漏掉 ACP 模式参数会握手超时
+wemind agent list / show <agent> [--explain] / check <agent|文件>   # 定义来源、生效值与数据面校验
 wemind config show / home-mode / reload / agent / wechat / reply-style   # 模式、真实配置、微信独享 overlay、微信回复风格
 wemind config reload   # 重读 Agent 配置、重新 seed 槽位并三态重启大脑：applied 立即生效 / queued 排到回合结束且写 runtime.json 的 pendingReload / failed 切换中不重启
 wemind mcp list|enable|disable|add|remove   # 仅 managed 的 brain 激活集；direct 下聊天指令转给 Agent（CLI 只提示改 Agent 配置）
@@ -102,7 +103,7 @@ pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 1. **单实例收消息**：同一个 bot token 同时只能有一个程序收消息；MCP 形态与 daemon 形态二选一；**WeMind 自己生成的 brain / worker MCP 集（`managed`）**永久禁止 `wechat`（防它把消息发回自己）；**按名字之外还按定义判**——改名条目只要 command/args/url 里跑 `wemind-mcp` 或 `@wemind/wechat-mcp` 同样被拒（`isWechatMcpServer()`，brain 与 worker 共用）。DSH 的 `cordis.patch.yml` 复制进副本前按投递方式处理：`mcpDelivery: "acp"` 时剥离**全部** MCP 条目，否则只剔除微信条目并告警（真实文件不动，`stripAllDshMcpEntries` / `stripWechatMcpEntries`）；`brain check` 起的自检副本在 `mcpDelivery: "acp"` 时同样剥离全部 MCP 条目（`copyProfilePatch` 的 `stripAllMcp`），自检也能按真实投递方式跑。`direct` 完全按 Agent 真实配置运行，发现微信 MCP 时**只告警、不阻止启动**（`warnForbiddenNativeMcp`）；用户需自行移除，否则可能形成第二个 poller/回环。**守卫**：`agent-mcp.test.ts`、`agents/managed/*.test.ts`（各 agent 副本用例）、`config.test.ts`。
 2. **ACP 是最小方法集，不是「所有 agent 都一样」**：
    - `session/load` 不是通用能力；DSH 只有 `session/resume`，缺失时退化为 `session/new`。
-   - **image / restore / `acpMcpServers` / `mcpDelivery` 来自内置 agent 定义（`agents/definitions/<agent>.json`，经 `agents/agent-registry.ts` 加载），不来自 `initialize` 回包**（`acp-brain.ts` 从不解析 `agentCapabilities`）。接新 agent 必须人工跑一次 `scripts/acp-probe.mjs` 并把结论写进定义字段。
+   - **image / restore / `acpMcpServers` / `mcpDelivery` 来自 agent 定义（内置 `agents/definitions/<agent>.json`，或本机 `~/.wemind/.agents/<name>.json`，经 `agents/agent-registry.ts` 加载），不来自 `initialize` 回包**（`acp-brain.ts` 从不解析 `agentCapabilities`）。内置/适配器类 agent 必须人工跑一次 `scripts/acp-probe.mjs` 并把结论写进定义字段；纯数据本机定义可由用户本地添加（同名**整条替换**内置，坏定义按文件名遮住同名内置，不走静默回退），`wemind agent list/show/check` 负责可见性与校验。P1 尚未加载外部 adapter 插件：本机定义只能引用内置 hook（目前只有 `builtin:cline-credentials`）。
    - Copilot CLI 原生 ACP 但不参与 `AUTO_PROBE_ORDER`（安装不代表已登录）；1.0.108 实测 `session/new.mcpServers` 传入的 stdio 条目不加载（普通写法与 `type: "stdio"` 都是 `toolCalls: 0`），故 `acpMcpServers: false` + `mcpDelivery: "config"`，MCP 只认 `~/.copilot/mcp-config.json`；`initialize` 只声明 http/sse 不代表能经 ACP 投递 stdio；图片 1×1 PNG 已接受，真机 E2E（2026-11-15）通过。
    - 反向请求统一走 `acp-reverse.ts`（brain / worker / `brain check` 三处共用）：权限**默认 yolo**（无人值守，自动选 `allow_once` / `allow_always`，只替用户按“允许”，不改动 Agent 自身的安全策略）；要恢复逐次拒绝设 `WEMIND_ACP_AUTO_ALLOW=0`，空白串/未设置都按默认 yolo；allow 候选项必须有非空字符串 `optionId`，一个合法项都没有就回 `cancelled` 并记 WARN（防非法 `selected` 把回合挂住）；未知 method 回 `-32601`。三处必须共用同一实现，否则会「微信能跑、`brain check` 超时」。**守卫**：`acp-reverse.test.ts`、`brain-agents.test.ts`。
    - `applyAcpModel()` 只吞 agent **明确回的 JSON-RPC error 帧**（有数字 `code`）：超时、`acp process reset`、无进程、写帧失败一律抛出，让上层 kill 重建；不要把「模型没设上」当成「旧进程还能继续用」，也不要把所有异常都吞成 WARN。

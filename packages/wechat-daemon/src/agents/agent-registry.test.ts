@@ -1,14 +1,23 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { validateAgentDefinition } from "./agent-definition.js";
 import {
   ACP_AGENT_PRESETS,
   BUILTIN_AGENT_DEFINITIONS,
+  brokenAgentDefinitionMessage,
   builtinDefinitionNames,
+  findAgentDefinition,
+  findAgentDefinitionSource,
+  findBrokenAgentDefinition,
+  getAgentRegistry,
+  isAgentToken,
+  resetAgentRegistryCache,
 } from "./agent-registry.js";
+import { agentProblem, presetNames, resolvePresetByName } from "./brain-agents.js";
 
 const EXPECTED_NAMES = [
   "kiro",
@@ -105,5 +114,125 @@ describe("内置 agent 定义注册表", () => {
       heartbeatMs: 60_000,
     });
     expect(d.codex.envDefaults).toEqual({ INITIAL_AGENT_MODE: "agent-full-access" });
+  });
+});
+
+describe("本机定义层", () => {
+  const prev = process.env.WEMIND_AGENTS_DIR;
+  let dir = "";
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-agent-defs-"));
+    process.env.WEMIND_AGENTS_DIR = dir;
+    resetAgentRegistryCache();
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.WEMIND_AGENTS_DIR;
+    else process.env.WEMIND_AGENTS_DIR = prev;
+    resetAgentRegistryCache();
+  });
+
+  function write(name: string, definition: unknown): string {
+    const file = path.join(dir, `${name}.json`);
+    fs.writeFileSync(file, JSON.stringify(definition, null, 2), "utf-8");
+    return file;
+  }
+
+  const minimal = (name: string) => ({
+    schemaVersion: 1,
+    name,
+    bin: `${name}-acp`,
+    args: ["--acp"],
+  });
+
+  it("目录不存在时只有内置定义，不报错", () => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    resetAgentRegistryCache();
+    const registry = getAgentRegistry();
+    expect(Object.keys(registry.definitions)).toEqual(builtinDefinitionNames());
+    expect(Object.keys(registry.broken)).toEqual([]);
+    expect(registry.dirError).toBeUndefined();
+  });
+
+  it("新增本机定义后无需重启即可见；同名整条替换内置", () => {
+    // 先建一次缓存（空目录），再写文件：下一次访问应按目录指纹自动重读。
+    getAgentRegistry();
+    write("test-agent", { ...minimal("test-agent"), model: "test-model", images: false });
+    expect(findAgentDefinition("test-agent")?.model).toBe("test-model");
+    expect(findAgentDefinitionSource("test-agent")?.kind).toBe("local");
+    expect(presetNames()).toContain("test-agent");
+    expect(isAgentToken("test-agent")).toBe(true);
+
+    // 同名覆盖是整条替换：内置 kiro 的 kiroEngine 不应残留
+    getAgentRegistry();
+    write("kiro", { ...minimal("kiro"), bin: "my-kiro", args: ["acp"] });
+    expect(findAgentDefinition("kiro")).toMatchObject({ bin: "my-kiro", args: ["acp"] });
+    expect(findAgentDefinition("kiro")?.kiroEngine).toBeUndefined();
+    expect(findAgentDefinitionSource("kiro")?.kind).toBe("local");
+  });
+
+  it("合并视图只认自有键，不把原型链上的 `constructor` 当成 agent", () => {
+    expect(findAgentDefinition("constructor")).toBeUndefined();
+    expect(findAgentDefinitionSource("constructor")).toBeUndefined();
+    expect(ACP_AGENT_PRESETS["constructor"]).toBeUndefined();
+    expect(isAgentToken("constructor")).toBe(false);
+  });
+
+  it("坏定义遮住同名内置，并给出文件与修法", () => {
+    const file = write("kiro", { schemaVersion: 1, name: "kiro", bin: "kiro-cli" });
+    resetAgentRegistryCache();
+    expect(ACP_AGENT_PRESETS.kiro).toBeUndefined();
+    expect(findAgentDefinition("kiro")).toBeUndefined();
+    const broken = findBrokenAgentDefinition("kiro");
+    expect(broken?.file).toBe(file);
+    const text = brokenAgentDefinitionMessage(broken!);
+    expect(text).toContain("args");
+    expect(text).toContain(file);
+    expect(text).toContain("wemind agent check kiro");
+
+    const r = resolvePresetByName("kiro");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problem).toContain(file);
+  });
+
+  it("文件名与 name 不一致、name=auto、外部 adapter 都按坏定义处理", () => {
+    write("wrong-file", minimal("other-name"));
+    write("auto", minimal("auto"));
+    write("adapter-agent", {
+      ...minimal("adapter-agent"),
+      adapter: { module: "some-plugin", apiVersion: 1 },
+    });
+    resetAgentRegistryCache();
+    expect(findBrokenAgentDefinition("wrong-file")?.problems[0].path).toBe("name");
+    expect(findBrokenAgentDefinition("auto")?.problems[0].message).toContain("自动探测");
+    expect(findBrokenAgentDefinition("adapter-agent")?.problems[0].message).toContain("P3");
+  });
+
+  it("自定义 mcpFormat 在 P1 明确失败（不猜格式）", () => {
+    write("yaml-agent", {
+      ...minimal("yaml-agent"),
+      mcpFormat: "yaml",
+      adapter: { module: "builtin:cline-credentials", apiVersion: 1 },
+    });
+    resetAgentRegistryCache();
+    expect(findBrokenAgentDefinition("yaml-agent")?.problems[0].path).toBe("mcpFormat");
+  });
+
+  it("本机定义能解析为可切换的 agent；坏定义选择时返回可读原因", () => {
+    write("test-agent", { ...minimal("test-agent"), realHome: "~/.test-agent" });
+    resetAgentRegistryCache();
+    const r = resolvePresetByName("test-agent", {
+      agent: "test-agent",
+      presets: { "test-agent": { bin: process.execPath } },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.agent.name).toBe("test-agent");
+      expect(r.agent.definitionProblem).toBeUndefined();
+      expect(agentProblem(r.agent)).toBeNull();
+      expect(r.agent.realHome).toBe(path.join(os.homedir(), ".test-agent"));
+    }
   });
 });

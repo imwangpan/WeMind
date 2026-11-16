@@ -350,6 +350,31 @@ export function normalizeDocName(text) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+/**
+ * 工作树里是否已有对应的接入文档。
+ *
+ * `preset` 规则用于「新增内置 agent 必须有接入文档」；判断的是最终存在性，不是「本次必须改它」。
+ * 纯数据迁移会把已有预设换一份来源，文档通常不需要改；要求 diff 改文档会制造无关改动。
+ */
+export function findExistingPresetDoc(name, root = ROOT) {
+  const dir = path.join(root, "docs", "接入方案");
+  const wanted = normalizeDocName(`接入-${name}`);
+  let files;
+  try {
+    files = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+  return (
+    files.find(
+      (file) =>
+        file.startsWith("接入-") &&
+        file.toLowerCase().endsWith(".md") &&
+        normalizeDocName(file) === wanted,
+    ) ?? null
+  );
+}
+
 /** 从规则输入行取路径：状态行 `M path` / 新增行 `+path\t内容`。 */
 function pathOfRuleLine(line) {
   if (line.startsWith("+")) {
@@ -497,7 +522,7 @@ function main(argv) {
       const changedDoc = [...changedPaths].some(
         (p) => p.startsWith("docs/接入方案/接入-") && normalizeDocName(p) === wanted,
       );
-      if (!changedDoc) {
+      if (!changedDoc && !findExistingPresetDoc(name)) {
         missingAfterAnyOf.push(
           `docs/接入方案/接入-${name}.md（按预设名推导，大小写与连字符不敏感）`,
         );

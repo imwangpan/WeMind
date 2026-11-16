@@ -5,7 +5,14 @@ import { spawnSync } from "node:child_process";
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config.js";
 import { readProfileDefaultModel } from "./profile-model.js";
-import { ACP_AGENT_PRESETS, type AcpAgentPreset } from "./agent-registry.js";
+import {
+  ACP_AGENT_PRESETS,
+  brokenAgentDefinitionMessage,
+  findBrokenAgentDefinition,
+  isAgentToken,
+  type AcpAgentPreset,
+} from "./agent-registry.js";
+import { AGENT_DEFINITION_SCHEMA_VERSION } from "./agent-definition.js";
 import { readEnvSnapshot, mergeEnvSnapshot } from "./config/env-snapshot.js";
 import { readHomeMode } from "./config/home-mode.js";
 
@@ -139,7 +146,10 @@ export function presetBinPath(
 export function presetAvailable(key: string, cfg?: BrainConfig | null): boolean {
   const preset = ACP_AGENT_PRESETS[key];
   if (!preset) return false;
-  return presetBinPath(preset, cfg?.presets?.[key.toLowerCase()]?.bin) !== null;
+  const presets = cfg?.presets;
+  const normalized = key.toLowerCase();
+  const bin = presets && Object.hasOwn(presets, normalized) ? presets[normalized]?.bin : undefined;
+  return presetBinPath(preset, bin) !== null;
 }
 
 /**
@@ -164,6 +174,8 @@ export const BRAIN_CONFIG_EXIT_CODE = 78;
 
 export type ResolvedAgent = {
   name: string;
+  /** 选中的定义坏了时的完整说明（含文件与修法）；此时 `known` 为 false。 */
+  definitionProblem?: string;
   bin: string;
   args: string[];
   homeEnvVar?: string;
@@ -401,31 +413,47 @@ export function ensureKiroV3Permissions(ag: ResolvedAgent, settingsDir: string):
 function resolveAgentCore(
   role: AgentRole,
   cfg: BrainConfig | null,
-  opts: { ignoreEnv?: boolean; dataDir?: string } = {},
+  opts: { ignoreEnv?: boolean; dataDir?: string; forceKey?: string } = {},
 ): ResolvedAgent {
-  const envKey = opts.ignoreEnv ? undefined : envKeyFor(role);
+  // `forceKey` 只锁「选哪个 agent」，不锁字段覆盖：`agent show` 要看这个 agent 的最终生效值（含 env 字段覆盖），
+  // 但不能被 WEMIND_BRAIN 改成别的 agent。
+  const envKey = opts.ignoreEnv || opts.forceKey ? undefined : envKeyFor(role);
   const roleCfg = agentConfigFor(cfg, role);
-  const fileKey = roleCfg?.agent?.trim();
+  const fileKey = opts.forceKey?.trim().toLowerCase() || roleCfg?.agent?.trim();
   const requestedKey = (envKey || fileKey || "auto").toLowerCase();
-  const source: ResolvedAgent["source"] = envKey ? "env" : fileKey ? "file" : "auto";
+  const source: ResolvedAgent["source"] = opts.forceKey
+    ? "file"
+    : envKey
+      ? "env"
+      : fileKey
+        ? "file"
+        : "auto";
+  const broken = requestedKey === "auto" ? undefined : findBrokenAgentDefinition(requestedKey);
 
   // 选 agent：auto → 探测第一个可用；未知值 → 标 known:false（结构上退回 kiro 兜底，交启动校验报错）。
   let known = true;
   let key = requestedKey;
   if (key === "auto") {
     key = AUTO_PROBE_ORDER.find((k) => presetAvailable(k, cfg)) ?? "kiro";
-  } else if (!ACP_AGENT_PRESETS[key]) {
+  } else if (broken || !ACP_AGENT_PRESETS[key]) {
     known = false;
-    key = "kiro";
   }
-  const preset = ACP_AGENT_PRESETS[key];
+  // 坏定义 / 未知值不能借用另一个 agent 的预设：占位预设只用于填满结构，`agentProblem()` 会先报原因。
+  const preset: AcpAgentPreset = ACP_AGENT_PRESETS[key] ?? {
+    schemaVersion: AGENT_DEFINITION_SCHEMA_VERSION,
+    name: key,
+    bin: key,
+    args: [],
+  };
   const homeMode = readHomeMode(opts.dataDir ?? DATA_DIR);
   // 按 agent 名存的启动覆盖：无论谁在用这个 agent 都适用（顶层覆盖只属于「写入磁盘那个 agent」，切走后不该跟过去）。
-  const presetOv = cfg?.presets?.[key];
+  const presetOv = cfg?.presets && Object.hasOwn(cfg.presets, key) ? cfg.presets[key] : undefined;
 
   // roleCfg 的 bin/args/shell/homeEnvVar 是**给该段所写那个 agent** 的启动覆盖；环境变量临时切到别的 agent 时不能沿用（否则会拿 deepseek 的 dsh.cmd 去起 qoder）。
   const overrideCfg =
-    envKey && roleCfg?.agent?.trim() && roleCfg.agent.trim().toLowerCase() !== requestedKey
+    (envKey || opts.forceKey) &&
+    roleCfg?.agent?.trim() &&
+    roleCfg.agent.trim().toLowerCase() !== requestedKey
       ? null
       : roleCfg;
 
@@ -524,6 +552,7 @@ function resolveAgentCore(
 
   return {
     name: preset.name,
+    ...(broken ? { definitionProblem: brokenAgentDefinitionMessage(broken) } : {}),
     bin,
     args,
     homeEnvVar,
@@ -582,9 +611,27 @@ export function resolveAgentFor(
   return resolveAgentCore(role, cfg ?? null, dataDir ? { dataDir } : {});
 }
 
+/** 按名字解析**最终生效值**（含一次性的 env 字段覆盖，但不让 `WEMIND_BRAIN` 改选目标）。 */
+export function resolveAgentByName(
+  name: string,
+  cfg?: BrainConfig | null,
+  dataDir?: string,
+): ResolvedAgent {
+  return resolveAgentCore("brain", cfg ?? null, {
+    forceKey: name,
+    ...(dataDir ? { dataDir } : {}),
+  });
+}
+
 /** 全部 agent 名（`auto` 不在其中：它只是「自动探测」的开关）。 */
 export function presetNames(): string[] {
   return Object.keys(ACP_AGENT_PRESETS);
+}
+
+/** 可作为 agent 名/指令 token 的集合：有效定义、坏定义（用于回可读错误）与 `auto`。 */
+export function isAgentName(name: string): boolean {
+  const key = (name ?? "").trim().toLowerCase();
+  return key === "auto" || isAgentToken(key);
 }
 
 /**
@@ -638,6 +685,7 @@ const ADAPTER_INSTALL_HINT: Record<string, string> = {
  * 供 daemon 启动校验（早失败、说人话）与 `wemind brain` / `wemind brain check` 复用。
  */
 export function agentProblem(ag: ResolvedAgent): string | null {
+  if (ag.definitionProblem) return ag.definitionProblem;
   if (!ag.known)
     return `未知 agent「${ag.requestedKey}」。可选：${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制可用 WEMIND_BRAIN_BIN 或 brain set --bin 指定）`;
   if (ag.requestedKey === "auto" && !ag.available)

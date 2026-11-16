@@ -9,6 +9,11 @@ import {
   type ResolvedAgent,
 } from "../../agents/brain-agents.js";
 import {
+  brokenAgentDefinitionMessage,
+  findAgentDefinitionSource,
+  findBrokenAgentDefinition,
+} from "../../agents/agent-registry.js";
+import {
   loadBrainConfig,
   updateBrainConfig,
   clearBrainConfig,
@@ -70,6 +75,7 @@ function describeBrain(key: string): string {
     `账号 ${key}`,
     `  配置：${cfgLine}`,
     `  请求：${ag.requestedKey}    来源：${BRAIN_SRC_LABEL[ag.source]}`,
+    `  定义：${definitionSourceLine(ag.name)}`,
     `  生效：name=${ag.name}  bin=${ag.bin}  args=[${ag.args.join(" ")}]  shell=${ag.shell}  home_env=${ag.homeEnvVar ?? "(无)"}  model=${ag.model ?? "(agent 默认)"}  session_mode=${ag.sessionMode ?? "(无)"}`,
     `  可用：${problem ? `❌ ${problem}` : `✅ ${ag.binPath ?? ag.bin}`}`,
     `  可选 agent：${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
@@ -87,6 +93,12 @@ function describeBrain(key: string): string {
   return lines.join("\n");
 }
 
+function definitionSourceLine(agent: string): string {
+  const source = findAgentDefinitionSource(agent);
+  if (!source) return "（无有效定义）";
+  return `${source.kind === "builtin" ? "内置" : "本机"} ${source.file}`;
+}
+
 /** `wemind brain set <agent 名|auto>`：把选择按账号写入磁盘（可选 --bin/--args/--extra-args/--shell/--model；--restart 立即重启 daemon）。 */
 async function cmdBrainSet(
   agentName: string,
@@ -102,10 +114,13 @@ async function cmdBrainSet(
   deps: BrainCliDeps,
 ): Promise<string> {
   const agent = agentName.trim().toLowerCase();
-  if (agent !== "auto" && !ACP_AGENT_PRESETS[agent])
+  if (agent !== "auto" && !ACP_AGENT_PRESETS[agent]) {
+    const broken = findBrokenAgentDefinition(agent);
+    if (broken) throw new Error(brokenAgentDefinitionMessage(broken));
     throw new Error(
       `未知 agent「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}（自定义二进制用 --bin 搭配任一 agent）`,
     );
+  }
   // auto 不绑定具体 agent：写进 presets.auto 永远读不到，顶层覆盖会下发给探测到的任意 agent（把 A 的 bin/args 发给 B）。
   if (
     agent === "auto" &&
@@ -333,10 +348,13 @@ export async function cmdBrain(rest: string[], deps: BrainCliDeps): Promise<stri
  */
 async function cmdBrainSwitch(agentName: string, key: string, worker: boolean): Promise<string> {
   const agent = agentName.trim().toLowerCase();
-  if (agent !== "auto" && !ACP_AGENT_PRESETS[agent])
+  if (agent !== "auto" && !ACP_AGENT_PRESETS[agent]) {
+    const broken = findBrokenAgentDefinition(agent);
+    if (broken) throw new Error(brokenAgentDefinitionMessage(broken));
     throw new Error(
       `未知 agent「${agentName}」。可选：auto、${Object.keys(ACP_AGENT_PRESETS).join("、")}`,
     );
+  }
   const dir = accountDir(key);
   if (worker) {
     requireDaemonAlive(key); // 「默认任务大脑」是进程内状态，不写入磁盘

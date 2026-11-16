@@ -7,6 +7,7 @@ import {
   checkStaleFacts,
   commitMessageCoversDiff,
   docPathOf,
+  findExistingPresetDoc,
   isStaleHitAllowed,
   isStaleScanPath,
   matchRules,
@@ -211,6 +212,14 @@ describe("doc-impact 规则匹配", () => {
     expect(hit.find((h) => h.rule.id === "preset").dynamicNames).toEqual(["acme"]);
   });
 
+  it("预设名里的点也参与动态文档匹配（定义契约允许点）", () => {
+    const hit = match([
+      "A packages/wechat-daemon/src/agents/definitions/acme.v2.json",
+      '+packages/wechat-daemon/src/agents/definitions/acme.v2.json\t  "name": "acme.v2",',
+    ]);
+    expect(hit.find((h) => h.rule.id === "preset").dynamicNames).toEqual(["acme.v2"]);
+  });
+
   it("构建拓扑配置变化触发 build-config", () => {
     const hit = match([
       '+packages/wechat-ilink-core/package.json\t  "exports": {',
@@ -231,6 +240,11 @@ describe("doc-impact 规则匹配", () => {
     expect(normalizeDocName("docs/接入方案/接入-ClaudeCode.md")).toBe(
       normalizeDocName("接入-claude-code.md"),
     );
+  });
+
+  it("已有接入文档即可满足 preset 规则，不要求本次 diff 再改一遍", () => {
+    expect(findExistingPresetDoc("claude-code")).toBe("接入-ClaudeCode.md");
+    expect(findExistingPresetDoc("definitely-not-an-agent")).toBeNull();
   });
 });
 
