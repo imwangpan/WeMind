@@ -22,6 +22,11 @@ import {
   readSessionMapStrict,
   sessionKey,
 } from "../sessions/session-map.js";
+import {
+  applyMediaToPrompt,
+  type PromptImage,
+  WORKER_UNSUPPORTED_IMAGE_NOTE,
+} from "../acp/prompt-media.js";
 import { acpArgsHint, agentEnv, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
 import {
   applyAcpModel,
@@ -236,18 +241,23 @@ export class WorkerConn {
    * 失败即杀本连接的进程（下一轮 ask 重建并 session/load 恢复上下文）→ 配合「继续」实现中断恢复。
    * `strictResume`：磁盘上有旧会话、但 load/resume 都失败时**不静默新建**，直接抛错（续跑场景要的是「上下文接上」，
    * 悄悄换一个空会话会让用户以为续上了、其实什么都不知道）。
+   * `images`：本轮随指令一起发来的图片（收件人模式重组后的附件）；agent 不支持看图时降级为一段提示文本，不静默丢图。
    */
   async ask(
     instruction: string,
     key: string,
     onProgress?: (ev: WorkerProgressEvent) => void,
-    opts: { strictResume?: boolean } = {},
+    opts: { strictResume?: boolean; images?: PromptImage[] } = {},
   ): Promise<string> {
     await this.ensureProcess();
     const sid = await this.ensureSession(key, opts.strictResume === true);
     beginAcpTurn(this.turn, sid, onProgress);
     const t0 = Date.now();
-    const prompt: unknown[] = [{ type: "text", text: instruction || "（继续）" }];
+    const prompt: unknown[] = [];
+    applyMediaToPrompt(prompt, opts.images, this.agent.images, {
+      unsupportedNote: WORKER_UNSUPPORTED_IMAGE_NOTE,
+    });
+    prompt.push({ type: "text", text: instruction || "（继续）" });
     try {
       await promptAcp(
         this.host,

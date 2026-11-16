@@ -136,11 +136,20 @@ describe("大脑指令", () => {
           "重置工作区",
           "微信配置 查看 qoder",
           "帮助",
+          "回到大脑",
         ][COMMAND_SPECS.indexOf(s)],
       );
       expect(sample).not.toBeNull();
       expect(!!s.ownerOnly).toBe(OWNER_ONLY_KINDS.has(sample!.kind));
     }
+  });
+
+  it("回到大脑：退出收件人模式（别名 + 斜杠）", () => {
+    expect(parseChatCommand("回到大脑")).toEqual({ kind: "toBrain" });
+    expect(parseChatCommand("返回大脑")).toEqual({ kind: "toBrain" });
+    expect(parseChatCommand("退出收件人")).toEqual({ kind: "toBrain" });
+    expect(parseChatCommand("/to-brain")).toEqual({ kind: "toBrain" });
+    expect(parseChatCommand("/toBrain")).toEqual({ kind: "toBrain" });
   });
 });
 
@@ -227,9 +236,32 @@ describe("任务指令", () => {
     expect(parseTaskCommand("/stop all")).toEqual({ kind: "stop", id: "all" });
   });
 
+  it("收件人：裸 #N / 发给任务 N（无正文，与回话区分）", () => {
+    expect(parseTaskCommand("#5")).toEqual({ kind: "recipient", id: 5 });
+    expect(parseTaskCommand("＃5")).toEqual({ kind: "recipient", id: 5 });
+    expect(parseTaskCommand("发给任务 5")).toEqual({ kind: "recipient", id: 5 });
+    expect(parseTaskCommand("发给任务5")).toEqual({ kind: "recipient", id: 5 });
+    // 帮助里渲染的斜杠写法必须真能解析（否则用户照抄会当成正文发给任务）
+    expect(parseTaskCommand("/task-focus 5")).toEqual({ kind: "recipient", id: 5 });
+    expect(parseTaskCommand("/TASK-FOCUS 5")).toEqual({ kind: "recipient", id: 5 });
+    // 有正文仍然是「回话」，不受影响
+    expect(parseTaskCommand("#5 继续")).toEqual({ kind: "reply", id: 5, text: "继续" });
+    expect(parseTaskCommand("#5：继续")).toEqual({ kind: "reply", id: 5, text: "继续" });
+    // 不是编号寻址的东西仍是普通消息
+    expect(parseTaskCommand("#abc")).toBeNull();
+    expect(parseTaskCommand("发给任务 abc")).toBeNull();
+    expect(parseTaskCommand("发给任务")).toBeNull();
+  });
+
   it("全部子模式都在表里（帮助不会漏项）", () => {
     const ids = TASK_COMMAND_SPECS.map((s) => s.id);
-    expect(ids).toEqual(["task.dispatch", "task.reply", "task.list", "task.stop"]);
+    expect(ids).toEqual([
+      "task.dispatch",
+      "task.reply",
+      "task.recipient",
+      "task.list",
+      "task.stop",
+    ]);
   });
 });
 

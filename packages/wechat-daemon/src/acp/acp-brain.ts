@@ -27,6 +27,7 @@ import {
 } from "../sessions/session-map.js";
 import { ensureEntry, markUsed, titleOf, touchEntry } from "../sessions/session-registry.js";
 import { stripHandoffPrefix } from "../sessions/handoff.js";
+import { applyMediaToPrompt } from "./prompt-media.js";
 import {
   applyAcpModel,
   applyAcpSessionMode,
@@ -425,16 +426,7 @@ async function runTurn(
   beginAcpTurn(turn, sid, onProgress);
   const t0 = Date.now();
   const prompt: unknown[] = [];
-  if (images?.length && !ag.images) {
-    prompt.push({
-      type: "text",
-      text: "（用户发来图片，但当前大脑不支持图片输入；请让用户改用文字，或切换到支持图片的大脑。不要臆测图片内容。）",
-    });
-  }
-  if (ag.images) {
-    for (const im of images ?? [])
-      prompt.push({ type: "image", mimeType: im.mimeType, data: im.data });
-  }
+  applyMediaToPrompt(prompt, images, ag.images);
   if (!hintedSessions.has(sid)) {
     hintedSessions.add(sid);
     prompt.push({

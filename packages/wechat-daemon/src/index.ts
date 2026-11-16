@@ -22,9 +22,6 @@ import {
   MessageItemType,
   MessageState,
   MessageType,
-  downloadImage,
-  downloadMediaBuffer,
-  MAX_INCOMING_MEDIA_BYTES,
   sendImage,
   sendFile,
   sendItem as sendMessageItem,
@@ -82,12 +79,14 @@ import {
   takePendingSensitive,
   type PendingSensitiveAttachment,
 } from "./daemon/messaging/sensitive-allow.js";
+import { pruneInboundMediaIfDue } from "./daemon/messaging/media-store.js";
 import {
-  pruneInboundMediaIfDue,
-  safeMediaFileName,
-  saveInboundMedia,
-} from "./daemon/messaging/media-store.js";
-import { silkToWav } from "./daemon/messaging/voice.js";
+  composeAgentText,
+  isFlushWord,
+  mediaInstructionFallback,
+  prepareInboundMedia,
+} from "./daemon/messaging/inbound-media.js";
+import { decideInboundRoute, MediaRoute, type PendingBatch } from "./daemon/media-route.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./daemon/messaging/md-reply.js";
 import { isAuthorizedSender } from "./daemon/access.js";
 import { handleControl, handleControlRequest } from "./daemon/daemon-control.js";
@@ -98,11 +97,13 @@ import {
   dispatchTask,
   injectTask,
   stopTask,
+  findRecipientTask,
   hasActiveTask,
   awaitingTasks,
   interruptedTasks,
   shouldResumeTask,
   renderTaskList,
+  taskKeyOf,
   initTasks,
   setTaskPush,
   setTaskTyping,
@@ -354,15 +355,6 @@ let warnedWechatSettingsProblem = "";
 // `wemind config home-mode` 的回执明确要求重启 daemon，运行期覆盖不属于受支持的用法。
 let homeModeAtBoot: HomeMode = "direct";
 
-/** 从解密后的字节嗅探图片 MIME。 */
-function sniffMime(b: Buffer): string {
-  const h = b.subarray(0, 4).toString("hex");
-  if (h.startsWith("89504e47")) return "image/png";
-  if (h.startsWith("47494638")) return "image/gif";
-  if (h.startsWith("52494646")) return "image/webp";
-  return "image/jpeg";
-}
-
 /**
  * 处理一条发给大脑的消息。返回**是否真的答成了**（`brainErrorMessage` 兜底算没答成）——
  * 交接摘要的清除就靠这个返回值：只有答成了才把摘要删掉（失败留着，下次还能用）。
@@ -379,10 +371,6 @@ async function handleMessage(
   latestToken?: () => string | undefined,
 ): Promise<boolean> {
   const msgAge = () => (createTimeMs ? `${Math.round((Date.now() - createTimeMs) / 1000)}s` : "?"); // 这条消息已存在多久（诊断用）
-  const imageItems = attachments
-    .filter((a): a is Extract<InboundAttachment, { kind: "image" }> => a.kind === "image")
-    .map((a) => a.item);
-  const otherAttachments = attachments.filter((a) => a.kind !== "image");
   // activeTurn 只存当前回合的 from/token；连续发送计数用按用户、跨回合的 budgetOf(to)（不在回合开始清零）。
   activeTurn = { from: to, token: ctx, runId: randomUUID() };
   const cx = () => activeTurn?.token ?? ctx;
@@ -508,86 +496,14 @@ async function handleMessage(
     }
   }, heartbeatMsValue);
 
-  // 下载入站媒体：图片走 ACP image block；文件/视频/无转写语音落盘，把绝对路径交给大脑。
-  const images: Array<{ data: string; mimeType: string }> = [];
-  const incomingNotes: string[] = [];
-  const incomingFailures: string[] = [];
-  const fmtBytes = (n: number) =>
-    n >= 1024 * 1024
-      ? `${(n / 1024 / 1024).toFixed(1)}MB`
-      : `${Math.max(1, Math.round(n / 1024))}KB`;
-  if (attachments.length > 0) {
-    if (imageItems.length && otherAttachments.length)
-      sendProgress(`📎 收到 ${attachments.length} 个附件，下载中…`);
-    else if (imageItems.length) sendProgress(`🖼️ 收到 ${imageItems.length} 张图片，下载识别中…`);
-    else sendProgress(`📎 收到 ${otherAttachments.length} 个附件，下载中…`);
-  }
-  for (const im of imageItems) {
-    try {
-      const buf = await downloadImage(im);
-      images.push({ data: buf.toString("base64"), mimeType: sniffMime(buf) });
-    } catch (e) {
-      log.warn("image download failed:", String(e));
-      incomingFailures.push("图片");
-    }
-  }
-  for (const a of otherAttachments) {
-    try {
-      if (a.kind === "file") {
-        const buf = await downloadMediaBuffer({
-          media: a.item.media,
-          maxBytes: MAX_INCOMING_MEDIA_BYTES,
-          label: "file",
-        });
-        const name = safeMediaFileName(a.item.file_name, "file.bin");
-        const saved = saveInboundMedia(buf, { messageId, fileName: name, kind: "file" });
-        incomingNotes.push(
-          `[用户发来文件] 名称: ${name}；大小: ${fmtBytes(buf.length)}；本地路径: ${saved}`,
-        );
-        log.info(`inbound file saved: ${saved} (${buf.length}B)`);
-      } else if (a.kind === "video") {
-        const buf = await downloadMediaBuffer({
-          media: a.item.media,
-          maxBytes: MAX_INCOMING_MEDIA_BYTES,
-          label: "video",
-        });
-        const saved = saveInboundMedia(buf, {
-          messageId,
-          fileName: "video.mp4",
-          kind: "video",
-        });
-        const dur = a.item.play_length ? `；时长: ${a.item.play_length}s` : "";
-        incomingNotes.push(
-          `[用户发来视频] 大小: ${fmtBytes(buf.length)}${dur}；本地路径: ${saved}`,
-        );
-        log.info(`inbound video saved: ${saved} (${buf.length}B)`);
-      } else {
-        // 无微信转写的语音：下载后 SILK→WAV（有转写的语音在 extractInbound 里已作为文本，不会进附件）。
-        const buf = await downloadMediaBuffer({
-          media: a.item.media,
-          maxBytes: MAX_INCOMING_MEDIA_BYTES,
-          label: "voice",
-        });
-        const wav = await silkToWav(buf);
-        const saved = saveInboundMedia(wav ?? buf, {
-          messageId,
-          fileName: wav ? "voice.wav" : "voice.silk",
-          kind: "voice",
-        });
-        const dur = a.item.playtime ? `；时长: ${(a.item.playtime / 1000).toFixed(1)}s` : "";
-        incomingNotes.push(
-          `[用户发来语音] 格式: ${wav ? "audio/wav" : "audio/silk"}${dur}；本地路径: ${saved}；` +
-            "微信没有提供转写，请用可用工具尽力理解；若无法读取音频，请如实告诉用户。",
-        );
-        log.info(`inbound voice saved: ${saved} (${buf.length}B${wav ? ", wav" : ", raw silk"})`);
-      }
-    } catch (e) {
-      const label =
-        a.kind === "file" ? a.item.file_name || "文件" : a.kind === "video" ? "视频" : "语音";
-      log.warn(`inbound ${a.kind} download failed:`, label, String(e));
-      incomingFailures.push(label);
-    }
-  }
+  // 下载入站媒体：图片走 ACP image block；文件/视频/无转写语音落盘，把绝对路径交给大脑。brain 与 worker 共用同一实现。
+  const prepared = await prepareInboundMedia(attachments, {
+    messageId,
+    onHint: (t) => sendProgress(t),
+  });
+  const images = prepared.images;
+  const incomingNotes = prepared.notes;
+  const incomingFailures = prepared.failures;
 
   const rejectWith = async (msg: string, logMsg: string): Promise<boolean> => {
     clearInterval(keepAlive);
@@ -613,12 +529,12 @@ async function handleMessage(
 
   // 收图后怎么走：全部下载失败/大脑不支持时，有文字（或其它附件）就只按文字答，没内容就直接拒绝。
   const hasTextOrOther = !!text.trim() || incomingNotes.length > 0;
-  const plan = planImageTurn(imageItems.length, images.length, supportsImages(), hasTextOrOther);
+  const plan = planImageTurn(prepared.imageCount, images.length, supportsImages(), hasTextOrOther);
   if (plan.kind === "reject")
     return rejectWith(plan.text, "image unusable and no text; rejected gracefully");
   const imageNote = plan.kind === "text-only" ? plan.note : "";
   if (imageNote)
-    log.warn(`image ignored (${images.length}/${imageItems.length} usable): ${imageNote}`);
+    log.warn(`image ignored (${images.length}/${prepared.imageCount} usable): ${imageNote}`);
   if (!hasTextOrOther && images.length === 0) {
     const reason = incomingFailures.length
       ? `📎 附件没能下载下来（${incomingFailures.join("、")}），请重新发一次。`
@@ -897,6 +813,8 @@ type QueuedMsg = {
   messageId: string;
   createTimeMs?: number;
   contextToken?: string;
+  /** 收件人模式下，这条纯文本消息要交给的任务编号（与待投递队列一起提交）。 */
+  toRecipientTaskId?: number;
 };
 const msgQueue: QueuedMsg[] = [];
 let wakeWorker: (() => void) | null = null;
@@ -916,6 +834,80 @@ function notifyFast(): void {
   const w = wakeFast;
   wakeFast = null;
   if (w) w();
+}
+
+// ===== 收件人模式：让 worker 也能收到图片/文件这类没有文字可寻址的消息 =====
+// 微信一条消息塞不下「文字 + 图片」，图片/文件单独到达、正文为空，路由只能靠上文状态。
+// 收件人指向某条任务；在它到期前，非文本消息进「待投递队列」，纯文本（非命令）标记为一起提交；
+// 提交点（文本到达 / 「好了」 / 空闲到期）把附件与文字合成一个多模态回合交给任务。内存态、不落盘。
+const MEDIA_RECIPIENT_TTL_MS = Number(process.env.WEMIND_MEDIA_RECIPIENT_TTL_MS) || 60_000;
+const mediaRoute = new MediaRoute(MEDIA_RECIPIENT_TTL_MS);
+
+/**
+ * 把一批暂存附件（可带正文）作为一个**多模态回合**投递给任务。
+ * 返回需要回给用户的说明（成功且无异常时为空串）。
+ */
+async function deliverPending(params: {
+  from: string;
+  taskId: number;
+  batch: PendingBatch;
+  head: string;
+  messageId: string;
+  onHint?: (text: string) => void;
+}): Promise<string> {
+  const { from, taskId, batch, head, messageId, onHint } = params;
+  const prepared = await prepareInboundMedia(batch.items, { messageId, onHint });
+  const body = composeAgentText(head, prepared.notes);
+  const failNote = prepared.failures.length
+    ? `（有 ${prepared.failures.length} 个附件没能下载：${prepared.failures.join("、")}。请重新发一次。）`
+    : "";
+  // 全部附件都下载失败、又没有正文时，不要再说「用户发来图片」——那会让 agent 以为图在。
+  const fallback = !prepared.failures.length && !body ? mediaInstructionFallback(prepared) : "";
+  const text = [body || fallback, failNote].filter(Boolean).join("\n\n");
+  const err = injectTask(from, text, taskId, undefined, {
+    images: prepared.images.length ? prepared.images : undefined,
+  });
+  if (err) {
+    // 任务不在了：收件人指针与残留队列一起清掉，如实交代（绝不静默丢附件）。
+    if (!findRecipientTask(from, taskId)) {
+      mediaRoute.clear(from);
+      mediaRoute.clearPending(from);
+    }
+    return err;
+  }
+  mediaRoute.touch(from);
+  return failNote ? `⚠️ ${failNote}` : "";
+}
+
+/** 设置收件人；若还有指向旧任务的暂存附件，先提交给旧任务再切换（绝不静默错投/丢弃）。 */
+function armAndFlush(
+  from: string,
+  taskId: number,
+  notify: (text: string) => void | Promise<void>,
+): void {
+  const displaced = mediaRoute.swapRecipient(from, taskId, taskKeyOf(taskId, from));
+  if (!displaced) return;
+  const { oldTaskId, batch } = displaced;
+  void deliverPending({
+    from,
+    taskId: oldTaskId,
+    batch,
+    head: "",
+    messageId: batch.messageIds.at(-1) ?? "",
+  })
+    .then((note) => {
+      const msg = note
+        ? `📎 切换收件人前先把暂存的附件交给 #${oldTaskId}：${note}`
+        : `📎 已先把 ${batch.items.length} 个暂存附件提交给 #${oldTaskId}，现在 #${taskId} 是收件人。`;
+      try {
+        void notify(msg);
+      } catch (e) {
+        log.warn("media-route: switch notice failed:", describeError(e, import.meta.url));
+      }
+    })
+    .catch((e) =>
+      log.warn("media-route: flush on switch failed:", describeError(e, import.meta.url)),
+    );
 }
 
 async function pollerLoop(
@@ -1045,10 +1037,57 @@ async function pollerLoop(
           active: hasActiveTask(from),
           interrupted: interruptedTasks(from).length,
         };
-        // 带附件的消息不走快车道：控制/任务指令不处理附件，进快车道会静默丢文件。
-        const mcpToBrain = passMcpToggleToBrain(parseControl(text), homeModeAtBoot === "direct");
-        if (!mcpToBrain && isFastLane(text, facts, parts.attachments.length))
+        // 收件人模式：非文本消息进待投递队列；无前缀文字标记为交给收件人，与已攒附件一起提交。
+        // 命令优先——带附件的命令仍走原路径，不悄悄吞掉指令（见 decideInboundRoute）。
+        const ctrl = parseControl(text);
+        const tctrl = parseTaskControl(text);
+        const brainEscape = text ? parseBrainEscape(text) : null;
+        const recipient = mediaRoute.recipient(from);
+        const route = decideInboundRoute({
+          recipientTaskId: recipient?.taskId ?? null,
+          attachmentCount: parts.attachments.length,
+          hasText: !!text.trim(),
+          hasCommand: !!(ctrl || tctrl || brainEscape),
+          fastLane: isFastLane(text, facts, parts.attachments.length),
+          mcpToBrain: passMcpToggleToBrain(ctrl, homeModeAtBoot === "direct"),
+        });
+        if (route.kind === "buffer") {
+          const { first, count } = mediaRoute.buffer(
+            from,
+            parts.attachments,
+            messageId,
+            route.recipientTaskId,
+          );
+          if (first)
+            void sends
+              .sendNotice(
+                from,
+                msg.context_token,
+                `📎 已把收到的附件交给 #${route.recipientTaskId}（再发文字、「好了」就一起提交）。`,
+                state.contextTokens[`${account.botId}:${from}`],
+              )
+              .catch(() => {});
+          log.info(
+            `media-route: buffered ${parts.attachments.length} attachment(s) for #${route.recipientTaskId} (total ${count})`,
+          );
+          // 极端情况下同一条消息既有附件又有说明文字：文字入快车道，出队时与这批附件合并提交。
+          // 附件已归待投递队列，`queued` 里的副本必须清掉，否则队列先到期补交时会重复提交。
+          if (text.trim()) {
+            queued.attachments = [];
+            queued.toRecipientTaskId = route.recipientTaskId;
+            fastQueue.push(queued);
+            enq = true;
+          }
+          continue;
+        }
+        if (route.kind === "recipient") {
+          queued.toRecipientTaskId = route.recipientTaskId;
           fastQueue.push(queued);
+          enq = true;
+          continue;
+        }
+        // 带附件的消息不走快车道：控制/任务指令不处理附件，进快车道会静默丢文件。
+        if (route.kind === "fast") fastQueue.push(queued);
         else msgQueue.push(queued);
         enq = true;
       }
@@ -1153,6 +1192,50 @@ async function handleFastItem(
     interrupted: interruptedTasks(from).length,
   };
 
+  // ── 收件人模式：无前缀文字与已攒附件一起提交给收件人 ──
+  if (item.toRecipientTaskId !== undefined) {
+    const taskId = item.toRecipientTaskId;
+    const batch = mediaRoute.takePending(from);
+    const flushOnly = batch.items.length > 0 && isFlushWord(item.text);
+    // 「好了」但队列已被清扫搬走：别把「好了」当成普通正文再发一个空回合。
+    if (!batch.items.length && isFlushWord(item.text)) {
+      log.info(`task: flush-word without pending(#${taskId})`);
+      await notice("现在没有待提交的附件。");
+      return;
+    }
+    const head = flushOnly
+      ? ""
+      : [formatQuote(item.quote), item.text.trim()].filter(Boolean).join("\n");
+    let r: string;
+    if (batch.items.length) {
+      r = await deliverPending({
+        from,
+        taskId,
+        batch,
+        head,
+        messageId: item.messageId,
+        // 大文件/视频下载耗时：给用户进度，别让「好了」之后一片安静。
+        onHint: (t) => void notice(t),
+      });
+    } else {
+      r = injectTask(from, head || item.text.trim(), taskId, undefined, {});
+      if (r && !findRecipientTask(from, taskId)) {
+        mediaRoute.clear(from);
+        mediaRoute.clearPending(from);
+      } else {
+        mediaRoute.touch(from);
+      }
+    }
+    log.info(
+      `task: submit-to-recipient(#${taskId}):`,
+      (head || (batch.items.length ? "(附件)" : "")).slice(0, 40),
+      "->",
+      r.replace(/\n/g, " | "),
+    );
+    if (r) await notice(r);
+    return;
+  }
+
   // 控制指令：单独处理
   const ctrl = item.text ? parseControl(item.text) : null;
   // direct 下「加载/卸载 MCP」不在 daemon 侧处理：原样交给 Agent，由它决定怎么改自己的配置。
@@ -1163,6 +1246,32 @@ async function handleFastItem(
     if (isOwnerOnly(ctrl) && from !== owner) {
       const r = "这条指令仅登录者可用。发送「帮助」看你自己的指令。";
       log.info("control: denied(not owner)", JSON.stringify(ctrl));
+      await notice(r);
+      return;
+    }
+    // 退出收件人模式：把待投递队列里已攒的附件尽力交给原收件人后，之后的文字/附件回到大脑。
+    if (ctrl.kind === "toBrain") {
+      const had = mediaRoute.recipient(from);
+      mediaRoute.clear(from);
+      const batch = mediaRoute.takePending(from);
+      let r = "🧠 好，之后的文字和附件交给大脑。";
+      if (batch.items.length) {
+        // 指针可能已过期（队列却还没被 15s 清扫搬走）：归属以批次自己的 taskId 为准，仍交回去，绝不静默丢。
+        const targetId = had?.taskId ?? batch.taskId;
+        if (targetId !== undefined) {
+          const extra = await deliverPending({
+            from,
+            taskId: targetId,
+            batch,
+            head: "",
+            messageId: item.messageId,
+          });
+          if (extra) r = `${r}\n${extra}`;
+        } else {
+          r = `${r}\n（另有 ${batch.items.length} 个暂存的附件已超时，没能交出去，需要的话重新发一次。）`;
+        }
+      }
+      log.info("control: toBrain ->", r.replace(/\n/g, " | "));
       await notice(r);
       return;
     }
@@ -1198,7 +1307,16 @@ async function handleFastItem(
   // 1) 结束任务（可带编号/全部）
   const tcmd = item.text ? parseTaskControl(item.text) : null;
   if (tcmd?.kind === "stop") {
-    const r = stopTask(from, tcmd.id);
+    let r = stopTask(from, tcmd.id);
+    const rc = mediaRoute.recipient(from);
+    // 结束任务顺带清路由：被结束的正是收件人（或「全部」）时，指针与残留队列一起清掉。
+    // 待投递队列必须交代清楚：明确告知丢了几条，不静默丢文件。
+    if (rc && (tcmd.id === "all" || !findRecipientTask(from, rc.taskId))) {
+      const dropped = mediaRoute.pendingCount(from);
+      mediaRoute.clear(from);
+      mediaRoute.clearPending(from);
+      if (dropped > 0) r += `\n（还有 ${dropped} 个暂存的附件没有提交，已一并丢弃。）`;
+    }
     log.info("task: stop ->", r.replace(/\n/g, " | "));
     await notice(r);
     return;
@@ -1208,9 +1326,27 @@ async function handleFastItem(
     await notice(renderTaskList(from));
     return;
   }
+  // 2.5) 设置收件人：裸 `#N` 或 `发给任务 N`（只设指针，不产生文本）
+  if (tcmd?.kind === "recipient") {
+    const t = findRecipientTask(from, tcmd.id);
+    if (!t) {
+      await notice(`没有 #${tcmd.id} 号任务。发「任务列表」看现有编号。`);
+      return;
+    }
+    armAndFlush(from, t.id, notice);
+    const secs = Math.round(MEDIA_RECIPIENT_TTL_MS / 1000);
+    log.info(`task: recipient(#${t.id}) armed`);
+    await notice(
+      `✅ 已把 #${t.id} 设为收件人：接下来 ${secs} 秒内你发的文字、图片、文件都交给它。\n` +
+        "想回大脑发「回到大脑」，只想问大脑一句发「问大脑：…」。",
+    );
+    return;
+  }
   // 3) 给指定编号的任务回话
   if (tcmd?.kind === "reply") {
-    const r = injectTask(from, tcmd.text, tcmd.id);
+    const r = injectTask(from, tcmd.text, tcmd.id, undefined, {
+      onTaskId: (id) => armAndFlush(from, id, notice),
+    });
     log.info(`task: inject(#${tcmd.id}):`, tcmd.text.slice(0, 40));
     if (r) await notice(r);
     return;
@@ -1218,7 +1354,10 @@ async function handleFastItem(
   // 4) 派发：带 agent 名 = 指定 agent 起一条**新任务**（多任务并行）；不带 = 沿用「有任务就发给它，没有就派发」
   if (tcmd?.kind === "toWorker" && tcmd.agentToken) {
     // 指定的 agent **只对这条任务生效**，不改默认任务大脑：那是账号级状态（`切换任务大脑` 是 owner-only），顺手改会让「派一条任务」变成一次隐形的全局设置变更，也破坏微信与 CLI（`--agent` 只影响那一条任务）两边的对称。
-    const r = dispatchTask(from, tcmd.text, { agentKey: tcmd.agentToken });
+    const r = dispatchTask(from, tcmd.text, {
+      agentKey: tcmd.agentToken,
+      onTaskId: (id) => armAndFlush(from, id, notice),
+    });
     log.info(`task: dispatch(agent=${tcmd.agentToken}):`, r.replace(/\n/g, " | "));
     await notice(r);
     return;
@@ -1227,11 +1366,15 @@ async function handleFastItem(
     // 明确发给 worker：有活跃任务 → 发给它/追加（唯一一条喂下一轮、running 暂存、多条则回编号提示）；
     // 没有活跃任务 → 派发新任务（不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活）。
     if (hasActiveTask(from)) {
-      const r = injectTask(from, tcmd.text);
+      const r = injectTask(from, tcmd.text, undefined, undefined, {
+        onTaskId: (id) => armAndFlush(from, id, notice),
+      });
       log.info("task: inject(explicit):", tcmd.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
       if (r) await notice(r);
     } else {
-      const r = dispatchTask(from, tcmd.text);
+      const r = dispatchTask(from, tcmd.text, {
+        onTaskId: (id) => armAndFlush(from, id, notice),
+      });
       log.info("task: dispatch:", r.replace(/\n/g, " | "));
       await notice(r);
     }
@@ -1241,7 +1384,9 @@ async function handleFastItem(
   // poller 按**入队时**的任务状态把「继续」类短句送进快车道；出队时状态可能已变（任务刚出完结果），
   // 这时交回大脑队列，保持「到出队才最终判定」的旧语义。
   if (shouldResumeTask(item.text, facts)) {
-    const r = injectTask(from, item.text);
+    const r = injectTask(from, item.text, undefined, undefined, {
+      onTaskId: (id) => armAndFlush(from, id, notice),
+    });
     log.info("task: resume(unnumbered):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
     if (r) await notice(r);
     return;
@@ -1328,7 +1473,10 @@ async function workerLoop(
         interrupted: interruptedTasks(from).length,
       })
     ) {
-      const r = injectTask(from, item.text);
+      const r = injectTask(from, item.text, undefined, undefined, {
+        onTaskId: (id) =>
+          armAndFlush(from, id, (text) => sends.sendNotice(from, token, text, latestToken())),
+      });
       log.info("task: resume(unnumbered):", item.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
       if (r) await sends.sendNotice(from, token, r, latestToken());
       continue;
@@ -1396,6 +1544,41 @@ function readPidFile(file: string): number | null {
     return Number.isInteger(n) && n > 0 ? n : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * 收件人到期清扫：到期即取消并回执（绝不静默切换归属），队列里已攒的附件尽力补交给原任务。
+ * 由 runDaemon 里的定时器周期调用（滑动空闲 TTL，默认 1 分钟）。
+ */
+async function sweepMediaRecipients(
+  account: AccountData,
+  sends: SendPipeline,
+  state: ServerState,
+): Promise<void> {
+  for (const { userId, recipient } of mediaRoute.dueExpired()) {
+    const batch = mediaRoute.takePending(userId);
+    const token = state.contextTokens[`${account.botId}:${userId}`];
+    let extra = "";
+    if (batch.items.length) {
+      const r = await deliverPending({
+        from: userId,
+        taskId: recipient.taskId,
+        batch,
+        head: "",
+        messageId: batch.messageIds[batch.messageIds.length - 1] ?? "0",
+      });
+      extra = r ? `\n（把已收到的附件交回去时：${r}）` : "（已把之前收到的附件交给它。）";
+    }
+    log.info(`media-route: recipient #${recipient.taskId} expired for ${userId}`);
+    await sends
+      .sendNotice(
+        userId,
+        token,
+        `⌛ #${recipient.taskId} 收件人已超时取消：之后的文字和附件交给大脑。${extra}`,
+        token,
+      )
+      .catch(() => {});
   }
 }
 
@@ -1582,6 +1765,13 @@ export async function runDaemon(): Promise<void> {
   // 进程池清扫：空闲超时的 worker 回收（默认 5 分钟）
   const poolSweep = setInterval(() => sweepWorkerPool(), 30_000);
   poolSweep.unref?.();
+  // 收件人到期清扫：滑动空闲 TTL（默认 1 分钟）到点即取消并回执，绝不静默切换归属。
+  const recipientSweep = setInterval(() => {
+    void sweepMediaRecipients(account, sends, state).catch((e) =>
+      log.warn("media-route sweep failed:", String(e)),
+    );
+  }, 15_000);
+  recipientSweep.unref?.();
   // 解耦运行：拉取器持续抓消息(永不被大脑阻塞)，大脑与快车道各一个处理器并发
   // 两个常驻循环若在自身 try 之外意外退出，进程还活着却不再收消息（list 显示运行中、pid 文件还在）——必须显式叫停，交给 watchdog 5s 重拉。
   const fatalLoop = (name: string) => (e: unknown) => {

@@ -8,6 +8,11 @@
 
 <!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
 
+### Added
+
+- **worker 接收图片/文件等非文本消息（2026-11-16）**：微信侧非文本消息本身不带地址，新增**收件人模式**——`#<编号>` / `发给任务 <编号>` 只把任务设为收件人（`任务：` / `#<编号> 正文` / `继续` 顺带设置），之后不带前缀的文字与附件都交给该任务。附件先入内存待投递队列（首批回执 `📎 已把收到的附件交给 #N…`），下一句文字或 `好了`/`就这样` 时经 `prepareInboundMedia()`（`daemon/messaging/inbound-media.ts`，从 `index.ts` 抽出的 brain 媒体管线）下载解密，图片以 ACP `image` 块、文件/视频/无转写语音以本地路径说明并入同一个 `injectTask(..., { images })` 回合；`applyMediaToPrompt()`（`acp/prompt-media.ts`）让 brain 与 worker 共用同一套「不支持图片就给明确说明、不臆测内容」的降级。收件人按发送者隔离、内存态（`daemon/media-route.ts` 的 `MediaRoute`），静默 1 分钟滑动超时自动退出并把队列里的附件补交回去（`WEMIND_MEDIA_RECIPIENT_TTL_MS` 可调），`回到大脑` / `/to-brain` 主动退出，`问大脑：…` 只逃逸一句，任务结束或 `结束任务` 自动清除。**未设收件人时行为不变**：带附件的消息仍一律交给大脑（`isFastLane()` / `shouldResumeInBrainQueue()` 的安全降级保留）。
+- **brain 逃逸前缀扩展**：除 `问大脑` 外新增 `大脑：xxx` / `大脑 xxx` 与 `brain: xxx` / `brain xxx`（大小写不敏感，必须带冒号或空格）；不带斜杠，避免与 `切换大脑` 的 `/brain` 冲突。
+
 ## [2.0.0] 本机 Agent 终端等效工作模式（默认 direct）· `wemind config|workspace|env`（2026-11-16）
 
 > 同批发布 `@wemind/wechat-mcp` **1.1.4**（内联的 core 只改了注释与 README 措辞，无行为变化，故只升 patch）。

@@ -32,7 +32,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 
 **「当前是哪个 agent」来自槽位，不是模块常量**（1.2.0 起）：`agent-slot.ts` 的 `getAgent("brain")` 懒解析 + 记忆化，`setAgent` 供热切换改写；`acp-brain.ts` 的每个过程**显式接收** `ag`（`ensureProcess(ag)` / `ensureSession(ag, userId)`；模型与 prompt 超时分别调用共用协议层的 `applyAcpModel(host, ag, sid)` / `promptAcp(host, params, timeouts)`）——入口取一次、过程内不再读槽位，所以「握手中途换 agent」在结构上不可能发生。心跳与首帧超时也改为**每回合现算**（`firstFrameMs(ag)`、回合内的 `heartbeatMsValue`），此前它们 import 期定死，切到 DSH 会继续用旧值。
 
-**与 worker 共用的协议层**：帧分类（响应/反向请求/`session/update` 的进度与文本拼接）、请求超时、`session/prompt` 的首帧/空闲/硬上限、`session/set_config_option` / `session/set_mode`、`load` 后的回放静默，都在 `acp-connection.ts`。brain 只保留常驻单例、按用户会话映射与切脑门；worker 只保留每任务连接、`worker-sessions.json` 与进程池协作。这样「改协议要记得同步两份」的范围缩到进程生命周期与会话持久化。
+**与 worker 共用的协议层**：帧分类（响应/反向请求/`session/update` 的进度与文本拼接）、请求超时、`session/prompt` 的首帧/空闲/硬上限、`session/set_config_option` / `session/set_mode`、`load` 后的回放静默，都在 `acp-connection.ts`。brain 只保留常驻单例、按用户会话映射与切脑门；worker 只保留每任务连接、`worker-sessions.json` 与进程池协作。这样「改协议要记得同步两份」的范围缩到进程生命周期与会话持久化。**prompt 的媒体块组装也共用一层**：`acp/prompt-media.ts` 的 `applyMediaToPrompt(prompt, images, supportsImages, { unsupportedNote })` 由 `acp-brain.ts` 的 `runTurn` 与 `tasks/worker-acp.ts` 的 `ask(..., { images })` 同时调用——支持图片时逐张推 `{ type: "image", mimeType, data }`，不支持时只推一句降级说明（brain 用 `BRAIN_UNSUPPORTED_IMAGE_NOTE`，worker 用 `WORKER_UNSUPPORTED_IMAGE_NOTE`），两边都不臆测内容；image 能力仍只看预设的 `images` 字段（不读 `initialize` 回包）。
 
 协议层的一条边界（2026-11-15）：`applyAcpModel()` 只吞 agent **明确回的 JSON-RPC error 帧**（连接层用 `AcpMethodError` 承载，判据是该类型 + 数字 `code`，不解析 `message` 文本）；超时、`acp process reset`、无进程、写帧失败一律抛出，让上层 kill 重建——不要把「模型没设上」当成「旧进程还能继续用」，也不要把所有异常都吞成 WARN。
 
@@ -312,7 +312,7 @@ worker 副本详见 [7. 远程任务 Worker](07-远程任务-Worker.md#worker-�
 |---|---|---|---|
 | `session/load` | 探针实测（`scripts/acp-probe.mjs`）；回包里的 `agentCapabilities` 代码不读 | 不支持 → `-32601` → 当前代码新建会话，**丢多轮上下文** | 预设写 `restore: "resume"` 用 `session/resume` 兜底，再失败才 `new` |
 | `session/resume` | 同上：实测 + 预设字段 | 也没有 → 无法自愈恢复 | 接受「重启即新会话」，或换 agent |
-| `image` | 探针带图跑一次 prompt；结论写进预设的 `images` | 预设 `images: false` → `planImageTurn()` 按「有文字只按文字答、无文字才拒绝」处理；即便漏到 `askBrainTurn`，也只会附一句「当前大脑不支持图片」而不带图 | 友好拒绝，或换 agent |
+| `image` | 探针带图跑一次 prompt；结论写进预设的 `images` | 预设 `images: false` → `planImageTurn()` 按「有文字只按文字答、无文字才拒绝」处理；即便漏到 `askBrainTurn` / worker 的 `ask()`，`applyMediaToPrompt()` 也只会附一句「当前大脑/任务 agent 不支持图片」而不带图（2026-11-16 起 brain 与 worker 共用这套降级） | 友好拒绝，或换 agent |
 | MCP 传输 | 探针传非空 `mcpServers` 实测；结论写进预设的 `acpMcpServers`，managed 托管时再配 `mcpDelivery` | 不支持 ACP MCP → 动态 MCP 不可用 | 设 `acpMcpServers: false` + `mcpDelivery: "config"`，走 Agent 自己的配置文件（如 Copilot） |
 | 反向请求 | 跑一次 prompt，记录 `method`+`id` | 不应答 → 挂到超时 | 应答器已在 `acp-reverse.ts` 统一（brain/worker/`brain check` 共用），一般无需再写 |
 | 正文粒度 | 看 `agent_message_chunk` 数量 | committed-only → 心跳刷屏、首帧慢 | 调 `firstFrameMs` + `heartbeatMs`（静默期心跳间隔） |

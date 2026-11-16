@@ -315,9 +315,18 @@ export function parseTaskControl(text: string): TaskCommand | null {
   return parseTaskCommand(text);
 }
 
-/** 解析「明确问大脑」逃逸前缀：问大脑 xxx / 问大脑：xxx。命中返回去前缀后的文本（强制走 brain，即使 worker 在等你）。 */
+/**
+ * 解析「明确问大脑」逃逸前缀，命中返回去前缀后的文本（强制走 brain，即使收件人/worker 在等你）。
+ * 支持：`问大脑 xxx` / `问大脑：xxx`（历史宽松，分隔符可选）、`大脑：xxx` / `大脑 xxx`、`brain: xxx` / `brain xxx`（大小写不敏感）。
+ * `大脑` / `brain` 必须带分隔符（冒号或空白）：「大脑的工作原理…」「brainstorm」是普通消息，不是逃逸。
+ * 带斜杠的 `/brain` 是「切换大脑」指令，不在此列。逃逸是**一次性**的：问完仍留在收件人模式。
+ */
 export function parseBrainEscape(text: string): string | null {
-  const m = text.trim().match(/^问大脑[:：]?\s*([\s\S]+)$/);
+  const m = text
+    .trim()
+    .match(
+      /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?:大脑|brain)\s+)([^:：\s][\s\S]*)$/i,
+    );
   return m ? m[1].trim() : null;
 }
 
@@ -326,7 +335,7 @@ export type TaskFacts = { awaiting: number; active: boolean; interrupted: number
 
 /**
  * 这条消息是否走**快车道**：控制指令与任务指令不经过大脑，不该排在一条十几分钟的大脑回合后面。
- * 「继续」类短句在确实有可续跑任务时也走快车道；问大脑前缀永远走大脑。
+ * 「继续」类短句在确实有可续跑任务时也走快车道；问大脑/大脑/brain 逃逸前缀永远走大脑。
  * 带附件的消息一律走大脑：控制/任务指令目前不处理附件，放快车道会静默丢掉用户发来的文件。
  * 注意：切脑 / 会话 / 交接也在快车道，但它们要操作同一个 ACP 连接，仍会在 ACP 门口等当前回合结束——那是语义要求，不是排队阻塞。
  */
