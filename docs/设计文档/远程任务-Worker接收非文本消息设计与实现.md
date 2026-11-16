@@ -1,6 +1,6 @@
 # 远程任务：Worker 接收非文本消息（图片 / 文件 / 视频 / 语音）设计与实现
 
-> **状态**：设计（待实现）｜ **分支**：`feat/worker-inbound-media`（worktree `.worktrees/worker-media`）｜ **基线**：`origin/main` @ `1b6b703`
+> **状态**：已实现（2026-11-16，`feat/worker-inbound-media`；含评审修复）｜ **分支**：`feat/worker-inbound-media`（worktree `.worktrees/worker-media`）｜ **基线**：`origin/main` @ `1b6b703`
 >
 > 本文是「让 worker 也能像 brain 一样接收图片、文件等非文本消息」的完整设计与实施清单。落地时与代码、测试、其余文档同提交（见 §14–§16）。
 
@@ -17,7 +17,7 @@
 
 - 不实现「一条消息同时带文本 + 媒体」（微信协议不允许，见 §3）的合并发送——由「待投递队列」重组。
 - 不做引用寻址（引用某条任务回复再发媒体）——留作后续（§17）。
-- 不改出站附件（worker 回复里的 `[附件](file://…)` / 图片）——那是既有能力。
+- ~~不改出站附件~~ —— 已追加：worker 结果里的 `![](路径)` / `[附件](file://…)` 同样会发出（见 §19）。
 - 不落盘收件人 / 待投递队列状态（重启即失效，安全默认回大脑，§13）。
 
 ---
@@ -87,12 +87,14 @@ type Recipient = {
 ### 4.2 待投递队列（pending，原方案里的「buffer」）
 
 ```ts
-type Pending = {
+type PendingBatch = {
   items: InboundAttachment[];   // 原样攒着，flush 时才下载 / 落盘（§7.3）
   messageIds: string[];         // 去重 / 日志
-  firstAcked: boolean;          // 是否已发过 per-batch ack（§11）
+  taskId?: number;              // 这批附件当初是给哪条任务攒的（指针过期后仍按它认账）
 };
 ```
+
+`taskId` 是**投递归属的唯一依据**：指针（`recipients`）只决定「新到的附件算谁的」，批次一旦建立就跟着自己的 `taskId` 走。换收件人、指针过期、TTL 清扫、结束任务都以它为准（见 §20.1–§20.3），这样「给 #5 的图」不会因为指针变了而被 #7 认领。
 
 语义：**收件人期间收到的非文本消息先攒着**，等一个「提交点」到达时，与随后到达的文本一起、作为一个多模态回合投给任务。
 
@@ -205,7 +207,7 @@ switch (route.kind) {
 ### 7.1 提交点（三个）
 
 1. **文本到达**（收件人命中）：文本 + 全部积压附件 → 一个回合（§4.3）。
-2. **`好了` / `就这样`**：不配文字，把积压附件立即提交（不等 TTL）。实现上没有单独的 `flush` 指令：这两个词命中 `isFlushWord()`，在收件人分支里把正文置空（`flushOnly`），只提交附件；队列为空时它们就是普通文字，照常交给收件人。
+2. **`好了` / `就这样`**：不配文字，把积压附件立即提交（不等 TTL）。实现上没有单独的 `flush` 指令：这两个词命中 `isFlushWord()`，在收件人分支里把正文置空（`flushOnly`），只提交附件；**队列为空时**直接回一句「现在没有待提交的附件。」，不再把这两个词当正文发给任务（否则会白白多一个空回合）。
 3. **空闲 TTL 到期兜底**（§8.1）：积压非空 → 用兜底指令提交，防丢文件。
 
 **不设独立的短防抖**：短防抖会在图刚发完就抢先提交，随后到达的说明文字跟不上，白白多一个回合。滑动 1 分钟 TTL 本身就充当批处理窗口。
@@ -306,9 +308,9 @@ prompt 组装：`applyMediaToPrompt(prompt, opts.images, this.agent.images)` →
 
 ### 9.4 `task-manager.ts` 贯通媒体
 
-- `Task` 增 `pendingMedia?: PreparedMedia`（或把 media 随 `inject` 一起流转）。
-- `dispatchTask(to, instruction, opts: { cwd?, agentKey?, ackId?, media? })`：首个回合带上 `media`。
-- `injectTask(to, text, id?, ackId?, media?)`：把 `media` 与文本一起交给下一个回合（`pendingInjects` 存 `{ text, images }`，`waitForInject` 一并取出）。
+- `Task` 增 `pendingInjects?: InjectPayload[]`（`InjectPayload = { text: string; images?: PromptImage[] }`），不再另存整份 `PreparedMedia`。
+- `dispatchTask(to, instruction, opts: { cwd?, agentKey?, ackId?, images?, onTaskId? })`：首个回合带上 `images`。
+- `injectTask(to, text, id?, ackId?, opts: { images?, onTaskId? })`：把 `images` 与文本一起交给下一个回合（`waitForInject()` 合并文本、`flatMap` 图片）。
 - `runTask` 循环：`conn.ask(instruction, task.key, onProgress, { strictResume: wasResume, images })`。
 - `resumeTask(task, instruction, media?)` 同理。
 
@@ -325,9 +327,9 @@ prompt 组装：`applyMediaToPrompt(prompt, opts.images, this.agent.images)` →
 ## 11. 进度、回执与发送额度
 
 - **进入回执**（占 1 条额度）：
-  `✅ 已把 #5 设为收件人：接下来这 1 分钟内你发的文字、图片、文件都交给它；想提前回大脑发「回到大脑」，只想问大脑一句发「问大脑：…」。`
+  `✅ 已把 #5 设为收件人：接下来 60 秒内你发的文字、图片、文件都交给它。` + 换行 + `想回大脑发「回到大脑」，只想问大脑一句发「问大脑：…」。`
 - **per-batch ack**（首批附件入队时 1 条，占额度）：
-  `📎 已收到 N 个附件（给 #5），发一句话或「好了」我就交给它。`
+  `📎 已把收到的附件交给 #5（再发文字、「好了」就一起提交）。`
 - **退出 / 超时回执**（占额度），见 §8.2 文案。
 - **媒体下载进度**：复用 brain 的进度文案（`hints`），受既有 `planProgressEmission` / 连发额度约束。
 - 遵守 AGENTS.md §4.5：图片 / 文件 / 视频各占一条连发额度；额度到 `limit-2` 时按既有策略让位给最终答案。
@@ -397,7 +399,7 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 
 ### 测试
 
-`daemon-routing.test.ts`（`parseBrainEscape` 新写法 + `isFastLane` 未命中收件人时行为不变）、`index.test.ts`（路由 / 回执 / 逃逸一次性）、`task-manager.test.ts`（media 贯通）、`worker-pool.test.ts` / 新增 `worker-acp` 用例（prompt 含 image block / 降级）、`chat-command-specs.test.ts` 或等价（裸 `#N` / `发给任务 N` / `回到大脑`）。
+`daemon-routing.test.ts`（`parseBrainEscape` 新写法 + `isFastLane` 未命中收件人时行为不变）、`media-route.test.ts`（收件人/队列语义、`decideInboundRoute` 表驱动、`deliveryTarget`、`purgeForStopped`、`swapRecipient`/`buffer` 的过期与换人边界）、`inbound-media.test.ts`（按角色落盘）、`prompt-media.test.ts`（image 块与降级文案）、`task-manager.test.ts`（media 贯通）、`pool-spawn.test.ts`（首轮约定提示只带一次）、`chat-commands.test.ts`（裸 `#N` / `发给任务 N` / `task-focus` / `回到大脑`）。注：`index.test.ts` 仍只覆盖从 `index.ts` 导出的纯函数，`handleFastItem()` 的分支**没有**端到端用例（需要真实 daemon 状态），其投递目标判定已抽成 `deliveryTarget()` 单测覆盖。
 
 ---
 
@@ -456,3 +458,38 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 - **可发现性**：worker 每个会话首轮追加一次约定提示（`hintedSessions`，键 `<agent>:<sessionId>`），措辞只讲「怎么写就能发」与「占连发额度、别刷屏」，不改 agent 自身能力。
 - **不与「附件一律给大脑」冲突**：这条限制只作用于入站路由；出站是任务结果的一部分，本来就属于 worker。
 - **提示文案**：任务推送末尾从「不带前缀的消息会交给大脑」改为「不带前缀的消息默认交给大脑（发「#N」可设为收件人）」——收件人模式下前者不准确，且这行是用户学习寻址的主要入口。
+
+## 20. 独立审查后的修复（2026-11-16）
+
+第一版实现经独立审查发现若干真实缺陷，均已修复并补了回归用例。这一节记录**结论与不变量**，避免以后改回去。
+
+### 20.1 批次归属是投递的唯一依据
+
+- 待投递队列的每一批都记 `taskId`（「这一批是给谁攒的」）。提交时用 `deliveryTarget(batch, fallback)`：**有附件就以 `batch.taskId` 为准**，指针只负责「没有附件时的纯文字提交」与提示。
+- `swapRecipient()` 判断「有没有旧账」时读**原始表项**（允许已过期），不只信 `recipient()`；过期指针也照样把旧批次交回原任务，不会留给下一条任务认领。
+- `buffer()` 发现队列里是另一条任务的附件时不覆盖归属，而是整批交还调用方（`displaced`），poller 先把它交给原任务再入新队。
+- 清扫（TTL 到期）同样用 `batch.taskId ?? recipient.taskId`。
+
+### 20.2 失败清理按归属限定
+
+`deliverPending()` 发现目标任务已不存在时，只在「指针仍指着它」时清指针、只在「批次归属还是它」时清队列——不能把用户刚设置的 #2 连同新附件一起清掉。
+
+### 20.3 结束任务的两条入口都要清
+
+微信 `结束任务` 与本地 `wemind task-stop` 走的是不同代码路径（`handleFastItem` vs `task-inbox-runner`），两者都调用 `purgeForStopped(userId, id, isAlive)`：命中指针或命中批次归属即清理，并返回丢弃条数用于回执。`isAlive` 兜住「指针已过期、任务已被别处停掉」的情形。
+
+### 20.4 managed 下按角色落盘
+
+`prepareInboundMedia(attachments, { messageId, onHint, role })` 把 `role` 传给 `saveInboundMedia(..., mediaInboxDir(role))`：worker 侧写 `worker-home/media/inbound`，与 `docs/repowiki/08-数据存储与多账号.md` 的口径一致；启动清理对 brain / worker 两个目录各清一次。
+
+### 20.5 图片通道与附件同一套安全闸
+
+`resolveImageBytes()` 的本地路径此前只查扩展名与大小，等于给外发凭证开了后门（worker 结果里的 `![](路径)` 也会走它）。现在与附件一致：`assertLocalPath()`（拒 UNC / `file://host` / NTFS 数据流）→ `realpath` → 图片扩展名 → `isSensitiveFilePath()` → 大小上限。
+
+### 20.6 任务推送用最新 token
+
+`sendTaskReply()` 改成每次发送现取 `state.contextTokens[...]`（`tok()`），不再在下载媒体**之前**固定捕获——大文件下载期间用户新消息刷新 token 后，媒体不会再用旧 token 发。
+
+### 20.7 分派改成 switch + never 兜底
+
+`handleFastItem()` 的任务指令分派改成 `switch (tcmd.kind)`，`default` 里 `const unhandled: never = tcmd`。审查期间出现过「删掉一个分支而测试仍全绿」的事故（`index.ts` 的这些分支没有端到端用例），加这层兜底后，新增 `TaskCommand` kind 却忘了处理会当场 typecheck 失败。`handleFastItem()` 本身仍无集成测试，投递目标等纯逻辑已下沉到 `media-route.ts` 单测覆盖。

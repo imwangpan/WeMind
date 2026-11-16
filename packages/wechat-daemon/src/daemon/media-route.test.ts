@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { InboundAttachment } from "./daemon-routing.js";
-import { decideInboundRoute, MediaRoute } from "./media-route.js";
+import { decideInboundRoute, deliveryTarget, MediaRoute } from "./media-route.js";
 
 /** 队列只存引用，不读内容；用最小占位对象即可。 */
 const att = (id: string) =>
@@ -136,16 +136,66 @@ describe("MediaRoute（收件人 + 待投递队列）", () => {
     expect(route.pendingCount("u")).toBe(0);
   });
 
-  it("swapRecipient：指针已过期时不返回批次（队列的归属交给调用方兜底）", () => {
+  it("swapRecipient：指针已过期也要把旧批次交回（否则会错投给下一条任务）", () => {
+    let now = 0;
+    const route = new MediaRoute(60_000, () => now);
+    route.arm("u", 1, "k");
+    route.buffer("u", [att("a")], "m", 1);
+    now = 60_001; // 15s 清扫还没轮到，指针只是「过期」
+    // #1 的附件必须交回给 #1，不能留在队列里等 #2 来认领
+    const displaced = route.swapRecipient("u", 2, "k2");
+    expect(displaced?.oldTaskId).toBe(1);
+    expect(displaced?.batch.items.length).toBe(1);
+    expect(route.recipient("u")!.taskId).toBe(2);
+    expect(route.pendingCount("u")).toBe(0);
+  });
+
+  it("buffer：队列里是另一条任务的附件时不改归属，整批交还给调用方", () => {
+    const route = new MediaRoute(60_000, () => 0);
+    route.arm("u", 1, "k1");
+    route.buffer("u", [att("a")], "m1", 1);
+    // 指针已换到 #2（模拟换人时旧批次没被取走的极端情况）
+    route.arm("u", 2, "k2");
+    const r = route.buffer("u", [att("b")], "m2", 2);
+    expect(r.displaced?.taskId).toBe(1);
+    expect(r.displaced?.batch.items.length).toBe(1);
+    // 新批次只含新附件，不会被旧附件污染
+    expect(r.first).toBe(true);
+    expect(r.count).toBe(1);
+    expect(route.pendingOwner("u")).toBe(2);
+  });
+
+  it("pendingOwner：指针过期后仍能认账", () => {
     let now = 0;
     const route = new MediaRoute(60_000, () => now);
     route.arm("u", 1, "k");
     route.buffer("u", [att("a")], "m", 1);
     now = 60_001;
-    expect(route.swapRecipient("u", 2, "k2")).toBeNull();
+    expect(route.recipient("u")).toBeNull();
+    expect(route.pendingOwner("u")).toBe(1);
+  });
+
+  it("purgeForStopped：指针已过期也能清掉属于该任务的暂存附件", () => {
+    let now = 0;
+    const route = new MediaRoute(60_000, () => now);
+    route.arm("u", 1, "k");
+    route.buffer("u", [att("a"), att("b")], "m", 1);
+    now = 60_001; // 指针过期，清扫还没跑
+    expect(route.purgeForStopped("u", 1, () => false)).toBe(2);
+    expect(route.pendingCount("u")).toBe(0);
+  });
+
+  it("purgeForStopped：只清被结束的那条任务，不误伤后来设置的收件人", () => {
+    const route = new MediaRoute(60_000, () => 0);
+    route.arm("u", 2, "k2");
+    route.buffer("u", [att("a")], "m", 2);
+    expect(route.purgeForStopped("u", 1, (id) => id === 2)).toBe(0);
     expect(route.recipient("u")!.taskId).toBe(2);
-    // 旧队列没被悄悄清掉，调用方还能用 batch.taskId 找到归属
-    expect(route.takePending("u").taskId).toBe(1);
+    expect(route.pendingCount("u")).toBe(1);
+    // 「全部」才一起清
+    expect(route.purgeForStopped("u", "all", () => true)).toBe(1);
+    expect(route.recipient("u")).toBeNull();
+    expect(route.pendingCount("u")).toBe(0);
   });
 });
 
@@ -203,5 +253,19 @@ describe("decideInboundRoute（poller 分拣）", () => {
 
   it("mcpToBrain：direct 下把 MCP 切换原样交给 Agent（不进快车道）", () => {
     expect(decide({ fastLane: true, mcpToBrain: true })).toEqual({ kind: "brain" });
+  });
+});
+
+describe("deliveryTarget（过期批次不错投给新收件人）", () => {
+  it("有附件：以批次归属为准，指针已换人也不改投", () => {
+    expect(deliveryTarget({ items: [att("a")], taskId: 1 }, 2)).toBe(1);
+  });
+
+  it("有附件但批次没记归属：退回当前收件人（只在旧数据/测试里出现）", () => {
+    expect(deliveryTarget({ items: [att("a")] }, 2)).toBe(2);
+  });
+
+  it("没有附件：走当前收件人（纯文字提交）", () => {
+    expect(deliveryTarget({ items: [], taskId: 1 }, 2)).toBe(2);
   });
 });

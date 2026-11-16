@@ -51,11 +51,15 @@ export class MediaRoute {
     taskId: number,
     taskKey: string,
   ): { oldTaskId: number; batch: PendingBatch } | null {
-    const cur = this.recipient(userId);
+    // 指针可能已过期（15s 清扫还没轮到），但队列里的附件归属仍是旧任务：按批次自己的 taskId 认账，
+    // 不能因为 `recipient()` 返回 null 就把旧附件留给下一条任务（那会错投）。
+    const cur = this.recipients.get(userId);
+    const batch = this.takePending(userId);
     let displaced: { oldTaskId: number; batch: PendingBatch } | null = null;
-    if (cur && cur.taskId !== taskId) {
-      const batch = this.takePending(userId);
-      if (batch.items.length) displaced = { oldTaskId: cur.taskId, batch };
+    if (batch.items.length) {
+      const owner = batch.taskId ?? cur?.taskId;
+      if (owner !== undefined && owner !== taskId) displaced = { oldTaskId: owner, batch };
+      else this.pending.set(userId, batch); // 同一任务 / 归属不明：原样留着继续攒
     }
     this.arm(userId, taskId, taskKey);
     return displaced;
@@ -88,7 +92,24 @@ export class MediaRoute {
     items: InboundAttachment[],
     messageId: string,
     taskId?: number,
-  ): { first: boolean; count: number } {
+  ): {
+    first: boolean;
+    count: number;
+    /** 队列里原来攒的是**另一条任务**的附件：整批交还给调用方先投递，绝不静默改归属。 */
+    displaced?: { taskId: number; batch: PendingBatch };
+  } {
+    const prev = this.pending.get(userId);
+    let displaced: { taskId: number; batch: PendingBatch } | undefined;
+    if (
+      prev &&
+      prev.items.length &&
+      prev.taskId !== undefined &&
+      taskId !== undefined &&
+      prev.taskId !== taskId
+    ) {
+      this.pending.delete(userId);
+      displaced = { taskId: prev.taskId, batch: prev };
+    }
     const batch = this.pending.get(userId) ?? { items: [], messageIds: [] };
     const first = batch.items.length === 0;
     batch.items.push(...items);
@@ -96,7 +117,32 @@ export class MediaRoute {
     if (taskId !== undefined) batch.taskId = taskId;
     this.pending.set(userId, batch);
     this.touch(userId);
-    return { first, count: batch.items.length };
+    return { first, count: batch.items.length, displaced };
+  }
+
+  /** 队列里攒的附件属于哪条任务（指针过期后仍能认账）。 */
+  pendingOwner(userId: string): number | undefined {
+    return this.pending.get(userId)?.taskId;
+  }
+
+  /**
+   * 任务结束时清掉与它相关的状态（微信「结束任务」与本地 `wemind task-stop` 共用）。
+   * 指针可能已过期（15s 清扫还没轮到），所以「是不是它」同时看指针与批次归属：
+   * `isAlive` 用于兜住「任务已被别处停掉、指针还指着它」的情形。
+   * 返回被丢弃的暂存附件数（调用方据此在回执里交代，绝不静默丢文件）。
+   */
+  purgeForStopped(
+    userId: string,
+    id: number | "all" | undefined,
+    isAlive: (taskId: number) => boolean,
+  ): number {
+    const hit = (taskId: number | undefined): boolean =>
+      taskId !== undefined && (id === "all" || id === taskId || !isAlive(taskId));
+    if (hit(this.recipients.get(userId)?.taskId)) this.clear(userId);
+    if (!hit(this.pending.get(userId)?.taskId)) return 0;
+    const dropped = this.pendingCount(userId);
+    this.clearPending(userId);
+    return dropped;
   }
 
   pendingCount(userId: string): number {
@@ -135,6 +181,17 @@ export class MediaRoute {
     this.recipients.clear();
     this.pending.clear();
   }
+}
+
+/**
+ * 投递目标：队列里有附件时以**批次归属**为准（收件人指针可能已经换人/过期）。
+ * 这是「过期收件人的旧附件不错投给新任务」的最后一环。
+ */
+export function deliveryTarget(
+  batch: Pick<PendingBatch, "items" | "taskId">,
+  fallbackTaskId: number,
+): number {
+  return batch.items.length ? (batch.taskId ?? fallbackTaskId) : fallbackTaskId;
 }
 
 /** poller 对一条入站消息的分拣结果。 */

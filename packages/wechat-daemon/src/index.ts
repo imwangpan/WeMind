@@ -79,14 +79,19 @@ import {
   takePendingSensitive,
   type PendingSensitiveAttachment,
 } from "./daemon/messaging/sensitive-allow.js";
-import { pruneInboundMediaIfDue } from "./daemon/messaging/media-store.js";
+import { mediaInboxDir, pruneInboundMediaIfDue } from "./daemon/messaging/media-store.js";
 import {
   composeAgentText,
   isFlushWord,
   mediaInstructionFallback,
   prepareInboundMedia,
 } from "./daemon/messaging/inbound-media.js";
-import { decideInboundRoute, MediaRoute, type PendingBatch } from "./daemon/media-route.js";
+import {
+  decideInboundRoute,
+  deliveryTarget,
+  MediaRoute,
+  type PendingBatch,
+} from "./daemon/media-route.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./daemon/messaging/md-reply.js";
 import { isAuthorizedSender } from "./daemon/access.js";
 import { handleControl, handleControlRequest } from "./daemon/daemon-control.js";
@@ -773,6 +778,15 @@ const MEDIA_RECIPIENT_TTL_MS = Number(process.env.WEMIND_MEDIA_RECIPIENT_TTL_MS)
 const mediaRoute = new MediaRoute(MEDIA_RECIPIENT_TTL_MS);
 
 /**
+ * 任务被结束时清掉与它相关的收件人状态（微信 `结束任务` 与本地 `wemind task-stop` 共用）。
+ * 指针可能已过期（15s 清扫还没轮到），所以「是不是它」同时看指针与批次归属；只清自己，不误伤后来设置的收件人。
+ * 返回被丢弃的暂存附件数（调用方据此在回执里交代清楚）。
+ */
+function purgeMediaRouteForStopped(from: string, id?: number | "all"): number {
+  return mediaRoute.purgeForStopped(from, id, (taskId) => !!findRecipientTask(from, taskId));
+}
+
+/**
  * 把一批暂存附件（可带正文）作为一个**多模态回合**投递给任务。
  * 返回需要回给用户的说明（成功且无异常时为空串）。
  */
@@ -785,7 +799,7 @@ async function deliverPending(params: {
   onHint?: (text: string) => void;
 }): Promise<string> {
   const { from, taskId, batch, head, messageId, onHint } = params;
-  const prepared = await prepareInboundMedia(batch.items, { messageId, onHint });
+  const prepared = await prepareInboundMedia(batch.items, { messageId, onHint, role: "worker" });
   const body = composeAgentText(head, prepared.notes);
   const failNote = prepared.failures.length
     ? `（有 ${prepared.failures.length} 个附件没能下载：${prepared.failures.join("、")}。请重新发一次。）`
@@ -797,10 +811,11 @@ async function deliverPending(params: {
     images: prepared.images.length ? prepared.images : undefined,
   });
   if (err) {
-    // 任务不在了：收件人指针与残留队列一起清掉，如实交代（绝不静默丢附件）。
+    // 任务不在了：只清**属于这条任务**的指针/队列，如实交代（绝不静默丢附件）。
+    // 不能无条件 clear：调用方可能在旧批次投递期间已经设了 #2，清掉就把新收件人和新附件一起毁了。
     if (!findRecipientTask(from, taskId)) {
-      mediaRoute.clear(from);
-      mediaRoute.clearPending(from);
+      if (mediaRoute.recipient(from)?.taskId === taskId) mediaRoute.clear(from);
+      if (mediaRoute.pendingOwner(from) === taskId) mediaRoute.clearPending(from);
     }
     return err;
   }
@@ -981,12 +996,37 @@ async function pollerLoop(
           mcpToBrain: passMcpToggleToBrain(ctrl, homeModeAtBoot === "direct"),
         });
         if (route.kind === "buffer") {
-          const { first, count } = mediaRoute.buffer(
+          const { first, count, displaced } = mediaRoute.buffer(
             from,
             parts.attachments,
             messageId,
             route.recipientTaskId,
           );
+          // 队列里原来攒的是另一条任务的附件（指针换过人）：先交回原任务，绝不改归属。
+          if (displaced)
+            void deliverPending({
+              from,
+              taskId: displaced.taskId,
+              batch: displaced.batch,
+              head: "",
+              messageId,
+            })
+              .then((note) => {
+                const text = note
+                  ? `📎 先把你之前给 #${displaced.taskId} 的附件交回去了：${note}`
+                  : `📎 你之前给 #${displaced.taskId} 的 ${displaced.batch.items.length} 个附件已先提交给它。`;
+                return sends
+                  .sendNotice(
+                    from,
+                    msg.context_token,
+                    text,
+                    state.contextTokens[`${account.botId}:${from}`],
+                  )
+                  .catch(() => {});
+              })
+              .catch((e) =>
+                log.warn("media-route: displaced flush failed:", describeError(e, import.meta.url)),
+              );
           if (first)
             void sends
               .sendNotice(
@@ -1125,6 +1165,8 @@ async function handleFastItem(
   if (item.toRecipientTaskId !== undefined) {
     const taskId = item.toRecipientTaskId;
     const batch = mediaRoute.takePending(from);
+    // 队列可能是在**另一条任务**当收件人时攒的（指针过期后重新设过收件人）：按批次归属投递。
+    const targetId = deliveryTarget(batch, taskId);
     const flushOnly = batch.items.length > 0 && isFlushWord(item.text);
     // 「好了」但队列已被清扫搬走：别把「好了」当成普通正文再发一个空回合。
     if (!batch.items.length && isFlushWord(item.text)) {
@@ -1139,7 +1181,7 @@ async function handleFastItem(
     if (batch.items.length) {
       r = await deliverPending({
         from,
-        taskId,
+        taskId: targetId,
         batch,
         head,
         messageId: item.messageId,
@@ -1147,16 +1189,16 @@ async function handleFastItem(
         onHint: (t) => void notice(t),
       });
     } else {
-      r = injectTask(from, head || item.text.trim(), taskId, undefined, {});
-      if (r && !findRecipientTask(from, taskId)) {
-        mediaRoute.clear(from);
-        mediaRoute.clearPending(from);
+      r = injectTask(from, head || item.text.trim(), targetId, undefined, {});
+      if (r && !findRecipientTask(from, targetId)) {
+        if (mediaRoute.recipient(from)?.taskId === targetId) mediaRoute.clear(from);
+        if (mediaRoute.pendingOwner(from) === targetId) mediaRoute.clearPending(from);
       } else {
         mediaRoute.touch(from);
       }
     }
     log.info(
-      `task: submit-to-recipient(#${taskId}):`,
+      `task: submit-to-recipient(#${targetId}):`,
       (head || (batch.items.length ? "(附件)" : "")).slice(0, 40),
       "->",
       r.replace(/\n/g, " | "),
@@ -1233,81 +1275,86 @@ async function handleFastItem(
   }
 
   // ── 任务路由 ──
-  // 1) 结束任务（可带编号/全部）
   const tcmd = item.text ? parseTaskControl(item.text) : null;
-  if (tcmd?.kind === "stop") {
-    let r = stopTask(from, tcmd.id);
-    const rc = mediaRoute.recipient(from);
-    // 结束任务顺带清路由：被结束的正是收件人（或「全部」）时，指针与残留队列一起清掉。
-    // 待投递队列必须交代清楚：明确告知丢了几条，不静默丢文件。
-    if (rc && (tcmd.id === "all" || !findRecipientTask(from, rc.taskId))) {
-      const dropped = mediaRoute.pendingCount(from);
-      mediaRoute.clear(from);
-      mediaRoute.clearPending(from);
-      if (dropped > 0) r += `\n（还有 ${dropped} 个暂存的附件没有提交，已一并丢弃。）`;
+  if (tcmd) {
+    // 用 switch + `never` 兜底：新增任务指令 kind 却忘了在这里处理，typecheck 会当场失败。
+    switch (tcmd.kind) {
+      case "stop": {
+        let r = stopTask(from, tcmd.id);
+        const dropped = purgeMediaRouteForStopped(from, tcmd.id);
+        if (dropped > 0) r += "\n（还有 " + dropped + " 个暂存的附件没有提交，已一并丢弃。）";
+        log.info("task: stop ->", r.replace(/\n/g, " | "));
+        await notice(r);
+        return;
+      }
+      case "tasks": {
+        await notice(renderTaskList(from));
+        return;
+      }
+      case "recipient": {
+        // 裸 `#N` 或 `发给任务 N`：只设指针，不产生文本
+        const t = findRecipientTask(from, tcmd.id);
+        if (!t) {
+          await notice(`没有 #${tcmd.id} 号任务。发「任务列表」看现有编号。`);
+          return;
+        }
+        armAndFlush(from, t.id, notice);
+        const secs = Math.round(MEDIA_RECIPIENT_TTL_MS / 1000);
+        log.info(`task: recipient(#${t.id}) armed`);
+        await notice(
+          `✅ 已把 #${t.id} 设为收件人：接下来 ${secs} 秒内你发的文字、图片、文件都交给它。\n` +
+            "想回大脑发「回到大脑」，只想问大脑一句发「问大脑：…」。",
+        );
+        return;
+      }
+      case "reply": {
+        const r = injectTask(from, tcmd.text, tcmd.id, undefined, {
+          onTaskId: (id) => armAndFlush(from, id, notice),
+        });
+        log.info(`task: inject(#${tcmd.id}):`, tcmd.text.slice(0, 40));
+        if (r) await notice(r);
+        return;
+      }
+      case "toWorker": {
+        // 带 agent 名 = 指定 agent 起一条**新任务**（多任务并行）；不带 = 沿用「有任务就发给它，没有就派发」。
+        if (tcmd.agentToken) {
+          // 指定的 agent **只对这条任务生效**，不改默认任务大脑：那是账号级状态（`切换任务大脑` 是 owner-only），顺手改会让「派一条任务」变成一次隐形的全局设置变更，也破坏微信与 CLI（`--agent` 只影响那一条任务）两边的对称。
+          const r = dispatchTask(from, tcmd.text, {
+            agentKey: tcmd.agentToken,
+            onTaskId: (id) => armAndFlush(from, id, notice),
+          });
+          log.info(`task: dispatch(agent=${tcmd.agentToken}):`, r.replace(/\n/g, " | "));
+          await notice(r);
+          return;
+        }
+        // 明确发给 worker：有活跃任务 → 发给它/追加（唯一一条喂下一轮、running 暂存、多条则回编号提示）；
+        // 没有活跃任务 → 派发新任务（不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活）。
+        if (hasActiveTask(from)) {
+          const r = injectTask(from, tcmd.text, undefined, undefined, {
+            onTaskId: (id) => armAndFlush(from, id, notice),
+          });
+          log.info(
+            "task: inject(explicit):",
+            tcmd.text.slice(0, 40),
+            "->",
+            r.replace(/\n/g, " | "),
+          );
+          if (r) await notice(r);
+        } else {
+          const r = dispatchTask(from, tcmd.text, {
+            onTaskId: (id) => armAndFlush(from, id, notice),
+          });
+          log.info("task: dispatch:", r.replace(/\n/g, " | "));
+          await notice(r);
+        }
+        return;
+      }
+      default: {
+        // 新增 kind 时这里会报「类型不可赋值给 never」，提醒补 case。
+        const unhandled: never = tcmd;
+        void unhandled;
+      }
     }
-    log.info("task: stop ->", r.replace(/\n/g, " | "));
-    await notice(r);
-    return;
-  }
-  // 2) 任务列表
-  if (tcmd?.kind === "tasks") {
-    await notice(renderTaskList(from));
-    return;
-  }
-  // 2.5) 设置收件人：裸 `#N` 或 `发给任务 N`（只设指针，不产生文本）
-  if (tcmd?.kind === "recipient") {
-    const t = findRecipientTask(from, tcmd.id);
-    if (!t) {
-      await notice(`没有 #${tcmd.id} 号任务。发「任务列表」看现有编号。`);
-      return;
-    }
-    armAndFlush(from, t.id, notice);
-    const secs = Math.round(MEDIA_RECIPIENT_TTL_MS / 1000);
-    log.info(`task: recipient(#${t.id}) armed`);
-    await notice(
-      `✅ 已把 #${t.id} 设为收件人：接下来 ${secs} 秒内你发的文字、图片、文件都交给它。\n` +
-        "想回大脑发「回到大脑」，只想问大脑一句发「问大脑：…」。",
-    );
-    return;
-  }
-  // 3) 给指定编号的任务回话
-  if (tcmd?.kind === "reply") {
-    const r = injectTask(from, tcmd.text, tcmd.id, undefined, {
-      onTaskId: (id) => armAndFlush(from, id, notice),
-    });
-    log.info(`task: inject(#${tcmd.id}):`, tcmd.text.slice(0, 40));
-    if (r) await notice(r);
-    return;
-  }
-  // 4) 派发：带 agent 名 = 指定 agent 起一条**新任务**（多任务并行）；不带 = 沿用「有任务就发给它，没有就派发」
-  if (tcmd?.kind === "toWorker" && tcmd.agentToken) {
-    // 指定的 agent **只对这条任务生效**，不改默认任务大脑：那是账号级状态（`切换任务大脑` 是 owner-only），顺手改会让「派一条任务」变成一次隐形的全局设置变更，也破坏微信与 CLI（`--agent` 只影响那一条任务）两边的对称。
-    const r = dispatchTask(from, tcmd.text, {
-      agentKey: tcmd.agentToken,
-      onTaskId: (id) => armAndFlush(from, id, notice),
-    });
-    log.info(`task: dispatch(agent=${tcmd.agentToken}):`, r.replace(/\n/g, " | "));
-    await notice(r);
-    return;
-  }
-  if (tcmd?.kind === "toWorker") {
-    // 明确发给 worker：有活跃任务 → 发给它/追加（唯一一条喂下一轮、running 暂存、多条则回编号提示）；
-    // 没有活跃任务 → 派发新任务（不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活）。
-    if (hasActiveTask(from)) {
-      const r = injectTask(from, tcmd.text, undefined, undefined, {
-        onTaskId: (id) => armAndFlush(from, id, notice),
-      });
-      log.info("task: inject(explicit):", tcmd.text.slice(0, 40), "->", r.replace(/\n/g, " | "));
-      if (r) await notice(r);
-    } else {
-      const r = dispatchTask(from, tcmd.text, {
-        onTaskId: (id) => armAndFlush(from, id, notice),
-      });
-      log.info("task: dispatch:", r.replace(/\n/g, " | "));
-      await notice(r);
-    }
-    return;
   }
 
   // poller 按**入队时**的任务状态把「继续」类短句送进快车道；出队时状态可能已变（任务刚出完结果），
@@ -1584,7 +1631,7 @@ async function sweepMediaRecipients(
     if (batch.items.length) {
       const r = await deliverPending({
         from: userId,
-        taskId: recipient.taskId,
+        taskId: batch.taskId ?? recipient.taskId,
         batch,
         head: "",
         messageId: batch.messageIds[batch.messageIds.length - 1] ?? "0",
@@ -1704,7 +1751,9 @@ export async function runDaemon(): Promise<void> {
     log.error("agent config/workspace unavailable:", describeError(e, import.meta.url));
     throw e;
   }
-  const pruned = pruneInboundMediaIfDue(); // 启动时清一次过期/超额入站附件（并把节流时钟起好）
+  // 启动时清一次过期/超额入站附件（并把节流时钟起好）：managed 下 brain / worker 各有一份目录。
+  const pruned = pruneInboundMediaIfDue();
+  for (const role of ["worker"] as const) pruneInboundMediaIfDue(undefined, mediaInboxDir(role));
   if (pruned?.removed)
     log.info(`pruned inbound media: ${pruned.removed} files, ${pruned.bytes}B left`);
   log.info(
@@ -1718,8 +1767,9 @@ export async function runDaemon(): Promise<void> {
   // 按用户串行（媒体要下载/读盘，若并发解析，后到的短回复可能抢先发出）。
   const taskReplyChains = new Map<string, Promise<void>>();
   const sendTaskReply = async (to: string, rawText: string): Promise<void> => {
-    const tok = state.contextTokens[`${account.botId}:${to}`];
-    const { text, mediaCount } = await sendReplyMedia(to, rawText, sends, () => tok);
+    // 每次发送时现取 token：大文件下载可能耗时几十秒，期间用户又发过消息，旧 token 可能已失效。
+    const tok = (): string | undefined => state.contextTokens[`${account.botId}:${to}`];
+    const { text, mediaCount } = await sendReplyMedia(to, rawText, sends, tok);
     // 只有媒体、没有正文时不必再发一条空消息；两者都没有才说明「没有内容」
     const finalText = text || (mediaCount === 0 ? "（没有内容）" : "");
     if (!finalText) return;
@@ -1733,7 +1783,7 @@ export async function runDaemon(): Promise<void> {
       return;
     }
     b.count += 1;
-    void sends.sendOrdered(to, tok, finalText, MessageState.FINISH, tok, (e) =>
+    void sends.sendOrdered(to, tok(), finalText, MessageState.FINISH, tok(), (e) =>
       sends.holdUndelivered(to, finalText, e),
     );
   };
@@ -1769,7 +1819,11 @@ export async function runDaemon(): Promise<void> {
   const taskInboxOps = {
     dispatch: dispatchTask,
     inject: injectTask,
-    stop: stopTask,
+    stop: (to: string, id?: number | "all", ackId?: string) => {
+      const r = stopTask(to, id, ackId);
+      purgeMediaRouteForStopped(to, id); // 本地 task-stop 绕过了微信分支：收件人指针/暂存附件同样要清
+      return r;
+    },
     writeAck: (ackId: string | undefined, text: string) => writeTaskAck(DATA_DIR, ackId, text),
     log: leveledLog,
   };

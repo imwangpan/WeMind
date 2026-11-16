@@ -14,6 +14,7 @@ vi.mock("@wemind/wechat-ilink-core", () => ({
   MAX_INCOMING_MEDIA_BYTES: 1024,
 }));
 vi.mock("./media-store.js", () => ({
+  mediaInboxDir: (role?: string) => `/inbox/${role ?? "brain"}`,
   safeMediaFileName: (name: string | undefined, fallback: string) => name || fallback,
   saveInboundMedia,
 }));
@@ -108,13 +109,23 @@ describe("prepareInboundMedia", () => {
   it("文件：落盘 + 说明里带路径和大小", async () => {
     downloadMediaBuffer.mockResolvedValue(Buffer.alloc(2048));
     const r = await prepareInboundMedia([file("a.txt")], { messageId: "m" });
-    expect(saveInboundMedia).toHaveBeenCalledWith(Buffer.alloc(2048), {
-      messageId: "m",
-      fileName: "a.txt",
-      kind: "file",
-    });
+    expect(saveInboundMedia).toHaveBeenCalledWith(
+      Buffer.alloc(2048),
+      { messageId: "m", fileName: "a.txt", kind: "file" },
+      "/inbox/brain",
+    );
     expect(r.notes).toEqual(["[用户发来文件] 名称: a.txt；大小: 2KB；本地路径: /media/saved.bin"]);
     expect(r.otherCount).toBe(1);
+  });
+
+  it("managed 下按角色落到各自的 media/inbound（worker 不写 brain-home）", async () => {
+    downloadMediaBuffer.mockResolvedValue(Buffer.alloc(16));
+    await prepareInboundMedia([file("a.txt")], { messageId: "m", role: "worker" });
+    expect(saveInboundMedia).toHaveBeenCalledWith(
+      Buffer.alloc(16),
+      { messageId: "m", fileName: "a.txt", kind: "file" },
+      "/inbox/worker",
+    );
   });
 
   it("文件下载失败：failures 用文件名", async () => {
@@ -133,21 +144,21 @@ describe("prepareInboundMedia", () => {
   it("语音：silkToWav 成功用 wav；失败退回 silk", async () => {
     downloadMediaBuffer.mockResolvedValue(Buffer.alloc(100));
     const r = await prepareInboundMedia([voice(3000)], { messageId: "m" });
-    expect(saveInboundMedia).toHaveBeenCalledWith(Buffer.from("wav"), {
-      messageId: "m",
-      fileName: "voice.wav",
-      kind: "voice",
-    });
+    expect(saveInboundMedia).toHaveBeenCalledWith(
+      Buffer.from("wav"),
+      { messageId: "m", fileName: "voice.wav", kind: "voice" },
+      "/inbox/brain",
+    );
     expect(r.notes[0]).toContain("格式: audio/wav；时长: 3.0s");
     expect(r.notes[0]).toContain("微信没有提供转写");
 
     silkToWav.mockResolvedValue(null);
     const r2 = await prepareInboundMedia([voice()], { messageId: "m" });
-    expect(saveInboundMedia).toHaveBeenLastCalledWith(Buffer.alloc(100), {
-      messageId: "m",
-      fileName: "voice.silk",
-      kind: "voice",
-    });
+    expect(saveInboundMedia).toHaveBeenLastCalledWith(
+      Buffer.alloc(100),
+      { messageId: "m", fileName: "voice.silk", kind: "voice" },
+      "/inbox/brain",
+    );
     expect(r2.notes[0]).toContain("格式: audio/silk");
   });
 

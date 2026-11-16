@@ -227,7 +227,7 @@ function normalizeWinPath(p: string): string {
  * 拒绝网络路径与 NTFS 备用数据流。
  * `account.json::$DATA` 这类 ADS 路径 basename 会变成 `account.json::$data`，能绕过所有按名规则。
  */
-function assertLocalPath(p: string, src: string): void {
+export function assertLocalPath(p: string, src: string): void {
   const q = normalizeWinPath(p);
   // UNC（\\server\share）会触发 SMB 认证；只允许本机路径。
   if (/^[\\/]{2}/.test(q)) throw new Error(`只允许本地绝对路径（不支持网络路径）：${src}`);

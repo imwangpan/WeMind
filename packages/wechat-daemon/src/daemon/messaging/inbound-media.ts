@@ -6,7 +6,8 @@ import {
 } from "@wemind/wechat-ilink-core";
 
 import type { InboundAttachment } from "../daemon-routing.js";
-import { safeMediaFileName, saveInboundMedia } from "./media-store.js";
+import type { AgentRole } from "../../agents/brain-config.js";
+import { mediaInboxDir, safeMediaFileName, saveInboundMedia } from "./media-store.js";
 import { silkToWav } from "./voice.js";
 
 /**
@@ -58,9 +59,11 @@ function fmtBytes(n: number): string {
  */
 export async function prepareInboundMedia(
   attachments: InboundAttachment[],
-  opts: { messageId: string; onHint?: (text: string) => void },
+  opts: { messageId: string; onHint?: (text: string) => void; role?: AgentRole },
 ): Promise<PreparedMedia> {
   const messageId = opts.messageId;
+  // managed 下角色各有自己的副本：worker 的附件必须落在 worker-home，而不是 brain-home。
+  const dir = mediaInboxDir(opts.role ?? "brain");
   const imageItems = attachments
     .filter((a): a is Extract<InboundAttachment, { kind: "image" }> => a.kind === "image")
     .map((a) => a.item);
@@ -96,7 +99,7 @@ export async function prepareInboundMedia(
           label: "file",
         });
         const name = safeMediaFileName(a.item.file_name, "file.bin");
-        const saved = saveInboundMedia(buf, { messageId, fileName: name, kind: "file" });
+        const saved = saveInboundMedia(buf, { messageId, fileName: name, kind: "file" }, dir);
         notes.push(
           `[用户发来文件] 名称: ${name}；大小: ${fmtBytes(buf.length)}；本地路径: ${saved}`,
         );
@@ -107,7 +110,11 @@ export async function prepareInboundMedia(
           maxBytes: MAX_INCOMING_MEDIA_BYTES,
           label: "video",
         });
-        const saved = saveInboundMedia(buf, { messageId, fileName: "video.mp4", kind: "video" });
+        const saved = saveInboundMedia(
+          buf,
+          { messageId, fileName: "video.mp4", kind: "video" },
+          dir,
+        );
         const dur = a.item.play_length ? `；时长: ${a.item.play_length}s` : "";
         notes.push(`[用户发来视频] 大小: ${fmtBytes(buf.length)}${dur}；本地路径: ${saved}`);
         log.info(`inbound video saved: ${saved} (${buf.length}B)`);
@@ -119,11 +126,11 @@ export async function prepareInboundMedia(
           label: "voice",
         });
         const wav = await silkToWav(buf);
-        const saved = saveInboundMedia(wav ?? buf, {
-          messageId,
-          fileName: wav ? "voice.wav" : "voice.silk",
-          kind: "voice",
-        });
+        const saved = saveInboundMedia(
+          wav ?? buf,
+          { messageId, fileName: wav ? "voice.wav" : "voice.silk", kind: "voice" },
+          dir,
+        );
         const dur = a.item.playtime ? `；时长: ${(a.item.playtime / 1000).toFixed(1)}s` : "";
         notes.push(
           `[用户发来语音] 格式: ${wav ? "audio/wav" : "audio/silk"}${dur}；本地路径: ${saved}；` +

@@ -236,7 +236,7 @@ poller（长轮询，不被大脑阻塞）
 4. 不在文档里复制易变细节（版本号、完整方法列表）；给「怎么查」（`initialize`、`wemind brain`）而不是「背答案」。
 5. 内部链接用相对路径；新增文件后跑 `pwsh -NoProfile -File scripts/check-docs.ps1`（CI 也可用）。
 6. 结论被推翻时，除了改正文，还要在 `scripts/doc-impact.rules.mjs` 的 `STALE_FACTS` 登记旧措辞（`id` / `since` / `why` / `pattern` / `allow`）；`npm run doc-impact:check` 会读工作树最终内容逐行拦截，报「文件:行号」。确实该保留的历史段/归档索引/测试反例用 `allow.marker` 写明约定（声明被删则放行失效）。`Docs-Impact: none` 豁免不覆盖这一层。见 [`文档守卫设计.md`](../设计文档/文档守卫设计.md) §3.7、§7.4。
-7. 2026-11-15 守卫自身也修了：C-quoted git 路径还原、`--staged` 读 index blob、内容扫描跳过代码围栏、`testRe()` 每次重置 `lastIndex`、dirty diff 不算未跟踪文件、`1\.0\.107(?!\d)` 不误报 `1.0.1070`（用例 `scripts/doc-guards.test.mjs`）；改 `cli-config.ts` 必须同步 `packages/wechat-daemon/src/cli/subcommands/cli-config.test.ts`。本轮全量 `npm test`：107 个测试文件 / 1205 passed + 4 skipped（快照）。
+7. 2026-11-15 守卫自身也修了：C-quoted git 路径还原、`--staged` 读 index blob、内容扫描跳过代码围栏、`testRe()` 每次重置 `lastIndex`、dirty diff 不算未跟踪文件、`1\.0\.107(?!\d)` 不误报 `1.0.1070`（用例 `scripts/doc-guards.test.mjs`）；改 `cli-config.ts` 必须同步 `packages/wechat-daemon/src/cli/subcommands/cli-config.test.ts`。本轮全量 `npm test`：107 个测试文件 / 1205 passed + 4 skipped（当时的快照；2026-11-16 已增至 **110 个测试文件 / 1261 passed + 4 skipped**）。
 
 ---
 
