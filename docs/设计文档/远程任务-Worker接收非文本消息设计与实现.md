@@ -493,3 +493,9 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 ### 20.7 分派改成 switch + never 兜底
 
 `handleFastItem()` 的任务指令分派改成 `switch (tcmd.kind)`，`default` 里 `const unhandled: never = tcmd`。审查期间出现过「删掉一个分支而测试仍全绿」的事故（`index.ts` 的这些分支没有端到端用例），加这层兜底后，新增 `TaskCommand` kind 却忘了处理会当场 typecheck 失败。`handleFastItem()` 本身仍无集成测试，投递目标等纯逻辑已下沉到 `media-route.ts` 单测覆盖。
+
+### 20.8 有意保留：超时回执不看连发额度（P2-5）
+
+`sweepMediaRecipients()` 的 `⌛ 超时取消` 回执直接 `sends.sendNotice()`，不像快车道的 `notice()` 那样在「本回合额度见底」时让位（`deferTaskPush()`）。理论上存在一条窄路径：用户给收件人发到 8–9 条 → 清扫回执占掉保留给最终答案的最后一条 → 大脑答案被 `ret=-2` 挂起，等用户下一条消息才补发。
+
+**决定（2026-11-16，用户确认）：保持现状**。理由：触发需要「收件人到期 + 用户恰在此刻发消息 + 大脑回合在跑且已发 ≥8 条」四件事同时发生；后果只是顺序与延迟，不丢文件、不错投、不改路由；且与进入回执、`结束任务` 回执等其他 `sendNotice()` 用法一致。真要修只需在清扫里加一次 `activeTurn` + `budget.count >= limit - 1` 判断后改走 `deferTaskPush()`。
