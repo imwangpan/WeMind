@@ -207,7 +207,7 @@ MCP **文件格式**知识集中在 `agents/managed/mcp-adapters.ts` 的 `McpAda
 
 `ensureBrainHome()` 的顺序是：`direct` 直接返回（不写任何文件）→ `managed` 才执行同步非 MCP 设置 → `linkRealKnowledge` → `syncCredentials` → `stripWechatFromConfigCopy` → 生成 MCP 文件 → `applySettingsDefaults` → kiro v3 权限。`syncProfilePatch` 对 DSH 的真实 `profiles/<名>/cordis.patch.yml`：provider/模型条目原样复制；`mcpDelivery: "acp"` 时剥离**全部** MCP 条目（集合改由 ACP 注入），否则只剔除微信 MCP 条目（真实文件不动）。
 
-`wemind brain check` 起的自检副本在 `mcpDelivery: "acp"` 时同样剥离**全部** MCP 条目（`copyProfilePatch` 的 `stripAllMcp`），自检也能按真实投递方式跑。
+`wemind brain check` 起的自检副本在 `mcpDelivery: "acp"` 时同样剥离**全部** MCP 条目（`copyProfilePatch` 的 `stripAllMcp`），自检也能按真实投递方式跑。`agent check` 与 `brain check` 共用 `checkAgent()`：成功或失败后都按「Windows taskkill 进程树 + `kill()` 兜底 + destroy stdin/stdout/stderr + `unref()`」清理；某些 agent 会再拉起脱离进程树的子进程并继承 stdio，只杀直接子进程会让 CLI 在打印结论后仍被残留管道挂住。
 
 > 换模型/权限后旧 ACP 会话可能仍绑旧配置，需要新会话或 `wemind config reload`。真实配置变化由 `configFingerprint()` 在下一轮开始前发现：它先入哈希 `ag.name` + `rt.mode`，再哈希 `settingsBase` / `mcpConfigFile` / `catalogFile` / profile 一层文件 / overlay（跳过 Agent 自己高频写的会话/历史文件）。**指纹不再恒为空**：没有 `homeEnvVar` 的 Agent（claude-code / cline / qoder 等）也把 `ag.name + rt.mode` 与微信侧 overlay 单独哈希，homeMode 从 `direct` 改成 `managed` 会改变 `rt.mode`、触发重建（旧行为返回空串，会让旧进程因 `configFp === before` 一直复用、仍按 direct 下发空 MCP 集）；`direct` 与 `managed` 都盯真实配置，managed 在下次 spawn 时重新复制。`wemind config reload` 重读 Agent 配置、`seedSlots(loadBrainConfig(DATA_DIR))` 重新 seed 槽位，并按三态重启 brain：`applied` 立即重建进程生效；有回合在跑时 `queued`，排到回合结束再重启（不打断输出）并落盘 `runtime.json` 的 `pendingReload`，如实回执「重启已排队到回合结束」；切脑进行中 `failed`，不重启并提示重试。
 

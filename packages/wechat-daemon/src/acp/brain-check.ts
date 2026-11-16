@@ -213,15 +213,22 @@ export async function checkAgent(
     };
   } finally {
     try {
-      if (process.platform === "win32" && proc.pid)
+      if (process.platform === "win32" && proc.pid) {
         spawnSync("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
           stdio: "ignore",
           windowsHide: true,
         });
-      else proc.kill();
+      }
+      if (!proc.killed) proc.kill();
     } catch {
       /* ignore */
     }
+    // 有些 agent 会再拉起脱离进程树的子进程并继承 stdio；只杀直接子进程时，残留管道会让 CLI 一直不退出。
+    // 自检已经拿到结论，主动关掉管道并 unref，避免 `agent check` 成功打印后仍挂住终端。
+    proc.stdin.destroy();
+    proc.stdout.destroy();
+    proc.stderr.destroy();
+    proc.unref();
     try {
       fs.rmSync(home, { recursive: true, force: true });
     } catch {
