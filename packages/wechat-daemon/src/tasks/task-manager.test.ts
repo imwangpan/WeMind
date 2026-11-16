@@ -154,7 +154,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     expect(has(pushed, "🤖【任务】")).toBe(true); // 来源标记
     // 每条结果都带「怎么回这条任务」的提示（无前缀的消息已改为走大脑）
     expect(has(pushed, "#1 正文")).toBe(true);
-    expect(has(pushed, "不带前缀的消息会交给大脑")).toBe(true);
+    expect(has(pushed, "不带前缀的消息默认交给大脑")).toBe(true);
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1)); // 推送后进入 waiting
 
     injectTask("u1", "选 A"); // waiting 态回话 → 第二轮

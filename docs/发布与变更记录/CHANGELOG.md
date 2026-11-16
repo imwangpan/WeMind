@@ -12,6 +12,7 @@
 
 - **worker 接收图片/文件等非文本消息（2026-11-16）**：微信侧非文本消息本身不带地址，新增**收件人模式**——`#<编号>` / `发给任务 <编号>` 只把任务设为收件人（`任务：` / `#<编号> 正文` / `继续` 顺带设置），之后不带前缀的文字与附件都交给该任务。附件先入内存待投递队列（首批回执 `📎 已把收到的附件交给 #N…`），下一句文字或 `好了`/`就这样` 时经 `prepareInboundMedia()`（`daemon/messaging/inbound-media.ts`，从 `index.ts` 抽出的 brain 媒体管线）下载解密，图片以 ACP `image` 块、文件/视频/无转写语音以本地路径说明并入同一个 `injectTask(..., { images })` 回合；`applyMediaToPrompt()`（`acp/prompt-media.ts`）让 brain 与 worker 共用同一套「不支持图片就给明确说明、不臆测内容」的降级。收件人按发送者隔离、内存态（`daemon/media-route.ts` 的 `MediaRoute`），静默 1 分钟滑动超时自动退出并把队列里的附件补交回去（`WEMIND_MEDIA_RECIPIENT_TTL_MS` 可调），`回到大脑` / `/to-brain` 主动退出，`问大脑：…` 只逃逸一句，任务结束或 `结束任务` 自动清除。**未设收件人时行为不变**：带附件的消息仍一律交给大脑（`isFastLane()` / `shouldResumeInBrainQueue()` 的安全降级保留）。
 - **brain 逃逸前缀扩展**：除 `问大脑` 外新增 `大脑：xxx` / `大脑 xxx` 与 `brain: xxx` / `brain xxx`（大小写不敏感，必须带冒号或空格）；不带斜杠，避免与 `切换大脑` 的 `/brain` 冲突。
+- **worker 任务结果可以发图片/文件/视频（2026-11-16）**：worker 在结果里写 `![](本地路径或 http 直链)`、`[附件](file:///绝对路径)` / `[文件](…)` / `[视频](…)`，daemon 用与大脑相同的出站管线（`sendReplyMedia()`：`extractImages()` / `extractAttachments()` → `resolveImageBytes()` / `resolveAttachment()`）解析成独立媒体消息再发正文。每张图片/每个文件各占一条连发额度；敏感文件同样被 denylist 拦截，「允许敏感文件」窗口内放行；失败时正文里保留原路径并附说明。worker 每个任务会话首轮会收到一次「可发图/发文件」约定提示（`hintedSessions`）。同一用户的多条任务推送按顺序串行（媒体要先下载/读盘）。任务推送末尾的提示改为「不带前缀的消息**默认**交给大脑（发「#N」可设为收件人）」，收件人模式下不再误导。
 
 ## [2.0.0] 本机 Agent 终端等效工作模式（默认 direct）· `wemind config|workspace|env`（2026-11-16）
 

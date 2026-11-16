@@ -698,86 +698,15 @@ async function handleMessage(
     cancelSecond();
   }
   await setTyping(account, to, cx(), 2);
-  // 发图：从回复里提取图片引用（markdown ![](url/路径) 或裸图片 URL），逐个作为图片消息发出，再发剩余文本
-  const { images: replyImages, text: cleaned } = extractImages(answer || "");
-  const failedImgs: ImageFailure[] = [];
-  for (const im of replyImages) {
-    let buf: Buffer;
-    try {
-      buf = await resolveImageBytes(im.src);
-    } catch (e) {
-      log.warn("image download failed:", im.src, String(e));
-      failedImgs.push({ src: im.src, reason: "download" });
-      continue;
-    }
-    if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
-      log.warn("image skipped (连发额度留给最终文字):", im.src);
-      failedImgs.push({ src: im.src, reason: "budget" });
-      continue;
-    }
-    sends.budgetOf(to).count += 1; // 图片也占一条连发额度
-    if (await sends.sendImageOrdered(to, cx(), buf)) {
-      log.info(`sent image: ${im.src.slice(0, 80)}`);
-    } else {
-      log.warn("send image failed:", im.src);
-      failedImgs.push({ src: im.src, reason: "send" });
-    }
-  }
-
-  // 发文件/视频：显式 [附件]/[文件]/[视频](绝对路径)，逐个作为独立媒体消息发出。
-  const { attachments: replyAttachments, text: cleanedText } = extractAttachments(cleaned);
-  const failedAttachments: AttachmentFailure[] = [];
-  const blockedSensitive: PendingSensitiveAttachment[] = [];
-  for (const attachment of replyAttachments) {
-    let resolved;
-    try {
-      // 「允许敏感文件」窗口内跳过凭证/状态名单；其余闸门（绝对路径/UNC/数据流/大小）照旧。
-      resolved = resolveAttachment(attachment, undefined, {
-        allowSensitive: sensitiveAllowActive(),
-      });
-    } catch (e) {
-      log.warn("attachment rejected:", attachment.src, String(e));
-      if (isSensitiveFileError(e)) {
-        // 先拦截、后放行：记进待补发队列，用户回「允许敏感文件」时直接补发，不用让大脑重发一遍。
-        blockedSensitive.push({ src: attachment.src, kind: attachment.kind });
-        failedAttachments.push({ src: attachment.src, reason: "sensitive" });
-      } else {
-        failedAttachments.push({ src: attachment.src, reason: "read" });
-      }
-      continue;
-    }
-    if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
-      log.warn("attachment skipped (连发额度留给最终文字):", attachment.src);
-      failedAttachments.push({ src: attachment.src, reason: "budget" });
-      continue;
-    }
-    sends.budgetOf(to).count += 1; // 文件/视频也占一条连发额度
-    if (await sends.sendFileOrdered(to, cx(), resolved.data, resolved.fileName, resolved.kind)) {
-      log.info(
-        `sent attachment (${resolved.kind}${resolved.sensitiveBypassed ? "，敏感文件已临时放行" : ""}): ${resolved.fileName} ${resolved.data.length}B <- ${attachment.src.slice(0, 80)}`,
-      );
-    } else {
-      log.warn("send attachment failed:", attachment.src);
-      failedAttachments.push({ src: attachment.src, reason: "send" });
-    }
-  }
-  if (blockedSensitive.length > 0) {
-    const n = rememberPendingSensitive(to, blockedSensitive);
-    log.info(
-      `blocked sensitive attachments: ${blockedSensitive.length}（待补发 ${n} 条，回复「允许敏感文件」）`,
-    );
-  }
-
+  // 发图 / 发文件：先各自作为独立消息发出，余下正文再发（与 worker 任务推送共用同一套口子）
+  const { text: cleanedText, mediaCount } = await sendReplyMedia(to, answer || "", sends, cx);
   let finalText = cleanedText;
   if (imageNote) finalText = finalText ? `${imageNote}\n${finalText}` : imageNote;
   const inboundNote = incomingFailures.length
     ? `（有 ${incomingFailures.length} 个入站附件没能下载：${incomingFailures.join("、")}）`
     : "";
-  const note = [inboundNote, imageFailureNote(failedImgs), attachmentFailureNote(failedAttachments)]
-    .filter(Boolean)
-    .join("\n\n");
-  if (note) finalText = finalText ? `${finalText}\n\n${note}` : note;
-  if (!finalText && !replyImages.length && !replyAttachments.length) finalText = "（没有内容）";
+  if (inboundNote) finalText = [finalText, inboundNote].filter(Boolean).join("\n\n");
+  if (!finalText && mediaCount === 0) finalText = "（没有内容）";
   let finalSendFailed = false;
   if (finalText) {
     sends.budgetOf(to).count += 1; // 最终答案占一条额度（等待段预留的最后一条）
@@ -1548,6 +1477,98 @@ function readPidFile(file: string): number | null {
 }
 
 /**
+ * 出站媒体：从回复文本里抽出图片 / 文件 / 视频，逐条发出，返回剩余正文。
+ * brain 回合与 worker 任务推送共用（预算记账、敏感文件拦截、失败说明口径一致）。
+ */
+async function sendReplyMedia(
+  to: string,
+  answer: string,
+  sends: SendPipeline,
+  ctxToken: () => string | undefined,
+): Promise<{ text: string; mediaCount: number }> {
+  // 发图：markdown ![](url/路径) 或裸图片 URL，逐个作为图片消息发出，再发剩余文本
+  const { images: replyImages, text: cleaned } = extractImages(answer || "");
+  const failedImgs: ImageFailure[] = [];
+  let mediaCount = 0;
+  for (const im of replyImages) {
+    let buf: Buffer;
+    try {
+      buf = await resolveImageBytes(im.src);
+    } catch (e) {
+      log.warn("image download failed:", im.src, String(e));
+      failedImgs.push({ src: im.src, reason: "download" });
+      continue;
+    }
+    if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
+      log.warn("image skipped (连发额度留给最终文字):", im.src);
+      failedImgs.push({ src: im.src, reason: "budget" });
+      continue;
+    }
+    sends.budgetOf(to).count += 1; // 图片也占一条连发额度
+    if (await sends.sendImageOrdered(to, ctxToken(), buf)) {
+      mediaCount += 1;
+      log.info(`sent image: ${im.src.slice(0, 80)}`);
+    } else {
+      log.warn("send image failed:", im.src);
+      failedImgs.push({ src: im.src, reason: "send" });
+    }
+  }
+
+  // 发文件/视频：显式 [附件]/[文件]/[视频](绝对路径)，逐个作为独立媒体消息发出
+  const { attachments: replyAttachments, text: cleanedText } = extractAttachments(cleaned);
+  const failedAttachments: AttachmentFailure[] = [];
+  const blockedSensitive: PendingSensitiveAttachment[] = [];
+  for (const attachment of replyAttachments) {
+    let resolved;
+    try {
+      // 「允许敏感文件」窗口内跳过凭证/状态名单；其余闸门（绝对路径/UNC/数据流/大小）照旧。
+      resolved = resolveAttachment(attachment, undefined, {
+        allowSensitive: sensitiveAllowActive(),
+      });
+    } catch (e) {
+      log.warn("attachment rejected:", attachment.src, String(e));
+      if (isSensitiveFileError(e)) {
+        // 先拦截、后放行：记进待补发队列，用户回「允许敏感文件」时直接补发，不用让 agent 重发一遍。
+        blockedSensitive.push({ src: attachment.src, kind: attachment.kind });
+        failedAttachments.push({ src: attachment.src, reason: "sensitive" });
+      } else {
+        failedAttachments.push({ src: attachment.src, reason: "read" });
+      }
+      continue;
+    }
+    if (!canSendMedia(sends.budgetOf(to).count, CONSEC_SEND_LIMIT)) {
+      log.warn("attachment skipped (连发额度留给最终文字):", attachment.src);
+      failedAttachments.push({ src: attachment.src, reason: "budget" });
+      continue;
+    }
+    sends.budgetOf(to).count += 1; // 文件/视频也占一条连发额度
+    if (
+      await sends.sendFileOrdered(to, ctxToken(), resolved.data, resolved.fileName, resolved.kind)
+    ) {
+      mediaCount += 1;
+      log.info(
+        `sent attachment (${resolved.kind}${resolved.sensitiveBypassed ? "，敏感文件已临时放行" : ""}): ${resolved.fileName} ${resolved.data.length}B <- ${attachment.src.slice(0, 80)}`,
+      );
+    } else {
+      log.warn("send attachment failed:", attachment.src);
+      failedAttachments.push({ src: attachment.src, reason: "send" });
+    }
+  }
+  if (blockedSensitive.length > 0) {
+    const n = rememberPendingSensitive(to, blockedSensitive);
+    log.info(
+      `blocked sensitive attachments: ${blockedSensitive.length}（待补发 ${n} 条，回复「允许敏感文件」）`,
+    );
+  }
+
+  const note = [imageFailureNote(failedImgs), attachmentFailureNote(failedAttachments)]
+    .filter(Boolean)
+    .join("\n\n");
+  const text = note ? [cleanedText, note].filter(Boolean).join("\n\n") : cleanedText;
+  return { text, mediaCount };
+}
+
+/**
  * 收件人到期清扫：到期即取消并回执（绝不静默切换归属），队列里已攒的附件尽力补交给原任务。
  * 由 runDaemon 里的定时器周期调用（滑动空闲 TTL，默认 1 分钟）。
  */
@@ -1693,22 +1714,40 @@ export async function runDaemon(): Promise<void> {
 
   const state: ServerState = loadState();
   const sends = createSendPipeline(account);
-  // worker 任务推送：用该用户最新 token 经串行发送层发出（与 brain 共用 sendOrdered，保证不乱序）
-  setTaskPush((to, text) => {
+  // worker 任务推送：先按与 brain 相同的口子解析出站图片/文件/视频，再发正文；
+  // 按用户串行（媒体要下载/读盘，若并发解析，后到的短回复可能抢先发出）。
+  const taskReplyChains = new Map<string, Promise<void>>();
+  const sendTaskReply = async (to: string, rawText: string): Promise<void> => {
     const tok = state.contextTokens[`${account.botId}:${to}`];
+    const { text, mediaCount } = await sendReplyMedia(to, rawText, sends, () => tok);
+    // 只有媒体、没有正文时不必再发一条空消息；两者都没有才说明「没有内容」
+    const finalText = text || (mediaCount === 0 ? "（没有内容）" : "");
+    if (!finalText) return;
     // task 推送也占用连续发送额度（与 brain 回合共用 budgetOf）：task 在后台运行，可能与 brain 回合并发，若不计数，本地 budget 会低估服务端真实连续发送数 → brain 的 sendProgress 误判「还能发」→ 撞 ret=-2 限流、结果丢失。
     // 注：task 推送是「本轮结果」（必须送达），故只累加计数、不被 awaiting 暂停（暂停只作用于可丢弃的 brain 进度提示）。
     const b = sends.budgetOf(to);
     // 但大脑回合已接近上限时，最后一条额度要留给最终答案：先延后，回合结束后再发（见 flushDeferredTaskPushes）。
     if (shouldDeferTaskPush(activeTurn?.from, to, b.count, CONSEC_SEND_LIMIT)) {
-      const n = sends.deferTaskPush(to, text);
+      const n = sends.deferTaskPush(to, finalText);
       log.info(`任务推送遇大脑回合额度将满 → 延后到回合结束（累计 ${n} 条，${to}）`);
       return;
     }
     b.count += 1;
-    void sends.sendOrdered(to, tok, text, MessageState.FINISH, tok, (e) =>
-      sends.holdUndelivered(to, text, e),
+    void sends.sendOrdered(to, tok, finalText, MessageState.FINISH, tok, (e) =>
+      sends.holdUndelivered(to, finalText, e),
     );
+  };
+  setTaskPush((to, text) => {
+    const prev = taskReplyChains.get(to) ?? Promise.resolve();
+    const next = prev.then(
+      () => sendTaskReply(to, text),
+      () => sendTaskReply(to, text),
+    );
+    taskReplyChains.set(to, next);
+    const cleanup = (): void => {
+      if (taskReplyChains.get(to) === next) taskReplyChains.delete(to);
+    };
+    next.then(cleanup, cleanup);
   });
   // worker 跑一轮期间持续「正在输入中」（typing 不占连续发送上限），避免长任务静默让用户以为卡了
   setTaskTyping((to) => {

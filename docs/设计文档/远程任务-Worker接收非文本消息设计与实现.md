@@ -445,3 +445,14 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 5. **收件人 / 待投递不落盘**，重启即失效是**预期行为**，不是 bug。
 6. **媒体下载 / prompt 降级逻辑只有一份**（`inbound-media.ts` / `prompt-media.ts`），brain 与 worker 共用。
 7. **回执占额度**，遵守 §4.5 的连发上限与让位规则。
+
+## 19. 追加（同分支，2026-11-16）：worker 出站媒体
+
+收非文本做通后，用户要求在同一个分支补上反方向：worker 的任务结果也能发图片/文件/视频。
+
+- **共用出站管线**：把 brain 回合里「从回复文本抽媒体 → 逐条发出」的代码原样抽成模块级 `sendReplyMedia(to, answer, sends, ctxToken)`（`index.ts`），返回 `{ text, mediaCount }`。brain 的 `handleMessage` 与 worker 的 `setTaskPush` 都调它，因此预算记账（`canSendMedia()` + `budgetOf(to).count += 1`）、敏感文件拦截（`sensitiveAllowActive()` / `rememberPendingSensitive()`）、失败说明（`imageFailureNote()` / `attachmentFailureNote()`）只有一套口径。
+- **顺序**：brain 与 worker 都是「先媒体、后正文」。任务推送额外按用户串行（`taskReplyChains`，`Map<userId, Promise>`），因为媒体要先下载/读盘，并发解析会让后到的短回复抢先发出。
+- **只发媒体、没有正文**时不补一条空消息；两者都没有才发「（没有内容）」。
+- **可发现性**：worker 每个会话首轮追加一次约定提示（`hintedSessions`，键 `<agent>:<sessionId>`），措辞只讲「怎么写就能发」与「占连发额度、别刷屏」，不改 agent 自身能力。
+- **不与「附件一律给大脑」冲突**：这条限制只作用于入站路由；出站是任务结果的一部分，本来就属于 worker。
+- **提示文案**：任务推送末尾从「不带前缀的消息会交给大脑」改为「不带前缀的消息默认交给大脑（发「#N」可设为收件人）」——收件人模式下前者不准确，且这行是用户学习寻址的主要入口。
