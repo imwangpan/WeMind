@@ -13,8 +13,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { WEMIND_ROOT } from "@wemind/wechat-ilink-core";
-
 import {
   AGENT_MCP_FORMATS,
   formatAgentDefinitionProblems,
@@ -22,7 +20,9 @@ import {
   type AgentDefinition,
   type AgentDefinitionProblem,
 } from "./agent-definition.js";
-import { clineCredentialEnv } from "./cline-credentials.js";
+import type { AgentAdapter } from "./agent-adapter.js";
+import { loadAgentAdapterSync } from "./agent-adapter-loader.js";
+import { agentSourcesFile, agentsDir } from "./agent-paths.js";
 import claudeCode from "./definitions/claude-code.json" with { type: "json" };
 import cline from "./definitions/cline.json" with { type: "json" };
 import codex from "./definitions/codex.json" with { type: "json" };
@@ -36,18 +36,12 @@ import qoder from "./definitions/qoder.json" with { type: "json" };
 
 /**
  * 内置预设 = 数据定义 + 代码 hook。
- * `credentialEnv` 是函数值，数据面表达不了；P3 会把这类 hook 正式收敛成 adapter 契约。
+ * `hooks` 是 adapter 模块解析后的结果；数据面表达不了的东西都在那里。
  */
 export type AcpAgentPreset = AgentDefinition & {
-  credentialEnv?: (
-    realHome: string | undefined,
-    parentEnv: NodeJS.ProcessEnv,
-  ) => Record<string, string>;
-};
-
-/** 内置 adapter 注册表：`adapter.module` → 它提供的 hook。 */
-const BUILTIN_ADAPTERS: Record<string, Pick<AcpAgentPreset, "credentialEnv">> = {
-  "builtin:cline-credentials": { credentialEnv: clineCredentialEnv },
+  hooks?: AgentAdapter;
+  /** adapter 的实际来源（内置模块名或解析后的绝对路径），用于来源可见性。 */
+  adapterSource?: string;
 };
 
 /**
@@ -114,19 +108,20 @@ function loadBuiltinDefinition(file: string, raw: unknown): AgentDefinition {
  * 把一份已校验的定义挂上它声明的内置 hook。
  * 本地文件与 `agent check <文件>` 也走这里，保证「安装后」与「安装前检查」看到的是同一套 adapter。
  */
-export function presetForDefinition(def: AgentDefinition): AcpAgentPreset {
-  const module = def.adapter?.module;
-  if (!module) return def;
-  const adapter = BUILTIN_ADAPTERS[module];
-  if (!adapter)
-    throw new Error(
-      `内置 agent 定义「${def.name}」声明了未注册的 adapter「${module}」——内置定义只能引用 BUILTIN_ADAPTERS 里已注册的模块`,
-    );
-  return { ...def, ...adapter };
+export function presetForDefinition(def: AgentDefinition, definitionFile?: string): AcpAgentPreset {
+  const loaded = def.adapter ? loadAgentAdapterSync(def, definitionFile) : null;
+  if (loaded && !loaded.ok) throw new Error(loaded.error);
+  if (def.mcpFormat && !(AGENT_MCP_FORMATS as readonly string[]).includes(def.mcpFormat)) {
+    if (!loaded?.ok || !loaded.adapter.mcp)
+      throw new Error(
+        `agent「${def.name}」的自定义 mcpFormat「${def.mcpFormat}」需要 adapter 提供 mcp.read/write hook`,
+      );
+  }
+  return loaded?.ok ? { ...def, hooks: loaded.adapter, adapterSource: loaded.source } : def;
 }
 
-function toBuiltinPreset(def: AgentDefinition): AcpAgentPreset {
-  return presetForDefinition(def);
+function toBuiltinPreset(def: AgentDefinition, file: string): AcpAgentPreset {
+  return presetForDefinition(def, file);
 }
 
 function buildBuiltinRegistry(): {
@@ -138,7 +133,7 @@ function buildBuiltinRegistry(): {
   for (const [file, raw] of RAW_DEFINITIONS) {
     const def = loadBuiltinDefinition(file, raw);
     definitions[def.name] = def;
-    presets[def.name] = toBuiltinPreset(def);
+    presets[def.name] = toBuiltinPreset(def, `definitions/${file}.json`);
   }
   return { definitions, presets };
 }
@@ -151,7 +146,7 @@ export const BUILTIN_AGENT_DEFINITIONS: Record<string, AgentDefinition> =
 
 /** 一根定义来自哪一层。P4 的「数据包」也落在本机目录里，届时再加 kind。 */
 export type AgentDefinitionSource = {
-  kind: "builtin" | "local";
+  kind: "builtin" | "package" | "local";
   /** 内置为 `definitions/<name>.json`，本机为绝对路径。 */
   file: string;
 };
@@ -174,10 +169,7 @@ export type AgentRegistry = {
   broken: Record<string, BrokenAgentDefinition>;
 };
 
-/** 本机定义目录：`~/.wemind/.agents`；点号目录不会与账号 key 撞名。 */
-export function agentsDir(): string {
-  return process.env.WEMIND_AGENTS_DIR?.trim() || path.join(WEMIND_ROOT, ".agents");
-}
+export { agentsDir };
 
 type LocalFile = { file: string; name: string; mtimeMs: number; size: number };
 
@@ -240,7 +232,6 @@ function brokenOf(
 function readLocalDefinition(
   file: string,
   stem: string,
-  adapterFor: (module: string) => Pick<AcpAgentPreset, "credentialEnv"> | null,
 ): { preset: AcpAgentPreset } | { broken: BrokenAgentDefinition } {
   const key = stem.toLowerCase();
   let raw: unknown;
@@ -276,30 +267,17 @@ function readLocalDefinition(
         { path: "name", message: "`auto` 是自动探测开关，不能作为 agent 名" },
       ]),
     };
-  if (def.mcpFormat && !(AGENT_MCP_FORMATS as readonly string[]).includes(def.mcpFormat))
+  let preset: AcpAgentPreset;
+  try {
+    preset = presetForDefinition(normalizeDefinition(def), file);
+  } catch (e) {
     return {
       broken: brokenOf(key, file, [
-        {
-          path: "mcpFormat",
-          message: `自定义格式「${def.mcpFormat}」需要 adapter 的 MCP 读写 hook；本版本只支持 ${AGENT_MCP_FORMATS.join(" / ")}`,
-        },
+        { path: "adapter.module", message: e instanceof Error ? e.message : String(e) },
       ]),
     };
-  let hook: Pick<AcpAgentPreset, "credentialEnv"> = {};
-  if (def.adapter) {
-    const adapter = adapterFor(def.adapter.module);
-    if (!adapter)
-      return {
-        broken: brokenOf(key, file, [
-          {
-            path: "adapter.module",
-            message: `本版本还不能加载外部 adapter 插件「${def.adapter.module}」（P3 才开放）；先删掉 adapter，或改用内置 hook`,
-          },
-        ]),
-      };
-    hook = adapter;
   }
-  return { preset: { ...normalizeDefinition(def), ...hook } };
+  return { preset };
 }
 
 function buildRegistry(dir: string, scan: ReturnType<typeof scanLocalFiles>): AgentRegistry {
@@ -307,6 +285,7 @@ function buildRegistry(dir: string, scan: ReturnType<typeof scanLocalFiles>): Ag
   const presets = { ...builtinRegistry.presets };
   const sources: Record<string, AgentDefinitionSource> = {};
   const broken: Record<string, BrokenAgentDefinition> = {};
+  const installed = readInstalledSources();
   for (const [name] of RAW_DEFINITIONS)
     sources[name] = { kind: "builtin", file: `definitions/${name}.json` };
 
@@ -336,11 +315,7 @@ function buildRegistry(dir: string, scan: ReturnType<typeof scanLocalFiles>): Ag
     }
     const item = items[0];
     const stem = item.name.slice(0, -".json".length);
-    const loaded = readLocalDefinition(
-      item.file,
-      stem,
-      (module) => BUILTIN_ADAPTERS[module] ?? null,
-    );
+    const loaded = readLocalDefinition(item.file, stem);
     if ("broken" in loaded) {
       broken[key] = loaded.broken;
       // 坏定义在解析层表现为「不存在」：同名内置也不会被静默使用。
@@ -352,7 +327,10 @@ function buildRegistry(dir: string, scan: ReturnType<typeof scanLocalFiles>): Ag
     const name = loaded.preset.name;
     definitions[name] = loaded.preset;
     presets[name] = loaded.preset;
-    sources[name] = { kind: "local", file: item.file };
+    sources[name] = {
+      kind: installed[name]?.kind === "package" ? "package" : "local",
+      file: item.file,
+    };
     delete broken[name];
   }
 
@@ -364,6 +342,30 @@ function buildRegistry(dir: string, scan: ReturnType<typeof scanLocalFiles>): Ag
     sources,
     broken,
   };
+}
+
+type InstalledSource = { kind: "package"; source: string; at?: string };
+
+/** `wemind agent add` 写下的安装来源；手写定义不在其中，按「本机」展示。 */
+function readInstalledSources(): Record<string, InstalledSource> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(agentSourcesFile(), "utf-8")) as unknown;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const out: Record<string, InstalledSource> = {};
+    for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const v = value as Record<string, unknown>;
+      if (v.kind !== "package" || typeof v.source !== "string") continue;
+      out[name.toLowerCase()] = {
+        kind: "package",
+        source: v.source,
+        ...(typeof v.at === "string" ? { at: v.at } : {}),
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 let cached: { fingerprint: string; registry: AgentRegistry } | null = null;
@@ -457,3 +459,12 @@ export const ACP_AGENT_PRESETS: Record<string, AcpAgentPreset> = new Proxy(
 export function builtinDefinitionNames(): string[] {
   return Object.keys(BUILTIN_AGENT_DEFINITIONS);
 }
+
+/**
+ * `auto` 的探测顺序：由内置 adapter 的 `hints.autoProbe` 决定（数字小的优先）。
+ * 只取内置定义——用户定义可以显式选择，但不参与自动挑脑（避免装一个未登录的 agent 后静默换脑）。
+ */
+export const AUTO_PROBE_ORDER: readonly string[] = Object.entries(builtinRegistry.presets)
+  .filter(([, preset]) => preset.hooks?.hints?.autoProbe !== undefined)
+  .sort((a, b) => (a[1].hooks!.hints!.autoProbe ?? 0) - (b[1].hooks!.hints!.autoProbe ?? 0))
+  .map(([name]) => name);

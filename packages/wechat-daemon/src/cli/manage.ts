@@ -39,6 +39,7 @@ import {
 import { startDaemon, stopDaemon } from "./process-lifecycle.js";
 import { CLI_VERSION, versionLine } from "../shared/version.js";
 import { renderHelp } from "../ipc/chat-commands.js";
+import { preloadAgentAdapters } from "../agents/agent-adapter-loader.js";
 
 export { pickKey } from "./cli-context.js";
 export { agentLabel } from "./subcommands/cli-brain.js";
@@ -61,6 +62,8 @@ export { brainRecord, descendantPids, stopSummary, deleteGuard } from "./process
 const LEGACY_STAGING = path.join(WEMIND_ROOT, ".staging");
 
 export async function runManage(argv: string[]): Promise<void> {
+  // cli.ts 已预加载；这里再调一次是幂等的，方便测试/其它入口直接调用 runManage。
+  await preloadAgentAdapters();
   const cmd = argv.shift();
   const rest = [...argv];
   // autostart 的 --key / --label 是**子命令参数**：跳过下面的全局开关解析，否则会被 takeValue("--label") 抽走。

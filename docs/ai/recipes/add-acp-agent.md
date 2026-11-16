@@ -14,9 +14,9 @@
 2. 探测：`wemind agent probe <bin> --args <进入 ACP 的参数> --draft`。默认只握手，不发真实 prompt；`--deep` 才发真实回合并验证恢复后的上下文。
 3. 补人工字段：按 `agent spec` 的「去哪里找」补 `realHome`、`configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile`、凭据/继承清单、`requiresBins` 等；不要凭记忆猜字段。
 4. 校验：先 `wemind agent check <文件> --schema`，再 `wemind agent check <文件>`（默认真实握手），需要完整回合时再加 `--deep`。
-5. 安装与选择：保存为 `~/.wemind/.agents/<name>.json`（文件名与 `name` 完全一致）→ `wemind agent list` / `show <name> --explain` → 用户明确要求时 `wemind brain switch <name>`。**不要自动切换大脑。**
+5. 安装与选择：`wemind agent add <包目录|package.json|定义.json>`（也可手工保存为 `~/.wemind/.agents/<name>.json`，文件名与 `name` 完全一致）→ `wemind agent list` / `show <name> --explain` → 用户明确要求时 `wemind brain switch <name>`。**不要自动切换大脑。** `agent add` 支持包内 `wemind-agent.json`、`package.json` 的 `wemind.definition` / `wemind.definitions`，并把相对路径 adapter 复制到定义目录。
 
-边界：探针成功只代表协议层可用，不代表领域字段完整或 MCP 真被加载；外部 adapter 插件仍待 P3。完整说明见 [`docs/接入方案/接入其它-ACP-Agent.md`](../../接入方案/接入其它-ACP-Agent.md) §4.1.1。
+边界：探针成功只代表协议层可用，不代表领域字段完整或 MCP 真被加载。外部 adapter 插件已可加载（CJS 同步、ESM 启动时预加载）；插件只补文件格式与 spawn 前准备，不能接管会话协议或反向请求。完整说明见 [`docs/接入方案/接入其它-ACP-Agent.md`](../../接入方案/接入其它-ACP-Agent.md) §4.1.1 / §4.1.2。
 
 ### 0.2 官方内置（随 `@wemind/cli` 发布）
 
@@ -64,7 +64,7 @@ node scripts/acp-probe.mjs
 | 有反向请求                                                                              | 应答器已在 `acp-reverse.ts`（brain / worker / `brain check` 共用），**一般无需再写**；只有在需要放行某类请求时才改那一处                                                                                                                                                                                                                                                                                                          |
 | `image:false`（探针带图 prompt 被拒）                                                   | 预设加 `images: false`：`planImageTurn()` 按「有文字只按文字答、无文字才拒绝」处理，不会拿空 prompt 白问；漏到 `askBrainTurn` 也只附一句提示、不带图                                                                                                                                                                                                                                                                              |
 | 正文非逐 token / 无 activity 帧                                                         | 预设加 `firstFrameMs`（首帧超时）与 `heartbeatMs`（静默期心跳），见 §4                                                                                                                                                                                                                                                                                                                                                            |
-| `session/new` 先要求 `authenticate`（`-32000 Authentication required`）                 | 先看能否靠**复制凭据**自动恢复（`credentialFiles`；Cline 只自动恢复它自己的 3 种 OAuth provider）；不能就**从 agent 自己的配置派生环境变量**（`credentialEnv`，参考 Cline 的 `clineCredentialEnv()`：只读、显式 env 优先），或要求部署方提供 agent 官方文档里的环境变量。**不要**在 daemon 里实现交互式 `authenticate`——无头环境会卡在浏览器/输入上；把可执行的提示写进 `brain check` 与失败回复（参考 `authHint()`）             |
+| `session/new` 先要求 `authenticate`（`-32000 Authentication required`）                 | 先看能否靠**复制凭据**自动恢复（`credentialFiles`；Cline 只自动恢复它自己的 3 种 OAuth provider）；不能就**从 agent 自己的配置派生环境变量**（adapter 的 `hooks.env.derive`，参考内置 Cline adapter 的 `clineCredentialEnv()`：只读、显式 env 优先），或要求部署方提供 agent 官方文档里的环境变量。**不要**在 daemon 里实现交互式 `authenticate`——无头环境会卡在浏览器/输入上；把可执行的提示写进 `brain check` 与失败回复（参考 adapter 的 `hints.auth`）             |
 | 默认模型路由需要 API key / 桌面登录要切 account                                         | 加 `model` agent 配置字段：会话建立后走 `session/set_config_option`（agent 自己的接口）；`--model auto`/`default` = 跟随真实 profile 的默认（见下一行）；用户可用 `wemind brain set <名> --model …` 覆盖                                                                                                                                                                                                                          |
 | 默认模型由该 agent 自己的用户层 profile 维护（DSH 的 `profiles/<名>/cordis.patch.yml`） | 加 `realProfile` 字段：`direct` 直接用真实 `profiles/`，`managed` 才复制那份用户层（否则副本是空壳 `[]`、路由都不存在；provider/模型条目原样，`mcpDelivery: "acp"` 时剥离全部 MCP 条目）；并从它读默认模型（`profile-model.ts`：优先用户写的 `- id: acp`，否则 `agent-default-model`）；插件 bundle patch 里写死的默认**由用户在自己的 profile 里覆盖**，WeMind 只提示（`wemind brain` 给可粘贴的片段）、不代改（§4.14）——用户改桌面端默认后，重启 daemon 或切一次这个 agent 时跟着改 |
 
@@ -84,7 +84,7 @@ node scripts/acp-probe.mjs
 | 6   | 已知坑加一条           | [`docs/ai/已知坑.md`](../已知坑.md)                              | `check-agent-docs.mjs` |
 | 7   | 全库索引               | `docs/README.md`「各 agent 实测」行 + `llms.txt`                 | `check-agent-docs.mjs` |
 | 8   | AI 事实表              | `docs/ai/README.md` 事实状态表                                   | 人工                   |
-| 9   | 安装提示（适配器类）   | `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`                      | 单测                   |
+| 9   | 安装提示（适配器类）   | `agents/adapters/builtin.ts` 的 `hints.install`                  | 单测                   |
 | 10  | 探针记录               | 文档「探针实测结论」小节，每条标来源档位                         | 人工审校               |
 
 ## 0.6 填空：能力结论与来源档位
@@ -114,7 +114,7 @@ node scripts/acp-probe.mjs
 
 > 如果第 4 项不是「某个 HOME + 文件式 MCP」，动态挂 MCP 需要单独适配；不要硬套 kiro 的 `settings/mcp.json`。
 >
-> **适配器类 agent（CLI 本身不实现 ACP）**：第 1 项填适配器的**全局安装**产物（`npm i -g <适配器包>`，如 `claude-agent-acp` / `codex-acp` / `pi-acp`），**不要**把 `npx -y <包>` 写进预设——daemon 常驻、每条 worker 任务都起进程，npx 每次要问 registry/冷缓存现下（离线不可用）、版本随 latest 漂移。同时把安装命令加进 `brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`，让「找不到适配器」的报错直接给出可粘贴的命令。**适配器还依赖其它运行时**（如 `pi-acp` 内部 spawn `pi`）时，给预设加 `requiresBins: ["pi"]`——`agentProblem()` 会提前报「运行时缺失」，不要等 `session/new` 抛适配器内部错误。样板见 [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) 与 [`docs/接入方案/接入-pi.md`](../../接入方案/接入-pi.md)。
+> **适配器类 agent（CLI 本身不实现 ACP）**：第 1 项填适配器的**全局安装**产物（`npm i -g <适配器包>`，如 `claude-agent-acp` / `codex-acp` / `pi-acp`），**不要**把 `npx -y <包>` 写进预设——daemon 常驻、每条 worker 任务都起进程，npx 每次要问 registry/冷缓存现下（离线不可用）、版本随 latest 漂移。同时把安装命令写进该 agent 内置 adapter 的 `hints.install`（`agents/adapters/builtin.ts`），让「找不到适配器」的报错直接给出可粘贴的命令。**适配器还依赖其它运行时**（如 `pi-acp` 内部 spawn `pi`）时，给定义加 `requiresBins: ["pi"]`——`agentProblem()` 会提前报「运行时缺失」，不要等 `session/new` 抛适配器内部错误。样板见 [`docs/接入方案/接入-ClaudeCode.md`](../../接入方案/接入-ClaudeCode.md) 与 [`docs/接入方案/接入-pi.md`](../../接入方案/接入-pi.md)。
 
 ---
 
@@ -150,7 +150,7 @@ node scripts/acp-probe.mjs
 - `isolateSessions: true`（DSH 的 `--patch` 会话 root）；
 - `fallbackBinPaths`（官方安装不在 PATH）；`settingsBase` / `settingsDefaults`、`credentialFiles` / `identityFiles`、`realProfile`。
 
-数据表达不了的才用代码 hook：`"adapter": { "module": "builtin:cline-credentials", "apiVersion": 1 }`（内置目前只有 Cline 的凭据派生化）。当前 `credentialEnv` 由 `agent-registry.ts` 按 `adapter.module` 挂上；P3 会把这类 hook 收敛成正式契约。
+数据表达不了的才用代码 hook：`"adapter": { "module": "builtin:cline-credentials", "apiVersion": 1 }`。内置 adapter 在 `agents/adapters/builtin.ts`，外部模块按 `agents/agent-adapter.ts` 的命名 hook 契约实现；`agent-registry.ts` 只按 `adapter.module` 加载，不再按 agent 名分派。自定义 MCP 格式必须提供完整的 `mcp.readCatalog` / `writeCatalog` / `stripSettings` / `toAcp` / `nativeCatalog`。
 
 同时：
 
@@ -237,7 +237,7 @@ wemind brain check
 - **密钥不要写进 agent**：daemon 进程环境提供。
 - **能力字段是人工结论，不是自动适配**（1.2.0 仍未变）：`initialize` 的回包**不被解析**（只置 `initialized = true`），`image`/`restore`/`acpMcpServers`/`mcpDelivery` 全部来自 agent 定义字段——所以探针必须看，看完必须写进 `agents/definitions/<agent>.json`。
 - **冷启动耗时（2026-10-29 已量）**：DSH `initialize` **5.8s** / `session/new` 50ms；opencode ~650ms / ~800ms；qoder 1.7s / 1.5s——均远小于 `REQ_TIMEOUT=30s`，**暂不需要** `reqTimeoutMs`（见 `run-e2e.md` §7.3）。新接入的 agent 仍要先量；若超过 30s，再在 agent 里加 `reqTimeoutMs`（**尚未实现**，先量再定）。
-- **适配器不要用 npx 当默认**：全局安装后 `bin` 写 `claude-agent-acp`（Windows `claude-agent-acp.cmd`）+ `shell: true`；npx 只做兜底。没装时用 `ADAPTER_INSTALL_HINT` 给提示，别只回一句「找不到」。适配器另有运行时依赖（`pi-acp` → `pi`）时用 `requiresBins`；`onPathAny()` 会补试 `.cmd`/`.exe`。
+- **适配器不要用 npx 当默认**：全局安装后 `bin` 写 `claude-agent-acp`（Windows `claude-agent-acp.cmd`）+ `shell: true`；npx 只做兜底。没装时用 adapter 的 `hints.install` 给提示，别只回一句「找不到」。适配器另有运行时依赖（`pi-acp` → `pi`）时用 `requiresBins`；`onPathAny()` 会补试 `.cmd`/`.exe`。
 - **「免审批」要用漂移检测兜住**：`ACP_TEST_TOOL=1` 跑探针——强制一次工具调用（写标记文件），断言「0 个 `session/request_permission` + 文件真的落盘」。只看 stopReason 分不出「被拒绝」和「没执行」；上游改成逐次审批时探针会先红，而不是微信第一条消息卡 30s 超时。
 - **同 agent 并发 = 两个进程共用其配置目录**：多任务并行时会真实发生（不同 agent 各自 `configSubdir` 天然隔离）；新 agent 若把会话/缓存写在配置目录里，这条要实测。Claude Code 的 `CLAUDE_CONFIG_DIR` 会连 `~/.claude.json` 一起隔离。
 

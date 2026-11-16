@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { createLogger, DATA_DIR } from "@wemind/wechat-ilink-core";
-import { ensureKiroV3Permissions, type ResolvedAgent } from "../brain-agents.js";
+import { prepareManagedAgent, type ResolvedAgent } from "../brain-agents.js";
 import { getAgent } from "../agent-slot.js";
 import { isWechatMcpServer, normalizeMcpName } from "./agent-mcp.js";
 import { mcpAdapterFor, mcpAdapterForFile, mcpCatalogPath, mcpConfigPath } from "./mcp-adapters.js";
@@ -120,10 +120,13 @@ export function workerSessionMcpServers(
 
 /** 按适配器继承该 Agent 的「非 MCP」设置（kiro 的 settings/*；opencode 的 model 等同文件设置）。 */
 function syncFormatSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
-  const adapter = mcpAdapterFor(ag);
-  if (!adapter.inheritSettings || !ag.realHome) return;
+  if (!ag.hooks?.settings?.inherit || !ag.realHome) return;
   if (!canWriteAgentConfig(ag, rt)) return;
-  adapter.inheritSettings(ag, ag.realHome, workerConfigDir(ag, rt));
+  ag.hooks.settings.inherit({
+    agent: ag,
+    realHome: ag.realHome,
+    targetConfigDir: workerConfigDir(ag, rt),
+  });
 }
 
 function syncSettings(ag: ResolvedAgent, rt: AgentRuntime): void {
@@ -167,7 +170,6 @@ export function ensureWorkerHome(
   linkRealKnowledge(ag, rt);
   syncCredentials(ag, workerConfigDir(ag, rt));
   applySettingsDefaults(ag, workerConfigDir(ag, rt));
-  if (ag.kiroV3 && canWriteAgentConfig(ag, rt))
-    ensureKiroV3Permissions(ag, path.join(rt.configDir, "settings"));
+  if (canWriteAgentConfig(ag, rt)) prepareManagedAgent(ag, rt.configDir);
   return rt;
 }

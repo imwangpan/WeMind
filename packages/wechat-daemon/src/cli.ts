@@ -9,6 +9,7 @@ import { cliHook } from "./cli/cli-dispatch.js";
 import { runDaemon } from "./index.js";
 import { runManage } from "./cli/manage.js";
 import { runWatchdog } from "./cli/watchdog-runner.js";
+import { preloadAgentAdapters } from "./agents/agent-adapter-loader.js";
 const log = createLogger("wechat-daemon");
 const watchdogLog = log.child("watchdog");
 const cliLog = log.child("cli");
@@ -16,19 +17,17 @@ const cliLog = log.child("cli");
 const argv = process.argv.slice(2);
 const hook = cliHook(argv);
 
-if (hook === "daemon") {
-  runDaemon().catch((err: unknown) => {
-    log.error("fatal:", describeError(err, import.meta.url));
-    process.exit(1);
-  });
-} else if (hook === "watchdog") {
-  runWatchdog().catch((err: unknown) => {
-    watchdogLog.error("fatal:", describeError(err, import.meta.url));
-    process.exit(1);
-  });
-} else {
-  runManage(argv).catch((e: unknown) => {
-    cliLog.error(describeError(e, import.meta.url));
-    process.exit(1);
-  });
+async function main(): Promise<void> {
+  // ESM adapter 只能异步 import；在同步解析器看到定义前先把它们放进缓存。
+  const preloaded = await preloadAgentAdapters();
+  for (const problem of preloaded.problems) log.warn(problem);
+  if (hook === "daemon") return runDaemon();
+  if (hook === "watchdog") return runWatchdog();
+  return runManage(argv);
 }
+
+main().catch((err: unknown) => {
+  const target = hook === "watchdog" ? watchdogLog : hook === "daemon" ? log : cliLog;
+  target.error("fatal:", describeError(err, import.meta.url));
+  process.exit(1);
+});

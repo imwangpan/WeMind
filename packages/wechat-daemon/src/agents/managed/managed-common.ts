@@ -4,9 +4,7 @@ import path from "node:path";
 import { createLogger } from "@wemind/wechat-ilink-core";
 
 import type { ResolvedAgent } from "../brain-agents.js";
-import { copyProfilePatch, stripWechatMcpEntries } from "../profile-model.js";
 import type { AgentRuntime } from "../config/runtime.js";
-import { writeFileAtomic } from "../../shared/io/atomic-json.js";
 import { forbiddenMcpServer, parseJsonc } from "./agent-mcp.js";
 import { mcpAdapterFor, mcpAdapterForFile, mcpConfigPath } from "./mcp-adapters.js";
 
@@ -150,20 +148,17 @@ export function writeSettingsBase(ag: ResolvedAgent, configDir: string): boolean
 export function stripWechatFromConfigCopy(ag: ResolvedAgent, rt: AgentRuntime): void {
   if (rt.mode !== "managed") return;
   const base = rt.configDir;
-  if (ag.realProfile) {
-    for (const name of ["cordis.patch.yml", "cordis.yml"]) {
-      const file = path.join(base, "profiles", ag.realProfile, name);
-      if (!isRegularFile(file)) continue;
-      try {
-        const { text, removed } = stripWechatMcpEntries(fs.readFileSync(file, "utf-8"));
-        if (!removed.length) continue;
-        writeFileAtomic(file, text);
-        log.warn(
-          `副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
-        );
-      } catch (e) {
-        log.error(`副本清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`);
-      }
+  const managedFiles = ag.hooks?.profile?.managedFiles?.({ agent: ag, base }) ?? [];
+  for (const file of managedFiles) {
+    if (!isRegularFile(file)) continue;
+    try {
+      const removed = ag.hooks?.profile?.stripManagedWechat?.(file) ?? [];
+      if (!removed.length) continue;
+      log.warn(
+        `副本里的微信 MCP 已剔除（${ag.name} → ${file}）：${removed.join(", ")}（真实文件未改）`,
+      );
+    } catch (e) {
+      log.error(`副本清洗失败（${ag.name} → ${file}）：${String((e as Error)?.message ?? e)}`);
     }
   }
   if (!ag.catalogFile || ag.catalogFile.includes("..")) return;
@@ -204,12 +199,15 @@ function isRegularFile(file: string): boolean {
  * 否则只剔除用户自己挂的微信 MCP 条目（防回环）。
  */
 export function syncProfilePatch(ag: ResolvedAgent, targetHome: string, label: string): void {
-  if (!ag.realProfile || !ag.realHome || !ag.inherit) return;
+  const copy = ag.hooks?.profile?.copyForManaged;
+  if (!copy || !ag.realProfile || !ag.realHome || !ag.inherit) return;
   if (path.resolve(targetHome) === path.resolve(ag.realHome)) return; // 副本就是真实目录时不自我覆盖
-  const src = path.join(ag.realHome, "profiles", ag.realProfile, "cordis.patch.yml");
   try {
-    if (!fs.existsSync(src)) return;
-    const removed = copyProfilePatch(ag.realHome, ag.realProfile, targetHome, {
+    const removed = copy({
+      agent: ag,
+      realHome: ag.realHome,
+      profile: ag.realProfile,
+      targetHome,
       stripAllMcp: ag.mcpDelivery === "acp",
     });
     if (removed.length) {

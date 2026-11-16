@@ -68,7 +68,7 @@
 - [源码目录分层设计](设计文档/源码目录分层设计.md) —— `packages/wechat-daemon/src/` 的 8 个一级 + 7 个二级目录分层、A/B 类文件拆分、按目录分批的实施与文档同步流程（已实施）
 - [WeMind 接入本机 Agent 工作模式设计与实现](设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md) —— 让 daemon / worker 直接使用本机 Agent 的真实配置、技能、记忆与会话；`direct`（默认）/ `managed` 两种模式、微信 overlay、工作区、MCP 策略、yolo、迁移与验收
 - [远程任务：human-in-the-loop（人在回路）设计与实现](设计文档/远程任务-human-in-the-loop设计与实现.md) —— 把漫长任务交给受控 ACP worker 进程：单任务单进程 → 多任务 + 进程池 + 重启续跑；消息路由与状态机、会话恢复、配置与权限、进度反馈、双入口、边界
-- [Agent 接入：配置化与插件化设计与实现](设计文档/Agent-接入配置化与插件化设计与实现.md) —— 把「接入新 ACP Agent」从改 TS + 发版变成加一份定义（必要时加一个插件）：定义放 `~/.wemind/.agents/`、来源优先级、adapter hook 边界、探针与自助接入、分阶段实施（**P0–P2 已实现；P3 插件层与 P4 分发未做**）
+- [Agent 接入：配置化与插件化设计与实现](设计文档/Agent-接入配置化与插件化设计与实现.md) —— 把「接入新 ACP Agent」从改 TS + 发版变成加一份定义（必要时加一个插件）：定义放 `~/.wemind/.agents/`、来源优先级、adapter hook 边界、探针与自助接入、`agent add/remove` 分发（**P0–P4 已实现**）
 
 ### 历史归档（明确标注，不作为现行说明）
 

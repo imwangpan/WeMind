@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ResolvedAgent } from "../brain-agents.js";
+import { resolveAgentByName, type ResolvedAgent } from "../brain-agents.js";
 import type { AgentRuntime } from "../config/runtime.js";
 import { stripWechatFromConfigCopy } from "./managed-common.js";
 
@@ -54,7 +54,7 @@ describe("managed 副本日志文案", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       try {
         stripWechatFromConfigCopy(
-          { name: "deepseek", realProfile: "acp" } as unknown as ResolvedAgent,
+          { ...resolveAgentByName("deepseek"), realProfile: "acp" } as ResolvedAgent,
           { mode: "managed", configDir } as unknown as AgentRuntime,
         );
         const joined = warn.mock.calls.map((call) => call.map(String).join(" ")).join("\n");

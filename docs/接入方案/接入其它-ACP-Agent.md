@@ -171,7 +171,7 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 - **优先级**：内置 < 本机定义 < `brain.json` 的字段覆盖 < 一次性环境变量。
 - **同名是整条替换，不做字段合并**：本机的 `kiro.json` 会完全替换内置 `kiro`，没写的字段回到默认值，不会继承内置值。只想改几个启动字段，用 `wemind brain set <名> --bin/--args/--extra-args/--model`。
 - **坏定义 fail-closed**：JSON 语法、未知字段、类型、`schemaVersion`、文件名与 `name` 不一致、`name: "auto"` 都会让这份定义不可用；它仍然按文件名遮住同名内置（不会静默回退到旧定义）。选择它时退出码 78，错误里给出文件与修法。
-- **P2 边界**：本机定义只能用纯数据字段与**内置** adapter hook（目前只有 `builtin:cline-credentials`）；外部 adapter 插件（自定义 MCP 格式、凭据派生、启动前文件生成）在 P3 才开放，现在写外部 `adapter.module` 会直接判为坏定义。
+- **插件边界**：纯数据能表达时不需要 adapter；自定义 MCP 格式、凭据派生、启动前文件生成才写 `adapter`。模块可来自包名、绝对路径或相对路径，`apiVersion` 必须为 1；未知 hook、缺少方法或解析失败都会 fail-closed。`agent add` 安装定义包时会把相对路径的 adapter 复制到 `~/.wemind/.agents/adapters/<name>/`，运行期不联网拉取。
 
 查看与校验（都无需重启 daemon）：
 
@@ -182,6 +182,8 @@ wemind agent show acme --explain        # 最终生效值 + 每一层来源
 wemind agent check acme --schema        # 只校验数据面，不启动进程
 wemind agent check acme                 # 默认起进程做真实 ACP 握手
 wemind agent check acme --deep          # 握手后再发一条真实 prompt
+wemind agent add ./acme-agent-pack      # 复制安装定义包（可带相对路径 adapter）
+wemind agent remove acme                # 只删本机/数据包层；同名内置恢复
 wemind brain switch acme                # 建议先 check；daemon 在跑时热切换
 ```
 
@@ -198,16 +200,34 @@ wemind brain switch acme                # 建议先 check；daemon 在跑时热�
 2. **探测并产草稿**：`wemind agent probe <bin> --args <进入 ACP 的参数> --draft`。默认只做 `initialize` + `session/new` + load/resume，**不发真实 prompt**；默认用临时假 MCP 测 `session/new.mcpServers`，`--no-mcp-test` 可关闭。只有显式 `--deep` 才发真实 prompt（会产生费用，并可能把测试对话写进 agent 自己的会话历史）；`--image` / `--tool` 也必须配合 `--deep`。草稿只填协议层结论，`notes` 会列出仍需人工补的字段。
 3. **补领域字段**：按 `agent spec` 的字段表补齐目录、文件格式、凭据与依赖；不要凭记忆猜字段——未知字段会整份拒绝（例如 `realhome` 不是 `realHome`）。
 4. **先校验数据，再验真实握手**：把草稿保存到临时 `.json`，先跑 `wemind agent check <文件> --schema` 修 schema；再跑 `wemind agent check <文件>` 做真实 ACP 握手；需要验证完整回合时加 `--deep`。真实握手失败不会伪造成功，也不会替用户改 agent 配置。
-5. **安装并选择**：把定义保存为 `~/.wemind/.agents/<name>.json`（文件名必须与 `name` 完全一致），再运行 `wemind agent list` / `wemind agent show <name> --explain`，最后由用户明确要求时运行 `wemind brain switch <name>`。**不要自动切换大脑**；在微信里只需回一句「要切过去就说『切到 <name>』」。
+5. **安装并选择**：用 `wemind agent add <包目录|package.json|定义.json>` 复制安装（也可手工保存为 `~/.wemind/.agents/<name>.json`，文件名必须与 `name` 完全一致），再运行 `wemind agent list` / `wemind agent show <name> --explain`，最后由用户明确要求时运行 `wemind brain switch <name>`。**不要自动切换大脑**；在微信里只需回一句「要切过去就说『切到 <name>』」。
 
 **可依赖的边界**：
 
 - 探针成功只代表**协议层可用**；`realHome` / MCP 文件格式 / 凭据 / 继承目录仍必须人工补，不能把「probe ok」当成「适配完成」。
 - `session/new` 接受非空 `mcpServers` 只代表协议上没拒绝，**不代表 agent 真的加载了工具**；MCP 仍需按 §6 做真机验证。
 - 定义写完**不会自动切换**；坏定义 fail-closed，不会静默回退同名内置。
-- 外部 adapter 插件仍是 P3；当前只能引用内置 hook。
+- 外部 adapter 现在可以加载：CJS 立即生效，ESM 由 CLI/daemon 启动时预加载；修改插件后运行 `wemind config reload` 或重启 daemon。插件只补文件格式与 spawn 前准备，不能接管会话协议或反向请求。
 
 兼容入口：旧的 `node scripts/acp-probe.mjs` 会转成 `wemind agent probe`，继续支持 `ACP_BIN` / `ACP_ARGS` / `ACP_HOME_ENV` / `ACP_HOME` 等变量，并默认带 `--deep` 保持旧脚本行为；`ACP_NO_PROMPT=1` 可改成只做协议探测。新脚本/文档应优先使用 `wemind agent ...`。
+
+#### 4.1.2 定义包与插件分发
+
+`wemind agent add <包目录|package.json|定义.json>` 是**复制安装**，不会在运行期联网拉取。包根可用三种声明方式：
+
+```text
+acme-agent-pack/
+  package.json          # { "wemind": { "definition": "wemind-agent.json" } }
+  wemind-agent.json     # 单定义（name 必须与文件名一致）
+  adapter.cjs           # 可选；定义里写 "./adapter.cjs"
+```
+
+- 单定义：包根 `wemind-agent.json`，或 `package.json` 的 `wemind.definition`。
+- 多定义：`package.json` 的 `wemind.definitions` 指向目录（默认 `agents/*.json`）。
+- 共享 adapter：`package.json` 的 `wemind.adapter` 可指定一个相对路径模块；安装时会被复制到每个定义对应的 `adapters/<name>/` 并改写 `adapter.module`。
+- 相对路径 adapter 必须是 `.js` / `.cjs` / `.mjs` 且自包含；若插件要引用同包的其它模块，推荐把适配器发布成 npm 包，在定义里直接写包名。
+
+安装结果写入 `~/.wemind/.agents/`，来源记录在 `.sources.json`；`wemind agent list` 显示「数据包」。`wemind agent remove <name>` 只删这一层，同名内置定义会恢复。安装会先写盘再预加载 adapter；预加载失败会回滚本次写入，不留下半套定义。
 
 ### 4.2 内置定义（开发，随包发布）
 
@@ -263,7 +283,7 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `mcpDelivery` | 否 | `managed` 托管 MCP 时的投递方式：`config`（写副本配置文件，默认；如 kiro/gemini/opencode/qoder/cline/pi/Copilot）或 `acp`（随会话下发；如 DSH / Claude Code / Codex） |
 | `env` | 否 | **仅 `managed`** 额外注入的环境变量（强制；值里 `%HOME%` → 副本根），如 opencode 的 `OPENCODE_DISABLE_PROJECT_CONFIG` |
 | `envDefaults` | 否 | **默认值**环境变量：父进程已设同名变量时**不覆盖**（如 DSH `DSH_PERMISSION_MODE`、codex `INITIAL_AGENT_MODE`）。审批/副本类开关用它，部署方可在 daemon 环境里收紧权限；跳过时会记日志 `env defaults kept from parent: …` |
-| `adapter` | 否 | 代码逃生舱：`{ "module": "...", "apiVersion": 1 }`。数据表达不了时（自定义 MCP 格式、凭据派生、启动前文件生成）指向一个按 hook 契约注册的模块。内置目前只有 Cline 用 `builtin:cline-credentials` 从 `providers.json` 的 `lastUsedProvider` + `apiKey` 派生 `CLINE_PROVIDER` / `CLINE_API_KEY`（只读、解析失败返回空、显式 env 永远优先） |
+| `adapter` | 否 | 代码逃生舱：`{ "module": "...", "apiVersion": 1 }`。数据表达不了时（自定义 MCP 格式、凭据派生、启动前文件生成）指向一个按 hook 契约注册的模块；可用 hook 见 `wemind agent spec`。模块可来自包名/绝对路径/相对路径，未知键、版本不符、缺少 `mcp` 接口方法都 fail-closed。内置定义也走同一套 hook（如 Cline 用 `builtin:cline-credentials` 从 `providers.json` 派生 `CLINE_PROVIDER` / `CLINE_API_KEY`，只读、显式 env 永远优先） |
 | `sessionMode` | 否 | 会话建立/恢复后经 `session/set_mode { sessionId, modeId }` 切到的模式（**agent 自己的 ACP 接口**；用于免审批：claude-code `bypassPermissions`、codex `agent-full-access`）。会话回包报告 `modes.availableModes` 且不含该值时**跳过**并记日志；调用失败只记日志、不拖垮回合。`WEMIND_ACP_SESSION_MODE=0/false/off/no` 关闭，其它非空值 = 覆盖 modeId |
 | `replayOnLoad` | 否 | `session/load`/`resume` **返回后仍会异步回放历史帧**的 agent（gemini 的 `loadSession` 里 `streamHistory` 不 await）：恢复后先等帧流安静（200ms 静默窗口、最多 3s）再发本轮 prompt，否则历史会被拼进本轮答复。默认 `false` |
 | `restore` | 否 | 恢复会话的方式：`load`（默认）或 `resume`（如 DSH） |
@@ -314,7 +334,7 @@ ACP agent 分两类，接入方式不同：
 | `opencode` | OpenCode | 原生 | ✅ **已实测** | `opencode acp`，`XDG_CONFIG_HOME`（详见 [接入-OpenCode.md](接入-OpenCode.md)） |
 | `deepseek` | DeepSeek Harness `dsh` | 原生（官方 ACP profile） | ✅ **已内置/已实测（0.2.1-rc.3，2026-11-03 复测）**：prompt / 工具 / resume 上下文 / stdio MCP；`load` ❌、`image:false`（收图友好拒绝）。**`managed` 下会话 root 已隔离**：启动前 `prepareAgent()` 落盘 `--patch` 文件，把 DSH 的会话库指到 `<账号目录>/agent-sessions/deepseek/<brain\|worker>`（否则会把它人写进共用副本根的 `sessions/` 当成自己的，报 `unsupported flat-file layout`）；`direct` 下使用真实 `~/.dsh` 会话库 | `dsh --profile acp`；`managed` 额外加 `--patch "<账号目录>/agent-sessions/deepseek/session-root-<role>.patch.yml"` 并令 `DSH_HOME` 指向副本；建议 `--bin` 绝对路径（详见 [接入-DeepSeek.md](接入-DeepSeek.md)） |
 | `qoder` | Qoder CLI `qodercli` | 原生（`--acp`） | ✅ **已内置/已实测**：`load`/`resume`、图片、stdio/HTTP/SSE MCP、`--yolo` 下 0 反向请求；M1 副本 + M3 真机 E2E 均通过（详见 [接入-Qoder.md](接入-Qoder.md)） | `qodercli --acp --yolo`，`QODER_CONFIG_DIR`；直接起本体，**不要**走 `qoder` 分发器；需同步 `.auth/user` + `.auth/machine_id` |
-| `cline` | Cline CLI `cline` | 原生（`--acp`） | ✅ **已内置/已实测（3.0.74）**：`loadSession`、硬杀后 `session/load` 上下文保留、0 反向请求；**图片 ❌**（声明 `image:true` 但 ACP `prompt` 只保留 text → `images:false`）；`session/close` ❌（WeMind 不调用）。**认证注意**：ACP 只自动恢复 `cline`/`cline-pass`/`openai-codex`；自定义 provider 由 `credentialEnv` 从 `providers.json` 自动派生 `CLINE_PROVIDER`+`CLINE_API_KEY`（显式 env 优先；详见 [接入-Cline.md](接入-Cline.md)） | `cline --acp --auto-approve true`；`direct` 下 `CLINE_DIR` 等直接用真实 `~/.cline`，`managed` 下才指向账号副本；`providers.json`/`models.json` 同步（缺 models.json 会回退 `gpt-4o`）；MCP 走当前配置目录的 `cline/mcp.json`（ACP `mcpServers` 不生效；`direct` 下 WeMind 不写、加载/卸载原样转给 Agent，`managed` 才写） |
+| `cline` | Cline CLI `cline` | 原生（`--acp`） | ✅ **已内置/已实测（3.0.74）**：`loadSession`、硬杀后 `session/load` 上下文保留、0 反向请求；**图片 ❌**（声明 `image:true` 但 ACP `prompt` 只保留 text → `images:false`）；`session/close` ❌（WeMind 不调用）。**认证注意**：ACP 只自动恢复 `cline`/`cline-pass`/`openai-codex`；自定义 provider 由内置 adapter 的 `hooks.env.derive` 从 `providers.json` 自动派生 `CLINE_PROVIDER`+`CLINE_API_KEY`（显式 env 优先；详见 [接入-Cline.md](接入-Cline.md)） | `cline --acp --auto-approve true`；`direct` 下 `CLINE_DIR` 等直接用真实 `~/.cline`，`managed` 下才指向账号副本；`providers.json`/`models.json` 同步（缺 models.json 会回退 `gpt-4o`）；MCP 走当前配置目录的 `cline/mcp.json`（ACP `mcpServers` 不生效；`direct` 下 WeMind 不写、加载/卸载原样转给 Agent，`managed` 才写） |
 | `gemini` | Gemini CLI | 原生（`--acp`） | ✅ **已内置/已实测（0.66.0 探针）**：`loadSession` ✅（强杀后 `session/load` 上下文保留；但 load 返回后仍会**异步回放历史** → `replayOnLoad` 先等帧流安静）、图片 ✅、工具调用 0 反向请求（yolo）；`session/set_config_option` ❌（`-32601`，模型走 `--model` 启动参数）、`session/close` ❌（WeMind 不调用）。MCP：`settings.json` 的 `mcpServers` 实测生效（ACP `session/new` 的 mcpServers 也能用，但 `initialize` 只声明 http/sse、不声明 acp → 走配置文件更稳）。**`--skip-trust` 必须带**：未信任目录不仅把 yolo 静默降回 default，连 MCP 都不加载（用户级 server 也被抑制） | `gemini --acp --approval-mode yolo --skip-trust`；`direct` 不注入 `GEMINI_CLI_HOME`、用真实 `~/.gemini`，`managed` 才指向副本根、配置目录是 `<它>/.gemini`（`configSubdir: ".gemini"`）；`settings.json` 在 managed 作设置基底（只剥 `mcpServers`，保留 model/security）、`.env` 作凭据同步、`skills/` + `GEMINI.md` 继承。详见 [接入-Gemini.md](接入-Gemini.md) |
 | `claude-code` | Claude Code | 需适配器（官方维护） | ✅ **已内置/已实测（探针级 + 真机微信单轮 E2E）**：`load`/`resume` ✅、图片 ✅、stdio MCP ✅、`bypassPermissions` ✅、该模式下 0 反向请求；2026-10-31 真机微信单轮通过（`prompt ok 5381ms`、回复送达）；重启续聊 / MCP / 任务待复测 | `claude-agent-acp`（npm 包 `@agentclientprotocol/claude-agent-acp`，**先 `npm i -g` 全局安装**；**Node ≥22，且必须是运行 daemon 的那个 Node**——`agentProblem()` 只查 PATH 不查版本，Node 20 的 daemon 会通过预检却在 spawn 时失败；Windows 上是 `claude-agent-acp.cmd`，故预设 `binWin: "claude-agent-acp.cmd"` + `shell: true`）。`CLAUDE_CONFIG_DIR` 指到副本；Claude Code 自己读 `~/.claude.json`，managed 才由 WeMind 经 ACP 投递（`acpMcpServers` + `mcpDelivery: "acp"`）。适配器不解析 CLI 权限 flag，免审批走 `session/set_mode {modeId:"bypassPermissions"}`（**以 root 跑且未设 `IS_SANDBOX=1` 时该模式不可用**，会话回包的 `availableModes` 里没有它，WeMind 会跳过并记日志）。详见 [接入-ClaudeCode.md](接入-ClaudeCode.md) |
 | `codex` | OpenAI Codex | 需适配器（ACP 项目维护，非 OpenAI 官方） | ✅ **已内置/已实测（探针级 + 真机 E2E：worker 与 brain 通道均通过）**：`load` ✅、图片 ✅、`set_mode` ✅、`set_config_option(model)` ✅、工具调用 0 反向请求；**stdio MCP ✅**（2026-11-12 复测：模型实际调用客户端经 ACP 传入的 fake MCP；`mcpCapabilities.acp=false` 只指 MCP-over-ACP，stdin/stdout 是基础传输）→ 预设已开 `acpMcpServers` + `mcpDelivery: "acp"`；原生 `~/.codex/config.toml` 由 Codex 加载，同名原生优先，`direct` 不重发。2026-11-01 真机：切 worker 后 `wemind task` 由 codex 执行（`prompt ok 4436ms`，回话正常）；切 brain 后微信单轮 `prompt ok 2962ms`、回复送达。**没有独立配置目录**（cwd 是角色工作区） | `codex-acp`（npm 包 `@agentclientprotocol/codex-acp`，**先 `npm i -g` 全局安装**；Windows 上装出来的是 **`codex-acp.cmd`**，故预设 `binWin: "codex-acp.cmd"` + `shell: true`）。免审批：env `INITIAL_AGENT_MODE=agent-full-access`（预设 `envDefaults`）+ `session/set_mode {modeId:"agent-full-access"}`；codex 的 `--yolo` 不被适配器转发。详见 [接入-Codex.md](接入-Codex.md) |
@@ -348,7 +368,7 @@ ACP agent 分两类，接入方式不同：
 | 路径判定 | 按精确文件名（Windows 上是 `<bin>.cmd`） | 走 `npx` 裸名，PATH 上永远「有」→ **不能用来判断装没装** |
 
 `npx` 只作为「不想装、且能接受每次联网」的兜底：`wemind brain set <agent 名> --bin npx --args "-y <包名>" --shell`。
-WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直接给出可粘贴的 `npm i -g …` 命令**（`brain-agents.ts` 的 `ADAPTER_INSTALL_HINT`）。原生 ACP 的 agent（如 Cline）不需要适配器——`cline-acp` 已归档，直接用 `cline --acp`。
+WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直接给出可粘贴的 `npm i -g …` 命令**（内置 adapter 的 `hints.install`）。原生 ACP 的 agent（如 Cline）不需要适配器——`cline-acp` 已归档，直接用 `cline --acp`。
 
 ---
 

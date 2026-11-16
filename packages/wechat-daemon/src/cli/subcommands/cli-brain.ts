@@ -21,7 +21,6 @@ import {
   type BrainConfig,
 } from "../../agents/brain-config.js";
 import { checkAgent } from "../../acp/brain-check.js";
-import { acpModelHint, acpOverrideHint } from "../../agents/profile-model.js";
 import {
   aliveOurs,
   bridgeReady,
@@ -87,7 +86,10 @@ function describeBrain(key: string): string {
   // 用户层 profile 缺 `- id: acp`（或它的 model 已被桌面端模型目录淘汰）时给出「你自己改」的提示（WeMind 只读，不替 agent 合成）
   const hint =
     ag.realProfile && ag.realHome && ag.inherit
-      ? (acpOverrideHint(ag.realHome, ag.realProfile) ?? acpModelHint(ag.realHome, ag.realProfile))
+      ? (() => {
+          const h = ag.hooks?.profile?.hints?.(ag.realHome!, ag.realProfile!);
+          return h?.override ?? h?.model ?? null;
+        })()
       : null;
   if (hint) lines.push("", hint);
   return lines.join("\n");
@@ -96,7 +98,8 @@ function describeBrain(key: string): string {
 function definitionSourceLine(agent: string): string {
   const source = findAgentDefinitionSource(agent);
   if (!source) return "（无有效定义）";
-  return `${source.kind === "builtin" ? "内置" : "本机"} ${source.file}`;
+  const kind = source.kind === "builtin" ? "内置" : source.kind === "package" ? "数据包" : "本机";
+  return `${kind} ${source.file}`;
 }
 
 /** `wemind brain set <agent 名|auto>`：把选择按账号写入磁盘（可选 --bin/--args/--extra-args/--shell/--model；--restart 立即重启 daemon）。 */

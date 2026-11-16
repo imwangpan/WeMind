@@ -12,7 +12,9 @@ import {
 import {
   brokenAgentDefinitionMessage,
   findBrokenAgentDefinition,
+  resetAgentRegistryCache,
 } from "../agents/agent-registry.js";
+import { preloadAgentAdapters } from "../agents/agent-adapter-loader.js";
 import { getAgent, seedSlots, setAgent } from "../agents/agent-slot.js";
 import { preflightSwitch, switchBrain, switchInFlightTarget } from "../acp/brain-switch.js";
 import { renderHelp, type ChatCommand } from "../ipc/chat-commands.js";
@@ -299,6 +301,9 @@ export async function handleControlRequest(req: ControlRequest, owner: string): 
     case "brain.handoff":
       return await runHandoff(owner, { owner, notify: async () => {} }, req.expiresAt);
     case "config.reload": {
+      // 本地新增/修改的定义可能带来新的 ESM adapter；同步解析器只能读预加载缓存。
+      await preloadAgentAdapters({ refresh: true });
+      resetAgentRegistryCache();
       ensureBrainHome();
       ensureWorkerHome();
       killIdleConns();

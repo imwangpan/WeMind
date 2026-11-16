@@ -14,6 +14,7 @@
   "mcpConfigFile": "opencode.json",
   "catalogFile": "opencode.json",
   "env": { "OPENCODE_DISABLE_PROJECT_CONFIG": "1" },
+  "adapter": { "module": "builtin:opencode", "apiVersion": 1 },
   "notes": [
     "Windows 上是 npm shim（PATH 只有 opencode.cmd），故 shell:true + 裸名 binWin。",
     "配置目录走 XDG_CONFIG_HOME（只在 managed 下指向副本根 → 配置落在 `<副本>/opencode/`），可真正替换默认 global 目录实现隔离；direct 不设置，直接用 ~/.config/opencode。`OPENCODE_CONFIG_DIR` 只「追加」不替换 global，无法隔离，故不用它。",

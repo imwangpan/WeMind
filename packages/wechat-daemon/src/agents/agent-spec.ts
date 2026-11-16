@@ -223,15 +223,37 @@ const COMMANDS = {
   probe: "wemind agent probe <bin> [--args <JSON数组|空格分隔>] [--draft] [--deep]",
   checkSchema: "wemind agent check <name|文件.json> --schema",
   check: "wemind agent check <name|文件.json> [--deep]",
-  install: "把定义保存为 ~/.wemind/.agents/<name>.json（文件名必须与 name 完全一致）",
+  install:
+    "wemind agent add <包目录|package.json|定义.json>（复制到 ~/.wemind/.agents/；也可手工保存 <name>.json）",
+  remove: "wemind agent remove <name>（只删本机/数据包层；同名内置定义恢复）",
   select: "wemind brain switch <name>（写完不会自动切换；微信里说「切到 <name>」）",
 } as const;
+
+/** adapter hook 契约（人读与机器可读都用同一份）。 */
+const ADAPTER_HOOKS = [
+  ["mcp.*", "自定义 MCP 文件格式的读/写/剥离/ACP 转换"],
+  ["settings.inherit", "managed 副本继承非 MCP 设置"],
+  [
+    "profile.readDefaultModel / copyForManaged / managedFiles / stripManagedWechat / hints",
+    "profile 类 agent 的默认模型、副本复制、微信 MCP 清理与用户提示",
+  ],
+  ["env.derive / binOverride", "从凭据文件派生环境变量；旧版 bin 覆盖变量"],
+  ["engine.prepareArgs", "引擎版本探测与启动参数整理"],
+  [
+    "spawn.prepareArgs / prepare / prepareManaged",
+    "启动前派生参数与文件（如会话目录 patch、permissions.yaml）",
+  ],
+  ["fingerprint.volatile / extraFiles", "配置指纹里要排除的易变文件与额外配置文件"],
+  ["paths.sensitive", "附件外发时要额外拦截的敏感路径"],
+  ["hints.install / hints.auth / hints.autoProbe", "安装/认证提示与自动探测顺序"],
+] as const;
 
 /** 机器可读版本：字段、JSON Schema、命令与示例一次给全。 */
 export function agentSpecJson(): Record<string, unknown> {
   return {
     schemaVersion: AGENT_DEFINITION_SCHEMA_VERSION,
     adapterApiVersion: AGENT_ADAPTER_API_VERSION,
+    adapterHooks: ADAPTER_HOOKS.map(([name, desc]) => ({ name, desc })),
     definitionDir: agentsDir(),
     commands: COMMANDS,
     fields: fieldRows(),
@@ -268,7 +290,7 @@ export function agentSpecMarkdown(): string {
     "1. 先跑 `wemind agent probe <bin> --args <进入 ACP 的参数> --draft`，拿到协议层草稿。",
     "2. 按下面的字段表补 `realHome`、`mcpFormat`、`mcpConfigFile`、凭据/继承清单等探针推不出的字段。",
     "3. 保存到临时文件，先跑 `wemind agent check <文件> --schema` 修 schema；再跑 `wemind agent check <文件>` 做真实握手。",
-    "4. 握手通过后安装到定义目录，再运行 `wemind agent list` / `wemind brain switch <name>`。",
+    "4. 握手通过后用 `wemind agent add <包目录|文件.json>` 安装（或手工保存到定义目录），再运行 `wemind agent list` / `wemind brain switch <name>`。",
     "5. **不要替用户自动切换大脑**；完成后回一句「要切过去就说『切到 <name>』」。",
     "",
     "探针默认不发真实 prompt；只有显式 `--deep` 才会花钱并可能写入 agent 的会话历史。",
@@ -304,11 +326,24 @@ export function agentSpecMarkdown(): string {
     `- 只校验数据：\`${COMMANDS.checkSchema}\``,
     `- 校验 + 真实握手：\`${COMMANDS.check}\`（\`--deep\` 再发一条真实 prompt）`,
     `- 安装：${COMMANDS.install}`,
+    `- 移除：${COMMANDS.remove}`,
     `- 选择：${COMMANDS.select}`,
+    "",
+    "## adapter 插件（数据表达不了时才用）",
+    "",
+    "`adapter` 指向一个模块（包名、绝对路径或以 `./` 开头的相对路径），模块默认导出 `{ apiVersion: 1, ...hooks }`。",
+    `契约版本不匹配、未知 hook、模块无法解析都 fail-closed。可用 hook：`,
+    "",
+    ...ADAPTER_HOOKS.map(([name, desc]) => `- \`${name}\`：${desc}`),
+    "",
+    "**永不开放**：会话恢复策略、回合帧处理、静默等待、`session/request_permission` 应答与任何反向请求；这些由 WeMind 统一实现。",
+    "自定义 `mcpFormat` 必须在 adapter 里提供 `mcp` 实现；内置格式只有 `mcpServers` / `mcp.servers` / `dshProfileYaml`。",
+    "用 `wemind agent add <包目录|package.json|定义.json>` 安装时，包根可放 `wemind-agent.json`，或在 `package.json` 的 `wemind.definition` / `wemind.definitions` 里声明；相对路径的 adapter 会被复制到定义目录。",
     "",
     "## 边界",
     "",
-    "- `adapter` 会执行代码；当前版本还不能加载外部 adapter 插件（P3），只允许内置 hook。",
+    "- `adapter` 会执行代码；安装即授权。`agent list` / `agent show` 会显示来源，`agent add` 会提示哪些定义带代码。",
+    "- 外部模块随 daemon 进程加载；运行期不联网拉取。ESM 插件由 CLI/daemon 启动时预加载，新增/修改后运行 `wemind config reload`。",
     "- 未知字段、版本不匹配、文件名与 `name` 不一致都 fail-closed；错误会给出字段路径与修法。",
     "- 定义写好不会自动切换大脑；用户明确要求切换时才执行 `wemind brain switch` 或让用户在微信里说「切到 <name>」。",
     "",

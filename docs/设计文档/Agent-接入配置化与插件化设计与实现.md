@@ -1,6 +1,6 @@
 # Agent 接入：配置化与插件化设计与实现
 
-> **状态**：设计定稿；**P0 契约 + P1（内置迁移 + 本机加载层 + `agent list/show/check`）+ P2（`agent spec/probe`、真实握手校验、一次性自助接入提示）已实现**；P3–P4 未实现（2026-11-16）｜**分支**：`feat/agent-definitions`｜**最后核对**：2026-11-16
+> **状态**：设计定稿；**P0 契约 + P1（内置迁移 + 本机加载层 + `agent list/show/check`）+ P2（`agent spec/probe`、真实握手校验、一次性自助接入提示）+ P3（可安装 adapter 插件与内置 adapter 收敛）+ P4（`agent add/remove` 与数据包分发）已实现**（2026-11-16）｜**分支**：`feat/agent-definitions`｜**最后核对**：2026-11-16
 >
 > 本文描述如何把「接入一个新的 ACP Agent」从**改 TypeScript + 发新版**变成**加一份定义（必要时加一个插件）**：让用户在本机自己接入新 agent、让开发侧不再一个一个适配。本文是实现前定稿，进度以文末「实施阶段」与 [`docs/ai/README.md`](../ai/README.md) 事实状态表为准；未实测的结论标注「假设 / 待实测」。
 
@@ -114,7 +114,7 @@
 
 **校验用自写校验器**：现有运行时依赖只有 `qrcode` 与 `silk-wasm`（`packages/wechat-daemon/package.json`），不引入 `ajv` / `zod`。JSON Schema 由**同一份定义**生成，供 `agent spec` 输出，避免两套真相。
 
-**内置定义的位置**：源码 `packages/wechat-daemon/agents/<name>.json`，**构建期内联进 bundle**（tsdown 直接内联 JSON 导入），保持 `files: ["dist"]` 与 `scripts/prepack-guard.mjs` 的检查口径不变，运行期零 IO。仓库脚本（`check-agent-docs.mjs` / `gen-docs-tables.mjs`）直接读这些 JSON 作为键源；同一份目录结构就是未来官方数据包的结构（预留）。
+**内置定义的位置**：源码 `packages/wechat-daemon/src/agents/definitions/<name>.json`，**构建期内联进 bundle**（tsdown 直接内联 JSON 导入），保持 `files: ["dist"]` 与 `scripts/prepack-guard.mjs` 的检查口径不变，运行期零 IO。仓库脚本（`check-agent-docs.mjs` / `gen-docs-tables.mjs`）直接读这些 JSON 作为键源；同一份目录结构就是未来官方数据包的结构（预留）。
 
 ### 3.2 来源、优先级与覆盖
 
@@ -133,15 +133,17 @@
 
 | hook | 替换掉今天的 |
 | --- | --- |
-| `mcp.read` / `mcp.write` / `mcp.stripSettings` / `mcp.toAcp` / `mcp.nativeRead` | `MCP_ADAPTERS` 里按格式分派的 4 个 adapter（`mcp-adapters.ts`） |
+| `mcp.readCatalog` / `mcp.writeCatalog` / `mcp.stripSettings` / `mcp.toAcp` / `mcp.nativeCatalog` | `MCP_ADAPTERS` 里按格式分派的 4 个 adapter（`mcp-adapters.ts`） |
 | `settings.inherit` | `jsonMcpServers.inheritSettings` 里按 `mcp.json` 名字特判的逻辑 |
-| `profile.readDefaultModel` / `profile.copyForManaged` | `profile-model.ts`（DSH `cordis.patch.yml`） |
+| `profile.readDefaultModel` / `profile.copyForManaged` / `profile.managedFiles` / `profile.stripManagedWechat` / `profile.hints` | `profile-model.ts`（DSH `cordis.patch.yml`） |
 | `env.derive` | `cline-credentials.ts` 的 `clineCredentialEnv` |
-| `engine.detect` | `brain-agents.ts` 的 kiro v2/v3 探测与 `stripKiroV2TrustArgs` |
-| `spawn.prepare` | DSH 的 session patch 文件生成（`dshSessionPatchFor` / `prepareAgent`）、kiro 的 `permissions.yaml` |
+| `engine.prepareArgs` | `brain-agents.ts` 的 kiro v2/v3 探测与 `stripKiroV2TrustArgs` |
+| `spawn.prepareArgs` / `spawn.prepare` / `spawn.prepareManaged` | DSH 的 session patch 文件生成（`dshSessionPatchFor` / `prepareAgent`）、kiro 的 `permissions.yaml` |
 | `fingerprint.volatile` | `config-fingerprint.ts` 里 Claude Code 的易变文件清单 |
 | `paths.sensitive` | `attachments.ts` 里按 `realHome` 派生 + 三条硬编码的敏感路径 |
-| `hint.install` / `hint.auth` | `ADAPTER_INSTALL_HINT`、`authHint()` 的名字分支 |
+| `hints.install` / `hints.auth` / `hints.autoProbe` | 安装/认证提示与 `AUTO_PROBE_ORDER` 的名字分支 |
+
+**外部模块的加载口径**：定义里的 `adapter.module` 可以是包名、绝对路径或以 `./` / `../` 开头的相对路径；模块默认导出 `{ apiVersion: 1, ...hooks }`。CJS 插件走同步 `require`，ESM 插件在 CLI / daemon 启动时异步预加载；契约版本不符、未知顶层键、未知嵌套键、`mcp` 缺少接口方法、模块无法解析都 **fail-closed**。`agent add` 会把相对路径的 adapter 复制到定义目录下并改写 `adapter.module`；包名与绝对路径保持原样，运行期不联网拉取。插件只能补文件格式与 spawn 前准备，不能替换会话恢复、回合帧、静默等待、权限应答或任何反向请求。
 
 **永不开放的 hook**：会话恢复策略、回合帧处理、静默等待、`session/request_permission` 应答、任何反向请求——这些是 brain / worker / `brain check` **三处共用**、且最容易出"微信能跑但 `brain check` 超时"的路径。能力差异继续由数据声明（`restore` / `replayOnLoad` / `sessionMode` / `firstFrameMs` / `heartbeatMs`）。
 
@@ -219,11 +221,11 @@
 
 **已实现（2026-11-16）**：新增 `packages/wechat-daemon/src/agents/agent-definition.ts`（字段表 `AGENT_DEFINITION_FIELDS` 同时驱动 `validateAgentDefinition()` 与 `agentDefinitionJsonSchema()`；`AgentDefinition` 类型 + 编译期字段覆盖守卫）与 `agent-definition.test.ts`（22 个用例）。三条实现细节：未知字段一律拒绝（含 JSON 里真实存在的 `__proto__` 键，且断言不污染原型）；相同 `schemaVersion` 内允许新增可选字段，所以正常的兼容升级不用动常量；自定义 `mcpFormat` 必须同时给 `adapter`，这条**条件必填**也由同一份表生成进 JSON Schema（用 `anyOf` 表达，与 `if`/`then` 等价且避开 lint 的 `then` 告警——仓库里不加任何 lint 豁免）。P0 交付时 `brain-presets.ts` 尚未改动，两个既有文档守卫不受影响；键源已在 P1 改掉（见下段）。
 
-**P1 检查点 1（内置迁移）已实现（2026-11-16）**：10 份定义迁到 `src/agents/definitions/*.json`，`agent-registry.ts` 静态导入、展开 `~`、逐份 `validateAgentDefinition()`、按 `adapter.module` 挂 `credentialEnv`；`brain-presets.ts` 删除，6 个 import 点改读注册表；`scripts/check-agent-docs.mjs` 与 `scripts/gen-docs-tables.mjs` 的键源改成 `definitions/*.json`（新增 `scripts/agent-definitions.mjs` 共用读取/文件名校验），`doc-impact.rules.mjs` 的 `preset` 规则改为「新增 definitions/*.json」；迁移保真测试逐字段对照旧表跑过（10 × 35 字段一致），现有 `brain-agents.test.ts` / `attachments.test.ts` / managed 用例不退化。加载层在检查点 2 补齐（见下段）。
+**P1 检查点 1（内置迁移）已实现（2026-11-16）**：10 份定义迁到 `src/agents/definitions/*.json`，`agent-registry.ts` 静态导入、展开 `~`、逐份 `validateAgentDefinition()`、按 `adapter.module` 挂 adapter hooks；`brain-presets.ts` 删除，6 个 import 点改读注册表；`scripts/check-agent-docs.mjs` 与 `scripts/gen-docs-tables.mjs` 的键源改成 `definitions/*.json`（新增 `scripts/agent-definitions.mjs` 共用读取/文件名校验），`doc-impact.rules.mjs` 的 `preset` 规则改为「新增 definitions/*.json」；迁移保真测试逐字段对照旧表跑过（10 × 35 字段一致），现有 `brain-agents.test.ts` / `attachments.test.ts` / managed 用例不退化。加载层在检查点 2 补齐（见下段）。
 
 **P1 检查点 2（本机加载层 + 命令面）已实现（2026-11-16）**：`agent-registry.ts` 扫描 `~/.wemind/.agents/*.json`（`WEMIND_AGENTS_DIR` 可覆盖），按目录指纹缓存、下一次解析自动重读；优先级**内置 < 本机定义 < `brain.json` 字段覆盖 < 环境变量**，同名**整条替换**。坏定义（JSON/schema/未知字段/`name` 与文件名不一致/`name: "auto"`/自定义 `mcpFormat`/外部 adapter）按文件名遮住同名内置，`ResolvedAgent.definitionProblem` → `agentProblem()` → 退出码 78，文案含文件与修法；`ACP_AGENT_PRESETS` 改为合并视图 Proxy，`resolvePresetByName()` / 微信「切换大脑」「任务 <agent>」/ CLI 白名单自动接受本机定义；daemon 启动与切脑结果打印本机来源。新增 `wemind agent list|show [--explain]|check <name|文件>`；`config agent` 通过定义的 `realHome` / `mcpConfigFile` / `settingsBase` 工作，不按 agent 名硬编码。测试新增 `agent-registry.test.ts`（本机层/坏定义/热重读）、`cli-agent.test.ts`、`chat-commands.test.ts` 本机名用例、`cli-config.test.ts` 本机定义路径用例；`vitest.setup.ts` 把测试的定义目录指到空临时目录，避免读开发者真实 `~/.wemind`。
 
-**P2 自助接入已实现（2026-11-16）**：新增 `agents/agent-spec.ts`，用同一份 `AGENT_DEFINITION_FIELDS` + `FIELD_GUIDES` 输出人读 Markdown 与机器可读 JSON（含 JSON Schema、正例、错误示例、安装/选择命令），字段明确区分「自动 / `--deep` / 人工」。新增 `acp/agent-probe.ts`，把 `scripts/acp-probe.mjs` 的实现搬进 CLI：默认只做 `initialize` + `session/new` + load/resume 实测，不发真实 prompt；`--deep` 才发真实回合并验证恢复后的上下文，`--image` / `--tool` 需要显式配合 `--deep`；默认用临时假 MCP 测试 `session/new.mcpServers`，`--no-mcp-test` 可关闭；`--draft` 只填协议层能确认的字段，并在 notes 里列出仍需人工补的领域字段。`agent check` 默认改为真实 ACP 握手，`--schema` 才是纯数据校验，`--deep` 再发一条真实 prompt；`resolveAgentFromDefinition()` 让“检查未安装文件”和安装后使用同一套 adapter 解析。`scripts/acp-probe.mjs` 改成薄壳，兼容旧 `ACP_*` 变量并默认 `--deep`（`ACP_NO_PROMPT=1` 关闭）。反向请求统一走 `acp-reverse.ts`，探针可显式拒绝权限请求；草稿在检测到恢复后历史回放时自动写 `replayOnLoad: true`。大脑的一次性系统提示加入 `wemind agent spec` 入口，不新增微信指令、不每轮注入。**验收边界**：fake ACP 进程的探针、握手、`--deep`、草稿与提示注入已有单测；真实 agent 的「spec → probe → check → 落盘 → 热切换」闭环仍待真机跑通。**未做（按阶段）**：外部 adapter 插件（P3）、`agent add/remove` 与数据包分发（P4）。
+**P2 自助接入已实现（2026-11-16）**：新增 `agents/agent-spec.ts`，用同一份 `AGENT_DEFINITION_FIELDS` + `FIELD_GUIDES` 输出人读 Markdown 与机器可读 JSON（含 JSON Schema、正例、错误示例、安装/选择命令），字段明确区分「自动 / `--deep` / 人工」。新增 `acp/agent-probe.ts`，把 `scripts/acp-probe.mjs` 的实现搬进 CLI：默认只做 `initialize` + `session/new` + load/resume 实测，不发真实 prompt；`--deep` 才发真实回合并验证恢复后的上下文，`--image` / `--tool` 需要显式配合 `--deep`；默认用临时假 MCP 测试 `session/new.mcpServers`，`--no-mcp-test` 可关闭；`--draft` 只填协议层能确认的字段，并在 notes 里列出仍需人工补的领域字段。`agent check` 默认改为真实 ACP 握手，`--schema` 才是纯数据校验，`--deep` 再发一条真实 prompt；`resolveAgentFromDefinition()` 让“检查未安装文件”和安装后使用同一套 adapter 解析。`scripts/acp-probe.mjs` 改成薄壳，兼容旧 `ACP_*` 变量并默认 `--deep`（`ACP_NO_PROMPT=1` 关闭）。反向请求统一走 `acp-reverse.ts`，探针可显式拒绝权限请求；草稿在检测到恢复后历史回放时自动写 `replayOnLoad: true`。大脑的一次性系统提示加入 `wemind agent spec` 入口，不新增微信指令、不每轮注入。**验收边界**：fake ACP 进程的探针、握手、`--deep`、草稿与提示注入已有单测；真实 agent 的「spec → probe → check → 落盘 → 热切换」闭环仍待真机跑通。
 
 ### P1 内置迁移 + 加载层（交付用户侧目标的大半）
 
@@ -245,10 +247,14 @@
 - **验收**：现有 `agents/managed/*.test.ts`、`brain-agents.test.ts`、`acp-reverse.test.ts` 全绿；迁移后**没有任何**按 agent 名的分支残留（用新测试断言 `agent-registry.ts` 之外不再出现 agent 名）。
 - **文档**：`docs/repowiki/*`（06 / 07 篇）与 [`docs/ai/代码地图.md`](../ai/代码地图.md)。
 
+**P3 已实现（2026-11-16）**：新增 `agents/agent-adapter.ts`（稳定 hook 契约与 `AGENT_ADAPTER_API_VERSION = 1`）、`agents/agent-adapter-loader.ts`（CJS `createRequire` + 启动时 ESM 预加载、来源展示、未知键/版本/形状 fail-closed）与 `agents/adapters/builtin.ts`（Cline 凭据派生、kiro 引擎探测与权限文件、DSH profile/会话 patch、opencode 设置继承、Claude Code 易变/敏感路径、各 agent 安装提示与 autoProbe 排序）。`AcpAgentPreset` 改为 `hooks` + `adapterSource`；managed/MCP、配置指纹、敏感文件名单、`agent check` 都改按 hook 分派。`agent check <文件>` 会按定义文件所在目录解析相对 adapter；`wemind agent spec` 与 `--json` 输出实际 hook 契约。新增 `agent-adapter.test.ts` 与 `agent-branch-guard.test.ts`（断言核心代码不再按 agent 名分支）。
+
 ### P4 分发与守卫
 
 - **改动面**：包内定义约定（如包根 `wemind-agent.json` 或 `package.json` 的 `wemind` 字段）+ `agent add/remove`（复制即安装）；`llms.txt` 与 `docs/README.md` 同步；官方数据包结构预留。文档守卫键源已在 P1 改成 `definitions/*.json`，P4 只需确认用户目录不进入守卫。
 - **验收**：`npm run verify` 全绿；一个第三方定义包能装进 `~/.wemind/.agents/` 并被选中（真机）；用户目录里的定义**不触发**任何仓库守卫。
+
+**P4 已实现（2026-11-16）**：新增 `agents/agent-install.ts` / `agent-paths.ts` 与 `wemind agent add/remove`。包约定：包根 `wemind-agent.json`、`package.json` 的 `wemind.definition`（单定义）或 `wemind.definitions`（目录，默认 `agents/*.json`），可选 `package.json` 的 `wemind.adapter` 作为共享 adapter。`add` 只读本地目录/文件，复制定义与相对路径 adapter 到 `~/.wemind/.agents/`，改写成安装后的路径，并在 `.sources.json` 记录来源；adapter 预加载失败会回滚定义、adapter 与来源清单。`remove` 只删本机/数据包层，同名内置定义恢复。运行期不联网拉取；用户目录不进入仓库文档守卫。
 
 ---
 
@@ -263,7 +269,7 @@
 - **待实测**：`session/new` 的 `configOptions` 是否总能列出可用 mode id；tsdown 对 JSON 导入的内联行为（`resolveJsonModule` + `noEmit` 组合）；用户定义 agent 作为 worker 时进程池与会话持久化的表现。
 - **风险**：用户写一份劣质定义覆盖内置（如 kiro 漏了 engine 探测）→ 症状静默。缓解：三处可见性 + `agent check` + `agent show --explain`。
 - **风险**：模型自行写定义文件时可能绕过 `agent add`。这是**既有能力**，靠"合法路径最顺畅 + 三处可见性"缓解，不靠一道能被绕过的闸。
-- **风险**：P3 触碰的是"终端能用、微信不能用"的高发区（profile 剥离、session patch、凭据派生、引擎探测）。缓解：放到最后做，用现有单测当安全网。
+- **风险**：P3 触碰的是"终端能用、微信不能用"的高发区（profile 剥离、session patch、凭据派生、引擎探测）。缓解：已把 per-agent 逻辑收敛到内置 adapter，并用现有单测与 `agent-branch-guard.test.ts` 守住核心不再按 agent 名分支。
 
 ---
 

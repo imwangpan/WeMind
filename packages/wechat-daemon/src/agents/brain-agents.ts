@@ -1,12 +1,11 @@
 import path from "node:path";
 import fs from "node:fs";
-import { spawnSync } from "node:child_process";
 
 import { DATA_DIR } from "@wemind/wechat-ilink-core";
 import { agentConfigFor, type AgentRole, type BrainConfig } from "./brain-config.js";
-import { readProfileDefaultModel } from "./profile-model.js";
 import {
   ACP_AGENT_PRESETS,
+  AUTO_PROBE_ORDER,
   brokenAgentDefinitionMessage,
   findBrokenAgentDefinition,
   isAgentToken,
@@ -14,6 +13,7 @@ import {
   type AcpAgentPreset,
 } from "./agent-registry.js";
 import { AGENT_DEFINITION_SCHEMA_VERSION, type AgentDefinition } from "./agent-definition.js";
+import type { AgentAdapter } from "./agent-adapter.js";
 import { readEnvSnapshot, mergeEnvSnapshot } from "./config/env-snapshot.js";
 import { readHomeMode } from "./config/home-mode.js";
 
@@ -65,14 +65,7 @@ function onPathAny(exe: string): string | null {
 /**
  * `auto` 的探测顺序：按序取第一个「二进制能在 PATH 上解析到」的 agent。只收纳**适合无配置自动选择的原生 ACP**；Copilot 虽原生支持 ACP，但认证独立于二进制安装，故与适配器一样只允许显式选择（`wemind brain set|switch <名>`）。适配器（`claude-code` / `codex` / `pi`）也不参与自动探测。顺序按本机实测的启动耗时排（暖启动：opencode ~1.7s、cline ~2.0s、qoder ~2.5s、gemini ~4.3s）；kiro 与 deepseek 在该轮实测中未握手成功（kiro `session/new` 超时、deepseek 旧会话 artifact 布局错误），暂排最后，修复后可再前移。
  */
-export const AUTO_PROBE_ORDER = [
-  "opencode",
-  "cline",
-  "qoder",
-  "gemini",
-  "deepseek",
-  "kiro",
-] as const;
+export { AUTO_PROBE_ORDER };
 
 /**
  * 该 agent 预设里「进入 ACP 模式」的标记 token：从默认 args 中挑出含 `acp` 的项。
@@ -117,12 +110,16 @@ function presetExe(preset: Pick<AcpAgentPreset, "bin" | "binWin">): string {
   return /\.[A-Za-z0-9]+$/.test(preset.bin) ? preset.bin : `${preset.bin}.exe`;
 }
 
-/** 数据面的 `mcpFormat` 是开放字符串（自定义格式靠 adapter）；这里只接受内置格式，其它值明确报错而不是猜。 */
-function resolvedMcpFormat(v: string | undefined): ResolvedAgent["mcpFormat"] {
+/** 数据面的 `mcpFormat` 是开放字符串；自定义格式必须由 adapter 提供 mcp.* hook。 */
+function resolvedMcpFormat(
+  v: string | undefined,
+  hooks: AgentAdapter | undefined,
+): ResolvedAgent["mcpFormat"] {
   if (v === undefined) return "mcpServers";
   if (v === "mcpServers" || v === "mcp.servers" || v === "dshProfileYaml") return v;
+  if (hooks?.mcp) return v;
   throw new Error(
-    `mcpFormat「${v}」需要 adapter 解释（内置格式只有 mcpServers / mcp.servers / dshProfileYaml）`,
+    `mcpFormat「${v}」需要 adapter 提供 mcp.read/write hook（内置格式只有 mcpServers / mcp.servers / dshProfileYaml）`,
   );
 }
 
@@ -193,18 +190,16 @@ export type ResolvedAgent = {
   inheritDirs: string[];
   inheritFiles: string[];
   configSubdir: string;
-  mcpFormat: "mcpServers" | "mcp.servers" | "dshProfileYaml";
+  mcpFormat: string;
   mcpConfigFile: string;
   catalogFile: string;
   env: Record<string, string>;
   /** 预设给的「默认环境变量」：父进程已设同名变量时不覆盖（用于审批类开关，部署方可以收紧）。 */
   envDefaults: Record<string, string>;
-  /** 没有 homeEnvVar 的 agent 在非 direct 场景直接用真实 home 时需要覆盖的 env（见 preset 注释）。 */
-  /** 从 agent 自己的凭据文件派生环境变量（父进程未显式提供时；如 Cline 自定义 provider）。 */
-  credentialEnv?: (
-    realHome: string | undefined,
-    parentEnv: NodeJS.ProcessEnv,
-  ) => Record<string, string>;
+  /** 该 agent 的 adapter hook（数据表达不了的代码语义都在这里）。 */
+  hooks?: AgentAdapter;
+  /** adapter 的实际来源（内置模块名或绝对路径）；`agent show` 用它展示「会执行哪段代码」。 */
+  adapterSource?: string;
   restore?: "load" | "resume";
   /** session/load|resume 返回后还会异步回放历史帧：恢复后先等帧流安静，再开始本轮提问。 */
   replayOnLoad: boolean;
@@ -226,8 +221,8 @@ export type ResolvedAgent = {
   mcpDelivery: "config" | "acp";
   /** 会话建立/恢复后切到的模式 id（`session/set_mode`）；「免审批」用，留空=不调用。 */
   sessionMode?: string;
-  /** kiro 是否跑在 v3 引擎（决定启动参数与能否用 v3 的 permissions.yaml 免审批）。 */
-  kiroV3?: boolean;
+  /** `adapter.engine.prepareArgs` 的结论（如 kiro 的 v2/v3）。 */
+  engine?: string;
   /** 启动前要落盘的 session-root patch（DSH：`--patch` 指向该文件，root 指向账号数据目录）。 */
   sessionPatch?: { file: string; root: string };
   /** 请求的原始值（来自 env / brain.json / 缺省 `auto`）。 */
@@ -263,7 +258,9 @@ export function agentEnv(
   const direct = opts.direct === true;
   if (ag.homeEnvVar && !direct) env[ag.homeEnvVar] = home; // 把账号副本目录传给 agent（direct 不注入）
   // 从 agent 自己的凭据文件派生（如 Cline 的 CLINE_PROVIDER/CLINE_API_KEY）；helper 内部已保证父进程显式值优先
-  for (const [k, v] of Object.entries(ag.credentialEnv?.(ag.realHome, process.env) ?? {})) {
+  for (const [k, v] of Object.entries(
+    ag.hooks?.env?.derive?.({ realHome: ag.realHome, parentEnv: process.env }) ?? {},
+  )) {
     if (env[k] === undefined) env[k] = v;
   }
   if (!direct) {
@@ -297,118 +294,23 @@ function isDefaultModel(v: string): boolean {
 }
 
 /**
- * kiro 的 ACP 引擎：启动参数里的 `--agent-engine` → 真实 `settings/cli.json` 的 `acp.agentEngine` → CLI 主版本 ≥3 的默认 v3 → 其余 v2。
- * 2.37.1 的 `kiro-cli acp --help` 写明「v2 when neither is set」；「CLI ≥3 默认 v3」是**假设/待实测**，只作兜底（防未来大版本把默认切到 v3 后仍带 v2 专属参数 → 握手超时）。
- * `--agent-engine` 还接受 `v1`，未验证，按 v2 处理（保留 v2 参数）；`chat.agentEngine` **不影响** acp（官方文档原话），不能拿它推断。
- * v2 与 v3 的免审批方式不同：v2 是 `--trust-all-tools`（v3 会拒绝这个参数），v3 走 `settings/permissions.yaml` 的 allow-all 规则。
- */
-function kiroEngineFromArgs(args: readonly string[]): string | undefined {
-  for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith("--agent-engine=")) return args[i].split("=")[1];
-    if (args[i] === "--agent-engine") return args[i + 1];
-  }
-  return undefined;
-}
-
-function kiroEngineFromSettings(realHome: string | undefined): string | undefined {
-  if (!realHome) return undefined;
-  try {
-    const j = JSON.parse(fs.readFileSync(path.join(realHome, "settings", "cli.json"), "utf-8"));
-    const v = j?.["acp.agentEngine"];
-    return typeof v === "string" ? v.toLowerCase() : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-const kiroMajorCache = new Map<string, number | null>();
-/** `kiro-cli --version` 的主版本（只探一次；找不到/超时/解析失败都按 null，调用方回退 v2）。 */
-function kiroCliMajor(binPath: string | null): number | null {
-  if (!binPath) return null;
-  if (kiroMajorCache.has(binPath)) return kiroMajorCache.get(binPath) ?? null;
-  let major: number | null = null;
-  try {
-    const r = spawnSync(binPath, ["--version"], {
-      encoding: "utf-8",
-      timeout: 5_000,
-      windowsHide: true,
-    });
-    const m = /(?:^|\s)(\d+)\.\d+\.\d+/.exec(`${r.stdout ?? ""}\n${r.stderr ?? ""}`);
-    if (m) major = Number(m[1]);
-  } catch {
-    /* 找不到/超时：按未知处理 */
-  }
-  kiroMajorCache.set(binPath, major);
-  return major;
-}
-
-function resolveKiroV3(
-  args: readonly string[],
-  realHome: string | undefined,
-  binPath: string | null,
-): boolean {
-  const fromArgs = kiroEngineFromArgs(args);
-  if (fromArgs) return fromArgs.toLowerCase() === "v3";
-  const fromSettings = kiroEngineFromSettings(realHome);
-  if (fromSettings) return fromSettings === "v3";
-  return (kiroCliMajor(binPath) ?? 0) >= 3;
-}
-
-/** v3 拒绝 v2 专属的整会话信任参数；v3 的免审批改由 managed `settings/permissions.yaml` 承担。 */
-function stripKiroV2TrustArgs(args: readonly string[]): string[] {
-  const kept: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--trust-all-tools" || a === "-a") continue;
-    if (a === "--trust-tools") {
-      i++;
-      continue;
-    }
-    if (a.startsWith("--trust-tools=")) continue;
-    kept.push(a);
-  }
-  return kept;
-}
-
-/** DSH 会话持久化目录（账号数据目录内，按角色分开；与 kiro/pi 共用的副本根隔离开）。
- *  `dataDir` 允许调用方显式指定账号目录：CLI 进程里的 `DATA_DIR` 是**默认账号**的目录，不能拿来替别的账号解析（`brain check`/`list`/`stop` 会用到）。 */
-function dshSessionPatchFor(role: AgentRole, dataDir: string): { file: string; root: string } {
-  const dir = path.join(dataDir, "agent-sessions", "deepseek");
-  return {
-    file: path.join(dir, `session-root-${role}.patch.yml`),
-    root: path.join(dir, role),
-  };
-}
-
-/**
- * 启动前落盘 agent 需要的派生配置文件（DSH 的 session-root patch）。
+ * 启动前落盘 agent 需要的派生配置文件（由 adapter 的 `spawn.prepare` 解释）。
  * 与副本准备分开：`ensureBrainHome` 只在启动/换脑时调，`brain check` 和 worker 每次起进程也要有这份文件。
  */
 export function prepareAgent(ag: ResolvedAgent): void {
-  const patch = ag.sessionPatch;
-  if (!patch) return;
   try {
-    fs.mkdirSync(patch.root, { recursive: true });
-    fs.mkdirSync(path.dirname(patch.file), { recursive: true });
-    // DSH 的 patch 是 YAML 列表；JSON.stringify 给双引号字符串，Windows 反斜杠也能正确转义。
-    const body = `- id: session-persistence-jsonl\n  config:\n    root: ${JSON.stringify(patch.root)}\n`;
-    if (!fs.existsSync(patch.file) || fs.readFileSync(patch.file, "utf-8") !== body)
-      fs.writeFileSync(patch.file, body, "utf-8");
+    ag.hooks?.spawn?.prepare?.({ agent: ag });
   } catch {
-    /* best-effort：写不了就让 agent 自己报错（缺 --patch 文件比静默换目录更容易诊断） */
+    /* best-effort：派生文件写失败交给 agent 自己的启动错误，不让 daemon 在 spawn 前崩掉 */
   }
 }
 
-/** kiro v3 的免审批默认（等价于 v2 的 `--trust-all-tools`）：managed settings/permissions.yaml 缺失时补上。 */
-export function ensureKiroV3Permissions(ag: ResolvedAgent, settingsDir: string): void {
-  if (!ag.kiroV3) return;
+/** managed 副本准备好后的 adapter 收尾（如 kiro v3 的 permissions.yaml）。 */
+export function prepareManagedAgent(ag: ResolvedAgent, configDir: string): void {
   try {
-    const dst = path.join(settingsDir, "permissions.yaml");
-    if (fs.existsSync(dst)) return; // 副本里已有（或用户已同步）就尊重用户的规则
-    fs.mkdirSync(settingsDir, { recursive: true });
-    fs.writeFileSync(dst, "rules:\n  - capability: all\n    effect: allow\n", "utf-8");
+    ag.hooks?.spawn?.prepareManaged?.({ agent: ag, configDir });
   } catch {
-    /* best-effort */
+    /* best-effort：与 prepareAgent 同一口径 */
   }
 }
 
@@ -497,9 +399,11 @@ function resolveAgentCore(
   // 二进制：env 覆盖 > (kiro 旧变量) > 本段覆盖 > presets[agent 名] 覆盖 > PATH 解析 > agent 裸名。
   // 经 shell 启动时用裸名（让 shell 从 PATH 解析，避免带空格的全路径在 shell 下出问题）。
   const envBin = ignoreEnv ? undefined : process.env.WEMIND_BRAIN_BIN?.trim();
-  const kiroBin =
-    ignoreEnv || preset.name !== "kiro" ? undefined : process.env.KIRO_CLI_BIN?.trim();
-  const explicitBin = envBin || kiroBin || overrideCfg?.bin?.trim() || presetOv?.bin?.trim() || "";
+  const legacyBin = ignoreEnv
+    ? undefined
+    : preset.hooks?.env?.binOverride?.({ parentEnv: process.env });
+  const explicitBin =
+    envBin || legacyBin || overrideCfg?.bin?.trim() || presetOv?.bin?.trim() || "";
   const exe = presetExe(preset);
   const binPath = explicitBin ? locateBin(explicitBin) : presetBinPath(preset);
   const bin =
@@ -538,19 +442,28 @@ function resolveAgentCore(
         : [];
   let args = [...baseArgs, ...extraArgs];
 
-  // kiro：v3 删掉 v2 专属信任参数并显式声明引擎；v2 保持原样（`--trust-all-tools`）。
-  const kiroV3 = preset.kiroEngine ? resolveKiroV3(args, realHome, binPath) : false;
-  if (kiroV3) {
-    args = stripKiroV2TrustArgs(args);
-    if (!kiroEngineFromArgs(args)) args.push("--agent-engine", "v3");
-  }
+  // 引擎差异（如 kiro v2/v3 的参数与免审批方式）由 adapter 解释。
+  const engineResult = preset.hooks?.engine?.prepareArgs?.({
+    definition: preset,
+    args,
+    realHome,
+    binPath,
+  });
+  if (engineResult) args = engineResult.args;
+  const engine = engineResult?.engine;
 
-  // 会话目录隔离：agent 的 `--patch` 指向账号数据目录下的 per-role 文件（DSH）。
-  // 用户自己显式给了 `--patch` 就尊重用户，不追加第二个。
+  // 会话目录隔离等启动前派生文件由 adapter 解释；用户显式给的参数由 hook 自己尊重。
   let sessionPatch: ResolvedAgent["sessionPatch"];
-  if (preset.isolateSessions && homeMode === "managed" && !args.includes("--patch")) {
-    sessionPatch = dshSessionPatchFor(role, opts.dataDir ?? DATA_DIR);
-    args.push("--patch", sessionPatch.file);
+  const spawnPrepared = preset.hooks?.spawn?.prepareArgs?.({
+    definition: preset,
+    role,
+    dataDir: opts.dataDir ?? DATA_DIR,
+    args,
+    homeMode,
+  });
+  if (spawnPrepared) {
+    args = spawnPrepared.args;
+    sessionPatch = spawnPrepared.sessionPatch;
   }
 
   const homeEnvVar =
@@ -566,7 +479,7 @@ function resolveAgentCore(
   const explicitModel = rawModel && !isDefaultModel(rawModel) ? rawModel : "";
   const derivedModel =
     !explicitModel && preset.realProfile && realHome && inherit
-      ? readProfileDefaultModel(realHome, preset.realProfile)
+      ? (preset.hooks?.profile?.readDefaultModel?.(realHome, preset.realProfile) ?? null)
       : null;
   const model =
     explicitModel || derivedModel || (isDefaultModel(rawModel) ? undefined : preset.model);
@@ -596,12 +509,13 @@ function resolveAgentCore(
     inheritDirs,
     inheritFiles: preset.inheritFiles ?? [],
     configSubdir: preset.configSubdir ?? "",
-    mcpFormat: resolvedMcpFormat(preset.mcpFormat),
+    mcpFormat: resolvedMcpFormat(preset.mcpFormat, preset.hooks),
     mcpConfigFile: preset.mcpConfigFile ?? "settings/mcp.json",
     catalogFile: preset.catalogFile ?? "settings/mcp.json",
     env: preset.env ?? {},
     envDefaults: preset.envDefaults ?? {},
-    credentialEnv: preset.credentialEnv,
+    hooks: preset.hooks,
+    adapterSource: preset.adapterSource,
     restore: preset.restore,
     replayOnLoad: preset.replayOnLoad ?? false,
     firstFrameMs: preset.firstFrameMs,
@@ -617,7 +531,7 @@ function resolveAgentCore(
     acpMcpServers: preset.acpMcpServers ?? false,
     mcpDelivery: preset.mcpDelivery ?? "config",
     sessionMode,
-    kiroV3,
+    engine,
     sessionPatch,
     requestedKey,
     source,
@@ -662,11 +576,11 @@ export function resolveAgentByName(
  */
 export function resolveAgentFromDefinition(
   def: AgentDefinition,
-  opts: { dataDir?: string } = {},
+  opts: { dataDir?: string; definitionFile?: string } = {},
 ): ResolvedAgent {
   return resolveAgentCore("brain", null, {
     ignoreEnv: true,
-    presetOverride: presetForDefinition(def),
+    presetOverride: presetForDefinition(def, opts.definitionFile),
     ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
   });
 }
@@ -717,18 +631,6 @@ export function resolvePresetByName(
 }
 
 /**
- * 适配器类 agent 的安装指引：找不到适配器二进制时**直接给出可粘贴的命令**。
- * 口径：**适配器一律全局安装**（daemon 常驻、worker 每条任务起进程；npx 每次冷启动要联网现下、版本不可复现）。
- */
-const ADAPTER_INSTALL_HINT: Record<string, string> = {
-  "claude-code":
-    "`npm i -g @agentclientprotocol/claude-agent-acp`（装完得到 claude-agent-acp；Windows 上是 claude-agent-acp.cmd；**需 Node ≥22**）",
-  codex:
-    "`npm i -g @agentclientprotocol/codex-acp`（装完得到 codex-acp；Windows 上是 codex-acp.cmd）",
-  pi: "`npm i -g pi-acp`（装完得到 pi-acp；Windows 上是 pi-acp.cmd）；另需 `npm i -g @earendil-works/pi-coding-agent` 提供 pi 本体，并在终端里先登录/配好模型",
-};
-
-/**
  * 校验解析后的大脑是否可用：可用返回 null，否则返回一句面向用户的说明。
  * 供 daemon 启动校验（早失败、说人话）与 `wemind brain` / `wemind brain check` 复用。
  */
@@ -739,22 +641,23 @@ export function agentProblem(ag: ResolvedAgent): string | null {
   if (ag.requestedKey === "auto" && !ag.available)
     return `自动探测未找到可用的大脑（已试：${AUTO_PROBE_ORDER.join("、")}）。请安装其中之一，或运行 \`wemind brain set <agent 名>\``;
   if (!ag.available) {
-    const hint = ADAPTER_INSTALL_HINT[ag.name];
+    const hint = ag.hooks?.hints?.install?.({
+      agentName: ag.name,
+      bin: ag.bin,
+    });
     if (hint)
       return `找不到大脑「${ag.name}」的适配器「${ag.bin}」。先装适配器：${hint}；装完仍找不到就 \`wemind brain set ${ag.name} --bin "<绝对路径>"\` 指定它。`;
-    return ag.name === "deepseek"
-      ? `找不到 DeepSeek 的「${ag.bin}」。桌面端通常有 dsh.cmd；把它的绝对路径传给 \`wemind brain set deepseek --bin "<...>\\dsh.cmd"\``
-      : ag.name === "qoder"
-        ? `找不到 Qoder CLI 的「${ag.bin}」。官方安装会放在 ~/.qoder/bin/qodercli/ 并加入 PATH；确认后重开终端，或 \`wemind brain set qoder --bin "<...>\\qodercli.exe"\``
-        : ag.name === "cline"
-          ? `找不到 Cline CLI 的「${ag.bin}」。安装：\`npm i -g cline\`（Node 20+），装完后重开终端；或用 \`wemind brain set cline --bin "<...>\\cline.cmd"\``
-          : `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <agent 名>\` 切换`;
+    return `找不到大脑「${ag.name}」的二进制「${ag.bin}」。安装它，或运行 \`wemind brain set <agent 名>\` 切换`;
   }
   // 适配器已装、但它依赖的运行时没装（如 pi-acp 找到了、pi 本体不在 PATH）：
   // 提前说清楚，别等 session/new 才抛一句适配器的内部错误。
   const missingRuntime = ag.requiresBins.filter((b) => !onPathAny(b));
   if (missingRuntime.length) {
-    const hint = ADAPTER_INSTALL_HINT[ag.name];
+    const hint = ag.hooks?.hints?.install?.({
+      agentName: ag.name,
+      bin: ag.bin,
+      requiresBins: ag.requiresBins,
+    });
     return `找不到「${ag.name}」需要的运行时「${missingRuntime.join("、")}」。${hint ? `安装：${hint}` : "先安装它，再试。"}`;
   }
   return null;
@@ -767,8 +670,6 @@ export function agentProblem(ag: ResolvedAgent): string | null {
  * 其它 agent 返回空串（不改变既有文案）。
  */
 export function authHint(agentName: string, message: string): string {
-  if (agentName !== "cline") return "";
-  if (!/authentication required|authenticate|unauthorized|not authenticated/i.test(message))
-    return "";
-  return "Cline 的 ACP 只自动恢复 cline / cline-pass / openai-codex 三种登录；用自定义 provider（如 openai-compatible）时，请在启动 wemind 的环境里设置 CLINE_PROVIDER 与 CLINE_API_KEY（设置后重启一次 daemon）。";
+  const preset = ACP_AGENT_PRESETS[agentName];
+  return preset?.hooks?.hints?.auth?.({ agentName, message }) ?? "";
 }

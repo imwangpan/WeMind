@@ -14,6 +14,7 @@
   "settingsDefaults": { "quietStartup": true },
   "mcpConfigFile": "mcp.json",
   "catalogFile": "mcp.json",
+  "adapter": { "module": "builtin:pi", "apiVersion": 1 },
   "notes": [
     "pi coding agent（`@earendil-works/pi-coding-agent`）经社区适配器 pi-acp 接入：适配器 spawn `pi --mode rpc`，在 ACP 与 pi RPC 之间桥接。2026-10-30 探针 + 2026-11-01 复跑（pi-acp 0.0.34 + pi 1.4.0，见 docs/接入方案/接入-pi.md）。",
     "session/load 原生支持（强杀后上下文接上）；image:true；首帧 0–3ms；有 thought/tool 帧；无反向请求——pi 默认不做逐次工具审批（官方 security.md 明说），无需 yolo flag / sessionMode。",

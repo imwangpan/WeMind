@@ -6,8 +6,10 @@ import { accountDir } from "@wemind/wechat-ilink-core";
 import { checkAgent } from "../../acp/brain-check.js";
 import { draftFromProbe, probeAgent, type AgentProbeResult } from "../../acp/agent-probe.js";
 import { agentSpecJson, agentSpecMarkdown } from "../../agents/agent-spec.js";
+import { preloadAgentAdapterForDefinition } from "../../agents/agent-adapter-loader.js";
 import { loadBrainConfig } from "../../agents/brain-config.js";
 import {
+  ACP_AGENT_PRESETS,
   agentProblem,
   presetAvailable,
   resolveAgentByName,
@@ -29,6 +31,7 @@ import {
   getAgentRegistry,
 } from "../../agents/agent-registry.js";
 import { pickKey } from "../cli-context.js";
+import { installAgentPackage, removeAgentDefinition } from "../../agents/agent-install.js";
 
 /**
  * `wemind agent`：agent 定义层的查看、探测与校验。
@@ -44,7 +47,10 @@ const AGENT_USAGE = `用法：
   wemind agent probe <bin> [--args <JSON数组|空格分隔>] [--draft] [--deep] [--json]
                                                探测 ACP 能力；--draft 输出定义草稿，--json 输出完整结果
   wemind agent check <name|文件.json> [--schema] [--deep]
-                                               校验 schema + 真实 ACP 握手；--schema 不启动进程`;
+                                               校验 schema + 真实 ACP 握手；--schema 不启动进程
+  wemind agent add <包目录|package.json|定义.json>
+                                               复制安装定义（可选 adapter）；运行期不联网
+  wemind agent remove <name>                   移除本机/数据包定义（同名内置恢复）`;
 
 type AgentOpts = {
   key?: string;
@@ -252,7 +258,8 @@ function parseOpts(rest: string[]): { opts: AgentOpts; pos: string[] } {
 function sourceLabel(agent: string): string {
   const source = findAgentDefinitionSource(agent);
   if (!source) return "（无有效定义）";
-  return `${source.kind === "builtin" ? "内置" : "本机"}  ${source.file}`;
+  const kind = source.kind === "builtin" ? "内置" : source.kind === "package" ? "数据包" : "本机";
+  return `${kind}  ${source.file}`;
 }
 
 function orderedNames(): string[] {
@@ -289,9 +296,9 @@ function listLine(
     ? `${probe.at}${probe.agentVersion ? `（agent ${probe.agentVersion}）` : ""}`
     : "（未探测）";
   const lines = [
-    `${name.padEnd(width)}  ${source?.kind === "local" ? "本机" : "内置"}    ${available ? "✅" : "❌"}  ${probeText}`,
+    `${name.padEnd(width)}  ${source?.kind === "package" ? "数据包" : source?.kind === "local" ? "本机" : "内置"}    ${available ? "✅" : "❌"}  ${probeText}`,
   ];
-  if (source?.kind === "local") lines.push(`  定义：${source.file}`);
+  if (source && source.kind !== "builtin") lines.push(`  定义：${source.file}`);
   if (def?.adapter) lines.push(`  adapter：${def.adapter.module}（会执行代码）`);
   if (opts.key && !available) {
     const reason = agentProblem(resolveAgentByName(name, cfg));
@@ -306,10 +313,10 @@ function cmdList(opts: AgentOpts): string {
   const cfg = opts.key ? loadBrainConfig(accountDir(pickKey(opts.key))) : null;
   const names = orderedNames();
   const width = Math.max(4, ...names.map((n) => n.length)) + 2;
-  const local = Object.values(registry.sources).filter((s) => s.kind === "local").length;
+  const local = Object.values(registry.sources).filter((s) => s.kind !== "builtin").length;
   const lines = [
     `agent 定义目录：${dir}${fs.existsSync(dir) ? "" : "（不存在）"}`,
-    `内置 ${builtinDefinitionNames().length} 个；本机 ${local} 个；损坏 ${Object.keys(registry.broken).length} 个${opts.key ? `；可用性按账号 ${opts.key} 的启动覆盖判断` : ""}`,
+    `内置 ${builtinDefinitionNames().length} 个；本机/数据包 ${local} 个；损坏 ${Object.keys(registry.broken).length} 个${opts.key ? `；可用性按账号 ${opts.key} 的启动覆盖判断` : ""}`,
   ];
   if (registry.dirError) lines.push(`⚠️ ${registry.dirError}`);
   lines.push("");
@@ -351,15 +358,16 @@ function explainText(
   cfg: ReturnType<typeof loadBrainConfig>,
 ): string[] {
   const registry = getAgentRegistry();
+  const def = findAgentDefinition(name);
   const local = findAgentDefinitionSource(name);
   const builtinFile = `definitions/${name}.json`;
   const isBuiltin = builtinDefinitionNames().includes(name);
-  const builtinShadowed = isBuiltin && local?.kind === "local";
+  const builtinShadowed = isBuiltin && local !== undefined && local.kind !== "builtin";
   const lines = [
     "",
     "来源链（优先级从低到高，同名整条替换、不做字段合并）：",
     `  1. 内置：${isBuiltin ? (builtinShadowed ? `${builtinFile}（被本机定义整条覆盖）` : builtinFile) : "（无）"}`,
-    `  2. 本机：${local?.kind === "local" ? local.file : "（无）"}`,
+    `  2. 本机/数据包：${local && local.kind !== "builtin" ? `${local.kind === "package" ? "数据包" : "本机"} ${local.file}` : "（无）"}`,
   ];
   if (cfg) {
     const top = [
@@ -387,14 +395,13 @@ function explainText(
     "WEMIND_BRAIN_REAL_HOME",
     "WEMIND_BRAIN_INHERIT_DIRS",
     "WEMIND_ACP_SESSION_MODE",
-    ...(name === "kiro" ? ["KIRO_CLI_BIN"] : []),
+    ...(ACP_AGENT_PRESETS[name]?.hooks?.env?.binOverrideNames ?? []),
   ]
     .filter((k) => process.env[k] !== undefined && process.env[k] !== "")
     .map((k) => `${k}=${process.env[k]}`);
   lines.push(`  4. 环境变量：${env.length ? env.join("；") : "（无）"}`);
   lines.push("", "生效值：");
   lines.push(...effectiveLines(ag));
-  const def = findAgentDefinition(name);
   if (def) lines.push("", "定义本体（数据面）：", definitionText(def));
   if (registry.dirError) lines.push("", `⚠️ ${registry.dirError}`);
   return lines;
@@ -425,7 +432,11 @@ function cmdShow(name: string | undefined, opts: AgentOpts): string {
     "最终生效：",
     ...effectiveLines(ag),
   ];
-  if (def.adapter) lines.push("", `adapter：${def.adapter.module}（会执行代码）`);
+  if (def.adapter)
+    lines.push(
+      "",
+      `adapter：${def.adapter.module}（会执行代码${ag.adapterSource && ag.adapterSource !== def.adapter.module ? `；实际来源 ${ag.adapterSource}` : ""}）`,
+    );
   if (def.probe)
     lines.push(
       "",
@@ -522,7 +533,14 @@ async function checkFile(file: string, opts: AgentOpts): Promise<string> {
   }
   let ag: ReturnType<typeof resolveAgentFromDefinition>;
   try {
-    ag = resolveAgentFromDefinition(read.def);
+    if (read.def.adapter) {
+      const loaded = await preloadAgentAdapterForDefinition(read.def, read.abs);
+      if (!loaded.ok) {
+        process.exitCode = 1;
+        return `${warning}❌ ${loaded.error}`;
+      }
+    }
+    ag = resolveAgentFromDefinition(read.def, { definitionFile: read.abs });
   } catch (e) {
     process.exitCode = 1;
     return `${warning}❌ 定义无法解析：${e instanceof Error ? e.message : String(e)}`;
@@ -552,7 +570,17 @@ async function checkName(name: string, opts: AgentOpts): Promise<string> {
   }
   let ag: ReturnType<typeof resolveAgentFromDefinition>;
   try {
-    ag = resolveAgentFromDefinition(def);
+    const source = findAgentDefinitionSource(key);
+    if (def.adapter) {
+      const file = source?.kind === "builtin" ? "" : (source?.file ?? "");
+      const loaded = await preloadAgentAdapterForDefinition(def, file);
+      if (!loaded.ok) {
+        process.exitCode = 1;
+        return `❌ ${loaded.error}`;
+      }
+    }
+    const resolveOpts = source && source.kind !== "builtin" ? { definitionFile: source.file } : {};
+    ag = resolveAgentFromDefinition(def, resolveOpts);
   } catch (e) {
     process.exitCode = 1;
     return `❌ 定义无法解析：${e instanceof Error ? e.message : String(e)}`;
@@ -687,6 +715,20 @@ export async function cmdAgent(rest: string[]): Promise<string> {
     const known =
       findAgentDefinition(pos[0]) !== undefined || findBrokenAgentDefinition(pos[0]) !== undefined;
     return !known && looksLikeFile(pos[0]) ? checkFile(pos[0], opts) : checkName(pos[0], opts);
+  }
+  if (sub === "add") {
+    if (!pos[0]) throw new Error(`需要包目录、package.json 或定义文件\n${AGENT_USAGE}`);
+    if (pos.length > 1) throw new Error(`add 只接受一个来源：${pos.slice(1).join(" ")}`);
+    const result = await installAgentPackage(pos[0]);
+    if (!result.ok) process.exitCode = 1;
+    return result.text;
+  }
+  if (sub === "remove") {
+    if (!pos[0]) throw new Error(`需要 agent 名\n${AGENT_USAGE}`);
+    if (pos.length > 1) throw new Error(`remove 只接受一个 agent 名：${pos.slice(1).join(" ")}`);
+    const result = removeAgentDefinition(pos[0]);
+    if (!result.ok) process.exitCode = 1;
+    return result.text;
   }
   throw new Error(`未知 agent 子命令「${sub}」\n${AGENT_USAGE}`);
 }

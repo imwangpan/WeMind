@@ -12,6 +12,7 @@
   "acpMcpServers": true,
   "mcpDelivery": "acp",
   "heartbeatMs": 60000,
+  "adapter": { "module": "builtin:codex", "apiVersion": 1 },
   "notes": [
     "需适配器（Codex CLI 本身不说 ACP）：npm 包 `@agentclientprotocol/codex-acp`（bin: codex-acp；ACP 项目维护，非 OpenAI 官方）。npm latest 2.6.0（2026-11-11）；本预设的实测基线是 2.6.0（2026-11-12 全量复测通过），升级后重跑探针。",
     "**全局安装，不用 npx**（口径同 claude-code）：`npm i -g @agentclientprotocol/codex-acp`。适配器自带 @openai/codex 依赖（含平台原生二进制，约 100MB）；想复用本机已装的 Codex 可装适配器时加 `--omit=optional` 并设 CODEX_PATH=<codex.exe 绝对路径>。",

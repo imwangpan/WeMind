@@ -254,3 +254,41 @@ describe("wemind agent probe --draft", () => {
     expect(process.exitCode).toBeUndefined();
   }, 20_000);
 });
+
+describe("wemind agent add/remove", () => {
+  it("从包目录安装、列出数据包来源，再移除", async () => {
+    const saved = process.env.WEMIND_AGENTS_DIR;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-cli-agent-add-"));
+    const defs = path.join(root, "defs");
+    const pack = path.join(root, "pack");
+    process.env.WEMIND_AGENTS_DIR = defs;
+    resetAgentRegistryCache();
+    fs.mkdirSync(pack, { recursive: true });
+    fs.writeFileSync(
+      path.join(pack, "package.json"),
+      JSON.stringify({ name: "cli-pack", wemind: { definition: "wemind-agent.json" } }),
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(pack, "wemind-agent.json"),
+      JSON.stringify({ schemaVersion: 1, name: "cli-pack", bin: "cli-pack", args: [] }),
+      "utf-8",
+    );
+    try {
+      const added = await cmdAgent(["add", pack]);
+      expect(added).toContain("已安装 1 个定义");
+      expect(process.exitCode).toBeUndefined();
+      const list = await cmdAgent(["list"]);
+      expect(list).toContain("cli-pack");
+      expect(list).toContain("数据包");
+      const removed = await cmdAgent(["remove", "cli-pack"]);
+      expect(removed).toContain("已移除 cli-pack");
+      expect(fs.existsSync(path.join(defs, "cli-pack.json"))).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.WEMIND_AGENTS_DIR;
+      else process.env.WEMIND_AGENTS_DIR = saved;
+      resetAgentRegistryCache();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

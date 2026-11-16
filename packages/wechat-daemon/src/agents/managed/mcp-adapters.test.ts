@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ResolvedAgent } from "../brain-agents.js";
+import { ACP_AGENT_PRESETS } from "../agent-registry.js";
 import {
   mcpAdapterFor,
   mcpAdapterForFile,
@@ -69,7 +70,11 @@ describe("顶层 mcpServers（JSON）adapter", () => {
     );
     const target = tmpDir("flat-target");
 
-    MCP_ADAPTERS.jsonMcpServers.inheritSettings?.(agent({ realHome }), realHome, target);
+    ACP_AGENT_PRESETS.kiro.hooks?.settings?.inherit?.({
+      agent: agent({ realHome }) as never,
+      realHome,
+      targetConfigDir: target,
+    });
 
     expect(JSON.parse(fs.readFileSync(path.join(target, "settings", "cli.json"), "utf-8"))).toEqual(
       {
@@ -108,18 +113,22 @@ describe("嵌套 mcp.servers（JSON）adapter", () => {
     expect(JSON.parse(fs.readFileSync(file, "utf-8")).permission).toEqual({ bash: "deny" });
   });
 
-  it("inheritSettings 复制 model 等设置，但剔除 mcp 段", () => {
+  it("settings.inherit 复制 model 等设置，但剔除 mcp 段", () => {
     const realHome = tmpDir("nested-real");
     fs.writeFileSync(
       path.join(realHome, "opencode.json"),
       JSON.stringify({ model: "demo/model", mcp: { servers: { wechat: {} } } }),
     );
     const target = tmpDir("nested-target");
-    const ag = agent({ mcpFormat: "mcp.servers", realHome });
+    const ag = agent({ mcpFormat: "mcp.servers", mcpConfigFile: "opencode.json", realHome });
 
-    MCP_ADAPTERS.jsonMcpNested.inheritSettings?.(ag, realHome, target);
+    ACP_AGENT_PRESETS.opencode.hooks?.settings?.inherit?.({
+      agent: ag as never,
+      realHome,
+      targetConfigDir: target,
+    });
 
-    const out = JSON.parse(fs.readFileSync(mcpConfigPath(ag, target), "utf-8"));
+    const out = JSON.parse(fs.readFileSync(path.join(target, "opencode.json"), "utf-8"));
     expect(out).toEqual({ model: "demo/model" });
   });
 });

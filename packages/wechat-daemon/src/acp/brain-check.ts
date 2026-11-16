@@ -6,7 +6,6 @@ import path from "node:path";
 import { parseJsonc } from "../agents/managed/agent-mcp.js";
 import { mcpAdapterFor } from "../agents/managed/mcp-adapters.js";
 import { agentEnv, authHint, prepareAgent, type ResolvedAgent } from "../agents/brain-agents.js";
-import { copyProfilePatch } from "../agents/profile-model.js";
 import { spawnAgent } from "../shared/process/spawn-agent.js";
 import { handleReverseRequest } from "./protocol/acp-reverse.js";
 import { LineDecoder } from "../shared/io/line-decoder.js";
@@ -63,12 +62,18 @@ export async function checkAgent(
 
   // 与 daemon 的大脑副本对齐：配了 realProfile 的 agent（DSH）启动时就解析 profiles/<名>/cordis.patch.yml，
   // 语法错误会直接 exit 1（initialize 都不会发生）。不复制的话，坏 profile 上自检仍报 ✅，而 daemon 每条消息都起不来。
-  if (ag.inherit && ag.realProfile && ag.realHome) {
+  const copyProfile = ag.hooks?.profile?.copyForManaged;
+  if (copyProfile && ag.inherit && ag.realProfile && ag.realHome) {
     try {
-      const rel = path.join("profiles", ag.realProfile, "cordis.patch.yml");
-      if (fs.existsSync(path.join(ag.realHome, rel)))
-        // 自检会真起一个 agent：MCP 条目全部剥掉，不能让第二个收消息实例被带进临时副本。
-        copyProfilePatch(ag.realHome, ag.realProfile, home, { stripAllMcp: true });
+      // 自检会真起一个 agent：MCP 条目全部剥掉，不能让第二个收消息实例被带进临时副本。
+      // 文件是否存在由 profile hook 自己判断，核心不再知道任何 agent 的 profile 路径。
+      copyProfile({
+        agent: ag,
+        realHome: ag.realHome,
+        profile: ag.realProfile,
+        targetHome: home,
+        stripAllMcp: true,
+      });
     } catch {
       /* best-effort（与 daemon 的 syncProfilePatch 一致） */
     }

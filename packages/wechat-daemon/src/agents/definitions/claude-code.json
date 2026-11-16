@@ -16,6 +16,7 @@
   "acpMcpServers": true,
   "mcpDelivery": "acp",
   "sessionMode": "bypassPermissions",
+  "adapter": { "module": "builtin:claude-code", "apiVersion": 1 },
   "notes": [
     "官方 ACP 适配器 `@agentclientprotocol/claude-agent-acp`（bin: claude-agent-acp；**Node ≥22**）。**全局安装，不用 npx**（daemon 常驻、worker 每条任务起进程，npx 每次冷启动都要问 registry/现下包，离线不可用且版本漂移）：`npm i -g @agentclientprotocol/claude-agent-acp`。适配器自带 @anthropic-ai/claude-agent-sdk（含平台原生二进制）；若装的时候漏了 optional 依赖（native binary not found），可用 CLAUDE_CODE_EXECUTABLE 指向本机已装的 claude 二进制。",
     "免审批：适配器**不解析** `--dangerously-skip-permissions` 之类 CLI flag；会话建立/恢复后走 `session/set_mode {modeId:\"bypassPermissions\"}`（见 sessionMode）。以 root 运行且未设 IS_SANDBOX=1 时该模式不可用——会话回包的 availableModes 里没有它，applyAcpSessionMode 会跳过并记日志。",

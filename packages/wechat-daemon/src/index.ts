@@ -45,6 +45,7 @@ import {
   findAgentDefinitionSource,
   getAgentRegistry,
 } from "./agents/agent-registry.js";
+import { preloadAgentAdapters } from "./agents/agent-adapter-loader.js";
 import { switchInFlightTarget } from "./acp/brain-switch.js";
 import { loadBrainConfig } from "./agents/brain-config.js";
 import { getAgent, seedSlots } from "./agents/agent-slot.js";
@@ -1405,6 +1406,9 @@ function readPidFile(file: string): number | null {
 }
 
 export async function runDaemon(): Promise<void> {
+  // ESM adapter 的预加载；cli.ts 已做一次，这里保证直接调用 runDaemon 的入口也一致。
+  const preloaded = await preloadAgentAdapters();
+  for (const problem of preloaded.problems) log.warn(problem);
   // 单实例：同账号只允许一个 daemon 占用同一个 bot token。
   // `wimind start` 有 wrapper.pid 守卫；这里挡住直接 `wimind daemon` / `npm run daemon`，以及两套 runner 并存。
   const pidFile = path.join(DATA_DIR, "daemon.pid");

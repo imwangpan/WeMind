@@ -90,6 +90,31 @@ function isUnderAgentConfigRoot(file: string): boolean {
   return roots.some((root) => isUnderRoot(file, root));
 }
 
+/** adapter 声明的额外敏感路径（如 `~/.claude.json`）；目录按子树、文件按实时路径精确匹配。 */
+function isUnderAdapterSensitivePath(file: string): boolean {
+  for (const preset of Object.values(ACP_AGENT_PRESETS)) {
+    let extra: readonly string[] = [];
+    try {
+      extra =
+        preset.hooks?.paths?.sensitive?.({
+          agent: {
+            name: preset.name,
+            realHome: preset.realHome,
+            realProfile: preset.realProfile,
+            extraConfigFiles: preset.extraConfigFiles ?? [],
+          },
+        }) ?? [];
+    } catch {
+      /* 插件坏掉不能把附件功能一起拖垮；其它静态名单仍然生效 */
+    }
+    for (const p of [...(preset.extraConfigFiles ?? []), ...(extra ?? [])]) {
+      if (!p) continue;
+      if (path.resolve(file) === path.resolve(p) || isUnderRoot(file, p)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * 拒绝凭证/状态类文件（realpath 之后调用）。
  * 说明：路径 denylist 无法识别硬链接（realpath 也指向同一 inode）；这属于已接受的风险——
@@ -97,6 +122,7 @@ function isUnderAgentConfigRoot(file: string): boolean {
  */
 export function isSensitiveFilePath(file: string): boolean {
   const base = path.basename(file).toLowerCase();
+  if (isUnderAdapterSensitivePath(file)) return true;
   if (SENSITIVE_NAMES.has(base)) return true;
   if (CREDENTIAL_NAMES.has(base)) return true;
   if (

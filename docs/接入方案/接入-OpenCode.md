@@ -149,7 +149,7 @@ opencode: {
 export function agentEnv(ag: ResolvedAgent, home: string, skipped: string[] = []) {
   const env = { ...process.env };
   if (ag.homeEnvVar) env[ag.homeEnvVar] = home;                      // 副本目录
-  for (const [k, v] of Object.entries(ag.credentialEnv?.(...) ?? {})) … // 凭据派生
+  for (const [k, v] of Object.entries(ag.hooks?.env?.derive?.({ realHome: ag.realHome, parentEnv: process.env }) ?? {})) … // 凭据派生
   for (const [k, v] of Object.entries(ag.env ?? {})) env[k] = v.replaceAll("%HOME%", home);
   for (const [k, v] of Object.entries(ag.envDefaults ?? {})) …       // 父进程已设则保留父进程
   return env;

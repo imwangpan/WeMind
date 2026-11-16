@@ -22,6 +22,7 @@
   "mcpDelivery": "acp",
   "isolateSessions": true,
   "envDefaults": { "DSH_PERMISSION_MODE": "danger-full-access" },
+  "adapter": { "module": "builtin:deepseek", "apiVersion": 1 },
   "notes": [
     "桌面端自带 `dsh.cmd`（没有无扩展名的 dsh），故 binWin 必须写全；DSH_HOME 只在 managed 下指向账号副本；`.credentials.yaml` 由账号副本同步（direct 直接读真实文件）。",
     "无 `session/load`，用 `session/resume`；`image:false`（收图需上层拦截）。",

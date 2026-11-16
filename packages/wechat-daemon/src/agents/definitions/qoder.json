@@ -16,6 +16,7 @@
   "settingsBase": "settings.json",
   "credentialFiles": [".auth/user"],
   "identityFiles": [".auth/machine_id"],
+  "adapter": { "module": "builtin:qoder", "apiVersion": 1 },
   "notes": [
     "直接起 qodercli.exe：`qoder` 是分发器（cmd → powershell → qodercli），多一层管道且会与 IDE 命令混淆。",
     "QODER_CONFIG_DIR 只在 managed 下指向账号副本的 qoder 子目录；direct 不注入，直接用真实 ~/.qoder（WeMind 只读，绝不写 settings.json）。direct 下微信侧 overlay/MCP 对该 agent 不生效（改 Agent 自己的配置即可）；要由 WeMind 托管请用 managed。",

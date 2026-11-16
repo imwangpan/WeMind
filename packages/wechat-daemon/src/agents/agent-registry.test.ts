@@ -68,10 +68,13 @@ describe("内置 agent 定义注册表", () => {
     expect(BUILTIN_AGENT_DEFINITIONS["claude-code"].catalogFile).toBe("../.claude.json");
   });
 
-  it("只有 cline 把凭据派生挂成代码 hook（其余仍是纯数据）", () => {
-    expect(typeof ACP_AGENT_PRESETS.cline.credentialEnv).toBe("function");
-    for (const name of EXPECTED_NAMES.filter((n) => n !== "cline"))
-      expect(ACP_AGENT_PRESETS[name].credentialEnv, name).toBeUndefined();
+  it("声明 adapter 的定义都解析出了 hooks，且来源可见", () => {
+    expect(typeof ACP_AGENT_PRESETS.cline.hooks?.env?.derive).toBe("function");
+    expect(typeof ACP_AGENT_PRESETS.kiro.hooks?.engine?.prepareArgs).toBe("function");
+    expect(typeof ACP_AGENT_PRESETS.deepseek.hooks?.spawn?.prepare).toBe("function");
+    expect(typeof ACP_AGENT_PRESETS.opencode.hooks?.settings?.inherit).toBe("function");
+    expect(ACP_AGENT_PRESETS.cline.adapterSource).toBe("builtin:cline-credentials");
+    expect(ACP_AGENT_PRESETS.copilot.hooks).toBeUndefined();
   });
 
   it("关键能力字段没有在迁移中丢失", () => {
@@ -197,7 +200,7 @@ describe("本机定义层", () => {
     if (!r.ok) expect(r.problem).toContain(file);
   });
 
-  it("文件名与 name 不一致、name=auto、外部 adapter 都按坏定义处理", () => {
+  it("文件名与 name 不一致、name=auto、无法解析的外部 adapter 都按坏定义处理", () => {
     write("wrong-file", minimal("other-name"));
     write("auto", minimal("auto"));
     write("adapter-agent", {
@@ -207,7 +210,7 @@ describe("本机定义层", () => {
     resetAgentRegistryCache();
     expect(findBrokenAgentDefinition("wrong-file")?.problems[0].path).toBe("name");
     expect(findBrokenAgentDefinition("auto")?.problems[0].message).toContain("自动探测");
-    expect(findBrokenAgentDefinition("adapter-agent")?.problems[0].message).toContain("P3");
+    expect(findBrokenAgentDefinition("adapter-agent")?.problems[0].message).toContain("无法解析");
   });
 
   it("自定义 mcpFormat 在 P1 明确失败（不猜格式）", () => {
@@ -217,7 +220,7 @@ describe("本机定义层", () => {
       adapter: { module: "builtin:cline-credentials", apiVersion: 1 },
     });
     resetAgentRegistryCache();
-    expect(findBrokenAgentDefinition("yaml-agent")?.problems[0].path).toBe("mcpFormat");
+    expect(findBrokenAgentDefinition("yaml-agent")?.problems[0].path).toBe("adapter.module");
   });
 
   it("本机定义能解析为可切换的 agent；坏定义选择时返回可读原因", () => {
