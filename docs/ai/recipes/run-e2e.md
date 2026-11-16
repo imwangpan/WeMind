@@ -13,7 +13,7 @@
 |---|---|---|
 | L1 编译/单测 | `npm run build && npm run typecheck && npm test` | 代码不崩 |
 | L2 大脑可用 | `node .../cli.js brain check <key>` | 二进制存在 + 能实现 ACP（initialize/session-new） |
-| L3 ACP 冒烟 | `node scripts/acp-probe.mjs`（env 指定 agent） | prompt / update / load|resume / 反向请求 |
+| L3 ACP 冒烟 | `wemind agent probe <bin> ... --deep`（旧 `node scripts/acp-probe.mjs` 兼容） | prompt / update / load\|resume / 反向请求 |
 | L4 微信单轮 | 发一条消息，看 `prompt ok` + 收到回复 | iLink + daemon + brain 全链路 |
 | L5 多轮/自愈 | 杀 daemon → 再起 → 追问上一轮 | session 恢复 |
 | L6 任务/图片/MCP | 按需 | 专项能力 |

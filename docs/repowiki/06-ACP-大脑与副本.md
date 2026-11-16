@@ -22,7 +22,7 @@ daemon 使用 ACP 的一个**最小方法集**；不同 agent 的可用能力不
 | `session/update`（通知） | 流式回包：`agent_message_chunk`（正文）、`agent_thought_chunk`（思考）、`tool_call`/`tool_call_update`（工具进度） | committed-only agent 可能整段提交；`tool_call` 首帧报 start、终态 `tool_call_update` 报 end，同一 `toolCallId` 的终态只报一次 |
 | `session/request_permission`（反向请求） | agent 请求权限 | 客户端内置应答器（`acp-reverse.ts`，brain / worker / `brain check` 三处共用）：**默认 yolo**，自动选择 `allow_once` / `allow_always`；`WEMIND_ACP_AUTO_ALLOW=0` 恢复逐次拒绝（`cancelled`），空白串/未设置都按默认 yolo；allow 候选项必须有非空字符串 `optionId`，一个合法项都没有就回 `cancelled` 并记 WARN（防非法 `selected` 把回合挂住）；未知 method 回 `-32601`；接入前仍建议验证 |
 
-> ⚠️ **能力来自定义字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`acpMcpServers`、`mcpDelivery` 都写在 agent 定义（内置 `agents/definitions/*.json` 或本机 `~/.wemind/.agents/<name>.json`）里，来源是接入时的**探针实测**。因此接新 agent 必须人工读一次 `initialize`（`scripts/acp-probe.mjs`）并把结论写进定义——代码不会自动适配（详见 [AGENTS.md §4.2](../../AGENTS.md)）。
+> ⚠️ **能力来自定义字段，不是 `initialize` 回包**：`acp-brain.ts` 发出 `initialize` 后只置 `initialized = true`，**从不解析** `agentCapabilities`。`restore`（`loadSession`/`sessionResume`）、`images`、`acpMcpServers`、`mcpDelivery` 都写在 agent 定义（内置 `agents/definitions/*.json` 或本机 `~/.wemind/.agents/<name>.json`）里，来源是接入时的**探针实测**。因此接新 agent 要先读 `wemind agent spec`、跑 `wemind agent probe` 并把结论写进定义——代码不会自动适配（旧 `scripts/acp-probe.mjs` 只是兼容薄壳；详见 [AGENTS.md §4.2](../../AGENTS.md)）。
 
 「接入一个新 agent」主要是告诉 WeMind「怎么把它以 ACP 模式启动」；协议层能复用，但**能力差异要按 agent 补**（见 §6.6）。
 
@@ -221,7 +221,7 @@ MCP **文件格式**知识集中在 `agents/managed/mcp-adapters.ts` 的 `McpAda
 
 **定义的数据面契约（`agent-definition.ts`）**：`AcpAgentPreset` 的"数据面"被抽成独立的定义契约——`AgentDefinition` 类型 + 字段表 `AGENT_DEFINITION_FIELDS`（唯一事实来源，同时驱动运行时校验器与 JSON Schema）+ `validateAgentDefinition()`。三条纪律：**未知字段一律拒绝**（拼错字段名不能静默忽略，否则故障表现是"接上了但没生效"）、**一次报全所有问题**（写定义的人/模型需要一轮就知道全部要改的地方）、**版本 fail-closed**（`schemaVersion` 与 `adapter.apiVersion` 不符就如实报错，不做"尽力解释"）。注意它**不解释字段语义**：`realProfile` / `kiroEngine` / `isolateSessions` 是数据、但语义靠 per-agent 代码（未来收敛为 adapter hook）；`credentialEnv` 是函数值，必须留在代码侧。
 
-**加载层（P1 已实现）**：`agent-registry.ts` 静态导入内置 `definitions/*.json`，并扫描 `~/.wemind/.agents/*.json`（`WEMIND_AGENTS_DIR` 可单独覆盖）。优先级**内置 < 本机定义 < `brain.json` 字段覆盖 < 环境变量**；同名**整条替换**，不做字段合并。坏定义（语法/未知字段/类型/版本/文件名与 `name` 不一致/`auto`/未知 adapter）按文件名**遮住同名内置**，选择时报文件与修法（`wemind agent check`），不静默回退。目录按指纹缓存、下一次解析自动重读；没有 fs.watch。P1 还不能加载外部 adapter 插件（P3），本机定义只能引用内置 hook。`wemind agent list/show/check` 是可见性与校验入口；P2（spec/probe/check --deep）与 P4（add/remove）仍待做。目标与阶段见 [Agent 接入：配置化与插件化设计与实现](../设计文档/Agent-接入配置化与插件化设计与实现.md)。
+**加载层与自助接入（P1 + P2 已实现）**：`agent-registry.ts` 静态导入内置 `definitions/*.json`，并扫描 `~/.wemind/.agents/*.json`（`WEMIND_AGENTS_DIR` 可单独覆盖）。优先级**内置 < 本机定义 < `brain.json` 字段覆盖 < 环境变量**；同名**整条替换**，不做字段合并。坏定义（语法/未知字段/类型/版本/文件名与 `name` 不一致/`auto`/未知 adapter）按文件名**遮住同名内置**，选择时报文件与修法（`wemind agent check`），不静默回退。目录按指纹缓存、下一次解析自动重读；没有 fs.watch。P2 提供 `agent spec`（字段说明/JSON Schema/正反例）、`probe`（默认不发真实 prompt，`--deep` 才发）、`agent check`（默认真实 ACP 握手，`--schema` 只校验数据，`--deep` 再发 prompt）；`scripts/acp-probe.mjs` 已改成兼容薄壳。仍然不能加载外部 adapter 插件（P3），本机定义只能引用内置 hook。P4（`add/remove` 与数据包分发）仍待做。目标与阶段见 [Agent 接入：配置化与插件化设计与实现](../设计文档/Agent-接入配置化与插件化设计与实现.md)。
 
 内置 agent：
 
@@ -282,7 +282,7 @@ $env:WEMIND_BRAIN_ARGS     = "serve --acp"
 $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 ```
 
-**方式 B（加 agent）**：只给自己这台机器用 → 写 `~/.wemind/.agents/<name>.json`，`wemind agent check <name>` 后 `wemind brain switch <name>`（无需构建/发版）。要随包发布 → 在 `agents/definitions/` 加一份 `<agent>.json`（或改现有定义）→ `npm run build` → `wemind brain set acme`。
+**方式 B（加 agent）**：只给自己这台机器用 → `wemind agent spec` → `wemind agent probe <bin> ... --draft` → 补字段 → 先 `agent check <文件> --schema` 再 `agent check <文件>` → 写 `~/.wemind/.agents/<name>.json` → `wemind brain switch <name>`（无需构建/发版）。要随包发布 → 在 `agents/definitions/` 加一份 `<agent>.json`（或改现有定义）→ `npm run build` → `wemind brain set acme`。
 
 ### 跨 agent 的限制
 
@@ -314,7 +314,7 @@ worker 副本详见 [7. 远程任务 Worker](07-远程任务-Worker.md#worker-�
 
 | 检查项 | 怎么看 | 不满足时的影响 | 处置 |
 |---|---|---|---|
-| `session/load` | 探针实测（`scripts/acp-probe.mjs`）；回包里的 `agentCapabilities` 代码不读 | 不支持 → `-32601` → 当前代码新建会话，**丢多轮上下文** | 预设写 `restore: "resume"` 用 `session/resume` 兜底，再失败才 `new` |
+| `session/load` | 探针实测（`wemind agent probe`；旧 `scripts/acp-probe.mjs` 是薄壳）；回包里的 `agentCapabilities` 代码不读 | 不支持 → `-32601` → 当前代码新建会话，**丢多轮上下文** | 预设写 `restore: "resume"` 用 `session/resume` 兜底，再失败才 `new` |
 | `session/resume` | 同上：实测 + 预设字段 | 也没有 → 无法自愈恢复 | 接受「重启即新会话」，或换 agent |
 | `image` | 探针带图跑一次 prompt；结论写进预设的 `images` | 预设 `images: false` → `planImageTurn()` 按「有文字只按文字答、无文字才拒绝」处理；即便漏到 `askBrainTurn`，也只会附一句「当前大脑不支持图片」而不带图 | 友好拒绝，或换 agent |
 | MCP 传输 | 探针传非空 `mcpServers` 实测；结论写进预设的 `acpMcpServers`，managed 托管时再配 `mcpDelivery` | 不支持 ACP MCP → 动态 MCP 不可用 | 设 `acpMcpServers: false` + `mcpDelivery: "config"`，走 Agent 自己的配置文件（如 Copilot） |

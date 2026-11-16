@@ -15,6 +15,7 @@ export function handleReverseRequest(
   frame: Record<string, any>,
   write: AcpWriter,
   log?: (message: string) => void,
+  opts: { autoAllow?: boolean } = {},
 ): void {
   const method = String(frame.method);
   log?.(`← reverse request ${method}#${frame.id}`);
@@ -22,7 +23,8 @@ export function handleReverseRequest(
     const options = Array.isArray(frame.params?.options) ? frame.params.options : [];
     // 未设置 / 只写了空白都按默认 yolo；只有显式写 0/false/off/no 才关掉自动放行。
     const raw = (process.env.WEMIND_ACP_AUTO_ALLOW ?? "").trim().toLowerCase();
-    const autoAllow = !["0", "false", "off", "no"].includes(raw);
+    const autoAllow =
+      opts.autoAllow !== undefined ? opts.autoAllow : !["0", "false", "off", "no"].includes(raw);
     const candidates = autoAllow
       ? options.filter((o: any) => o?.kind === "allow_once" || o?.kind === "allow_always")
       : [];

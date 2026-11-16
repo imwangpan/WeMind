@@ -43,6 +43,12 @@ rl.on("line", (line) => {
   if (m.method === "initialize" && mode === "exit") process.exit(1);
   if (m.method === "initialize" && mode === "silent") return; // 永不回应 → 客户端超时
 
+  if (m.method === "session/prompt") {
+    send({ method: "session/update", params: { sessionId: m.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "OK" } } } });
+    send({ id: m.id, result: { stopReason: "end_turn" } });
+    return;
+  }
+
   let result;
   if (m.method === "initialize") result = { protocolVersion: 1, agentCapabilities: {} };
   else if (m.method === "session/new") result = withId ? { sessionId: "fake-session" } : {};
@@ -88,6 +94,13 @@ describe("checkAgent（真 ACP 握手自检）", () => {
     const r = await checkAgent(fakeAgent(script, "with-id"), 5000);
     expect(r.ok).toBe(true);
     expect(r.detail).toContain("sessionId=fake-session");
+  }, 15_000);
+
+  it("--deep 在握手后发一条真实 prompt", async () => {
+    const r = await checkAgent(fakeAgent(script, "with-id"), 5000, { deep: true });
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain("真实 prompt 成功");
+    expect(r.reply).toBe("OK");
   }, 15_000);
 
   it("握手期间收到权限请求 → 默认拒绝并继续，不挂到超时", async () => {

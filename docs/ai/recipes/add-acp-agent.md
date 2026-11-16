@@ -1,16 +1,32 @@
 # 配方：接入一个新的 ACP Agent
 
-> **最后核对**：2026-11-14
+> **最后核对**：2026-11-16
 >
 > 目标：把一个新的 agent CLI 变成 daemon 的「大脑」（以及 worker）。本文是操作清单，不是架构说明；架构见 [`docs/repowiki/06-ACP-大脑与副本.md`](../../repowiki/06-ACP-大脑与副本.md)。
 
-> **先选路径**：只给用户自己这台机器接入 → 写 `~/.wemind/.agents/<name>.json`（`wemind agent check` / `show --explain`，同名整条覆盖内置，无需改代码或发版；P1 只支持纯数据字段与内置 hook）。要把 agent 随 `@wemind/cli` 发布 → 走下面的 §2 改仓库内置定义，并按 §5 验收。
+## 0. 先选路径
+
+### 0.1 用户自定义（本机接入，不需要发版）
+
+只给当前这台机器接入 Agent，走这条。不要改仓库、不要发 npm 包：
+
+1. 读规格：`wemind agent spec`（字段含义、必填性、自动/`--deep`/人工边界、正反例、JSON Schema）。需要给程序读时用 `wemind agent spec --json`。
+2. 探测：`wemind agent probe <bin> --args <进入 ACP 的参数> --draft`。默认只握手，不发真实 prompt；`--deep` 才发真实回合并验证恢复后的上下文。
+3. 补人工字段：按 `agent spec` 的「去哪里找」补 `realHome`、`configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile`、凭据/继承清单、`requiresBins` 等；不要凭记忆猜字段。
+4. 校验：先 `wemind agent check <文件> --schema`，再 `wemind agent check <文件>`（默认真实握手），需要完整回合时再加 `--deep`。
+5. 安装与选择：保存为 `~/.wemind/.agents/<name>.json`（文件名与 `name` 完全一致）→ `wemind agent list` / `show <name> --explain` → 用户明确要求时 `wemind brain switch <name>`。**不要自动切换大脑。**
+
+边界：探针成功只代表协议层可用，不代表领域字段完整或 MCP 真被加载；外部 adapter 插件仍待 P3。完整说明见 [`docs/接入方案/接入其它-ACP-Agent.md`](../../接入方案/接入其它-ACP-Agent.md) §4.1.1。
+
+### 0.2 官方内置（随 `@wemind/cli` 发布）
+
+要把 Agent 变成仓库内置定义，走下面 §1–§5；同样先用 `wemind agent spec/probe` 得到协议结论，再改 `packages/wechat-daemon/src/agents/definitions/<name>.json`，并按 §5 验收。
 
 ---
 
-## 0. 先别改代码：跑一次能力探针
+## 0.3 先别改代码：跑一次能力探针
 
-用 [`scripts/acp-probe.mjs`](../../../scripts/acp-probe.mjs) 真起一个进程，回答 6 个问题：
+用 `wemind agent probe`（旧 [`scripts/acp-probe.mjs`](../../../scripts/acp-probe.mjs) 只是兼容薄壳）真起一个进程，回答 6 个问题：
 
 1. `initialize.agentCapabilities` 有什么？（`loadSession` / `sessionCapabilities.resume` / `image` / `mcp`）
 2. `session/new` 能不能成功？返回哪些 `configOptions`？
@@ -19,7 +35,7 @@
 5. kill 后 `session/load` / `session/resume` 能不能恢复？
 6. 非空 `mcpServers` 能不能被接受？带图 prompt 能不能被接受？
 
-示例（DSH）：
+示例（DSH，旧脚本兼容入口；新写法把同样的参数传给 `wemind agent probe`）：
 
 ```powershell
 $env:ACP_BIN = "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"  # 按实际安装位置调整

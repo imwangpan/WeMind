@@ -22,6 +22,7 @@ import {
   presetBinPath,
   presetNames,
   resolveAgentFor,
+  resolveAgentFromDefinition,
   resolvePresetByName,
 } from "./brain-agents.js";
 
@@ -1080,5 +1081,19 @@ describe("presets 段与 resolvePresetByName（命令驱动的切换）", () => 
     });
     expect(r2.ok).toBe(true);
     if (r2.ok) expect(r2.agent.model).toBeUndefined();
+  });
+
+  it("agent check 的定义解析隔离 ambient env：切脑命令仍尊重的 realHome/inherit/mode 不混进来", () => {
+    clearVars();
+    process.env.WEMIND_BRAIN_REAL_HOME = profileHome;
+    process.env.WEMIND_BRAIN_INHERIT = "0";
+    process.env.WEMIND_ACP_SESSION_MODE = "read-only";
+    const ag = resolveAgentFromDefinition({
+      ...ACP_AGENT_PRESETS.deepseek,
+      realHome: emptyRealHome,
+    });
+    expect(ag.realHome).toBe(emptyRealHome);
+    expect(ag.inherit).toBe(true);
+    expect(ag.sessionMode).toBeUndefined();
   });
 });

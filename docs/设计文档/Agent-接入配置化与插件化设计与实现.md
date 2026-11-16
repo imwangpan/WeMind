@@ -1,6 +1,6 @@
 # Agent 接入：配置化与插件化设计与实现
 
-> **状态**：设计定稿；**P0 契约 + P1（内置迁移 + 本机加载层 + `agent list/show/check`）已实现**，P2–P4 未实现（2026-11-16）｜**分支**：`feat/agent-definitions`｜**最后核对**：2026-11-16
+> **状态**：设计定稿；**P0 契约 + P1（内置迁移 + 本机加载层 + `agent list/show/check`）+ P2（`agent spec/probe`、真实握手校验、一次性自助接入提示）已实现**；P3–P4 未实现（2026-11-16）｜**分支**：`feat/agent-definitions`｜**最后核对**：2026-11-16
 >
 > 本文描述如何把「接入一个新的 ACP Agent」从**改 TypeScript + 发新版**变成**加一份定义（必要时加一个插件）**：让用户在本机自己接入新 agent、让开发侧不再一个一个适配。本文是实现前定稿，进度以文末「实施阶段」与 [`docs/ai/README.md`](../ai/README.md) 事实状态表为准；未实测的结论标注「假设 / 待实测」。
 
@@ -201,7 +201,7 @@
 | `wemind agent show <name> [--explain]` | 最终生效值；`--explain` 打印每一层的来源 |
 | `wemind agent spec [--json]` | 规格 + 说明书 + 示例（同一份源的 Markdown / JSON Schema） |
 | `wemind agent probe <bin> [--args …] [--draft] [--deep]` | 能力探针；`--draft` 产出定义草稿 |
-| `wemind agent check <name\|file> [--deep]` | schema + 起进程握手；`--deep` 发一条真实 prompt |
+| `wemind agent check <name\|file> [--schema] [--deep]` | 默认真实 ACP 握手；`--schema` 只校验数据、不启动进程；`--deep` 再发一条真实 prompt |
 | `wemind agent add <pkg\|file>` / `wemind agent remove <name>` | 复制安装 / 移除本机定义 |
 
 **受影响的既有命令**：`wemind brain set` / `brain switch` / 微信「切换大脑」/「任务 \<agent\>」的**名字白名单放开**为"已定义的 agent"；`wemind config agent <name> show\|set` 的语义扩展为：**有 adapter 走 adapter 的读写 hook，纯数据定义按其声明的 `mcpFormat` 走内置格式 adapter，格式不认识时明确报错**（不搞"用户定义的 agent 一律不支持"）。
@@ -221,7 +221,9 @@
 
 **P1 检查点 1（内置迁移）已实现（2026-11-16）**：10 份定义迁到 `src/agents/definitions/*.json`，`agent-registry.ts` 静态导入、展开 `~`、逐份 `validateAgentDefinition()`、按 `adapter.module` 挂 `credentialEnv`；`brain-presets.ts` 删除，6 个 import 点改读注册表；`scripts/check-agent-docs.mjs` 与 `scripts/gen-docs-tables.mjs` 的键源改成 `definitions/*.json`（新增 `scripts/agent-definitions.mjs` 共用读取/文件名校验），`doc-impact.rules.mjs` 的 `preset` 规则改为「新增 definitions/*.json」；迁移保真测试逐字段对照旧表跑过（10 × 35 字段一致），现有 `brain-agents.test.ts` / `attachments.test.ts` / managed 用例不退化。加载层在检查点 2 补齐（见下段）。
 
-**P1 检查点 2（本机加载层 + 命令面）已实现（2026-11-16）**：`agent-registry.ts` 扫描 `~/.wemind/.agents/*.json`（`WEMIND_AGENTS_DIR` 可覆盖），按目录指纹缓存、下一次解析自动重读；优先级**内置 < 本机定义 < `brain.json` 字段覆盖 < 环境变量**，同名**整条替换**。坏定义（JSON/schema/未知字段/`name` 与文件名不一致/`name: "auto"`/自定义 `mcpFormat`/外部 adapter）按文件名遮住同名内置，`ResolvedAgent.definitionProblem` → `agentProblem()` → 退出码 78，文案含文件与修法；`ACP_AGENT_PRESETS` 改为合并视图 Proxy，`resolvePresetByName()` / 微信「切换大脑」「任务 <agent>」/ CLI 白名单自动接受本机定义；daemon 启动与切脑结果打印本机来源。新增 `wemind agent list|show [--explain]|check <name|文件>`；`config agent` 通过定义的 `realHome` / `mcpConfigFile` / `settingsBase` 工作，不按 agent 名硬编码。测试新增 `agent-registry.test.ts`（本机层/坏定义/热重读）、`cli-agent.test.ts`、`chat-commands.test.ts` 本机名用例、`cli-config.test.ts` 本机定义路径用例；`vitest.setup.ts` 把测试的定义目录指到空临时目录，避免读开发者真实 `~/.wemind`。**未做（按阶段）**：`agent spec/probe/check --deep`（P2）、外部 adapter 插件（P3）、`agent add/remove` 与数据包分发（P4）。
+**P1 检查点 2（本机加载层 + 命令面）已实现（2026-11-16）**：`agent-registry.ts` 扫描 `~/.wemind/.agents/*.json`（`WEMIND_AGENTS_DIR` 可覆盖），按目录指纹缓存、下一次解析自动重读；优先级**内置 < 本机定义 < `brain.json` 字段覆盖 < 环境变量**，同名**整条替换**。坏定义（JSON/schema/未知字段/`name` 与文件名不一致/`name: "auto"`/自定义 `mcpFormat`/外部 adapter）按文件名遮住同名内置，`ResolvedAgent.definitionProblem` → `agentProblem()` → 退出码 78，文案含文件与修法；`ACP_AGENT_PRESETS` 改为合并视图 Proxy，`resolvePresetByName()` / 微信「切换大脑」「任务 <agent>」/ CLI 白名单自动接受本机定义；daemon 启动与切脑结果打印本机来源。新增 `wemind agent list|show [--explain]|check <name|文件>`；`config agent` 通过定义的 `realHome` / `mcpConfigFile` / `settingsBase` 工作，不按 agent 名硬编码。测试新增 `agent-registry.test.ts`（本机层/坏定义/热重读）、`cli-agent.test.ts`、`chat-commands.test.ts` 本机名用例、`cli-config.test.ts` 本机定义路径用例；`vitest.setup.ts` 把测试的定义目录指到空临时目录，避免读开发者真实 `~/.wemind`。
+
+**P2 自助接入已实现（2026-11-16）**：新增 `agents/agent-spec.ts`，用同一份 `AGENT_DEFINITION_FIELDS` + `FIELD_GUIDES` 输出人读 Markdown 与机器可读 JSON（含 JSON Schema、正例、错误示例、安装/选择命令），字段明确区分「自动 / `--deep` / 人工」。新增 `acp/agent-probe.ts`，把 `scripts/acp-probe.mjs` 的实现搬进 CLI：默认只做 `initialize` + `session/new` + load/resume 实测，不发真实 prompt；`--deep` 才发真实回合并验证恢复后的上下文，`--image` / `--tool` 需要显式配合 `--deep`；默认用临时假 MCP 测试 `session/new.mcpServers`，`--no-mcp-test` 可关闭；`--draft` 只填协议层能确认的字段，并在 notes 里列出仍需人工补的领域字段。`agent check` 默认改为真实 ACP 握手，`--schema` 才是纯数据校验，`--deep` 再发一条真实 prompt；`resolveAgentFromDefinition()` 让“检查未安装文件”和安装后使用同一套 adapter 解析。`scripts/acp-probe.mjs` 改成薄壳，兼容旧 `ACP_*` 变量并默认 `--deep`（`ACP_NO_PROMPT=1` 关闭）。反向请求统一走 `acp-reverse.ts`，探针可显式拒绝权限请求；草稿在检测到恢复后历史回放时自动写 `replayOnLoad: true`。大脑的一次性系统提示加入 `wemind agent spec` 入口，不新增微信指令、不每轮注入。**验收边界**：fake ACP 进程的探针、握手、`--deep`、草稿与提示注入已有单测；真实 agent 的「spec → probe → check → 落盘 → 热切换」闭环仍待真机跑通。**未做（按阶段）**：外部 adapter 插件（P3）、`agent add/remove` 与数据包分发（P4）。
 
 ### P1 内置迁移 + 加载层（交付用户侧目标的大半）
 
@@ -234,6 +236,8 @@
 - **改动面**：`agent spec` / `probe --draft` / `agent check`（握手复用 `brain check` 的自检副本机制）；`scripts/acp-probe.mjs` 改成薄壳；一次性提示注入。
 - **验收**：让一个真实 agent 走完"读 spec → 产草稿 → check → 落盘 → 热切换"闭环（真机）；`--deep` 与不带的差异有测试；提示只注入一次。
 - **文档**：`docs/接入方案/接入其它-ACP-Agent.md` 新增"用户自助接入"章节；[`docs/ai/recipes/add-acp-agent.md`](../ai/recipes/add-acp-agent.md) 拆成"官方内置定义"与"用户自定义"两条路。
+
+**P2 已实现（2026-11-16）**：见上方 P2 段；`agent spec/probe/check --schema/--deep`、薄壳脚本、字段说明守卫、一次性提示与 fake ACP 用例均已落地。真实 agent 闭环仍待真机验证。
 
 ### P3 插件层（交付开发侧目标）
 
@@ -269,4 +273,4 @@
 - [`docs/接入方案/接入其它-ACP-Agent.md`](../接入方案/接入其它-ACP-Agent.md) —— 通用 ACP 接入指南 + agent 表（由 `gen-docs-tables.mjs` 生成）
 - [`docs/repowiki/06-ACP-大脑与副本.md`](../repowiki/06-ACP-大脑与副本.md)、[`docs/repowiki/07-远程任务-Worker.md`](../repowiki/07-远程任务-Worker.md)
 - [`docs/设计文档/文档守卫设计.md`](文档守卫设计.md) —— 三个守卫脚本的设计与维护指南
-- [`scripts/acp-probe.mjs`](../../scripts/acp-probe.mjs) —— 能力探针（将变成 `wemind agent probe` 的薄壳）
+- [`scripts/acp-probe.mjs`](../../scripts/acp-probe.mjs) —— 能力探针的兼容薄壳（实现与唯一事实源是 `wemind agent probe`）

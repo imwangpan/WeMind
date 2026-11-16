@@ -1,440 +1,68 @@
-// ACP capability probe: initialize → session/new → prompt → close → kill → load/resume → prompt.
-// Mirrors WeMind's acp-brain.ts (newline-delimited JSON-RPC, clientCapabilities: {}), records capabilities, first-frame latency, update types, reverse requests, and whether the agent preserves context across a restart.
+#!/usr/bin/env node
+// ACP capability probe — thin wrapper around `wemind agent probe`.
 //
-// Usage (PowerShell):
-//   $env:ACP_BIN = "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd"
-//   $env:ACP_ARGS = '["--profile","acp"]'
-//   $env:ACP_SHELL = "1"
-//   $env:ACP_HOME_ENV = "DSH_HOME"
-//   $env:ACP_HOME = "$env:TEMP\dsh-probe-home"   # optional; keep credentials isolated
-//   $env:ACP_MODEL = '["<provider>","<model>"]'  # optional; session/set_config_option（DSH 的真实默认看 profile 的 - id: acp）
-//   $env:ACP_REASONING = "high"                  # optional; session/set_config_option
-//   $env:ACP_PROMPT = "Remember the secret word: PINEAPPLE. Reply with exactly: STORED"
-//   $env:ACP_SECOND = "What was the secret word? Reply with just the word."
-//   node scripts/acp-probe.mjs
+// The implementation (JSON-RPC, reverse requests, load/resume, draft generation) lives in
+// packages/wechat-daemon/src/acp/agent-probe.ts. This file only maps the historical
+// ACP_* environment variables to CLI flags, so existing recipes keep working.
 //
-// Optional:
-//   ACP_TEST_IMAGE=1     send a 1x1 PNG prompt and record accept/reject
-//   ACP_TEST_TOOL=1      send a tool-forcing prompt (writes a marker file) and record whether the agent asked for permission first — drift check for "no per-tool approval" assumptions
-//   ACP_TOOL_PROMPT="…"  override the tool-forcing prompt (default writes drift-check.txt in CWD)
-//   ACP_TEST_MCP='[{"name":"fake","command":"...","args":[],"env":[]}]'  pass mcpServers to session/new（stdio 的 env 是 ACP schema 必填；省略时探针补 []）
-//   ACP_SESSION_META='{"kiro":{"policyPreset":["allow-all"]}}'  pass _meta to session/new|load|resume（通用探针选项；kiro v3 的免审批**不是**这里——policyPreset 实测无效，v3 用 settings/permissions.yaml）
-//   ACP_KEEP=1           keep ACP_HOME (contains sessions) after the run
-//   ACP_HARD_KILL=1      skip session/close; kill the process (simulates WeMind self-heal)
-//   ACP_TIMEOUT_MS=180000
-//
-// Output: human-readable log on stderr, one JSON summary on stdout.
-import { spawn, spawnSync } from "node:child_process";
+// Legacy default: send the two real prompts (same as the old script). Set ACP_NO_PROMPT=1
+// for protocol-only probing. New callers can use `wemind agent probe` directly; it defaults
+// to no prompt.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const BIN = process.env.ACP_BIN || "opencode";
-const ARGS = JSON.parse(process.env.ACP_ARGS || '["acp"]');
-const SHELL = process.env.ACP_SHELL === "1";
-const CWD = process.env.ACP_CWD || path.join(os.tmpdir(), "wemind-acp-probe");
-const HOME_ENV = process.env.ACP_HOME_ENV || "";
-const HOME = process.env.ACP_HOME || "";
-const FIRST_PROMPT =
-  process.env.ACP_PROMPT || "Remember the secret word: PINEAPPLE. Reply with exactly: STORED";
-const SECOND_PROMPT =
-  process.env.ACP_SECOND || "What was the secret word? Reply with just the word.";
-const TEST_IMAGE = process.env.ACP_TEST_IMAGE === "1";
-const TEST_TOOL = process.env.ACP_TEST_TOOL === "1";
-// 漂移检测用：预设里「免审批」这类实测结论要靠它变成可失效的断言。让 agent 写一个标记文件——既强制走工具调用，
-// 又能用文件系统验证「真的执行到了最后一步」（只看 stopReason 分不出「拒绝了」和「没执行」）。
-const TOOL_PROMPT =
-  process.env.ACP_TOOL_PROMPT ||
-  "Create a file named drift-check.txt in the current directory containing exactly the text OK. Use your file/shell tools, do not ask me first. When done reply with exactly: WROTE";
-const TOOL_MARKER = "drift-check.txt";
-// ACP SDK 的 stdio server 要求 env 是数组；探针顺手补空数组，避免因示例缺字段被参数校验拒绝（不是 agent 不支持 stdio）。
-const TEST_MCP = (process.env.ACP_TEST_MCP ? JSON.parse(process.env.ACP_TEST_MCP) : []).map((s) =>
-  s.command && !Array.isArray(s.env) ? { ...s, env: [] } : s,
-);
-const MODEL = process.env.ACP_MODEL || "";
-const REASONING = process.env.ACP_REASONING || "";
-const SESSION_META = process.env.ACP_SESSION_META ? JSON.parse(process.env.ACP_SESSION_META) : null;
-const AUTO_ALLOW = process.env.ACP_AUTO_ALLOW === "1";
-const KEEP = process.env.ACP_KEEP === "1";
-const HARD_KILL = process.env.ACP_HARD_KILL === "1";
-const TIMEOUT_MS = Number(process.env.ACP_TIMEOUT_MS || 180_000);
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const dist = path.join(ROOT, "packages/wechat-daemon/dist/cli.js");
+const tsx = path.join(ROOT, "node_modules/tsx/dist/cli.mjs");
+const src = path.join(ROOT, "packages/wechat-daemon/src/cli.ts");
 
-const log = (...a) => console.error("[acp-probe]", ...a);
-const short = (v, n = 500) => JSON.stringify(v)?.slice(0, n);
-
-fs.mkdirSync(CWD, { recursive: true });
-if (HOME) fs.mkdirSync(HOME, { recursive: true });
-
-/** Node's shell:true + args[] is DEP0190; build one quoted command line instead. */
-function quoteCmd(arg) {
-  if (arg === "") return '""';
-  if (!/[\s"&|<>^()%!]/.test(arg)) return arg;
-  return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
-}
-function quoteSh(arg) {
-  if (arg === "") return "''";
-  if (!/[^\w@%+=:,./-]/.test(arg)) return arg;
-  return `'${arg.replace(/'/g, "'\\''")}'`;
-}
-function commandLine() {
-  const quote = process.platform === "win32" ? quoteCmd : quoteSh;
-  return [BIN, ...ARGS].map(quote).join(" ");
+function addValue(args, flag, value) {
+  if (value !== undefined && value !== "") args.push(flag, value);
 }
 
-class Client {
-  constructor(label) {
-    this.label = label;
-    this.buf = "";
-    this.frames = [];
-    this.pending = new Map();
-    this.idc = 0;
-    this.updateTypes = new Set();
-    this.reverse = [];
-    this.answer = [];
-    this.promptStart = 0;
-    this.firstAnyFrameMs = null;
-    this.firstTextMs = null;
-    this.toolCalls = [];
-    const env = { ...process.env };
-    if (HOME_ENV && HOME) env[HOME_ENV] = HOME;
-    this.child = SHELL
-      ? spawn(commandLine(), { cwd: CWD, env, stdio: ["pipe", "pipe", "pipe"], shell: true, windowsHide: true })
-      : spawn(BIN, ARGS, { cwd: CWD, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-    this.child.stdout.on("data", (d) => this.onData(d));
-    this.child.stderr.on("data", (d) => log(`${label} stderr:`, d.toString().trim().slice(0, 400)));
-    this.child.on("exit", (code) => log(`${label} exited code=${code}`));
-  }
+const args = ["agent", "probe", process.env.ACP_BIN || "opencode"];
+addValue(args, "--args", process.env.ACP_ARGS || '["acp"]');
+if (process.env.ACP_SHELL === "1") args.push("--shell");
+addValue(args, "--cwd", process.env.ACP_CWD);
+addValue(args, "--home-env", process.env.ACP_HOME_ENV);
+addValue(args, "--home", process.env.ACP_HOME);
+addValue(args, "--prompt", process.env.ACP_PROMPT);
+addValue(args, "--second", process.env.ACP_SECOND);
+addValue(args, "--tool-prompt", process.env.ACP_TOOL_PROMPT);
+addValue(args, "--model", process.env.ACP_MODEL);
+addValue(args, "--reasoning", process.env.ACP_REASONING);
+addValue(args, "--timeout", process.env.ACP_TIMEOUT_MS);
+addValue(args, "--mcp", process.env.ACP_TEST_MCP);
+addValue(args, "--session-meta", process.env.ACP_SESSION_META);
+addValue(args, "--name", process.env.ACP_NAME);
+if (process.env.ACP_TEST_IMAGE === "1") args.push("--image");
+if (process.env.ACP_TEST_TOOL === "1") args.push("--tool");
+if (process.env.ACP_KEEP === "1") args.push("--keep");
+if (process.env.ACP_HARD_KILL === "1") args.push("--hard-kill");
+if (process.env.ACP_AUTO_ALLOW !== "1") args.push("--reject-permissions");
+if (process.env.ACP_NO_PROMPT !== "1") args.push("--deep");
+if (process.env.ACP_DRAFT === "1") args.push("--draft");
+else args.push("--json");
 
-  onData(d) {
-    this.buf += d.toString();
-    let i;
-    while ((i = this.buf.indexOf("\n")) >= 0) {
-      const line = this.buf.slice(0, i).trim();
-      this.buf = this.buf.slice(i + 1);
-      if (!line) continue;
-      let f;
-      try {
-        f = JSON.parse(line);
-      } catch {
-        log(`${this.label} non-JSON stdout:`, line.slice(0, 200));
-        continue;
-      }
-      this.frames.push(f);
-      this.handle(f);
-    }
-  }
+const command = fs.existsSync(dist)
+  ? [process.execPath, dist]
+  : fs.existsSync(tsx)
+    ? [process.execPath, tsx, src]
+    : null;
 
-  handle(f) {
-    if (typeof f.id === "number" && (f.result !== undefined || f.error !== undefined)) {
-      const p = this.pending.get(f.id);
-      if (!p) return;
-      this.pending.delete(f.id);
-      clearTimeout(p.timer);
-      if (f.error) p.reject(new Error(short(f.error, 800)));
-      else p.resolve(f.result);
-      return;
-    }
-    // Server -> client request (reverse request): must answer or the agent waits.
-    if (f.method && f.id !== undefined) {
-      this.reverse.push({ method: f.method, params: f.params });
-      log(`${this.label} >>> REVERSE:`, f.method, short(f.params, 300));
-      let result;
-      if (f.method === "session/request_permission") {
-        const options = Array.isArray(f.params?.options) ? f.params.options : [];
-        const allow = AUTO_ALLOW
-          ? options.find((o) => o?.kind === "allow_once" || o?.kind === "allow_always")
-          : undefined;
-        result = allow
-          ? { outcome: { outcome: "selected", optionId: allow.optionId } }
-          : { outcome: { outcome: "cancelled" } };
-        log(`${this.label} permission ${allow ? "allowed" : "rejected"}`, allow?.kind ?? "");
-      }
-      const msg = result
-        ? { jsonrpc: "2.0", id: f.id, result }
-        : { jsonrpc: "2.0", id: f.id, error: { code: -32601, message: "probe does not support" } };
-      this.child.stdin.write(JSON.stringify(msg) + "\n");
-      return;
-    }
-    if (f.method === "session/update") {
-      const u = f.params?.update;
-      const now = Date.now();
-      if (u?.sessionUpdate) this.updateTypes.add(String(u.sessionUpdate));
-      if (this.promptStart && this.firstAnyFrameMs === null && now >= this.promptStart) {
-        this.firstAnyFrameMs = now - this.promptStart;
-      }
-      if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") {
-        if (this.promptStart && this.firstTextMs === null && now >= this.promptStart) {
-          this.firstTextMs = now - this.promptStart;
-        }
-        this.answer.push(String(u.content.text ?? ""));
-      }
-      if (u?.sessionUpdate === "tool_call" || u?.sessionUpdate === "tool_call_update") {
-        this.toolCalls.push({ kind: u.kind, title: u.title, status: u.status });
-      }
-    }
-  }
-
-  request(method, params, timeoutMs = TIMEOUT_MS) {
-    return new Promise((resolve, reject) => {
-      if (!this.child.stdin.writable) {
-        reject(new Error("stdin not writable"));
-        return;
-      }
-      const id = ++this.idc;
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`${method} timeout after ${timeoutMs}ms`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-      this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-    });
-  }
-
-  async prompt(text) {
-    this.answer = [];
-    this.updateTypes = new Set();
-    this.toolCalls = [];
-    this.firstAnyFrameMs = null;
-    this.firstTextMs = null;
-    this.promptStart = Date.now();
-    const started = Date.now();
-    let result;
-    let error;
-    try {
-      result = await this.request("session/prompt", {
-        sessionId: this.sid,
-        prompt: [{ type: "text", text }],
-      });
-    } catch (e) {
-      error = e.message;
-    }
-    const elapsed = Date.now() - started;
-    this.promptStart = 0;
-    return {
-      ok: !error,
-      error,
-      elapsedMs: elapsed,
-      firstAnyFrameMs: this.firstAnyFrameMs,
-      firstTextMs: this.firstTextMs,
-      answer: this.answer.join(""),
-      updateTypes: [...this.updateTypes],
-      toolCalls: this.toolCalls.length,
-      stopReason: result?.stopReason,
-    };
-  }
-
-  async initialize() {
-    return this.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
-  }
-
-  async newSession(mcpServers = TEST_MCP) {
-    const params = { cwd: CWD, mcpServers };
-    if (SESSION_META) params._meta = SESSION_META;
-    const r = await this.request("session/new", params);
-    this.sid = r?.sessionId;
-    return r;
-  }
-
-  /** ACP `session/set_config_option`; param shape follows the published profile. */
-  async setConfig(configId, value) {
-    if (!this.sid || value === undefined || value === "") return { skipped: true };
-    return this.request("session/set_config_option", {
-      sessionId: this.sid,
-      configId,
-      value,
-    });
-  }
-
-  async close() {
-    if (!this.sid) return { skipped: true };
-    try {
-      return await this.request("session/close", { sessionId: this.sid }, 30_000);
-    } catch (e) {
-      return { error: e.message };
-    }
-  }
-
-  kill() {
-    const pid = this.child.pid;
-    try {
-      if (process.platform === "win32") {
-        spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-      } else {
-        this.child.kill("SIGKILL");
-      }
-    } catch {
-      /* ignore */
-    }
-  }
+if (!command) {
+  console.error(
+    "找不到已构建的 CLI，也没有本地 tsx。先运行 `npm run build`，或在仓库根目录执行 `npm install`。",
+  );
+  process.exitCode = 2;
+} else {
+  const result = spawnSync(command[0], [...command.slice(1), ...args], {
+    cwd: ROOT,
+    env: process.env,
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  process.exitCode = result.status ?? (result.error ? 1 : 0);
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const png1x1 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+YF9sAAAAASUVORK5CYII=";
-
-(async () => {
-  const summary = {
-    bin: BIN,
-    args: ARGS,
-    shell: SHELL,
-    cwd: CWD,
-    homeEnv: HOME_ENV ? `${HOME_ENV}=${HOME}` : undefined,
-    time: new Date().toISOString(),
-  };
-  let first;
-  let second;
-  try {
-    first = new Client("first");
-    summary.initialize = await first.initialize();
-    log("initialize:", short(summary.initialize, 1200));
-    summary.sessionNew = await first.newSession();
-    log("session/new:", short(summary.sessionNew, 800));
-    if (!first.sid) throw new Error("session/new returned no sessionId");
-
-    if (MODEL) {
-      try {
-        summary.setModel = await first.setConfig("model", MODEL);
-      } catch (e) {
-        summary.setModel = { error: e.message };
-      }
-      log("set model:", short(summary.setModel, 600));
-    }
-    if (REASONING) {
-      try {
-        summary.setReasoning = await first.setConfig("reasoning_effort", REASONING);
-      } catch (e) {
-        summary.setReasoning = { error: e.message };
-      }
-      log("set reasoning:", short(summary.setReasoning, 600));
-    }
-
-    summary.prompt1 = await first.prompt(FIRST_PROMPT);
-    log("prompt1:", short(summary.prompt1, 1200));
-
-    if (TEST_IMAGE) {
-      const started = Date.now();
-      try {
-        summary.image = await first.request(
-          "session/prompt",
-          {
-            sessionId: first.sid,
-            prompt: [
-              { type: "image", mimeType: "image/png", data: png1x1 },
-              { type: "text", text: "Describe this image in one word." },
-            ],
-          },
-          60_000,
-        );
-      } catch (e) {
-        summary.image = { error: e.message };
-      }
-      summary.image.elapsedMs = Date.now() - started;
-      log("image prompt:", short(summary.image, 600));
-    }
-
-    if (TEST_TOOL) {
-      // 漂移检测：强制走一次真实工具调用，记录期间是否出现 session/request_permission。
-      // 「免审批」类预设的预期：文件写到磁盘、反向请求为 0；agent 若开始先问，permission>0 / fileWritten=false，探针红。
-      const reverseMark = first.reverse.length;
-      const marker = path.join(CWD, TOOL_MARKER);
-      try {
-        fs.rmSync(marker, { force: true }); // 清掉上次探针留下的旧标记，再开跑
-      } catch {}
-      const started = Date.now();
-      const res = await first.prompt(TOOL_PROMPT);
-      const permission = first.reverse
-        .slice(reverseMark)
-        .map((r) => r.method)
-        .filter((m) => m === "session/request_permission").length;
-      const fileWritten = fs.existsSync(marker);
-      summary.toolTest = {
-        ok: res.ok && fileWritten && permission === 0,
-        elapsedMs: Date.now() - started,
-        requestPermission: permission,
-        reverseDuringTool: first.reverse.slice(reverseMark).map((r) => r.method),
-        fileWritten,
-        toolCalls: res.toolCalls,
-        stopReason: res.stopReason,
-        answer: res.answer.slice(0, 120),
-      };
-      log(
-        "tool test:",
-        `ok=${summary.toolTest.ok} permission=${permission} fileWritten=${fileWritten} toolCalls=${res.toolCalls}`,
-      );
-    }
-
-    summary.close = HARD_KILL ? { skipped: "ACP_HARD_KILL=1" } : await first.close();
-    first.kill();
-    await sleep(800);
-
-    second = new Client("second");
-    summary.initialize2 = await second.initialize();
-
-    try {
-      summary.load = await second.request("session/load", {
-        sessionId: first.sid,
-        cwd: CWD,
-        mcpServers: TEST_MCP,
-        ...(SESSION_META ? { _meta: SESSION_META } : {}),
-      });
-    } catch (e) {
-      summary.load = { error: e.message };
-    }
-    log("session/load:", short(summary.load, 600));
-
-    if (!summary.load.error) {
-      second.sid = first.sid;
-      summary.resume = { skipped: "session/load ok" };
-    } else {
-      try {
-        summary.resume = await second.request("session/resume", {
-          sessionId: first.sid,
-          cwd: CWD,
-          mcpServers: TEST_MCP,
-          ...(SESSION_META ? { _meta: SESSION_META } : {}),
-        });
-        second.sid = first.sid;
-      } catch (e) {
-        summary.resume = { error: e.message };
-      }
-    }
-    log("session/resume:", short(summary.resume, 600));
-
-    if (second.sid) {
-      summary.prompt2 = await second.prompt(SECOND_PROMPT);
-      summary.contextKept = /PINEAPPLE/i.test(summary.prompt2.answer || "");
-      log("prompt2:", short(summary.prompt2, 1200));
-      log("contextKept:", summary.contextKept);
-    } else {
-      summary.contextKept = false;
-    }
-
-    summary.reverseRequests = first.reverse
-      .concat(second.reverse)
-      .map((r) => r.method);
-    summary.resumeOk = !!second.sid && !summary.resume?.error;
-    // 开了漂移检测时，工具测试失败也算整体失败（这正是它存在的意义：升级后跑一次就知道预案该不该启用）
-    summary.ok =
-      !!summary.prompt1?.ok && !!summary.contextKept && (!TEST_TOOL || summary.toolTest?.ok === true);
-  } catch (e) {
-    summary.fatal = e instanceof Error ? e.message : String(e);
-    summary.ok = false;
-  } finally {
-    try {
-      first?.kill();
-    } catch {}
-    try {
-      second?.kill();
-    } catch {}
-    // Only clean a temp home. Never delete the user's real ~/.dsh.
-    const tempRoot = path.resolve(os.tmpdir()) + path.sep;
-    const isTempHome = !!HOME && path.resolve(HOME).startsWith(tempRoot);
-    if (!KEEP && isTempHome) {
-      try {
-        fs.rmSync(HOME, { recursive: true, force: true });
-      } catch {}
-    }
-    process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
-    process.exitCode = summary.ok ? 0 : 1;
-  }
-})();

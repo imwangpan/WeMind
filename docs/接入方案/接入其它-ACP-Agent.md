@@ -1,6 +1,6 @@
 # 接入其它 AI Agent（ACP 配置指南）
 
-> **最后核对**：2026-11-15 ｜ **状态**：内置 10 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**、**Copilot CLI 已探针级实测 + 真机 E2E（1.0.108，Windows，2026-11-15）**。默认 `homeMode=direct`：WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Agent 完全使用真实配置/技能/记忆/会话库；`managed` 才是账号副本。
+> **最后核对**：2026-11-16 ｜ **状态**：内置 10 个预设——kiro/opencode/deepseek/qoder/cline 已实测，**gemini 已探针级实测 + 真机 E2E（0.66.0，2026-11-01）**、**claude-code 已实测（探针级 + 真机微信单轮 E2E）**、**codex 已实测（探针级 + 真机 E2E）**、**pi 已探针级实测 + 真机 E2E（2026-11-01）**、**Copilot CLI 已探针级实测 + 真机 E2E（1.0.108，Windows，2026-11-15）**。P2 起支持用户自助接入：`wemind agent spec` + `probe --draft` + `agent check`，本机定义无需 WeMind 发版。默认 `homeMode=direct`：WeMind 在 daemon 启动/运行期不自动写 Agent 配置（显式 `wemind config agent ...` 例外），Agent 完全使用真实配置/技能/记忆/会话库；`managed` 才是账号副本。
 >
 > 本文说明如何把 WeMind daemon 的「大脑」从默认的 `auto` 换成另一个 ACP agent（默认 `auto` 按 `opencode → cline → qoder → gemini → deepseek → kiro` 探测已安装者，kiro 排最后）。**多数原生 ACP agent 可以零代码接入；但 ACP 不是完全统一的能力集**——缺 `session/load`、会发反向请求、没有 activity 帧或图片能力不同，都需要协议层适配（见 §9）。
 
@@ -18,7 +18,7 @@
 |---|---|---|---|
 | 1 | 有**可执行入口**（executable entry point：CLI 或可被 `spawn` 的程序） | 终端里能直接跑起来 | 没有进程可启动 → 只能走 §9 的「第二档：裸 API 适配器」（未实现） |
 | 2 | **实现 ACP**（implements ACP），或有 **ACP 适配器**（ACP adapter） | 官方文档的 ACP / 「agent client protocol」章节；或社区适配器项目 | 有 CLI 但无 ACP → 找/写适配器（如 `claude-agent-acp`、`codex-acp`）；见 §5 |
-| 3 | ACP 实现覆盖**最小方法集**（minimal method set） | 跑 [`scripts/acp-probe.mjs`](../../scripts/acp-probe.mjs) 看 `initialize` + `session/new`；跑 `wemind brain check` 做真握手 | `session/new` 或流式 `session/update` 缺失 → 不可用，放弃 |
+| 3 | ACP 实现覆盖**最小方法集**（minimal method set） | 跑 `wemind agent probe <bin> ...` 看 `initialize` + `session/new`；`wemind agent check <文件>` 做真实握手；旧 [`scripts/acp-probe.mjs`](../../scripts/acp-probe.mjs) 仍是兼容薄壳 | `session/new` 或流式 `session/update` 缺失 → 不可用，放弃 |
 | 4 | 能**完成自身认证**（agent's own authentication）并在 daemon 环境里可解析（resolvable on PATH / by absolute path） | 二进制在 `PATH` 上（或 `--bin` 给绝对路径）、模型/登录态已就绪 | 配 `--bin` 绝对路径、`homeEnvVar`、凭据同步；见 §7 平台注意 |
 
 > 「支持 ACP」这四个字**不足以**说明可用：同一**协议**（protocol）的不同**实现**（implementation），能力差别很大。第 3 项才是真正决定能不能接入的那一步。
@@ -64,7 +64,7 @@ daemon 使用 ACP 的一个**最小方法集**，但不同 agent 的可用能力
 
 > 第 1、2 项几乎所有 agent 都有；第 3 项各家差异较大（见 §6 配置来源与 MCP 策略）；第 4 项是前提——不支持 ACP 的 agent 走不了这条路，得用「第二档：裸 LLM API 适配器」（尚未实现，见 §9）。
 >
-> **不要只看「支持 ACP」四个字**：`session/load`、图片、MCP 传输、权限请求都可能不同。接入前先跑 [`scripts/acp-probe.mjs`](../../scripts/acp-probe.mjs)，把 `initialize` 能力与一次 prompt 的 `session/update` 类型记录下来。
+> **不要只看「支持 ACP」四个字**：`session/load`、图片、MCP 传输、权限请求都可能不同。接入前先跑 `wemind agent probe <bin> ...`，把 `initialize` 能力与一次 prompt 的 `session/update` 类型记录下来；旧的 `scripts/acp-probe.mjs` 只是把它转给 CLI。
 
 ---
 
@@ -171,18 +171,43 @@ $env:WEMIND_BRAIN_HOME_ENV = "ACME_HOME"
 - **优先级**：内置 < 本机定义 < `brain.json` 的字段覆盖 < 一次性环境变量。
 - **同名是整条替换，不做字段合并**：本机的 `kiro.json` 会完全替换内置 `kiro`，没写的字段回到默认值，不会继承内置值。只想改几个启动字段，用 `wemind brain set <名> --bin/--args/--extra-args/--model`。
 - **坏定义 fail-closed**：JSON 语法、未知字段、类型、`schemaVersion`、文件名与 `name` 不一致、`name: "auto"` 都会让这份定义不可用；它仍然按文件名遮住同名内置（不会静默回退到旧定义）。选择它时退出码 78，错误里给出文件与修法。
-- **P1 边界**：本机定义只能用纯数据字段与**内置** adapter hook（目前只有 `builtin:cline-credentials`）；外部 adapter 插件（自定义 MCP 格式、凭据派生、启动前文件生成）在 P3 才开放，现在写外部 `adapter.module` 会直接判为坏定义。
+- **P2 边界**：本机定义只能用纯数据字段与**内置** adapter hook（目前只有 `builtin:cline-credentials`）；外部 adapter 插件（自定义 MCP 格式、凭据派生、启动前文件生成）在 P3 才开放，现在写外部 `adapter.module` 会直接判为坏定义。
 
 查看与校验（都无需重启 daemon）：
 
 ```powershell
+wemind agent spec                       # 字段规格、自动/人工边界、正反例、JSON Schema
 wemind agent list                       # 内置/本机来源、可用性、探测记录、损坏文件
 wemind agent show acme --explain        # 最终生效值 + 每一层来源
-wemind agent check acme                 # schema + 文件名校验（P1 不启动进程）
+wemind agent check acme --schema        # 只校验数据面，不启动进程
+wemind agent check acme                 # 默认起进程做真实 ACP 握手
+wemind agent check acme --deep          # 握手后再发一条真实 prompt
 wemind brain switch acme                # 建议先 check；daemon 在跑时热切换
 ```
 
 新增/修改/删除定义后，daemon 在下一次解析或指令匹配时会按目录指纹自动重读（没有文件监听线程）；已经常驻的大脑进程不会自己换，需要 `wemind brain switch <名>` 或 `wemind config reload`。
+
+#### 4.1.1 用户/agent 自助接入闭环（P2）
+
+用户或当前大脑（包括 Test Agent 自己）按下面五步就能在本机接入，不需要等 WeMind 改代码或发版：
+
+1. **读规格**：`wemind agent spec`。这份内容与 `wemind agent spec --json` 同源，列出每个字段的含义、必填性、获取位置，并明确区分：
+   - `自动`：探针能填（`restore`、`acpMcpServers`、`mcpDelivery`、`sessionMode` 候选等）；
+   - `--deep`：探针发真实回合才敢下结论（`images`、`replayOnLoad`、首帧耗时等）；
+   - `人工`：探针推不出的领域知识（`realHome`、`configSubdir`、`mcpFormat`、`mcpConfigFile`、`catalogFile`、凭据/继承清单、`requiresBins`、启动参数等）。
+2. **探测并产草稿**：`wemind agent probe <bin> --args <进入 ACP 的参数> --draft`。默认只做 `initialize` + `session/new` + load/resume，**不发真实 prompt**；默认用临时假 MCP 测 `session/new.mcpServers`，`--no-mcp-test` 可关闭。只有显式 `--deep` 才发真实 prompt（会产生费用，并可能把测试对话写进 agent 自己的会话历史）；`--image` / `--tool` 也必须配合 `--deep`。草稿只填协议层结论，`notes` 会列出仍需人工补的字段。
+3. **补领域字段**：按 `agent spec` 的字段表补齐目录、文件格式、凭据与依赖；不要凭记忆猜字段——未知字段会整份拒绝（例如 `realhome` 不是 `realHome`）。
+4. **先校验数据，再验真实握手**：把草稿保存到临时 `.json`，先跑 `wemind agent check <文件> --schema` 修 schema；再跑 `wemind agent check <文件>` 做真实 ACP 握手；需要验证完整回合时加 `--deep`。真实握手失败不会伪造成功，也不会替用户改 agent 配置。
+5. **安装并选择**：把定义保存为 `~/.wemind/.agents/<name>.json`（文件名必须与 `name` 完全一致），再运行 `wemind agent list` / `wemind agent show <name> --explain`，最后由用户明确要求时运行 `wemind brain switch <name>`。**不要自动切换大脑**；在微信里只需回一句「要切过去就说『切到 <name>』」。
+
+**可依赖的边界**：
+
+- 探针成功只代表**协议层可用**；`realHome` / MCP 文件格式 / 凭据 / 继承目录仍必须人工补，不能把「probe ok」当成「适配完成」。
+- `session/new` 接受非空 `mcpServers` 只代表协议上没拒绝，**不代表 agent 真的加载了工具**；MCP 仍需按 §6 做真机验证。
+- 定义写完**不会自动切换**；坏定义 fail-closed，不会静默回退同名内置。
+- 外部 adapter 插件仍是 P3；当前只能引用内置 hook。
+
+兼容入口：旧的 `node scripts/acp-probe.mjs` 会转成 `wemind agent probe`，继续支持 `ACP_BIN` / `ACP_ARGS` / `ACP_HOME_ENV` / `ACP_HOME` 等变量，并默认带 `--deep` 保持旧脚本行为；`ACP_NO_PROMPT=1` 可改成只做协议探测。新脚本/文档应优先使用 `wemind agent ...`。
 
 ### 4.2 内置定义（开发，随包发布）
 
@@ -201,6 +226,8 @@ wemind brain switch acme                # 建议先 check；daemon 在跑时热�
 ```
 
 `agent-registry.ts` 在构建期静态导入这些 JSON 并按 `agent-definition.ts` 的契约校验（未知字段、类型错误、版本不符都会直接失败）；`~` 在 `realHome` / `fallbackBinPaths` / `extraConfigFiles` 里展开为当前用户家目录。
+
+写内置定义前先跑 `wemind agent spec`，再用 `wemind agent probe <bin> ... --draft` 产草稿；协议层结论写进定义字段，人工领域字段按 `agent spec` 的「去哪里找」逐项补。内置定义仍随包发布，但本机定义不需要发版。
 
 > **不要因二进制存在就一律加入 `AUTO_PROBE_ORDER`**：`claude-code` / `codex` / `pi` 是适配器，`copilot` 虽是原生 ACP，但二进制存在都不代表运行账号已登录；这四者均显式选用，避免「装了但没登录」的机器静默换脑。其它原生 ACP 按实际启动条件与耗时决定是否加入。
 
@@ -450,7 +477,7 @@ WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直
 
 验证：
   看 daemon.log 的 [wemind/wechat-daemon/acp] spawn / prompt ok；或 wemind brain check
-  接入前先跑：node scripts/acp-probe.mjs（记录 initialize、首帧、update、load/resume、反向请求）
+  接入前先跑：wemind agent spec → wemind agent probe <bin> --draft（旧 node scripts/acp-probe.mjs 仍兼容）
   注意：brain check 默认 60s，冷启动慢的 agent 仍可能误报
 ```
 
@@ -459,7 +486,7 @@ WeMind 侧的落点：找不到适配器二进制时，`agentProblem()` 会**直
 
 ## 11. 附录：ACP 生态可接入 agent 清单（参考）
 
-> **这不是 WeMind 的支持清单。** 下面只说明「上游有哪些 agent 实现了 ACP（或提供 ACP 适配器）」；WeMind **内置**的只有 §5 的 9 个（均已至少探针级实测：kiro/opencode/deepseek/qoder/cline/claude-code/codex/gemini/pi）。未内置的 agent 需要你按 §2–§5 自行配置、按 §8 验证——文档列出 ≠ 已适配。
+> **这不是 WeMind 的支持清单。** 下面只说明「上游有哪些 agent 实现了 ACP（或提供 ACP 适配器）」；WeMind **内置**的只有 §5 的 10 个（均已至少探针级实测：kiro/opencode/deepseek/qoder/cline/claude-code/codex/gemini/pi/copilot）。未内置的 agent 需要你按 §2–§5 自行配置、按 §8 验证——文档列出 ≠ 已适配。
 >
 > 来源：ACP 官方站 `agentclientprotocol.com/get-started/agents`（截至 2026 年；生态在扩大，以官方为准）。
 > ACP 通用介绍见知识库笔记《ACP（Agent Client Protocol）详解》。

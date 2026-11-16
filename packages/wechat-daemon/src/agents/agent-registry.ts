@@ -110,7 +110,11 @@ function loadBuiltinDefinition(file: string, raw: unknown): AgentDefinition {
   return normalizeDefinition(result.value);
 }
 
-function toBuiltinPreset(def: AgentDefinition): AcpAgentPreset {
+/**
+ * 把一份已校验的定义挂上它声明的内置 hook。
+ * 本地文件与 `agent check <文件>` 也走这里，保证「安装后」与「安装前检查」看到的是同一套 adapter。
+ */
+export function presetForDefinition(def: AgentDefinition): AcpAgentPreset {
   const module = def.adapter?.module;
   if (!module) return def;
   const adapter = BUILTIN_ADAPTERS[module];
@@ -119,6 +123,10 @@ function toBuiltinPreset(def: AgentDefinition): AcpAgentPreset {
       `内置 agent 定义「${def.name}」声明了未注册的 adapter「${module}」——内置定义只能引用 BUILTIN_ADAPTERS 里已注册的模块`,
     );
   return { ...def, ...adapter };
+}
+
+function toBuiltinPreset(def: AgentDefinition): AcpAgentPreset {
+  return presetForDefinition(def);
 }
 
 function buildBuiltinRegistry(): {

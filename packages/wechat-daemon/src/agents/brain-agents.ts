@@ -10,9 +10,10 @@ import {
   brokenAgentDefinitionMessage,
   findBrokenAgentDefinition,
   isAgentToken,
+  presetForDefinition,
   type AcpAgentPreset,
 } from "./agent-registry.js";
-import { AGENT_DEFINITION_SCHEMA_VERSION } from "./agent-definition.js";
+import { AGENT_DEFINITION_SCHEMA_VERSION, type AgentDefinition } from "./agent-definition.js";
 import { readEnvSnapshot, mergeEnvSnapshot } from "./config/env-snapshot.js";
 import { readHomeMode } from "./config/home-mode.js";
 
@@ -110,7 +111,10 @@ export function acpArgsHint(ag: ResolvedAgent): string {
 
 /** agent 在该平台的「可执行文件名」（用于 PATH 探测）。 */
 function presetExe(preset: Pick<AcpAgentPreset, "bin" | "binWin">): string {
-  return process.platform === "win32" ? (preset.binWin ?? `${preset.bin}.exe`) : preset.bin;
+  if (process.platform !== "win32") return preset.bin;
+  if (preset.binWin) return preset.binWin;
+  // 已带扩展名的裸名/绝对路径不要再拼一次 .exe（本机定义的 bin 允许直接写路径）。
+  return /\.[A-Za-z0-9]+$/.test(preset.bin) ? preset.bin : `${preset.bin}.exe`;
 }
 
 /** 数据面的 `mcpFormat` 是开放字符串（自定义格式靠 adapter）；这里只接受内置格式，其它值明确报错而不是猜。 */
@@ -132,6 +136,9 @@ export function presetBinPath(
   overrideBin?: string,
 ): string | null {
   if (overrideBin) return locateBin(overrideBin);
+  // 本机定义允许 bin 直接写绝对/相对路径；此时不该按 PATH 裸名处理。
+  if (preset.bin.includes("/") || preset.bin.includes("\\"))
+    return fs.existsSync(preset.bin) ? preset.bin : null;
   return (
     onPath(presetExe(preset)) ??
     (preset.fallbackBinPaths ?? []).find((p) => fs.existsSync(p)) ??
@@ -413,51 +420,75 @@ export function ensureKiroV3Permissions(ag: ResolvedAgent, settingsDir: string):
 function resolveAgentCore(
   role: AgentRole,
   cfg: BrainConfig | null,
-  opts: { ignoreEnv?: boolean; dataDir?: string; forceKey?: string } = {},
+  opts: {
+    ignoreEnv?: boolean;
+    dataDir?: string;
+    forceKey?: string;
+    presetOverride?: AcpAgentPreset;
+  } = {},
 ): ResolvedAgent {
+  // `presetOverride` 用于 `agent check <文件>`：那份定义还没安装，但检查必须和安装后走同一套解析。
+  // 它同时隐式忽略环境变量与账号覆盖，避免「检查的是 A、跑起来的是 B」。
+  const ignoreEnv = opts.ignoreEnv === true || opts.presetOverride !== undefined;
+  // 切换命令的 `ignoreEnv` 只隔离「选哪个 agent + 启动参数」；真实配置目录、继承开关等 ambient 覆盖仍应生效。
+  // `agent check` 检查的是一份独立定义，必须连这些 ambient 覆盖也一起隔离。
+  const definitionOnly = opts.presetOverride !== undefined;
   // `forceKey` 只锁「选哪个 agent」，不锁字段覆盖：`agent show` 要看这个 agent 的最终生效值（含 env 字段覆盖），
   // 但不能被 WEMIND_BRAIN 改成别的 agent。
-  const envKey = opts.ignoreEnv || opts.forceKey ? undefined : envKeyFor(role);
+  const envKey = ignoreEnv || opts.forceKey ? undefined : envKeyFor(role);
   const roleCfg = agentConfigFor(cfg, role);
-  const fileKey = opts.forceKey?.trim().toLowerCase() || roleCfg?.agent?.trim();
-  const requestedKey = (envKey || fileKey || "auto").toLowerCase();
-  const source: ResolvedAgent["source"] = opts.forceKey
+  const fileKey =
+    opts.presetOverride?.name ?? opts.forceKey?.trim().toLowerCase() ?? roleCfg?.agent?.trim();
+  const requestedKey = (opts.presetOverride?.name ?? envKey ?? fileKey ?? "auto").toLowerCase();
+  const source: ResolvedAgent["source"] = opts.presetOverride
     ? "file"
-    : envKey
-      ? "env"
-      : fileKey
-        ? "file"
-        : "auto";
-  const broken = requestedKey === "auto" ? undefined : findBrokenAgentDefinition(requestedKey);
+    : opts.forceKey
+      ? "file"
+      : envKey
+        ? "env"
+        : fileKey
+          ? "file"
+          : "auto";
+  const broken =
+    opts.presetOverride || requestedKey === "auto"
+      ? undefined
+      : findBrokenAgentDefinition(requestedKey);
 
   // 选 agent：auto → 探测第一个可用；未知值 → 标 known:false（结构上退回 kiro 兜底，交启动校验报错）。
   let known = true;
-  let key = requestedKey;
-  if (key === "auto") {
-    key = AUTO_PROBE_ORDER.find((k) => presetAvailable(k, cfg)) ?? "kiro";
-  } else if (broken || !ACP_AGENT_PRESETS[key]) {
-    known = false;
+  let key = opts.presetOverride?.name ?? requestedKey;
+  if (!opts.presetOverride) {
+    if (key === "auto") {
+      key = AUTO_PROBE_ORDER.find((k) => presetAvailable(k, cfg)) ?? "kiro";
+    } else if (broken || !ACP_AGENT_PRESETS[key]) {
+      known = false;
+    }
   }
   // 坏定义 / 未知值不能借用另一个 agent 的预设：占位预设只用于填满结构，`agentProblem()` 会先报原因。
-  const preset: AcpAgentPreset = ACP_AGENT_PRESETS[key] ?? {
-    schemaVersion: AGENT_DEFINITION_SCHEMA_VERSION,
-    name: key,
-    bin: key,
-    args: [],
-  };
+  const preset: AcpAgentPreset = opts.presetOverride ??
+    ACP_AGENT_PRESETS[key] ?? {
+      schemaVersion: AGENT_DEFINITION_SCHEMA_VERSION,
+      name: key,
+      bin: key,
+      args: [],
+    };
   const homeMode = readHomeMode(opts.dataDir ?? DATA_DIR);
   // 按 agent 名存的启动覆盖：无论谁在用这个 agent 都适用（顶层覆盖只属于「写入磁盘那个 agent」，切走后不该跟过去）。
-  const presetOv = cfg?.presets && Object.hasOwn(cfg.presets, key) ? cfg.presets[key] : undefined;
+  const presetOv =
+    !opts.presetOverride && cfg?.presets && Object.hasOwn(cfg.presets, key)
+      ? cfg.presets[key]
+      : undefined;
 
   // roleCfg 的 bin/args/shell/homeEnvVar 是**给该段所写那个 agent** 的启动覆盖；环境变量临时切到别的 agent 时不能沿用（否则会拿 deepseek 的 dsh.cmd 去起 qoder）。
-  const overrideCfg =
-    (envKey || opts.forceKey) &&
-    roleCfg?.agent?.trim() &&
-    roleCfg.agent.trim().toLowerCase() !== requestedKey
+  const overrideCfg = opts.presetOverride
+    ? null
+    : (envKey || opts.forceKey) &&
+        roleCfg?.agent?.trim() &&
+        roleCfg.agent.trim().toLowerCase() !== requestedKey
       ? null
       : roleCfg;
 
-  const shellEnv = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_SHELL?.trim();
+  const shellEnv = ignoreEnv ? undefined : process.env.WEMIND_BRAIN_SHELL?.trim();
   const shell =
     shellEnv !== undefined && shellEnv !== ""
       ? shellEnv === "1" || shellEnv.toLowerCase() === "true"
@@ -465,9 +496,9 @@ function resolveAgentCore(
 
   // 二进制：env 覆盖 > (kiro 旧变量) > 本段覆盖 > presets[agent 名] 覆盖 > PATH 解析 > agent 裸名。
   // 经 shell 启动时用裸名（让 shell 从 PATH 解析，避免带空格的全路径在 shell 下出问题）。
-  const envBin = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_BIN?.trim();
+  const envBin = ignoreEnv ? undefined : process.env.WEMIND_BRAIN_BIN?.trim();
   const kiroBin =
-    opts.ignoreEnv || preset.name !== "kiro" ? undefined : process.env.KIRO_CLI_BIN?.trim();
+    ignoreEnv || preset.name !== "kiro" ? undefined : process.env.KIRO_CLI_BIN?.trim();
   const explicitBin = envBin || kiroBin || overrideCfg?.bin?.trim() || presetOv?.bin?.trim() || "";
   const exe = presetExe(preset);
   const binPath = explicitBin ? locateBin(explicitBin) : presetBinPath(preset);
@@ -479,13 +510,15 @@ function resolveAgentCore(
   // 继承「记忆/规则/技能」：来源目录与子目录清单按 agent 而异（下沉到 agent），env 可覆盖。
   // 放在 args 之前：kiro 的引擎选择与 v3 的信任参数清洗都要用它。
   const inherit =
+    definitionOnly ||
     (process.env.WEMIND_BRAIN_INHERIT ?? process.env.WECHAT_BRAIN_INHERIT ?? "1") !== "0";
-  const realHome =
-    process.env.WEMIND_BRAIN_REAL_HOME?.trim() ||
-    process.env.WECHAT_REAL_KIRO_HOME?.trim() ||
-    preset.realHome;
+  const realHome = definitionOnly
+    ? preset.realHome
+    : process.env.WEMIND_BRAIN_REAL_HOME?.trim() ||
+      process.env.WECHAT_REAL_KIRO_HOME?.trim() ||
+      preset.realHome;
 
-  const argsOverride = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_ARGS?.trim();
+  const argsOverride = ignoreEnv ? undefined : process.env.WEMIND_BRAIN_ARGS?.trim();
   const baseArgs = argsOverride
     ? argsOverride.split(/\s+/)
     : overrideCfg?.args && overrideCfg.args.length
@@ -495,7 +528,7 @@ function resolveAgentCore(
         : preset.args;
   // 追加参数：与 args 的「整段替换」不同，extraArgs 永远拼在后面（保留预设里的 ACP 模式参数）。
   // 来源优先级同 args：env > 本段（该角色）> presets[agent 名]。
-  const extraEnv = opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_EXTRA_ARGS?.trim();
+  const extraEnv = ignoreEnv ? undefined : process.env.WEMIND_BRAIN_EXTRA_ARGS?.trim();
   const extraArgs = extraEnv
     ? extraEnv.split(/\s+/)
     : overrideCfg?.extraArgs && overrideCfg.extraArgs.length
@@ -521,7 +554,7 @@ function resolveAgentCore(
   }
 
   const homeEnvVar =
-    (opts.ignoreEnv ? undefined : process.env.WEMIND_BRAIN_HOME_ENV?.trim()) ||
+    (ignoreEnv ? undefined : process.env.WEMIND_BRAIN_HOME_ENV?.trim()) ||
     overrideCfg?.homeEnvVar?.trim() ||
     presetOv?.homeEnvVar?.trim() ||
     preset.homeEnvVar;
@@ -539,14 +572,14 @@ function resolveAgentCore(
     explicitModel || derivedModel || (isDefaultModel(rawModel) ? undefined : preset.model);
   // 不支持 session/set_config_option 的 agent（gemini）：模型用它自己的 CLI 参数传，进程启动时生效。
   if (preset.modelArg && model) args.push(preset.modelArg, model);
-  const dirsEnv = process.env.WEMIND_BRAIN_INHERIT_DIRS?.trim();
+  const dirsEnv = definitionOnly ? undefined : process.env.WEMIND_BRAIN_INHERIT_DIRS?.trim();
   const inheritDirs = dirsEnv
     ? dirsEnv.split(/[,\s]+/).filter(Boolean)
     : (preset.inheritDirs ?? []);
 
   // 会话模式：预设默认；`WEMIND_ACP_SESSION_MODE=0/false/off` 关闭（让 agent 回到自己的审批流程），
   // 其它非空值 = 覆盖成该 modeId（自定义 agent 用）。环境变量是一次性覆盖，持久值仍以预设为准。
-  const modeEnv = process.env.WEMIND_ACP_SESSION_MODE?.trim();
+  const modeEnv = definitionOnly ? undefined : process.env.WEMIND_ACP_SESSION_MODE?.trim();
   const modeOff = !!modeEnv && ["0", "false", "off", "no"].includes(modeEnv.toLowerCase());
   const sessionMode = modeOff ? undefined : modeEnv || preset.sessionMode;
 
@@ -620,6 +653,21 @@ export function resolveAgentByName(
   return resolveAgentCore("brain", cfg ?? null, {
     forceKey: name,
     ...(dataDir ? { dataDir } : {}),
+  });
+}
+
+/**
+ * 把一份尚未安装的定义解析成可 spawn 的 agent，供 `wemind agent check <文件>` 使用。
+ * 它刻意绕开环境变量与账号覆盖：检查的必须是用户眼前这份定义，而不是「碰巧生效的另一个」。
+ */
+export function resolveAgentFromDefinition(
+  def: AgentDefinition,
+  opts: { dataDir?: string } = {},
+): ResolvedAgent {
+  return resolveAgentCore("brain", null, {
+    ignoreEnv: true,
+    presetOverride: presetForDefinition(def),
+    ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
   });
 }
 

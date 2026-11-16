@@ -17,9 +17,13 @@ import { LineDecoder } from "../shared/io/line-decoder.js";
  * 用**临时副本目录**（避免污染真实配置与账号副本），结束后杀进程、删临时目录。
  * 供 `wemind brain check` 使用；不影响正在运行的 daemon（各起各的进程）。
  */
-export type CheckResult = { ok: boolean; detail: string; ms: number };
+export type CheckResult = { ok: boolean; detail: string; ms: number; reply?: string };
 
-export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise<CheckResult> {
+export async function checkAgent(
+  ag: ResolvedAgent,
+  timeoutMs = 60_000,
+  opts: { deep?: boolean; prompt?: string } = {},
+): Promise<CheckResult> {
   const started = Date.now();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-brain-check-"));
   const env = agentEnv(ag, home); // 父进程 env → 临时副本目录 → 预设 env → 预设 envDefaults（与 daemon 的 spawn 口径一致）
@@ -74,6 +78,7 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
   const proc = spawnAgent(ag, { cwd: home, env });
 
   const stdoutLines = new LineDecoder();
+  const answer: string[] = [];
   let seq = 0;
   const pending = new Map<number, (frame: any) => void>();
   const settleAll = (msg: string): void => {
@@ -95,6 +100,16 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
       // 以前这里只处理「响应」，agent 一发权限请求就没人回 → `brain check` 白等 60s，误报「不可用」。
       if (frame.method && frame.id !== undefined) {
         handleReverseRequest(frame, (payload) => proc.stdin!.write(JSON.stringify(payload) + "\n"));
+        continue;
+      }
+      if (frame.method === "session/update") {
+        const update = frame.params?.update;
+        if (
+          update?.sessionUpdate === "agent_message_chunk" &&
+          update?.content?.type === "text" &&
+          typeof update.content.text === "string"
+        )
+          answer.push(update.content.text);
         continue;
       }
       if (typeof frame.id === "number" && pending.has(frame.id)) {
@@ -145,6 +160,25 @@ export async function checkAgent(ag: ResolvedAgent, timeoutMs = 60_000): Promise
       } catch (e) {
         modeNote = `，但 session/set_mode ${ag.sessionMode} 失败（${e instanceof Error ? e.message : String(e)}）——免审批模式可能不可用，回合仍可跑但会按 agent 自己的审批流程走`;
       }
+    }
+    if (opts.deep) {
+      const promptStarted = Date.now();
+      await req("session/prompt", {
+        sessionId: s.sessionId,
+        prompt: [
+          {
+            type: "text",
+            text: opts.prompt || "Reply with exactly: OK",
+          },
+        ],
+      });
+      const reply = answer.join("").trim();
+      return {
+        ok: true,
+        detail: `ACP 握手成功（initialize + session/new，sessionId=${s.sessionId}${modeNote}）；真实 prompt 成功（${Date.now() - promptStarted}ms）${reply ? `：${reply.slice(0, 160)}` : "（没有文本回复）"}`,
+        ms: Date.now() - started,
+        reply,
+      };
     }
     return {
       ok: true,
