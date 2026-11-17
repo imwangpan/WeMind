@@ -549,7 +549,7 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 
 ### 19.8 可发现性：每会话一次的约定提示
 
-worker agent 默认不知道「写 Markdown 图片就会发出去」。`worker-acp.ts` 在**每个会话首轮**追加一次系统提示（`hintedSessions`，键 `<agent>:<sessionId>`，`worker-acp.ts:98` / `:264`），内容为「怎么写就能发」+「占连发额度、别刷屏」+「不支持语音，音频按文件发」，末尾注明「此提示只出现一次，无需理会本句」。
+worker agent 默认不知道「写 Markdown 图片就会发出去」。（brain 侧早有另一段同作用的提示：`acp-brain.ts:78` 的 `BRAIN_SYSTEM_HINT`，由 `runTurn` 在每会话首轮推一次，内容更细——建议用 `raw.githubusercontent.com` 这类直链、避开被墙与带热链保护的图床、并说明它自己不会文生图。）`worker-acp.ts` 在**每个会话首轮**追加一次系统提示（`hintedSessions`，键 `<agent>:<sessionId>`，`worker-acp.ts:98` / `:264`），内容为「怎么写就能发」+「占连发额度、别刷屏」+「不支持语音，音频按文件发」，末尾注明「此提示只出现一次，无需理会本句」。
 
 设计取舍：
 

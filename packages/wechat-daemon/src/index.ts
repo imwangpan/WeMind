@@ -827,10 +827,15 @@ async function deliverPending(params: {
   // 全部附件都下载失败、又没有正文时，不要再说「用户发来图片」——那会让 agent 以为图在。
   const fallback = !prepared.failures.length && !body ? mediaInstructionFallback(prepared) : "";
   const text = [body || fallback, failNote].filter(Boolean).join("\n\n");
+  // 这条路径覆盖「换收件人 / 回到大脑 / 超时清扫 / 收件人提交」四个入口，日志必须留下痕迹，否则真机只能靠猜。
+  log.info(
+    `media-route: deliver to #${taskId} attachments=${batch.items.length} images=${prepared.images.length} failures=${prepared.failures.length}`,
+  );
   const err = injectTask(from, text, taskId, undefined, {
     images: prepared.images.length ? prepared.images : undefined,
   });
   if (err) {
+    log.warn(`media-route: deliver to #${taskId} failed:`, err.replace(/\n/g, " | "));
     // 任务不在了：只清**属于这条任务**的指针/队列，如实交代（绝不静默丢附件）。
     // 不能无条件 clear：调用方可能在旧批次投递期间已经设了 #2，清掉就把新收件人和新附件一起毁了。
     if (!findRecipientTask(from, taskId)) {
