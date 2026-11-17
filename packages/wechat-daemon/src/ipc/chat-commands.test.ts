@@ -266,7 +266,17 @@ describe("任务指令", () => {
     expect(parseTaskCommand("结束任务 2")).toEqual({ kind: "stop", id: 2 });
     expect(parseTaskCommand("/stop 3")).toEqual({ kind: "stop", id: 3 });
     expect(parseTaskCommand("结束全部任务")).toEqual({ kind: "stop", id: "all" });
+    expect(parseTaskCommand("全部结束")).toEqual({ kind: "stop", id: "all" });
+    expect(parseTaskCommand("结束所有任务")).toEqual({ kind: "stop", id: "all" });
     expect(parseTaskCommand("/stop all")).toEqual({ kind: "stop", id: "all" });
+  });
+
+  it("全部继续：把停在半路的任务一起拉起来", () => {
+    expect(parseTaskCommand("全部继续")).toEqual({ kind: "resumeAll" });
+    expect(parseTaskCommand("继续全部")).toEqual({ kind: "resumeAll" });
+    expect(parseTaskCommand("/resume all")).toEqual({ kind: "resumeAll" });
+    expect(parseTaskCommand("/resume 全部")).toEqual({ kind: "resumeAll" });
+    expect(parseTaskCommand("继续")).toBeNull(); // 裸「继续」仍走 shouldResumeTask
   });
 
   it("收件人：裸 #N / 发给任务 N（无正文，与回话区分）", () => {
@@ -293,6 +303,7 @@ describe("任务指令", () => {
       "task.reply",
       "task.recipient",
       "task.list",
+      "task.resumeAll",
       "task.stop",
     ]);
   });

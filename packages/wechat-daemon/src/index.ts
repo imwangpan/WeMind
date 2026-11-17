@@ -116,6 +116,7 @@ import {
   interruptedTasks,
   shouldResumeTask,
   renderTaskList,
+  resumeAllInterrupted,
   taskKeyOf,
   initTasks,
   setTaskPush,
@@ -1357,7 +1358,15 @@ async function handleFastItem(
         return;
       }
       case "tasks": {
-        await notice(renderTaskList(from));
+        const list = renderTaskList(from);
+        log.info(`task: list(${from}):`, list.split("\n")[0]);
+        await notice(list);
+        return;
+      }
+      case "resumeAll": {
+        const r = resumeAllInterrupted(from);
+        log.info("task: resume-all ->", r.replace(/\n/g, " | "));
+        await notice(r);
         return;
       }
       case "recipient": {

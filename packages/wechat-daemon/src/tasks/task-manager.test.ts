@@ -57,6 +57,7 @@ const {
   shouldResumeTask,
   listTasks,
   renderTaskList,
+  resumeAllInterrupted,
   initTasks,
   resetTasksForTest,
   providerIssue,
@@ -554,6 +555,37 @@ describe("任务表写入磁盘与重启续跑", () => {
     await vi.waitFor(() => expect(has(pushed, "接着干")).toBe(true));
   });
 
+  it("全部继续：把停在半路的都拉起来（重启后等回复的也算待继续）", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 3 },
+        tasks: [
+          { id: 1, userId: "u1", agent: "kiro", key: "task-1@u1", status: "interrupted", turns: 1 },
+          { id: 2, userId: "u1", agent: "kiro", key: "task-2@u1", status: "interrupted", turns: 1 },
+        ],
+      }),
+    );
+    initTasks(tmpDir);
+    acquire.mockImplementation(async () => {
+      const c = fakeConn("kiro");
+      conns.push(c);
+      c.ask.mockReturnValueOnce(deferred().promise);
+      return { ok: true, conn: c };
+    });
+    const r = resumeAllInterrupted("u1");
+    await vi.waitFor(() => expect(conns.length).toBe(2));
+    expect(r).toContain("已让 2 条任务接着跑：#1、#2");
+    expect(r).toContain("全部结束");
+    expect(conns[0].ask.mock.calls[0][3]).toEqual({ strictResume: true });
+    expect(listTasks("u1").filter((t) => t.status === "interrupted").length).toBe(0);
+  });
+
+  it("全部继续：没有待继续的任务时直接说清楚", () => {
+    expect(resumeAllInterrupted("nobody")).toContain("没有停在半路的任务可继续");
+  });
+
   it("多条「待继续」任务时裸「继续」不替你选：进任务侧、回编号清单", () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),
@@ -622,7 +654,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     const list = renderTaskList("u1");
     // 手机上连着多条会糊在一起：标题之后、任务之间都要空一行
     expect(list.startsWith("📋 任务（2 条）\n\n#1 ")).toBe(true);
-    expect(list).toContain("\n\n#2 ");
+    expect(list).toContain("\n────────\n#2 "); // 空行可能被客户端压掉，分隔线兜底
     expect(list).toContain("「待继续」= 进程不在了");
   });
 

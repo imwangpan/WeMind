@@ -306,12 +306,12 @@ export function renderTaskList(userId: string): string {
     const head = `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]} · ${t.turns} 轮 · ${age}`;
     const cwd = t.cwd ? `\n   cwd：${t.cwd}` : "";
     const out = t.lastOutput
-      ? `\n   最近输出：${t.lastOutput.replace(/\n/g, " ").slice(0, 120)}`
+      ? `\n   最近输出：${t.lastOutput.replace(/\n/g, " ").slice(0, 80)}`
       : "";
     return `${head}${cwd}${out}`;
   });
-  // 每条之间留空行：手机上连着 6 条、每块两三行时会糊成一坨。
-  const lines = [`📋 任务（${all.length} 条）`, ...blocks];
+  // 每条之间既留空行、也放一条分隔线：手机客户端可能把连续空行压成一行，分隔线不会丢。
+  const lines = [`📋 任务（${all.length} 条）`, blocks.join("\n────────\n")];
   const live = all.filter(isLive);
   if (live.length > 1)
     lines.push(`多条任务并行：回话用「#<编号> 正文」，结束用「结束任务 <编号>」。`);
@@ -766,4 +766,31 @@ export function resetTasksForTest(dir?: string): void {
   tasks.clear();
   store = emptyTaskStore();
   if (dir) storeDir = dir;
+}
+
+/**
+ * 「全部继续」：把停在半路（interrupted）的任务全部拉起来。
+ * 在跑/等回复的不动——它们本来就在，不需要再拉。
+ * 单条失败不影响其它条：逐条记结果，回执里分开报。
+ */
+export function resumeAllInterrupted(to: string): string {
+  const stopped = interruptedTasks(to);
+  if (!stopped.length) return "没有停在半路的任务可继续（在跑、等回复的不用管）。";
+  const started: number[] = [];
+  const failed: number[] = [];
+  for (const t of stopped) {
+    injectTask(to, "继续", t.id, undefined, {
+      onOutcome: (ok) => (ok ? started : failed).push(t.id),
+    });
+  }
+  if (!started.length)
+    return `这 ${stopped.length} 条都没能拉起来：看看日志，或换个说法用「#编号 继续」逐条试。`;
+  const parts = [
+    `▶️ 已让 ${started.length} 条任务接着跑：${started.map((id) => `#${id}`).join("、")}`,
+  ];
+  if (failed.length) parts.push(`#${failed.join("、#")} 没能拉起来：用「#编号 继续」逐条试。`);
+  parts.push(
+    "（它们会并行跑；看某条用「#编号 正文」，停某条用「结束任务 编号」，全停发「全部结束」。）",
+  );
+  return parts.join("\n");
 }

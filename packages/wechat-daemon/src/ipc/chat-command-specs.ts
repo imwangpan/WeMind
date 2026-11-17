@@ -58,7 +58,9 @@ export type TaskCommand =
   /** 只把某条任务设为「收件人」（不产生文本回合）：之后的文字、图片、文件都交给它。 */
   | { kind: "recipient"; id: number }
   /** 任务列表。 */
-  | { kind: "tasks" };
+  | { kind: "tasks" }
+  /** 把停在半路（待继续）的任务全部拉起来。 */
+  | { kind: "resumeAll" };
 
 /** owner-only 的指令：非登录者发送 → 短提示拒绝，**不**转发给大脑（避免大脑替用户执行越权动作）。 */
 export const OWNER_ONLY_KINDS: ReadonlySet<ChatCommand["kind"]> = new Set([
@@ -408,14 +410,26 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     match: (t) => (/^(?:任务列表|任务清单|列出任务|\/tasks?)$/i.test(t) ? { kind: "tasks" } : null),
   },
   {
+    id: "task.resumeAll",
+    section: "task",
+    zh: "全部继续",
+    slash: "/resume all",
+    cli: "wemind task-resume-all [<key|label>]",
+    brief: "把停在半路的任务全部拉起来并行跑",
+    match: (t) =>
+      /^(?:全部继续|继续全部|全部接着跑|\/resume\s+(?:all|全部))$/i.test(t)
+        ? { kind: "resumeAll" }
+        : null,
+  },
+  {
     id: "task.stop",
     section: "task",
-    zh: "结束任务 [编号]、结束全部任务",
+    zh: "结束任务 [编号]、全部结束",
     slash: "/stop [编号|全部]",
     cli: "wemind task-stop [编号|全部] [<key|label>]",
     brief: "结束任务（进程留着复用）",
     match: (t) => {
-      if (/^(?:结束全部任务|停止全部任务|\/stop\s+(?:all|全部))$/i.test(t))
+      if (/^(?:结束全部任务|停止全部任务|全部结束|结束所有任务|\/stop\s+(?:all|全部))$/i.test(t))
         return { kind: "stop", id: "all" };
       const m = t.match(/^(?:结束任务|停止任务|\/stop)(?:\s*(\d+))?$/i);
       if (!m) return null;
