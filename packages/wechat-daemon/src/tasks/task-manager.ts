@@ -309,23 +309,35 @@ export function renderTaskList(userId: string): string {
   if (!all.length)
     return "📋 当前没有任务。派发：直接发「任务：正文」或「任务 <agent 名>：正文」。";
   const intr = all.filter((t) => t.status === "interrupted");
-  // 一条任务一行：先图标再编号，扫一眼就知道哪条要处理。手机上过长的行会被折断，所以字段只留必要项。
-  const lines = all.map((t) => {
+  // 单元格内容会进 markdown 表格：`|` 换成「∣」防破表，换行压成空格，反引号换成单引号（agent 回话里常有行内代码）。
+  const cell = (x: string | number): string =>
+    String(x).replace(/\|/g, "∣").replace(/\r?\n/g, " ").replace(/`/g, "'");
+  const rows = all.map((t) => {
     const age = t.startedAt ? since(Date.now() - t.startedAt) : "?";
-    const head = `${STATUS_ICON[t.status]} #${t.id} ${t.agent} · ${STATUS_LABEL[t.status]} · ${t.turns} 轮 · ${age}`;
-    // 只有「可能要接着说话」的任务才附最近输出：运行中的任务没有可核对的东西，带上只会把列表撑长。
-    const out =
-      t.lastOutput && t.status !== "running"
-        ? `\n   ↳ 最近：${t.lastOutput.replace(/\n/g, " ").slice(0, 40)}`
-        : "";
-    return `${head}${out}`;
+    return `| ${STATUS_ICON[t.status]} | #${t.id} ${cell(t.agent)} | ${STATUS_LABEL[t.status]} | ${t.turns} | ${age} |`;
   });
   const title = intr.length
     ? `📋 任务（${all.length} 条 · ${intr.length} 个待继续）`
     : `📋 任务（${all.length} 条）`;
-  const out = [title, lines.join("\n")];
+  const table = [
+    "| | 任务 | 状态 | 轮次 | 时长 |",
+    "| --- | --- | --- | --- | --- |",
+    ...rows,
+  ].join("\n");
+  const out = [title, table];
   const live = all.filter(isLive);
   if (live.length > 1) out.push("多条在跑：回话用「#<编号> 正文」，结束用「结束任务 <编号>」。");
+  // 最近输出不进表格（会把列撑到看不见），放表下逐条列；运行中的没有可核对的东西，不附。
+  const recent = all.filter((t) => t.lastOutput && t.status !== "running");
+  if (recent.length)
+    out.push(
+      recent
+        .map(
+          (t) =>
+            `**#${t.id}** ${cell((t.lastOutput ?? "").replace(/\s+/g, " ").trim()).slice(0, 80)}`,
+        )
+        .join("\n"),
+    );
   if (intr.length)
     out.push(
       `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着跑（先用「#${intr[0].id}」看它最近在做什么）；一起拉起发「全部继续」，不要的用「结束任务 <编号>」清掉。`,

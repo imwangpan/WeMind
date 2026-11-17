@@ -522,9 +522,9 @@ describe("多任务与编号", () => {
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
     const list = renderTaskList("u1");
     expect(list).toContain("#1");
-    expect(list).toContain("#1 qoder · 等你回复 · 1 轮");
+    expect(list).toContain("| 💬 | #1 qoder | 等你回复 | 1 |");
     expect(list).toContain("等你回复");
-    expect(list).toContain("1 轮");
+    expect(list).toContain("| 1 |");
     expect(list).toContain("我先问你一件事");
   });
 
@@ -685,8 +685,8 @@ describe("任务表写入磁盘与重启续跑", () => {
     const list = renderTaskList("u1");
     // 标题带待继续计数；每条任务一行（先图标后编号），不再靠空行/分隔线分隔
     expect(list.startsWith("📋 任务（1 条 · 1 个待继续）")).toBe(true);
-    expect(list).toContain("⏸️ #1 kiro · 待继续 · 5 轮");
-    expect(list).toContain("↳ 最近：第一行 第二行");
+    expect(list).toContain("| ⏸️ | #1 kiro | 待继续 | 5 |");
+    expect(list).toContain("**#1** 第一行 第二行");
     expect(list).toContain("「待继续」= 进程不在了");
     expect(list).toContain("全部继续");
     // 运行中的任务不附最近输出（会把列表撑长），图标也不同
@@ -694,7 +694,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     t.status = "running";
     t.lastOutput = "运行中的输出不该出现在列表里";
     const live = renderTaskList("u1");
-    expect(live).toContain("▶️ #1 kiro · 运行中 · 5 轮");
+    expect(live).toContain("| ▶️ | #1 kiro | 运行中 | 5 |");
     expect(live).not.toContain("运行中的输出不该出现在列表里");
     expect(live).not.toContain("待继续」= 进程不在了");
   });
