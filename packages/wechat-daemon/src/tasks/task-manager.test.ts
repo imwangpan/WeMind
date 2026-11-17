@@ -58,6 +58,7 @@ const {
   listTasks,
   renderTaskList,
   resumeAllInterrupted,
+  recapForResume,
   initTasks,
   resetTasksForTest,
   providerIssue,
@@ -536,6 +537,54 @@ describe("多任务与编号", () => {
   });
 });
 
+describe("续跑时的上下文回顾", () => {
+  it("把上一轮最后输出带进续跑提示，超长截断", () => {
+    expect(recapForResume(undefined)).toBe("");
+    expect(recapForResume("   ")).toBe("");
+    const short = recapForResume("已经改完 a.ts，下一步跑测试");
+    expect(short).toContain("上一轮的最后输出");
+    expect(short).toContain("已经改完 a.ts，下一步跑测试");
+    const long = recapForResume("x".repeat(900));
+    expect(long).toContain("x".repeat(800) + "…");
+    expect(long).not.toContain("x".repeat(801));
+  });
+
+  it("回「继续」续跑时把上次输出一并交给 worker", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 4 },
+        tasks: [
+          {
+            id: 3,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-3@u1",
+            status: "running",
+            turns: 2,
+            lastOutput: "改好了 engine.ts，还剩文档没更新",
+            startedAt: Date.now() - 60_000,
+          },
+        ],
+      }),
+    );
+    initTasks(tmpDir);
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn("kiro");
+      conns.push(c);
+      c.ask.mockReturnValueOnce(deferred().promise);
+      return { ok: true, conn: c };
+    });
+    expect(injectTask("u1", "继续", 3)).toContain("正在按 #3 号任务续跑");
+    await vi.waitFor(() => expect(conns.length).toBe(1));
+    const prompt = conns[0].ask.mock.calls[0][0] as string;
+    expect(prompt).toContain("上一轮的最后输出");
+    expect(prompt).toContain("改好了 engine.ts，还剩文档没更新");
+    expect(prompt).toContain("中断");
+  });
+});
+
 describe("任务表写入磁盘与重启续跑", () => {
   it("重启后未完成的标「待继续」，编号接着排不归零；回「继续」才拉进程续跑（strictResume）", async () => {
     // 模拟上次运行留下的一条 running 任务
@@ -587,6 +636,8 @@ describe("任务表写入磁盘与重启续跑", () => {
     expect(conn7.ask.mock.calls[0][1]).toBe("task-7@u1"); // 沿用原会话键
     expect(conn7.ask.mock.calls[0][3]).toEqual({ strictResume: true });
     expect(conn7.ask.mock.calls[0][0]).toContain("中断");
+    // 这条任务没有 lastOutput（上次没来得及推送），就不要凭空编一段
+    expect(conn7.ask.mock.calls[0][0]).not.toContain("上一轮的最后输出");
     // 续跑提示走**返回值**（微信侧把它当答复发出去、CLI 侧当答复收下），不再只 push
     expect(r7).toContain("正在按 #7 号任务续跑");
     // 续跑里的 agent 已被确认为「kiro」

@@ -16,6 +16,8 @@
 
 ### Changed
 
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
+
 - **`结束全部任务` 连「待继续」的记录一起清（2026-11-17）**：此前 `结束全部任务` 只看「在跑」，一堆「待继续」时回 `当前没有正在运行的任务。`——用户以为已经收完，列表里却还挂着一串。现在不带编号的「全部结束」会连记录一起清并逐个列出；只收掉在跑的时回 `🛑 已结束全部任务（N 条），当前没有正在运行的任务。`；真的什么都没有时回 `没有要结束的任务：当前没有正在运行的任务，也没有待继续的。`；单条 `结束任务`（无编号、无在跑）回 `当前没有正在运行的任务。` + 待继续条数提示。
 
 - **新增 `全部继续` / `全部结束`（2026-11-17）**：`全部继续`（`继续全部` / `/resume all`）把停在半路（「待继续」）的任务一起拉起来并行运行（回执 `▶️ 已让 N 条任务继续运行：#1、#2`）；`结束全部任务` 之外补了同义的 `全部结束` / `结束所有任务`。此前多任务并存时只能逐条 `#<编号> 继续`，重启一次就积一批「待继续」，手机上逐条发很麻烦。
@@ -43,6 +45,8 @@
 - **`wemind agent probe` 的完整探针**：默认只做 `initialize` + `session/new` + load/resume（不发真实 prompt），`--deep` 才验证回合与恢复后上下文；`--image` / `--tool` 验证图片与工具；`--draft` 只填协议层能确认的字段；Windows 的 `.cmd` / `.bat` 与 npm 裸名会按 `PATHEXT` 自动经 shell。旧 `scripts/acp-probe.mjs` 保留为兼容薄壳（只在源码检出中存在，npm 包不含 `scripts/`）。
 
 ### Changed
+
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
 
 - **`wemind agent check` 默认做真实握手**：纯数据校验必须显式 `--schema`；`--deep` 才发真实 prompt。它与 `brain check` 共用 `checkAgent()`，结束后统一杀进程树、destroy 三路 stdio 并 `unref()`，避免孙进程继承管道导致终端挂住。
 - **文档守卫改为读定义 JSON**：`check-agent-docs` 与 `gen-docs-tables` 经 `scripts/agent-definitions.mjs` 读取 `agents/definitions/*.json`，不再解析 TypeScript 里的 `ACP_AGENT_PRESETS`；环境变量表识别 `parentEnv.X`。
@@ -72,6 +76,8 @@
 
 ### Changed
 
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
+
 - **Copilot 的 MCP 改走配置文件（2026-11-15）**：实测 GitHub Copilot CLI **1.0.108 不加载** ACP `session/new.mcpServers` 传入的 stdio MCP（普通写法与带 `type: "stdio"` 两种，模型都答「没有这个工具」，`toolCalls: 0`；`initialize` 的 `mcpCapabilities` 只有 `http`/`sse`）。`copilot` 预设因此从 `acpMcpServers: true` / `mcpDelivery: "acp"` 改为 `mcpConfigFile: "mcp-config.json"` / `mcpDelivery: "config"`：`managed` 把激活集/全量集写进副本的 `mcp-config.json`，`direct` 仍由 Copilot 自己读真实文件。此前 `managed` 下 Copilot 实际拿不到任何 MCP。**已知限制**：`direct` 下微信独享的 `overlay.mcp.extra` 对 Copilot 不生效（不写真实配置，ACP 又不被消费），需要额外 MCP 时请改真实 `mcp-config.json` 或切 `managed`。同步更新 `docs/接入方案/接入-Copilot.md` 与设计文档 §6 / §7.3 / §18.6。守卫：`brain-agents.test.ts`、`managed/copilot.test.ts`、`parity-direct.test.ts`。
 - **账号副本继承失败改为告警（2026-11-15）**：`managed` 下 `agents/managed/inherit.ts` 链入技能/记忆目录或拷贝单文件失败时（典型：无 symlink/junction 权限、文件系统不支持链接），以前静默 `ignore`，副本会静默缺少这份内容；现在记 `WARN`（`wechat-daemon/config`），让「副本漂移」可见。真实配置目录不受影响。守卫：`inherit.test.ts`。
 - **`sandbox` 模式改名为 `managed`（2026-11-14）**：`homeMode` 取值、`WEMIND_HOME_MODE`、`wemind config home-mode`、代码标识（`managedRoot`）、模块目录与文件名（`agents/managed/` 下的 `mcp-brain.ts` / `mcp-worker.ts` / `managed-common.ts` / `inherit.ts`）、以及文档/注释里的「沙箱」措辞（统一改为「账号副本」）全部收敛到新名。改名理由：旧名承诺了它做不到的事——它只是同一 OS 用户下的一份账号配置副本，**不是安全边界**。**不保留旧值兼容**（`homeMode` 本身未发布，`main` 上不存在 `runtime.json` / `WEMIND_HOME_MODE`）：读到无法识别的取值（含 `sandbox`）一律回落 `direct`。`main` 里出现过的 `sandbox` 只是 `agents/sandbox/` 这个**目录名**，与 `homeMode` 取值无关。守卫：`config.test.ts`。
@@ -95,6 +101,8 @@
 
 ### Changed
 
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
+
 - **收尾三项（2026-11-11）**：① `cli.ts` 的 `cliLog.error("error:", …)` 去掉重复的 `error:` 字面量，输出从 `[wemind/wechat-daemon/cli][ERROR] error: …` 变为 `[wemind/wechat-daemon/cli][ERROR] Error: …`（级别已标在 `[ERROR]`）；同步 `scripts/core-entry.test.mjs` 守卫与 AGENTS.md / `docs/ai/README.md` / `已知坑.md` 的现行口径。② `docs/ai/代码地图.md` 的「最后核对」补为 2026-11-11（本轮给它加了 `logging.ts` / `repeat-log.ts` / `cli-log.ts` 三行）。③ 三篇接入方案（Codex / Qoder / 通用）末尾加「日志格式说明」，按仓库约定**不改历史实测正文、不动头部日期**，说明现行 `[wemind/<scope>][LEVEL]` 格式与 ACP 帧级线索归 INFO。
 - **清掉 logger 前缀的迁移尾巴 + 统一「为什么 INFO 也走 console.error」（2026-11-11）**：26 处 `log.xxx("[wemind/<scope>] ...")` 调用点全部去掉自带前缀，改由 `createLogger(scope)` / `log.child("xxx")` 生成；`cli.ts` 的三个 fatal 出口分别用 `log` / `log.child("watchdog")` / `log.child("cli")`，`core/store/account.ts` 的 Windows 明文提醒从 `log.error` 归位为 `log.warn`。watchdog 是脱离式进程、stderr 被 ignore，它的 7 行直接写 `RotatingLog` 的日志改经 `wrapperLine(level, text)`，轮转标记也补上 `[INFO]`，**保证 daemon.log 每行都有级别标记**。随后删除 `createLogger` 里「第一个参数自带前缀就只插级别」的兼容分支。澄清一个常见误解：Node 的 `console.log/info/debug` **全部走 stdout**，只有 `console.warn/error` 走 stderr；所以 INFO/ERROR/DEBUG 用 `console.error` 只是把它当 stderr 出口（stdout 要留给 CLI 用户输出 `print()` 与 MCP 的 JSON-RPC 帧），级别是写进文本的语义而非分流。`scripts/core-entry.test.mjs` 的守卫改为锁住 `log.child("cli")` 而非字面量前缀。文档同步：AGENTS.md、docs/ai/README.md、已知坑。
 - **日志可观测性四项小修（2026-11-11）**：① `wemind log --errors` 不再靠泛正则：只认**带 `[wemind/...]` 前缀**且命中 `ERROR_MARKERS` 清单的行（清单含 `退避`/`限流`/`过期`/`挂起`/`接不上` 等不含 error 的项目文案），修「漏检异常、误捞正文里的 error」；每条命中**带前后各 2 行上下文**保留因果（`--lines` 仍按命中条数算），输出统计改为「命中 N 条错误，输出含上下文 M 行」。② 新增 `shared/io/repeat-log.ts`：`getUpdates error` 这类连续网络失败第 1 次照报、之后每 60 次带「连续 N 次」报一条、恢复时补一条 `recovered after N consecutive errors`，不再刷满 10MB 日志把线索顶进轮转文件。③ 启动行改 `[wemind/wechat-daemon] up. v<版本> bot=…`，贴日志时能看出跑的是哪版。④ 明确**不按 `console.error`/`console.log` 分级**：watchdog 把两条管道合并进同一个 `RotatingLog`、通道信息落盘即丢，且 70+ 个正常日志调用点也走 `console.error`，MCP 的 stdout 还是 JSON-RPC 通道——分级要全量改调用点还会破坏时间线，不划算。守卫：`cli-log.test.ts`（13 条，含真实错误文案样例与正文误伤反例）、`repeat-log.test.ts`（5 条）。
@@ -115,6 +123,8 @@
 - **GitHub Copilot CLI 原生 ACP agent**：新增显式选择的 `copilot` 预设，Windows 使用 `copilot.cmd`；在隔离的 `COPILOT_HOME` 中同步登录配置、skills 与指令，通过 ACP 激活 MCP 并排除 `wechat`；Copilot `config.json` 也纳入敏感附件拦截。Copilot CLI 1.0.107 的本机 ACP 探针已验证会话、工具和 MCP 调用；真实微信 brain/worker E2E 尚待验证。
 
 ### Changed
+
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
 
 - **协议内核改为 JIT 源码包（2026-11-10）**：`packages/wechat-ilink-core` 的 `main`/`types`/`exports` 改为指向 `src/index.ts`，删除 `build` 脚本与 `dist/`。此前 workspace 内引用 core 会经 npm 软链落到包入口（`dist/index.js`），因此 clone 后必须先构建 core 才能 `npm test` / `npm run typecheck`；现在 tsc / Vitest / tsdown / tsx 直接消费源码，构建只发生在发布打包时。两个发布包仍由 tsdown `deps.alwaysBundle` 内联 core，并新增 `failOnWarn: true` 把「core 未被内联」从 warning 升级为失败；`scripts/prepack-guard.mjs` 增加产物扫描，发现 `@wemind/*` 裸 import 即拒绝发布。消费方 `tsconfig.json` 加 `noEmit: true`，根 `build`/`typecheck` 先跑 core 的 `typecheck`。CI `min-node` 改为直接 `npm test` 并断言无 core dist。注意纯 `node` 不能直接跑 `src/*.ts`（不做 `.js` → `.ts` 映射），源码运行用 `tsx`。守卫：`scripts/core-entry.test.mjs`、`scripts/prepack-guard.test.mjs`。文档同步：`AGENTS.md`、`README.md`、`docs/ai/README.md`、`已知坑.md`、`验收清单.md`、`repowiki/01`、`03`、`11`、`packages/wechat-ilink-core/README.md`、`如何发布新版本.md`、`llms.txt`。
 
@@ -150,6 +160,8 @@
 
 ### Changed
 
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
+
 - **带附件的消息不再走快车道（2026-11-09）**：控制/任务指令只消费文本，进快车道会静默丢掉附件；现在 `isFastLane()` 收到附件数 > 0 时一律把消息交给对话大脑。要给任务传文件，目前只能把路径写进任务正文。
 
 - **源码外壳 `scripts/run-daemon.ps1` 默认改为薄壳（2026-11-07）**：默认执行 `wemind start`（重拉交给内置 `_watchdog`），源码开发者与发布版共用同一套 watchdog 实现；`-Mode shell` 保留旧的 PowerShell 监督循环（命名 Mutex、每次重拉前轮转日志），`-DryRun` 只打印将执行的命令。已有计划任务若想保持旧行为，给脚本加 `-Mode shell`。新增 `-Account <key>` / `-All` 选择账号。
@@ -170,17 +182,23 @@
 
 ### Changed
 
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
+
 - **构建拓扑同步（2026-11-10）**：core 改为 JIT 源码包（入口 `src/index.ts`，无 `dist/`），发布产物仍由 tsdown 内联；MCP 运行时行为不变。
 
 ## [1.5.1] 源码目录分层（2026-11-06）
 
 ### Changed
 
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
+
 - **源码目录分层（2026-11-06，内部重构，无用户可见行为变化）**：`packages/wechat-daemon/src/` 从平铺 117 个文件改为 8 个一级目录 + 6 个二级目录（`daemon/messaging`、`acp/protocol`、`agents/sandbox`、`cli/subcommands`、`shared/process`、`shared/io`）；同批拆出 `agents/brain-presets.ts`、`ipc/chat-command-specs.ts`、`cli/process-lifecycle.ts`、`cli/account-commands.ts`、`sessions/registry-store.ts`、`sessions/registry-view.ts`。导出符号、CLI/微信命令、环境变量、数据文件格式与日志文案均未改变；包仍是单文件 `dist/cli.js`。详见 [源码目录分层设计](../设计文档/源码目录分层设计.md)。
 
 ## [1.5.0] 文档审计 · 进度提示改 15 秒（2026-11-06）
 
 ### Changed
+
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
 
 - **进度第二条提示从第 10 秒改到第 15 秒（2026-11-05，commit `76db44b`）**：`PROGRESS_SECOND_NOTICE_MS` 由 `10_000` 改为 `15_000`，三档随之变为 `<5s` / `5–15s` / `≥15s`（第 15s 发第二条）。1.4.0 的用户看到的仍是 10 秒档（见下方 `[1.4.0]` 的对应条目）。README / AGENTS / repowiki 05 / docs/ai 已按 15 秒同步。
 
@@ -254,6 +272,8 @@
 
 ### Changed
 
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
+
 - **进度提示改为三档（2026-11-03，随 1.4.0 发布）**：按**最终答案到达时间**分档——`<5s` 只发最终答案；`5–10s` 第 5s 发 `🤖 收到，正在处理…`；`≥10s` 第 5s 发确认、第 10s 再发第二条（正文已开始→`✍️ 正在整理回复…`，否则→`⏳ 还在处理中…`），10s 之后不再补发第三条固定提示。工具步骤/心跳/图片/重试提示算已有可见进度：5s 前有进度就不发确认，第 10s 第二条要求距上一条非确认进度 ≥5s（不满足则跳过、不延后）；最终发送或回合失败时取消全部定时器。`toolSummary()` 让工具步骤优先用 agent 的 purpose，否则从 `rawInput` 取 command/路径/query（折行压平、截断 60 字），不再是整段原始参数。`daemon-routing.ts` / `acp-connection.ts` 补边界与提取用例；README、repowiki 05、AGENTS、docs/ai 同步。
 - **auto 探测顺序改为按实测启动耗时排列（2026-11-03）**：`AUTO_PROBE_ORDER` 从 `kiro → opencode → gemini → deepseek → qoder → cline` 改为 `opencode → cline → qoder → gemini → deepseek → kiro`（暖启动实测约 1.7s / 2.0s / 2.5s / 4.3s；kiro 该轮 `session/new` 超时、deepseek 旧会话 artifact 布局错误，暂排最后）。只收纳**原生 ACP** agent；适配器类 `pi` / `claude-code` / `codex` 仍不参与自动探测（独立安装、各有认证，装在机器上不代表登录过），要显式 `wemind brain set|switch <名>`、一次性 `WEMIND_BRAIN=<名>` 或微信「切换大脑 <名>」。补排序与「pi 不参与 auto」用例，同步 README、随包 README、repowiki、接入文档、新手教程、AGENTS 与 docs/ai。
 - **CLI 的任务命令与共享上下文拆出 `manage.ts`（2026-11-02）**：`manage.ts` 原本 1500 行，账号选择、daemon/控制桥存活判断、`viaBridge` 与 `task*` 命令全挤在一起。现在共享部分到 `cli-context.ts`，任务命令到 `cli-task.ts`（`resolveTaskCwd`/`taskAckOutcome` 仍从 `manage.ts` 再导出，既有调用方与测试不变），`manage.ts` 只保留入口、账号生命周期与账号命令（约 560 行）。会话命令拆到 `cli-session.ts`、brain 命令拆到 `cli-brain.ts`（`--restart` 的重启回调由入口注入，避免反向依赖）、扫码登录拆到 `cli-login.ts`（`--start` 同样注入）。`index.ts` 的纯路由判定也拆到 `daemon-routing.ts`（快车道/「继续」归属、指令解析、错误分类与提示），入口从约 1435 行降到约 1314 行。行为不变；`manage.test.ts` / `brain-record.test.ts` / `index.test.ts` 全绿。
@@ -315,6 +335,8 @@
 
 ### Changed
 
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
+
 - **权限措辞纠正：只有「登录者」，没有「主号」（2026-10-29）**：平台事实是**必须扫码登录该 bot 才能给它发消息**，所以每个 bot 只有它的**登录者**（扫码登录它的那个微信号）能发——此前的「账号本人（owner）/ 已授权用户」写法容易被读成「多个微信账号之间有一个主号」，已全仓库统一为「**登录者**」与「**登录者白名单**（`allowFrom`，默认拒绝；**兜底校验**，防发送范围将来变化 / daemon 被接到别的入口）」，作用范围写成「**整个账号（仅登录者）** / **登录者的会话** / **登录者的任务**」；`allowlist`/`allow`/`revoke` 明确为兜底工具（正常无需碰）。文档与示例里的 `--label 主号` 一律换成 **`--label 工作号`**，并注明 **`label` 只是别名（昵称）、与权限无关**、「主号 / 主账号」列入**禁用措辞**。另在 README「多账号管理」与 `repowiki/06` 新增**多账号下换大脑的范围、限制、两个入口（微信 / 本机 CLI）的区别**：作用对象（消息进来的那个账号 vs 可指定任意账号）、谁能做（仅登录者 vs 本机机主）、daemon 在跑/没跑时的行为（热切换 vs 只写 `brain.json`；`--worker` 必须先有 daemon）、写入磁盘的时机（都成功才写）、没有跨账号批量、控制桥只收 agent 名。
 - **模型/账号侧出错的任务不再抢消息（2026-10-29）**：一条任务若一轮失败在 provider 那类错误上（余额/额度不足、密钥鉴权、计费、模型不存在），它会**直接转「已中断」**而不是照旧停在「等你回复」。原因是「等你回复」的状态会抢下一条无编号消息（「谁在等就喂谁」）——真机踩过：一条余额不足的任务把用户之后的「在吗」吞掉，只是又白失败一轮，日常对话也断了。`interrupted` 不在 liveTasks 里，路由自然放它走；用户把账号修好后回「继续」/`#n 继续` 才续跑（两个入口不同路：无编号的「继续」这类整句短句走关键字闸 `looksLikeResume()`，`#n 继续` 在解析层就被 `#<编号> 正文` 分流）。判据是 `task-manager.ts` 的 `providerIssue()` 关键字表（错误措辞来自各 agent 的 provider、不统一），**认不出的一律按老规矩停在「等你回复」**（宁可多抢一次，也不把偶发失败误判成账号问题）；**限流（429/rate limit/overloaded）优先不归类**（等一会儿重试就会好，仍走老路）——Google 的按分钟 429 原文是「Quota exceeded for quota metric … requests per minute」，只按关键字会把限流误判成额度问题；续跑前缀文案改成中性（原先写死「daemon 重启时中断了」，provider 场景不准确），并统一提示「先核对上一步是否已产生副作用」；续跑期间**起不来**（agent 不可用/池满）不再删掉任务记录（原先无条件删，等于把「修好后回继续」这句承诺作废）；「接不上」的文案不再劝「把进展重述一遍」（重述走的还是同一条恢复路径），改为指出重试是同一结果、要重来就结束这条任务后重新派。
 - **`任务 <agent 名>：正文` 不再顺带改「默认任务大脑」（2026-10-29）**：此前微信发 `任务 kiro：…` 除了派这条任务，还会**顺手把进程内的默认任务大脑也改成 kiro**（不写入磁盘、答复里也不提示）。它既是**账号级**副作用（`切换任务大脑` 因此是 owner-only）却对所有发件人开放，又与本机 CLI 的 `wemind task --agent`（从来没有这个副作用）不对称。现在指定 agent **只对这条任务生效**；要改默认任务大脑只能用微信 `切换任务大脑`（owner-only）/ CLI `wemind brain switch <agent 名> --worker`，两个入口口径一致。
@@ -373,6 +395,8 @@
   - 给 README / repowiki / 接入指南补「适用版本 + 最后核对」与「实测/假设」标注；DeepSeek 0.2.1-rc.2 的实测见 `docs/接入方案/接入-DeepSeek.md`。
 
 ### Changed
+
+- **续跑时把「上次说到哪」交给 worker（2026-11-17）**：`resumeTask()` 把任务 `lastOutput` 的摘要（`recapForResume()`，≤800 字）拼进续跑首条指令（`你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：…`）。会话恢复带回的是历史，最后那轮的结论常不在里面，不给它只能从头猜；没有输出时不加这段。
 
 - **全仓库注释统一为「一段一行」（2026-10-28）**：注释不再按行宽折行，改为**按段落**换行——同一段的折行合并成一行（多长都不人为断开），只有语义上属于不同段落时才另起一行；列表项 / 标题 / 代码围栏 / 分隔线 / 用法表 / 独立命令行各自成行，「标签：内容」行（`用法：` / `退出码：` / `注意：`）另起一行但不阻断其后同段的续行，括号未闭合的行（`（…短路径。` 的下一行）不算句末，缩进一律保留（它表达层级而非折行）。涉及 39 个文件（daemon / core / mcp / `scripts/*` / `ecosystem.config.cjs` / `vitest.config.ts`），**纯注释改动**：转换脚本带两条硬不变量——注释正文的非空白字符序列不得增减、代码行必须逐字节不变——任一不满足就拒绝写该文件（`*/` 结尾行、清单项都要单独判）。该约定已写进 [`AGENTS.md`](../../AGENTS.md) §4（改代码前必读），因为 `oxfmt` 不会重排注释、没有约束就会被下一次「按 120 列折回来」改回去。
 - **MCP 提示文案改为中文 + description 统一三段式（2026-10-27）**：`packages/wechat-mcp/src/tools/*` 的 `message` / `ProtocolError` 文本与 core 的错误文案（`error-codes.ts` 的 `ILinkError`、`client.ts` 的 HTTP 非 2xx 与「响应不是合法 JSON」）全部改为中文——这些是**给模型读、并常被转述给微信用户**的文本。**刻意保持英文的三类**：① 6 个工具的 `description`（MCP 生态惯例 + 模型对 `MUST` / `wait=true` / 步骤顺序的遵循度，`index.ts` 顶部注释写明理由）；② `login.ts` 的 `qrHelpText`（它是命令 Agent「自己 `cat` 终端二维码」的指令，不面向人）；③ 状态码本身（`confirmed` / `expired` / `typing` / `sent` 等，Agent 可能据其分支）。同时把 6 个 `description` 统一为「做什么 → 何时调用/返回什么 → 硬约束」的空行分段格式（`get_messages` 那 4 步工作流逐字保留），`README.md` / `packages/wechat-mcp/README.md` / `docs/repowiki/04-MCP-Server.md` 的工具表 description 列同步改为节选。测试断言同步匹配中文文案。

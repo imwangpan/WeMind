@@ -616,6 +616,14 @@ export function providerIssue(e: unknown): string | null {
   return null;
 }
 
+/** 续跑时带上「上一轮最后说了什么」：会话恢复带回历史，但最后那轮的结论常不在里面。 */
+export function recapForResume(lastOutput: string | undefined, max = 800): string {
+  const last = (lastOutput ?? "").trim();
+  if (!last) return "";
+  const brief = last.length > max ? `${last.slice(0, max)}…` : last;
+  return `\n你上一轮的最后输出（用来接上进度；别照抄、也别重复已经做过的动作）：\n${brief}`;
+}
+
 /** 续跑一条「已中断」的任务：按原 agent 拉进程 + session/load 恢复上下文，然后照常跑循环。 */
 function resumeTask(task: Task, instruction: string, images?: PromptImage[]): string {
   const got = resolveTaskAgent(task.agent);
@@ -626,9 +634,11 @@ function resumeTask(task: Task, instruction: string, images?: PromptImage[]): st
   }
   task.ag = got.ag;
   task.strictResume = true; // 续跑要求「上下文真的接上」：恢复失败要报错，不能静默换空会话
+  // 会话恢复只带回历史，不一定带「最后那轮到底说了什么」；把最近输出一并给过去，省得它从头猜。
+  const recap = recapForResume(task.lastOutput);
   void runTask(
     task,
-    `（这条任务上一轮没跑完就中断了，现在续跑；上下文按会话恢复。动手前先核对上一步是否已经产生副作用，避免重复。）\n${instruction}`,
+    `（这条任务上一轮没跑完就中断了，现在续跑；上下文按会话恢复。动手前先核对上一步是否已经产生副作用，避免重复。）${recap}\n${instruction}`,
     images,
   );
   return `⏳ 正在按 #${task.id} 号任务续跑（${got.ag.name}）。上一步可能已经改过文件或发过请求，核对时注意别重复动作。`;
