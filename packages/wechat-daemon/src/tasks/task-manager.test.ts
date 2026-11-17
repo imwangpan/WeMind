@@ -456,6 +456,46 @@ describe("多任务与编号", () => {
     expect(hasActiveTask("u1")).toBe(true);
   });
 
+  it("结束全部任务：连「待继续」的记录一起清掉（不再回「当前没有正在运行的任务」）", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 3 },
+        tasks: [
+          {
+            id: 1,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-1@u1",
+            status: "interrupted",
+            turns: 2,
+            startedAt: 1,
+          },
+          {
+            id: 2,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-2@u1",
+            status: "interrupted",
+            turns: 1,
+            startedAt: 2,
+          },
+        ],
+      }),
+    );
+    initTasks(tmpDir);
+    const r = stopTask("u1", "all");
+    expect(r).toContain("已清掉 2 条待继续的任务记录");
+    expect(r).toContain("#1、#2");
+    expect(listTasks("u1").length).toBe(0);
+  });
+
+  it("结束全部任务：真的什么都没有时如实说没有，而不是「没有正在运行的任务」", () => {
+    initTasks(tmpDir);
+    expect(stopTask("u1", "all")).toContain("没有要结束的任务");
+  });
+
   it("池拒绝派发（并发上限）：如实回话，任务不留在表里", async () => {
     acquire.mockImplementationOnce(async () => ({
       ok: false,

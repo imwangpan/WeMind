@@ -703,7 +703,22 @@ export function injectTask(
   return ok("");
 }
 
-/** 结束任务：停 worker、清状态、唤醒退出循环。`id` 缺省＝唯一那条；`"all"`＝全部。 */
+/** 结束任务：停 worker、清状态、唤醒退出循环。`id` 缺省＝唯一那条；`"all"`＝全部（连「待继续」的记录一起清）。 */
+function listIds(ids: number[]): string {
+  return ids.map((id) => `#${id}`).join("、");
+}
+
+/** 删掉「待继续」的记录（进程本来就不在了，只需清表 + 落盘）。 */
+function purgeInterrupted(list: Task[]): number[] {
+  const purged: number[] = [];
+  for (const t of list) {
+    tasks.delete(t.id);
+    removeStoredTask(store, t.id);
+    purged.push(t.id);
+  }
+  return purged;
+}
+
 export function stopTask(to: string, id?: number | "all", ackId?: string): string {
   const done = (r: string): string => {
     ackIf(ackId, r);
@@ -718,7 +733,7 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
     const hint = intr.length
       ? `有 ${intr.length} 条停在半路（待继续）的任务记录（回「继续」接着跑，或「结束任务 <编号>」清掉）。`
       : "";
-    return done(`当前没有正在运行的任务。${hint}`);
+    return done(`现在没有在跑的任务。${hint}`);
   }
   if (id === undefined && live.length > 1) {
     const rows = live.map((t) => `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]}`).join("  ");
@@ -730,8 +745,15 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
   const targets =
     id === "all" ? live : id === undefined ? live.slice(0, 1) : live.filter((t) => t.id === id);
   if (!targets.length) {
-    if (id === undefined) return done("当前没有正在运行的任务。");
-    if (id === "all") return done("当前没有正在运行的任务。");
+    if (id === undefined) return done("现在没有在跑的任务。");
+    if (id === "all") {
+      // 「结束全部任务」要连「待继续」的记录一起清：否则用户以为收完了，列表里还挂着一串
+      const purged = purgeInterrupted(intr);
+      if (!purged.length) return done("没有要结束的任务：现在没有在跑、也没有待继续的。");
+      persist();
+      emitState();
+      return done(`🧹 已清掉 ${purged.length} 条待继续的任务记录（${listIds(purged)}）。`);
+    }
     const t = tasks.get(id);
     if (t && t.userId === to && t.status === "interrupted") {
       tasks.delete(id);
@@ -766,7 +788,13 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
   }
   persist();
   emitState();
-  if (id === "all") return done(`🛑 已结束全部任务（${targets.length} 条）。`);
+  if (id === "all") {
+    const purged = purgeInterrupted(intr);
+    const extra = purged.length
+      ? `\n🧹 另清掉 ${purged.length} 条待继续的记录（${listIds(purged)}）。`
+      : "";
+    return done(`🛑 已结束全部任务（${targets.length} 条）。${extra}`);
+  }
   const one = targets[0];
   return done(targets.length === 1 ? `🛑 任务 #${one.id} 已结束。` : "🛑 任务已结束。");
 }
