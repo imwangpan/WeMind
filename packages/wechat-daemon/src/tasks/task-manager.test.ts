@@ -740,6 +740,8 @@ describe("任务表写入磁盘与重启续跑", () => {
     expect(list).toContain("| 第一行 第二行 |");
     expect(list).toContain("「待继续」= 进程不在了");
     expect(list).toContain("全部继续");
+    // 裸「#N」是设收件人，不是「看它最近在做什么」——近况就在表格末列，别引导用户发错
+    expect(list).not.toContain("看它最近在做什么");
     // 运行中的任务换图标，但最近输出照样在末列（表格能横向滑动，不怕撑宽）
     const [t] = listTasks("u1");
     t.status = "running";

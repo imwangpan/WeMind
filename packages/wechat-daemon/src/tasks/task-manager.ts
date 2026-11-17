@@ -330,7 +330,7 @@ export function renderTaskList(userId: string): string {
     out.push("多条正在运行：回话用「#<编号> 正文」，结束用「结束任务 <编号>」。");
   if (intr.length)
     out.push(
-      `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着运行（先用「#${intr[0].id}」看它最近在做什么）；一起拉起发「全部继续」，不要的用「结束任务 <编号>」清掉。`,
+      `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着运行；想把它们全部恢复运行就发「全部继续」，不要的用「结束任务 <编号>」清掉。`,
     );
   return out.join("\n\n");
 }
@@ -820,8 +820,8 @@ export function resetTasksForTest(dir?: string): void {
 }
 
 /**
- * 「全部继续」：把停在半路（interrupted）的任务全部拉起来。
- * 在跑/等回复的不动——它们本来就在，不需要再拉。
+ * 「全部继续」：把停在半路（interrupted）的任务全部恢复运行。
+ * 在跑/等回复的不动——它们本来就在，不需要再动。
  * 单条失败不影响其它条：逐条记结果，回执里分开报。
  */
 export function resumeAllInterrupted(to: string): string {
@@ -835,11 +835,11 @@ export function resumeAllInterrupted(to: string): string {
     });
   }
   if (!started.length)
-    return `这 ${stopped.length} 条都没能拉起来：看看日志，或换个说法用「#编号 继续」逐条试。`;
+    return `这 ${stopped.length} 条都没能恢复运行：看看日志，或换个说法用「#编号 继续」逐条试。`;
   const parts = [
     `▶️ 已让 ${started.length} 条任务继续运行：${started.map((id) => `#${id}`).join("、")}`,
   ];
-  if (failed.length) parts.push(`#${failed.join("、#")} 没能拉起来：用「#编号 继续」逐条试。`);
+  if (failed.length) parts.push(`#${failed.join("、#")} 没能恢复运行：用「#编号 继续」逐条试。`);
   parts.push(
     "（它们会并行运行；看某条用「#编号 正文」，停某条用「结束任务 编号」，全停发「全部结束」。）",
   );

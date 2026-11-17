@@ -59,7 +59,7 @@ export type TaskCommand =
   | { kind: "recipient"; id: number }
   /** 任务列表。 */
   | { kind: "tasks" }
-  /** 把停在半路（待继续）的任务全部拉起来。 */
+  /** 把停在半路（待继续）的任务全部恢复运行。 */
   | { kind: "resumeAll" };
 
 /** owner-only 的指令：非登录者发送 → 短提示拒绝，**不**转发给大脑（避免大脑替用户执行越权动作）。 */
@@ -415,7 +415,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     zh: "全部继续",
     slash: "/resume all",
     cli: "wemind task-resume-all [<key|label>]",
-    brief: "把停在半路的任务全部拉起来并行运行",
+    brief: "把停在半路的任务全部恢复运行（并行）",
     match: (t) =>
       /^(?:全部继续|继续全部|全部接着跑|\/resume\s+(?:all|全部))$/i.test(t)
         ? { kind: "resumeAll" }
