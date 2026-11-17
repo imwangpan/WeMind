@@ -110,6 +110,7 @@ import {
   stopTask,
   findRecipientTask,
   hasActiveTask,
+  liveTasks,
   awaitingTasks,
   interruptedTasks,
   shouldResumeTask,
@@ -291,6 +292,18 @@ export function planProgressEmission(
     return visible && countsBudget ? { kind: "pause" } : { kind: "skip" };
   }
   return { kind: "send", countsBudget };
+}
+
+/**
+ * `任务：…` 派发成功后的追加说明：派发时若还有别的任务活着（running/waiting），补一句「并行 + 怎么接着它说话」。
+ *
+ * 2026-11-17 起 `任务：` 一律新建任务，不再「有活跃任务就追加」，所以并行会真实发生；
+ * 这里只是教学入口（用户靠它学 `#N 正文` 与收件人写法），不阻止也不改变派发结果。没有并行时返回空串。
+ */
+export function parallelTaskHint(others: Array<{ id: number }>): string {
+  if (others.length === 0) return "";
+  const ids = others.map((t) => `#${t.id}`).join("、");
+  return `\n（${ids} 还在跑，两条并行；要接着它说就发「#N 正文」，或先发「#N」把它设为收件人。）`;
 }
 
 // 静默期心跳默认 15s（配置可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。
@@ -780,7 +793,8 @@ function notifyFast(): void {
 // 微信一条消息塞不下「文字 + 图片」，图片/文件单独到达、正文为空，路由只能靠上文状态。
 // 收件人指向某条任务；在它到期前，非文本消息进「待投递队列」，纯文本（非命令）标记为一起提交；
 // 提交点（文本到达 / 「好了」 / 空闲到期）把附件与文字合成一个多模态回合交给任务。内存态、不落盘。
-const MEDIA_RECIPIENT_TTL_MS = Number(process.env.WEMIND_MEDIA_RECIPIENT_TTL_MS) || 60_000;
+// 默认 3 分钟：发一组图（每张是一条消息）+ 补一句说明常常超过 1 分钟，太短会在中途切回大脑。
+const MEDIA_RECIPIENT_TTL_MS = Number(process.env.WEMIND_MEDIA_RECIPIENT_TTL_MS) || 180_000;
 const mediaRoute = new MediaRoute(MEDIA_RECIPIENT_TTL_MS);
 
 /**
@@ -1333,26 +1347,20 @@ async function handleFastItem(
           await notice(r);
           return;
         }
-        // 明确发给 worker：有活跃任务 → 发给它/追加（唯一一条喂下一轮、running 暂存、多条则回编号提示）；
-        // 没有活跃任务 → 派发新任务（不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活）。
-        if (hasActiveTask(from)) {
-          const r = injectTask(from, tcmd.text, undefined, undefined, {
-            onTaskId: (id) => armAndFlush(from, id, notice),
-          });
-          log.info(
-            "task: inject(explicit):",
-            tcmd.text.slice(0, 40),
-            "->",
-            r.replace(/\n/g, " | "),
-          );
-          if (r) await notice(r);
-        } else {
-          const r = dispatchTask(from, tcmd.text, {
-            onTaskId: (id) => armAndFlush(from, id, notice),
-          });
-          log.info("task: dispatch:", r.replace(/\n/g, " | "));
-          await notice(r);
-        }
+        // 明确发给 worker：**一律派发新任务**（2026-11-17 改）。
+        // 此前是「有活跃任务就发给它/追加」，但活跃与否是用户看不见的状态（`waiting` 也算活跃）：同一句「任务：…」时而新建、时而被旧任务吞掉，是隐藏状态的心智负担。
+        // 接着某条任务说话有两条显式通道：`#N 正文`、收件人模式下的无前缀文字（`任务：` 派发后会自动把新任务设为收件人），所以这里不需要兼任追加。
+        // 不「续跑」已中断的：那是「继续」/`#n 继续` 的事，明确派发就该是新的活。
+        const running = liveTasks(from);
+        const r = dispatchTask(from, tcmd.text, {
+          ...(tcmd.agentToken ? { agentKey: tcmd.agentToken } : {}),
+          onTaskId: (id) => armAndFlush(from, id, notice),
+        });
+        log.info(
+          tcmd.agentToken ? `task: dispatch(agent=${tcmd.agentToken}):` : "task: dispatch:",
+          r.replace(/\n/g, " | "),
+        );
+        await notice(r + parallelTaskHint(running));
         return;
       }
       default: {
@@ -1649,7 +1657,7 @@ async function sweepMediaRecipients(
       .sendNotice(
         userId,
         token,
-        `⌛ #${recipient.taskId} 收件人已超时取消：之后的文字和附件交给大脑。${extra}`,
+        `⌛ 提醒：收件人 #${recipient.taskId} 已超时自动取消，之后的文字和附件交给大脑。${extra}\n（这是定时器单独发的提醒，不是对你上一条消息的回复。）`,
         token,
       )
       .catch(() => {});
