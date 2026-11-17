@@ -28,7 +28,7 @@
 | `wemind start` 说「已启动」但 `list` 显示未运行、日志不更新 | 进程表里的 `cli.js _watchdog` 有没有子进程 | 从 **VS Code 集成终端**启动时被调试引导卡死（见 §3.12）；换普通终端，或升级到带 `stripVscodeDebugEnv` 的版本 |
 | 池里进程不回收 / 内存高 | `wemind list` | 空闲回收默认 5 分钟（`WEMIND_WORKER_REAP_MS`）；上限 `WEMIND_IDLE_MAX`（默认 2） |
 | 「恢复会话」失败且当前会话没变 | 答复 | **预期行为**（严格恢复）：agent 侧没有那条会话，或在途 load 超时；不会静默新建 |
-| 重启后任务显示「已中断」 | `wemind task-list` / 日志 `restored tasks:` | **预期行为**：不自动拉起，回「继续」才续跑 |
+| 重启后任务显示「待继续」 | `wemind task-list` / 日志 `restored tasks:` | **预期行为**：不自动拉起，回「继续」才续跑 |
 | `wemind config reload` / 微信「加载 <MCP>」后没生效 | 回执 + `daemon.log` + `<账号>/runtime.json` | 三态：回「已重启」= 当场生效；回「重启已排队到回合结束」= **预期**，等当前长回合结束才重启（不打断输出），`runtime.json` 有 `pendingReload:{reason,at}`；回「没有重启」（切脑进行中）= 等切换完再发一次。daemon 在排队期间被杀，启动时日志见「上次退出前排队的 … 未及生效」，新进程已按当前配置重建，无需再发指令 |
 | 改了 Agent 真实配置但下一条消息没变 | `wemind config reload` / `daemon.log` 的 `config changed` | `configFingerprint()` 现在也把 `ag.name + rt.mode` 入哈希（没有 `homeEnvVar` 的 Agent 也有非空指纹）；漏网才用 `wemind config reload` 兜底。`homeMode` 只在 daemon 启动时快照成 `homeModeAtBoot`，运行中改 `WEMIND_HOME_MODE` 不逐条消息生效（重启才生效） |
 | 会话丢了 / 工作区不对 | `session-cwd.json` + 日志 `usableSessionCwd` | 会话指针一律先落盘再写内存，写盘失败只 WARN（内存指针仍生效）；恢复时 UNC / 不存在 / 非目录都记 WARN 并回落默认工作区，不会静默搬到新目录 |
@@ -83,7 +83,7 @@ wemind session list <key|label>
 | `brain.json` | 账号级大脑选择（`agent` + `worker.agent` + `presets` 各自启动覆盖） |
 | `brain-sessions.json` | `<agent>:userId → sessionId`（按大脑分开存）；**「当前是哪个会话」的唯一权威**；读/解析失败会先备份为 `*.corrupt-<时间戳>` 再按空表继续 |
 | `session-registry.json` | 会话登记表（名字/标题/轮次；**派生**元数据，坏了只影响列表） |
-| `tasks.json` | 任务表（编号/agent/状态；重启后未完成的标「已中断」） |
+| `tasks.json` | 任务表（编号/agent/状态；重启后未完成的标「待继续」） |
 | `task-state.json` | 任务状态记录（顶层字段复制最近一条，供旧 CLI 读） |
 | `handoff.json` | 交接摘要（切脑后带上一次；24h TTL） |
 | `control-inbox/` / `control-out/` | CLI ↔ daemon 控制桥；`control-out/.bridge` = daemon 自己的 pid（认桥凭据） |
@@ -255,7 +255,7 @@ Select-String -Path "$env:USERPROFILE\.wemind\<key>\daemon.log" -Pattern "brain 
 | 任务「跑」但一直没结果 | `.../worker` 日志 | 找 `exited code=` / `prompt FAIL`；worker 单轮硬上限 30min（`WEMIND_WORKER_CAP_MS`）、无帧 3min（`WEMIND_WORKER_IDLE_MS`） |
 | 任务列表为空但进程还在 | `workers.pid.json` | 进程**留着复用**是预期：任务结束不杀进程，空闲 5min（`WEMIND_WORKER_REAP_MS`）或超出 `WEMIND_IDLE_MAX`（默认 2）才回收 |
 | 池占资源多 | `wemind list` | 调小 `WEMIND_MAX_WORKERS` / `WEMIND_IDLE_MAX`；`wemind stop <key>` 一次杀光整池 |
-| 重启后状态「已中断」 | 日志 `restored tasks: interrupted=[…]` | **预期**：不自动拉起，回「继续」/`#n 继续` 才续跑 |
+| 重启后状态「待继续」 | 日志 `restored tasks: interrupted=[…]` | **预期**：不自动拉起，回「继续」/`#n 继续` 才续跑 |
 | 日常消息被任务吞掉 | `任务列表` + daemon 版本 | **2026-11-02 起不会再发生**：无前缀消息默认走大脑，`waiting` 不再接管（只有「继续」类短句 + 可续跑任务才进任务表）。若仍被吞，先确认 daemon 是新版（`wemind version` + 重启）：旧版「有一条 waiting 就接管无编号消息」正是本次改掉的规则。日志见 `task: resume(unnumbered):` |
 | 续跑接不上 | 答复 | agent 不支持 load/resume 或会话已被它自己清理 → 会给「这次接不上」（重试还是同一结果，要重来就结束这条任务后重新派一条），**不**改当前会话记录、不假装成功 |
 | 同 agent 并发时行为怪 | 池信息 | 同一 agent 的两个 worker **共用它的配置目录**（等价"两个终端在同一个目录里跑"）——已知形态；不同 agent 各自子目录天然隔离 |

@@ -125,7 +125,7 @@ graph TD
     G --> H["接入 setTaskPush / setTaskTyping / setTaskStateSink / setTaskAckSink"]
     H --> I["clearTaskDirs + 启动 task-inbox 扫描定时器(1s)"]
     I --> J["clearControlDirs + markBridgeReady(自己的 pid)<br/>→ 清控制桥残留、写下「我认识桥」凭据<br/>+ 启动 control-inbox 扫描定时器(1s)"]
-    J --> K["initTasks(DATA_DIR)：读回 tasks.json<br/>未完成的标「已中断」（**不**自动 spawn）"]
+    J --> K["initTasks(DATA_DIR)：读回 tasks.json<br/>未完成的标「待继续」（**不**自动 spawn）"]
     K --> L["syncFromPointerMap：按当前会话表回填会话登记表<br/>（老账号首次迁移，幂等）"]
     L --> M["sweepWorkerPool 定时器(30s，unref)"]
     M --> N["pollerLoop（后台）"]

@@ -201,7 +201,7 @@ export function initTasks(dir: string = DATA_DIR): { interrupted: number[] } {
   for (const t of store.tasks) tasks.set(t.id, { ...t });
   if (hit.length)
     log.info(
-      `重启：${hit.length} 条未完成任务标记为「已中断」（编号 ${hit.map((t) => t.id).join("、")}；回「继续」可续跑）`,
+      `重启：${hit.length} 条没跑完的任务已转为「待继续」（编号 ${hit.map((t) => t.id).join("、")}；回「继续」可续跑）`,
     );
   emitState();
   return { interrupted: hit.map((t) => t.id) };
@@ -270,7 +270,7 @@ function since(ms: number): string {
 const STATUS_LABEL: Record<TaskStatus, string> = {
   running: "运行中",
   waiting: "等你回复",
-  interrupted: "已中断",
+  interrupted: "待继续",
 };
 
 /** 任务标签：多条任务时带编号（单任务免编号，延续改造前的顺手）。 */
@@ -301,23 +301,26 @@ export function renderTaskList(userId: string): string {
   const all = listTasks(userId);
   if (!all.length)
     return "📋 当前没有任务。派发：直接发「任务：正文」或「任务 <agent 名>：正文」。";
-  const lines = [`📋 任务（${all.length} 条）`];
-  for (const t of all) {
+  const blocks = all.map((t) => {
     const age = t.startedAt ? since(Date.now() - t.startedAt) : "?";
-    lines.push(
-      `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]} · ${t.turns} 轮 · ${age}${t.cwd ? ` · cwd=${t.cwd}` : ""}`,
-    );
-    if (t.lastOutput) lines.push(`   最近输出：${t.lastOutput.replace(/\n/g, " ").slice(0, 120)}`);
-  }
+    const head = `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]} · ${t.turns} 轮 · ${age}`;
+    const cwd = t.cwd ? `\n   cwd：${t.cwd}` : "";
+    const out = t.lastOutput
+      ? `\n   最近输出：${t.lastOutput.replace(/\n/g, " ").slice(0, 120)}`
+      : "";
+    return `${head}${cwd}${out}`;
+  });
+  // 每条之间留空行：手机上连着 6 条、每块两三行时会糊成一坨。
+  const lines = [`📋 任务（${all.length} 条）`, ...blocks];
   const live = all.filter(isLive);
   if (live.length > 1)
     lines.push(`多条任务并行：回话用「#<编号> 正文」，结束用「结束任务 <编号>」。`);
   const intr = all.filter((t) => t.status === "interrupted");
   if (intr.length)
     lines.push(
-      `已中断的任务回「继续」（或「#${intr[0].id} 继续」）可续跑——注意上一步可能已经改过文件，核对后再继续。`,
+      `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着跑；上一步可能已经改过文件，先核对。不要的用「结束任务 <编号>」清掉。`,
     );
-  return lines.join("\n");
+  return lines.join("\n\n");
 }
 
 // ---- 派发与续跑 ----
@@ -668,7 +671,7 @@ export function injectTask(
       }
       if (intr.length > 1)
         return fail(
-          `有 ${intr.length} 条已中断的任务，请指明编号续跑：${intr.map((t) => `#${t.id}`).join("、")}（写法：\`#${intr[0].id} 继续\`）。`,
+          `有 ${intr.length} 条任务停在半路（待继续），请指明编号：${intr.map((t) => `#${t.id}`).join("、")}（写法：\`#${intr[0].id} 继续\`；不要了就「结束任务 ${intr[0].id}」）。`,
         );
       return fail("");
     } else {
@@ -703,7 +706,7 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
     persist();
     emitState();
     const hint = intr.length
-      ? `有 ${intr.length} 条已中断的任务记录（回「继续」可续跑，或「结束任务 <编号>」清掉记录）。`
+      ? `有 ${intr.length} 条停在半路（待继续）的任务记录（回「继续」接着跑，或「结束任务 <编号>」清掉）。`
       : "";
     return done(`当前没有正在运行的任务。${hint}`);
   }
@@ -725,7 +728,7 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
       removeStoredTask(store, id);
       persist();
       emitState();
-      return done(`已清掉 #${id} 号已中断任务的记录。`);
+      return done(`已清掉 #${id} 号任务的记录（它没跑完，之后不会再出现在任务列表里）。`);
     }
     return done(`没有 #${id} 号在跑的任务。发「任务列表」看现有编号。`);
   }

@@ -197,7 +197,7 @@ describe("isFastLane（控制/任务指令不排在大脑回合后面）", () =>
     expect(isFastLane("继续", noTasks)).toBe(false);
     expect(isFastLane("继续", { awaiting: 1, active: true, interrupted: 0 })).toBe(true);
     expect(isFastLane("继续", { awaiting: 0, active: false, interrupted: 1 })).toBe(true);
-    // 有活跃任务时不去抢已中断的那条（与 shouldResumeTask 同一口径）
+    // 有活跃任务时不去抢待继续的那条（与 shouldResumeTask 同一口径）
     expect(isFastLane("继续", { awaiting: 0, active: true, interrupted: 1 })).toBe(false);
   });
 

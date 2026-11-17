@@ -156,8 +156,8 @@ type WmTaskRow = {
 };
 const STATUS_ZH: Record<string, string> = {
   running: "运行中",
-  waiting: "等回复",
-  interrupted: "已中断",
+  waiting: "等你回复",
+  interrupted: "待继续",
 };
 
 /**
@@ -188,7 +188,7 @@ export function cmdTaskList(sel?: string): string {
   // 任务表是 daemon 的活状态：它没在跑（或还在跑旧版）时，表里的「运行中」只是上次留下的，别当成现在时。
   const stale = daemonAlive(key)
     ? ""
-    : "\n（daemon 未运行：以下状态是它上次留下的记录；未完成的任务会在下次启动时标为「已中断」，回「继续」可续跑。）";
+    : "\n（daemon 未运行：以下状态是它上次留下的记录；没跑完的任务会在下次启动时转为「待继续」，回「继续」可续跑。）";
   if (!rows.length) return `账号 ${key}：当前没有任务。${stale}`;
   const lines = [`账号 ${key} 任务（${rows.length} 条）：`];
   for (const t of rows) {

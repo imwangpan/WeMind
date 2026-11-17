@@ -16,7 +16,7 @@ import {
 } from "./task-store.js";
 
 /**
- * 任务表写入磁盘只服务一件事：**daemon 重启后能续跑**（编号不归零、未完成的标「已中断」）。
+ * 任务表写入磁盘只服务一件事：**daemon 重启后能续跑**（编号不归零、未完成的标「待继续」）。
  * 所以这里钉死三件事：往返不丢字段、坏文件降级为空表（不阻塞启动）、编号只增不复用。
  */
 
@@ -75,13 +75,13 @@ describe("task-store 往返", () => {
     );
     const back = loadTaskStore(dir);
     expect(back.tasks.map((t) => t.id)).toEqual([2]);
-    expect(back.tasks[0].status).toBe("interrupted"); // 认不出的状态按「已中断」处理（保守：宁可让用户按继续）
+    expect(back.tasks[0].status).toBe("interrupted"); // 认不出的状态按「待继续」处理（保守：宁可让用户按继续）
     expect(back.tasks[0].key).toBe("task-2@u1"); // 缺 key 按约定补
   });
 });
 
 describe("重启语义", () => {
-  it("markInterrupted：running/waiting → interrupted；已中断的不重复标", () => {
+  it("markInterrupted：running/waiting → interrupted；待继续的不重复标", () => {
     const s = emptyTaskStore();
     s.tasks = [
       task({ id: 1, status: "running" }),

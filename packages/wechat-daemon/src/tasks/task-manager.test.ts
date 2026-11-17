@@ -191,7 +191,7 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     expect(interruptedTasks("u1").length).toBe(0);
   });
 
-  it("provider 报错（余额不足）→ 转「已中断」；回「继续」能续跑", async () => {
+  it("provider 报错（余额不足）→ 转「待继续」；回「继续」能续跑", async () => {
     const r1 = deferred();
     const r2 = deferred();
     acquire.mockImplementationOnce(async () => {
@@ -210,12 +210,12 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     await vi.waitFor(() => expect(has(pushed, "额度/余额不足")).toBe(true));
     expect(has(pushed, "重试也不会好")).toBe(true);
     expect(has(pushed, "#1 继续")).toBe(true); // 续跑提示带编号
-    // 关键：不留在 waiting（这轮没跑完，别显示成还能接着干），而是「已中断」
+    // 关键：不留在 waiting（这轮没跑完，别显示成还能接着干），而是「待继续」
     await vi.waitFor(() => expect(interruptedTasks("u1").map((t) => t.id)).toEqual([1]));
     expect(awaitingTasks("u1").length).toBe(0);
     // 任务列表的「最近输出」也要是这条中断说明（别留着上一轮的旧输出，让人以为它跑完了）
     expect(renderTaskList("u1")).toContain("额度/余额不足");
-    expect(renderTaskList("u1")).toContain("已中断");
+    expect(renderTaskList("u1")).toContain("待继续");
 
     // 显式「继续」→ 走续跑路径（strictResume），重新拉连接、带上「没跑完就中断了」的前缀
     const r = injectTask("u1", "继续");
@@ -496,7 +496,7 @@ describe("多任务与编号", () => {
 });
 
 describe("任务表写入磁盘与重启续跑", () => {
-  it("重启后未完成的标「已中断」，编号接着排不归零；回「继续」才拉进程续跑（strictResume）", async () => {
+  it("重启后未完成的标「待继续」，编号接着排不归零；回「继续」才拉进程续跑（strictResume）", async () => {
     // 模拟上次运行留下的一条 running 任务
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),
@@ -519,7 +519,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     const out = initTasks(tmpDir);
     expect(out.interrupted).toEqual([7]);
     expect(listTasks("u1")[0].status).toBe("interrupted");
-    expect(renderTaskList("u1")).toContain("已中断");
+    expect(renderTaskList("u1")).toContain("待继续");
     expect(hasActiveTask("u1")).toBe(false); // 不自动恢复
 
     // 新任务接着 8 号（不复用 7）
@@ -554,7 +554,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     await vi.waitFor(() => expect(has(pushed, "接着干")).toBe(true));
   });
 
-  it("多条「已中断」任务时裸「继续」不替你选：进任务侧、回编号清单", () => {
+  it("多条「待继续」任务时裸「继续」不替你选：进任务侧、回编号清单", () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),
       JSON.stringify({
@@ -585,8 +585,45 @@ describe("任务表写入磁盘与重启续跑", () => {
     expect(initTasks(tmpDir).interrupted).toEqual([1, 2]);
     // 路由闸放行（有可续跑任务），但 injectTask 在「活跃 0 条 + 已中断多条」时不替用户挑
     expect(shouldResumeTask("继续", { awaiting: 0, active: false, interrupted: 2 })).toBe(true);
-    expect(injectTask("u1", "继续")).toContain("有 2 条已中断的任务，请指明编号续跑");
+    expect(injectTask("u1", "继续")).toContain("有 2 条任务停在半路（待继续）");
     expect(conns.length).toBe(0); // 没起进程
+  });
+
+  it("任务列表：多条之间留空行，只在有「待继续」时附状态说明", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "tasks.json"),
+      JSON.stringify({
+        version: 1,
+        nextId: { u1: 3 },
+        tasks: [
+          {
+            id: 1,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-1@u1",
+            status: "running",
+            turns: 2,
+            startedAt: 1,
+            lastOutput: "第一条的输出",
+          },
+          {
+            id: 2,
+            userId: "u1",
+            agent: "kiro",
+            key: "task-2@u1",
+            status: "running",
+            turns: 1,
+            startedAt: 2,
+          },
+        ],
+      }),
+    );
+    initTasks(tmpDir);
+    const list = renderTaskList("u1");
+    // 手机上连着多条会糊在一起：标题之后、任务之间都要空一行
+    expect(list.startsWith("📋 任务（2 条）\n\n#1 ")).toBe(true);
+    expect(list).toContain("\n\n#2 ");
+    expect(list).toContain("「待继续」= 进程不在了");
   });
 
   it("无编号「继续」也能续跑（微信侧走的就是这条路）；日常提问不会被陈旧的中断任务吞掉", async () => {
@@ -642,7 +679,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     await vi.waitFor(() => expect(has(pushed, "done")).toBe(true));
   });
 
-  it("续跑接不上（会话没了）→ 回到「已中断」并如实报错，不假装续上", async () => {
+  it("续跑接不上（会话没了）→ 回到「待继续」并如实报错，不假装续上", async () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),
       JSON.stringify({
@@ -683,7 +720,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     expect(conns[0].sessions).toEqual([]);
   });
 
-  it("续跑时进程起不来（agent 不可用/池满）→ 不删任务记录，仍留在「已中断」里可再试", async () => {
+  it("续跑时进程起不来（agent 不可用/池满）→ 不删任务记录，仍留在「待继续」里可再试", async () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),
       JSON.stringify({
@@ -713,7 +750,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     expect(renderTaskList("u1")).toContain("没起得来"); // 最近输出说清为什么没动
   });
 
-  it("「结束任务 <编号>」可清掉已中断任务的记录（不再占着编号）", () => {
+  it("「结束任务 <编号>」可清掉待继续任务的记录（不再占着编号）", () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),
       JSON.stringify({
