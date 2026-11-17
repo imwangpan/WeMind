@@ -299,7 +299,7 @@
 
 ### Docs
 
-- **本次改造的文档同步（2026-10-28）**：`AGENTS.md`（关键文件表、硬约束、速查、已知坑、验收表）、`README.md`（口令表）、`repowiki/05`（命令表/派发优先级/额度）、`06`（会话管理、热切换、pid 身份）、`07`（**多 worker/进程池/任务编号**——该文原先写的是单 worker）、`08`（新文件与 JSON pid）、`09`（新 env）、`10`（pid 表/运维）、`11`（测试表）、`docs/ai/README.md` 事实状态表、`docs/ai/recipes/{run-e2e,debug-daemon,add-acp-agent}.md`、`docs/使用指南/新手教程.md`、`docs/使用指南/速查-数据目录与环境变量.md`、`docs/机制与协议说明/本地双入口-命令派发与查看回复.md`（§3.3 控制桥）、`docs/使用指南/使用指南-远程任务（worker）.md`、`docs/设计文档/方案C-受控ACP工作机设计.md`（阶段 2 状态）。**7 条待实测**（会话删除是否存在、`session/load` 回放规模、各 agent 冷启动耗时、多任务并发下的 `ret=-2`、`taskkill /T /F` 杀池中特定进程、同 agent 并发共用配置目录、被强杀后各 agent 能否恢复该任务会话）记在 `docs/ai/recipes/run-e2e.md`。
+- **本次改造的文档同步（2026-10-28）**：`AGENTS.md`（关键文件表、硬约束、速查、已知坑、验收表）、`README.md`（口令表）、`repowiki/05`（命令表/派发优先级/额度）、`06`（会话管理、热切换、pid 身份）、`07`（**多 worker/进程池/任务编号**——该文原先写的是单 worker）、`08`（新文件与 JSON pid）、`09`（新 env）、`10`（pid 表/运维）、`11`（测试表）、`docs/ai/README.md` 事实状态表、`docs/ai/recipes/{run-e2e,debug-daemon,add-acp-agent}.md`、`docs/使用指南/新手教程.md`、`docs/使用指南/速查-数据目录与环境变量.md`、`docs/机制与协议说明/本地双入口-命令派发与查看回复.md`（§3.3 控制桥）、`docs/使用指南/使用指南-远程任务（worker）.md`、`docs/设计文档/受控 ACP 工作机（Worker）设计文档.md`（阶段 2 状态）。**7 条待实测**（会话删除是否存在、`session/load` 回放规模、各 agent 冷启动耗时、多任务并发下的 `ret=-2`、`taskkill /T /F` 杀池中特定进程、同 agent 并发共用配置目录、被强杀后各 agent 能否恢复该任务会话）记在 `docs/ai/recipes/run-e2e.md`。
 
 ### Changed
 

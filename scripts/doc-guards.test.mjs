@@ -501,7 +501,7 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     const current = [
       "GitHub Copilot CLI 1.0.108 实测不加载 ACP session/new.mcpServers 的 stdio 条目。",
       "8 个一级目录 + 7 个二级目录（agents/config/ 是第 7 个）。",
-      "现行设计见 docs/设计文档/远程任务-human-in-the-loop设计与实现.md。",
+      "现行设计见 docs/设计文档/远程任务（Worker）human-in-the-loop 设计与实现.md。",
       "agents/managed/managed-common.ts 的日志写「副本里的微信 MCP 已剔除」。",
       "不是因为「只支持 http/sse」，而是 stdio 条目根本不加载。",
     ].join("\n");

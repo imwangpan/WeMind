@@ -1,17 +1,17 @@
 # 方案 C：受控 ACP 工作机（设计文档）
 
-> **历史文档（2026-11-04 标注；2026-11-14 定界）**：本文只作**方案选型与分阶段落地**的记录（为什么选方案 C 而不是 A / B、阶段 0–3 的顺序与剩余项、当时的残余风险），**不作为现行实现的说明**。现行架构、消息路由、状态机与流程一律以 [远程任务-human-in-the-loop设计与实现.md](远程任务-human-in-the-loop设计与实现.md) 与 [repowiki/07-远程任务-Worker.md](../repowiki/07-远程任务-Worker.md) 为准；文中与现行不一致之处已在正文标注。
+> **历史文档（2026-11-04 标注；2026-11-14 定界）**：本文只作**方案选型与分阶段落地**的记录（为什么选方案 C 而不是 A / B、阶段 0–3 的顺序与剩余项、当时的残余风险），**不作为现行实现的说明**。现行架构、消息路由、状态机与流程一律以 [远程任务（Worker）human-in-the-loop 设计与实现.md](<远程任务（Worker）human-in-the-loop 设计与实现.md>) 与 [repowiki/07-远程任务-Worker.md](../repowiki/07-远程任务-Worker.md) 为准；文中与现行不一致之处已在正文标注。
 >
 > **路径说明（2026-11-06 补）**：文中源码路径是当时的平铺路径；`src/` 分层后对应位置见 [`docs/ai/代码地图.md`](../ai/代码地图.md)。
 
-> 状态：**MVP 已实现** ✅（2026-06-17，真机跑通）。本文为总设计与方案对比（A/B/C），属历史文档；现行设计与实现（worker-acp / worker-pool / task-manager / 消息路由 / typing）见 [远程任务-human-in-the-loop设计与实现.md](远程任务-human-in-the-loop设计与实现.md) 与 [repowiki/07](../repowiki/07-远程任务-Worker.md)。
+> 状态：**MVP 已实现** ✅（2026-06-17，真机跑通）。本文为总设计与方案对比（A/B/C），属历史文档；现行设计与实现（worker-acp / worker-pool / task-manager / 消息路由 / typing）见 [远程任务（Worker）human-in-the-loop 设计与实现.md](<远程任务（Worker）human-in-the-loop 设计与实现.md>) 与 [repowiki/07](../repowiki/07-远程任务-Worker.md)。
 >
 > **阶段 2 已落地**：受控工作机**多任务化**——单 worker → **多 worker 进程池 + 任务编号 + 派发时选 agent + 重启后续跑**（详见 §10）。实现文件：`worker-pool.ts`（进程池：复用/回收/并发上限）、`worker-acp.ts`（`class WorkerConn`，一条任务一条 ACP 连接）、`task-manager.ts`（任务表与派发路由）、`task-store.ts`（任务表写入磁盘、重启后按能力续跑）、`control-bridge.ts`（CLI 与微信走同一段实现的双入口）。
 >
 > **历史/设计说明（2026-10-24 补）**：文中以 `session/load` 为恢复路径；该能力并非所有 ACP agent 都有（如 DSH 只有 `session/resume`）。当前实现按 agent 能力兜底：`session/load` → `session/resume`，都接不上就**如实报错**（不假装成功、也不静默换新会话）。
 >
 > **路由说明（2026-11-02 起）**：本文的「无前缀回话续跑」是当时 MVP 设计；现在**无前缀消息默认归大脑**，回任务要显式寻址（`#<编号> 正文` / `> 正文` / `任务 …`），只有裸「继续」类短句才可能进任务表，以 [repowiki/07](../repowiki/07-远程任务-Worker.md) 与 README 为准。
-> 关联：MVP 设计文档（已删除；现行设计见 [远程任务-human-in-the-loop设计与实现.md](远程任务-human-in-the-loop设计与实现.md)）、[使用指南-远程任务（worker）.md](../使用指南/使用指南-远程任务（worker）.md)、README「远程任务（worker）」、`packages/wechat-daemon/src/{worker-pool,worker-acp,task-manager,task-store,control-bridge}.ts`（2026-11-06 目录分层后分别在 `tasks/`、`ipc/` 等子目录；原 `worker-sandbox.ts` 已由 `agents/managed/mcp-worker.ts` 取代）、`acp-brain.ts`、`brain-agents.ts`。
+> 关联：MVP 设计文档（已删除；现行设计见 [远程任务（Worker）human-in-the-loop 设计与实现.md](<远程任务（Worker）human-in-the-loop 设计与实现.md>)）、[使用指南-远程任务（worker）.md](../使用指南/使用指南-远程任务（worker）.md)、README「远程任务（worker）」、`packages/wechat-daemon/src/{worker-pool,worker-acp,task-manager,task-store,control-bridge}.ts`（2026-11-06 目录分层后分别在 `tasks/`、`ipc/` 等子目录；原 `worker-sandbox.ts` 已由 `agents/managed/mcp-worker.ts` 取代）、`acp-brain.ts`、`brain-agents.ts`。
 
 ---
 

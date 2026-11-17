@@ -351,7 +351,7 @@ export const STALE_FACTS = [
   {
     id: 'deleted-mvp-doc-ref',
     since: '2026-11-15',
-    why: '该 MVP 设计文档已删除；现行设计见 docs/设计文档/远程任务-human-in-the-loop设计与实现.md。历史段/归档索引按各自体例只加标注、不改正文。',
+    why: '该 MVP 设计文档已删除；现行设计见 docs/设计文档/远程任务（Worker）human-in-the-loop 设计与实现.md。历史段/归档索引按各自体例只加标注、不改正文。',
     pattern: /方案C-MVP-远程human-in-the-loop\.md/,
     allow: [
       {

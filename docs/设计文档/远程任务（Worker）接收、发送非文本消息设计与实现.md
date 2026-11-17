@@ -1,28 +1,38 @@
 # 远程任务：Worker 接收非文本消息（图片 / 文件 / 视频 / 语音）设计与实现
 
-> **状态**：已实现（2026-11-16，`feat/worker-inbound-media`；含评审修复）｜ **分支**：`feat/worker-inbound-media`（worktree `.worktrees/worker-media`）｜ **基线**：`origin/main` @ `1b6b703`
+> **状态**：已实现（接收与发送均为 2026-11-16 同一分支；含评审修复与 2026-11-17 的 TTL / `任务：` 调整）｜ **基线**：`origin/main` @ `1b6b703`，已合并进 `main`
 >
-> 本文是「让 worker 也能像 brain 一样接收图片、文件等非文本消息」的完整设计与实施清单。落地时与代码、测试、其余文档同提交（见 §14–§16）。
+> 本文覆盖 worker 与微信之间的**两个方向**：① 用户把**图片 / 文件 / 视频 / 语音**发给任务（§1–§18）；② 任务结果把**图片 / 文件 / 视频**发回微信（§19）。两个方向都复用 brain 已有的媒体管线，落地时与代码、测试、其余文档同提交（见 §14–§16）。
+>
+> 阅读路线：只关心「怎么给任务发图」→ §3–§8；只关心「任务怎么把图发回来」→ §19；动代码前先读 §18 的不变量。
 
 ---
 
 ## 1. 目标与非目标
 
-### 1.1 目标
+### 1.1 接收目标（用户 → 任务）
 
 - 用户能对**正在等的任务**（或新派发的任务）发**图片 / 文件 / 视频 / 无转写语音**，worker 能收到并处理。
 - 保持与现有行为**完全兼容**：不带任何前缀的普通消息、控制指令、任务指令的语义不变；brain 的媒体处理不变。
 
-### 1.2 非目标
+### 1.2 发送目标（任务 → 用户）
+
+- worker 的任务结果里显式写出的**图片 / 文件 / 视频**能作为**独立媒体消息**发到微信，而不是把链接当正文丢给用户。
+- 与 brain 出站共用同一套解析、额度记账、敏感文件拦截与失败说明，不出现第二套口径。
+
+### 1.3 非目标
 
 - 不实现「一条消息同时带文本 + 媒体」（微信协议不允许，见 §3）的合并发送——由「待投递队列」重组。
 - 不做引用寻址（引用某条任务回复再发媒体）——留作后续（§17）。
-- ~~不改出站附件~~ —— 已追加：worker 结果里的 `![](路径)` / `[附件](file://…)` 同样会发出（见 §19）。
+- **不给出站加专用工具**：出站靠回复文本里的约定语法（§19.2），不要求 agent 会调微信 API，也不改 agent 自己的能力位（`images` 只管入站看图）。
+- 不支持语音气泡（音频按文件发），不发出站 http 附件（只认本地绝对路径）。
 - 不落盘收件人 / 待投递队列状态（重启即失效，安全默认回大脑，§13）。
 
 ---
 
-## 2. 现状与差距（代码锚点）
+## 2. 现状与差距（代码锚点，实施前快照）
+
+> 本节记录 2026-11-16 动工前的状态，用于说明**为什么改**；现状以实现与 §20 的评审修复为准。
 
 ### 2.1 brain 路径（已支持媒体）
 
@@ -31,7 +41,7 @@
 - `packages/wechat-daemon/src/daemon/daemon-routing.ts` 的 `extractInbound(msg)` 把一条入站消息拆成 `InboundParts = { text, attachments, quote?, unsupportedTypes }`；`InboundAttachment = {kind:"image",item} | {kind:"voice",item} | {kind:"file",item} | {kind:"video",item}`。
 - `index.ts` 的媒体段（约 `:512–590`）：图片 → `downloadImage()` → base64（`{data,mimeType}`）；文件 / 视频 / 无转写语音 → `downloadMediaBuffer()` + `saveInboundMedia()` 落盘 `<账号>/media/inbound`（`managed` 见 §4.19 口径），把**绝对路径**写进 `incomingNotes`。
 - `askBrain(userId, message, onProgress?, images?, opts?)`（`packages/wechat-daemon/src/acp/acp-brain.ts`）的 `runTurn()` 组装 prompt：图片按 `ag.images` 能力决定注入 ACP `{type:"image",…}` 还是降级文本提示；`incomingNotes` 已拼进 `message`。
-- 能力位 `ResolvedAgent.images: boolean`（`packages/wechat-daemon/src/agents/brain-agents.ts`，来源 `agents/brain-presets.ts` 的预设字段）。
+- 能力位 `ResolvedAgent.images: boolean`（`packages/wechat-daemon/src/agents/brain-agents.ts`，来源 `packages/wechat-daemon/src/agents/definitions/<agent>.json` 的 `images` 字段，经 `agents/agent-registry.ts` 加载；本机同名定义见 `~/.wemind/.agents/<name>.json`）。
 
 ### 2.2 worker 路径（不支持媒体）
 
@@ -393,9 +403,11 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 | `packages/wechat-daemon/src/ipc/chat-command-specs.ts` | `TaskCommand` 加 `{ kind:"recipient"; id }`（裸 `#N` / `发给任务 N`）；`ChatCommand` 加 `{ kind:"toBrain" }`（`回到大脑`）；`TASK_COMMAND_SPECS` / `COMMAND_SPECS` 各加一条 spec |
 | `packages/wechat-daemon/src/daemon/daemon-routing.ts` | `parseBrainEscape` 扩展到 §12.2（`问大脑` / `大脑` / `brain`） |
 | `packages/wechat-daemon/src/acp/acp-brain.ts` | `runTurn` 改用 `applyMediaToPrompt`（等价重构） |
-| `packages/wechat-daemon/src/tasks/worker-acp.ts` | `ask()` 支持 `images`，prompt 走 `applyMediaToPrompt` |
+| `packages/wechat-daemon/src/tasks/worker-acp.ts` | `ask()` 支持 `images`，prompt 走 `applyMediaToPrompt`；每会话首轮加一次出站约定提示（§19.8） |
+| `packages/wechat-daemon/src/daemon/messaging/attachments.ts` | `assertLocalPath()` 改为 `export`（图片通道复用同一套闸，§19.6） |
+| `packages/wechat-daemon/src/daemon/messaging/image-reply.ts` | `resolveImageBytes()` 的本地分支补 realpath / 扩展名 / `isSensitiveFilePath()`（§19.6） |
 | `packages/wechat-daemon/src/tasks/task-manager.ts` | `dispatchTask` / `injectTask` / `resumeTask` 支持 `media`；`Task` 流转 `pendingMedia`；新增解析目标任务的辅助（供收件人 arm 复用） |
-| `packages/wechat-daemon/src/index.ts` | 收件人 / 待投递 Map 与调度；poller 分拣（§6.2）；`handleFastItem` 新分支（§6.3）；媒体段改用 `prepareInboundMedia`；`kind:"toBrain"` / `kind:"recipient"` / flush 处理 |
+| `packages/wechat-daemon/src/index.ts` | 收件人 / 待投递 Map 与调度；poller 分拣（§6.2）；`handleFastItem` 新分支（§6.3）；媒体段改用 `prepareInboundMedia`；`kind:"toBrain"` / `kind:"recipient"` / flush 处理；出站抽成 `sendReplyMedia()`（brain + worker 共用），`sendTaskReply()` 按用户串行 + token 现取 + 额度让位（§19.3–§19.5） |
 
 ### 测试
 
@@ -410,6 +422,7 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 - **提示词**：worker `images:true`→prompt 含 `{type:"image"}`；`images:false`→含降级文本且不含 image block；文件→prompt 含绝对路径。
 - **任务侧**：一批附件 + 文本 = 一次 `conn.ask`（一个回合）；`好了` 立即提交；兜底指令格式。
 - **额度 / 回执**：per-batch ack 只发一次；进入 / 退出 / 超时回执文案。
+- **出站（§19）**：`extractImages()` 抽 markdown / 裸 URL 且不改无媒体正文；`[附件]` 尖括号与普通形式的边界（含 `)` 的路径）；本地图片过 realpath / 扩展名 / 敏感名单 / UNC；http 图片逐跳校验与重定向上限；额度到 `limit - 1` 时媒体被跳过并有失败说明；每会话只提示一次。
 - **兼容回归**：`#1 号文件在哪`、`#1:30 开会`、`大脑的工作原理`、`brainstorm` 均为普通消息；`/brain foo` 仍是切换大脑。
 
 ---
@@ -447,17 +460,124 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 5. **收件人 / 待投递不落盘**，重启即失效是**预期行为**，不是 bug。
 6. **媒体下载 / prompt 降级逻辑只有一份**（`inbound-media.ts` / `prompt-media.ts`），brain 与 worker 共用。
 7. **回执占额度**，遵守 §4.5 的连发上限与让位规则。
+8. **出站只走一套管线**：`sendReplyMedia()` 是唯一出口，brain 与 worker 都不得自己拼「发图/发文件」逻辑（否则额度、敏感名单、失败说明必然漂移）。
+9. **出站两个通道同一套闸**：图片与附件都要过 UNC / 数据流 / realpath / 敏感名单 / 大小；图片通道不是后门。
+10. **出站不静默失败**：失败要进失败说明，并给原链接/路径；额度不足也算失败原因之一。
+11. **出站与入站状态互不影响**：任务结果永远回 `task.userId`，worker 发媒体不重置收件人 TTL。
 
-## 19. 追加（同分支，2026-11-16）：worker 出站媒体
+## 19. 发送（任务 → 微信）：worker 结果里的媒体
 
-收非文本做通后，用户要求在同一个分支补上反方向：worker 的任务结果也能发图片/文件/视频。
+> 本节是反方向：worker 跑完一轮后，结果里的图片 / 文件 / 视频怎么发到微信。入站的收件人模式（§4–§8）解决「用户怎么把媒体交给任务」，本节解决「任务怎么把媒体交回用户」——两者对称，但**不共用状态**：出站不看收件人指针，入站也不受出站影响。
 
-- **共用出站管线**：把 brain 回合里「从回复文本抽媒体 → 逐条发出」的代码原样抽成模块级 `sendReplyMedia(to, answer, sends, ctxToken)`（`index.ts`），返回 `{ text, mediaCount }`。brain 的 `handleMessage` 与 worker 的 `setTaskPush` 都调它，因此预算记账（`canSendMedia()` + `budgetOf(to).count += 1`）、敏感文件拦截（`sensitiveAllowActive()` / `rememberPendingSensitive()`）、失败说明（`imageFailureNote()` / `attachmentFailureNote()`）只有一套口径。
-- **顺序**：brain 与 worker 都是「先媒体、后正文」。任务推送额外按用户串行（`taskReplyChains`，`Map<userId, Promise>`），因为媒体要先下载/读盘，并发解析会让后到的短回复抢先发出。
-- **只发媒体、没有正文**时不补一条空消息；两者都没有才发「（没有内容）」。
-- **可发现性**：worker 每个会话首轮追加一次约定提示（`hintedSessions`，键 `<agent>:<sessionId>`），措辞只讲「怎么写就能发」与「占连发额度、别刷屏」，不改 agent 自身能力。
-- **不与「附件一律给大脑」冲突**：这条限制只作用于入站路由；出站是任务结果的一部分，本来就属于 worker。
-- **提示文案**：任务推送末尾从「不带前缀的消息会交给大脑」改为「不带前缀的消息默认交给大脑（发「#N」可设为收件人）」——收件人模式下前者不准确，且这行是用户学习寻址的主要入口。
+### 19.1 为什么用「回复文本里的约定语法」
+
+三个候选：① 给 worker 挂一个「发送媒体」MCP 工具；② daemon 扫工作区产物自动发；③ 约定语法（Markdown 图片 + `[附件](file:///…)`）。选 ③：
+
+- **不改造 agent**（AGENTS.md §4.14）：MCP 工具要按 agent 复制配置、还要进 `managed` 激活集，成本远大于收益；约定语法对任何能写 Markdown 的 agent 都成立。
+- **可审阅**：发什么由 agent 自己的回复决定，日志里能追（`sent image: …` / `sent attachment (file…): …`）。
+- **不做「扫目录自动发」**：工作区里的中间产物不该默认外发（可能是草稿、凭证、超大文件）。
+
+代价是 agent 得知道能这么写——由 §19.8 的一次性提示补上。
+
+### 19.2 语法（worker 结果里认什么）
+
+| 写法 | 结果 | 备注 |
+| --- | --- | --- |
+| `![alt](路径)` / `![alt](https://…)` | 图片 | 可带 `"title"`；同一 `src` 去重 |
+| 裸图片 URL（`https://…/x.png`） | 图片 | 只认 `png` / `jpe?g` / `gif` / `webp` / `bmp` |
+| `[附件](<路径>)` | 文件或视频 | 带尖括号才能在路径里写 `)` |
+| `[文件](file:///…)` | 文件 | `file://` 只接受空 host（`file:///…`） |
+| `[视频](file:///…)` | 视频 | 微信侧按视频消息发 |
+| `[附件](路径)` | 文件或视频 | 类型由扩展名判（`classifyMediaByName()`） |
+
+实现约束：
+
+- **只认本地绝对路径**：`[附件](https://…)` 保留在正文里，不会把网页当文件下载。图片是唯一接受 http 的通道。
+- **普通形式排除 `(` 与 `<`**：`report (1).pdf` 必须写成 `[附件](<…/report (1).pdf>)`，否则整段保留为正文——宁可发不出去，也不把路径截成 `report (1` 发错文件。
+- **没有媒体语法时正文原样返回**（不 trim、不压空行），避免改写 Markdown 代码块与缩进；只有确实移除了链接才清理多余空行。
+- **不发出站语音**：微信没有「发语音气泡」的接口，音频请按 `[文件]` 发。
+
+### 19.3 共用出站管线
+
+`index.ts:1544` 的 `sendReplyMedia(to, answer, sends, ctxToken): Promise<{ text; mediaCount }>`：
+
+1. `extractImages()` → 逐张 `resolveImageBytes()` → `canSendMedia()` 检查 → `budgetOf(to).count += 1` → `sendImageOrdered()`；
+2. `extractAttachments(cleaned)` → `resolveAttachment(…, { allowSensitive: sensitiveAllowActive() })` → 同额度检查 → `sendFileOrdered()`；
+3. `imageFailureNote()` + `attachmentFailureNote()` 拼到正文尾部。
+
+两个调用点：brain 的 `handleMessage()`（`index.ts:726`）与 worker 的 `sendTaskReply()`（`index.ts:1794`）。抽出来的动机是**口径唯一**：额度记账、敏感文件拦截、失败说明三件事原本只存在于 brain 路径，worker 另写一份迟早漂移（评审时就抓到过「worker 路径丢掉 failures」那类漂移）。
+
+### 19.4 顺序、串行与 token
+
+- **先媒体、后正文**：图片/文件各自作为独立消息先发，再发剩余文本；`mediaCount` 只数成功的媒体。
+- **只有媒体、没有正文**时不补一条空消息；两者都没有才发「（没有内容）」。
+- **按用户串行**：`taskReplyChains: Map<userId, Promise>`（`index.ts:1793`）。媒体要先下载/读盘，并发解析会让后到的短回复抢先发出，用户看到的顺序就和任务完成顺序相反。
+- **token 现取**：`sendTaskReply()` 用 `tok()`（`index.ts:1796`）每次发送时读 `state.contextTokens[botId:userId]`，不在下载前捕获——大文件下载几十秒，期间用户又发过消息，旧 token 会 `ret=-2`。
+- 出站媒体与正文都走 `MessageState.FINISH`；`sendFileOrdered()` 按 `file` / `video` 分派。
+
+### 19.5 预算与让位
+
+- `canSendMedia(sentCount, limit)`（`image-reply.ts:37`）= `sentCount < limit - 1`：**永远给最终文字留最后一条**。额度按用户、跨回合累计；到线时媒体被跳过，并在失败说明里注明「因接近微信连续发送上限没发」——不静默丢。
+- 每张图片、每个文件/视频各占一条（`count += 1`）。媒体不可见为「进度」，不顶替 5s 确认。
+- 任务推送是**本轮结果、必须送达**：只累加计数，不被 `awaiting` 暂停（暂停只作用于可丢弃的 brain 进度提示）。但大脑回合已接近上限时最后一条要留给最终答案 → `shouldDeferTaskPush(activeTurn?.from, to, count, CONSEC_SEND_LIMIT)` 为真则 `sends.deferTaskPush()` 排队，回合结束由 `flushDeferredTaskPushes()` 发出（日志「任务推送遇大脑回合额度将满 → 延后到回合结束」）。
+- 发送失败（`sendImageOrdered()` / `sendFileOrdered()` 返回 false）只记 WARN + 失败说明，不重试：重试会再占一条额度。
+
+### 19.6 安全闸（与入站附件同一套）
+
+图片通道与附件通道必须过同一组闸，否则「图片通道」会成为绕过敏感名单的后门（`![](C:\…\account.json.png)` 之类）。
+
+- **本地路径**：`assertLocalPath()` 拒 UNC（`\\server\share`、`file://host/…`）与 NTFS 数据流（`account.json::$DATA`）→ `realpath`（扩展名与敏感名单按解析后的真实路径判）→ 图片扩展名（`IMG_EXT`）→ `isSensitiveFilePath()` → 大小上限（图片 10MB）。附件通道更严：软链目标先 `assertLocalPath()`，`realpath` 后再判一次。
+- **http 图片**：`assertPublicHttpUrl()` **逐跳**校验（手动跟重定向，最多 3 跳，防 302 到 `127.0.0.1`）→ 15s 超时 → `content-type` 或扩展名 → 10MB。
+- **附件**：`resolveAttachment()` 另加「必须是绝对路径」「软链目标先判」「25MB 上限」（`DEFAULT_MAX_BYTES`）。
+- **敏感文件**：命中 `isSensitiveFilePath()` 抛 `SensitiveFileError`，不发送，改为记进待补发队列（`rememberPendingSensitive()`）；用户回「允许敏感文件 [分钟]」（默认 2 分钟、上限 30）后补发，`sendReplyMedia()` 里用 `sensitiveAllowActive()` 放行，日志标「敏感文件已临时放行」。窗口只跳过名单，UNC / 数据流 / 大小上限照旧。
+- **已知边界**：本机代理把公网域名解析成 `198.18.x` fake-IP 时，`assertPublicHttpUrl()` 会判成内网并拒绝（2026-11-17 真机撞到 `拒绝访问本机/内网地址: img1.kuwo.cn（198.18.0.85）`）。这是既有闸，brain 路径行为相同；本地图片不受影响。
+
+### 19.7 失败说明
+
+失败不静默：按原因归类后拼在正文尾部，保留原始链接/路径，用户可以直接重发。
+
+| 通道 | 原因 | 文案 |
+| --- | --- | --- |
+| 图片 | `download` | 「有 N 张图片没能下载下来，附原链接」 |
+| 图片 | `send` | 「有 N 张图片没能发出去」 |
+| 图片 | `budget` | 「有 N 张图片因接近微信连续发送上限没发」 |
+| 附件 | `read` | 「有 N 个附件没能读取/校验通过」 |
+| 附件 | `send` | 「有 N 个附件没能发出去」 |
+| 附件 | `budget` | 「有 N 个附件因接近微信连续发送上限没发」 |
+| 附件 | `sensitive` | 「有 N 个附件被敏感文件名单拦下（回复「允许敏感文件」可补发）」 |
+
+### 19.8 可发现性：每会话一次的约定提示
+
+worker agent 默认不知道「写 Markdown 图片就会发出去」。`worker-acp.ts` 在**每个会话首轮**追加一次系统提示（`hintedSessions`，键 `<agent>:<sessionId>`，`worker-acp.ts:98` / `:264`），内容为「怎么写就能发」+「占连发额度、别刷屏」+「不支持语音，音频按文件发」，末尾注明「此提示只出现一次，无需理会本句」。
+
+设计取舍：
+
+- **只讲用法，不改能力**：不提内部预算数字，也不替 agent 发明工具（AGENTS.md §4.14）。
+- **提示在前、指令在后**：`prompt` 最后一块必须是本轮指令（模型看的是最后那句）；提示只加一次，长任务不会每轮都占 token。
+- **按 session 去重**：同一 session 续跑（`session/load`）不重复；换 session（重启、换 agent、新任务）才再来一次。进程重启后 `hintedSessions` 是空的，会再提示一次——多次提示无害，只是多几行 token。
+- 任务推送末尾另有一行寻址提示（`task-manager.ts:292` 的 `replyFooter()`）：`↩ 回这条任务用「#N 正文」；不带前缀的消息默认交给大脑（发「#N」可设为收件人）。`——用户学习「回任务」与「设收件人」的主要入口。
+
+### 19.9 与入站路由的关系
+
+- 出站**不看**收件人指针：任务结果永远回给 `task.userId`，不会被「当前收件人是别的任务」影响。
+- 入站**不受**出站影响：worker 发图不会重置 TTL、也不改指针（只有「给任务投递内容」才算活动，见 §8.1）。
+- 两个方向共享同一份**连发额度**（按用户），所以同一时间窗口里「入站回执 + 进度 + 出站媒体 + 最终文字」是加在一起算的——§19.5 的让位规则就是为此存在。
+
+### 19.10 测试
+
+- `daemon/messaging/image-reply.test.ts`：`extractImages()`（markdown / 裸 URL / 去重 / 正文清理）、`resolveImageBytes()` 的本地安全闸（普通 png / 非图片扩展名 / `id_rsa.png` 敏感名 / UNC）、失败说明文案。
+- `daemon/messaging/image-url.test.ts`：`assertPublicHttpUrl()` 与重定向逐跳校验（SSRF）。
+- `daemon/messaging/attachments.test.ts`：`extractAttachments()` 的尖括号/普通形式、`resolveAttachment()` 的 UNC / 数据流 / 大小 / 敏感名单 / 允许窗口。
+- `daemon/messaging/sensitive-allow.test.ts`：开窗、过期、补发队列。
+- `tasks/pool-spawn.test.ts:155`：「首轮多带一次『可发图/发文件』约定提示，之后同一会话不再重复」。
+- 未覆盖：`sendReplyMedia()` 本身的端到端（需要真实发送管线）；真机靠日志 `sent image: …` / `sent attachment (file…)` 核对。
+
+### 19.11 真机结果（2026-11-17）
+
+- ✅ worker 结果里的本地图片：`sent image: C:\Users\imwan\.wemind\5699d5d92ea9\workspace\worker\chart.png`。
+- ⚠️ http 图片被 fake-IP 判成内网（§19.6 已知边界）。
+- 未测：视频、`[文件]` 大文件、敏感文件窗口补发（当时的敏感文件用例写成了全角 `］`，`extractAttachments()` 没匹配到）。
+
 
 ## 20. 独立审查后的修复（2026-11-16）
 
@@ -521,4 +641,4 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 
 ### 21.3 `任务：` 一律新建（跨模块的行为变更）
 
-`任务：正文` / `>正文` 不再「有活跃任务就追加」，见 [远程任务：human-in-the-loop 设计与实现](远程任务-human-in-the-loop设计与实现.md) 的 2026-11-17 补充与 [repowiki/07](../repowiki/07-远程任务-Worker.md)。它仍会把新任务设为收件人（`dispatchTask` 的 `onTaskId` → `armAndFlush()`），所以附件链路不变；并行时回执多一句 `parallelTaskHint()` 教学。
+`任务：正文` / `>正文` 不再「有活跃任务就追加」，见 [远程任务（Worker）human-in-the-loop 设计与实现](<远程任务（Worker）human-in-the-loop 设计与实现.md>) 的 2026-11-17 补充与 [repowiki/07](../repowiki/07-远程任务-Worker.md)。它仍会把新任务设为收件人（`dispatchTask` 的 `onTaskId` → `armAndFlush()`），所以附件链路不变；并行时回执多一句 `parallelTaskHint()` 教学。
