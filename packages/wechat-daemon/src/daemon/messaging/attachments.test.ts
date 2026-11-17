@@ -69,6 +69,23 @@ describe("extractAttachments（显式附件语法）", () => {
     const { attachments } = extractAttachments("[附件](C:/tmp/a.pdf) [附件](C:/tmp/a.pdf)");
     expect(attachments).toHaveLength(1);
   });
+
+  it("行内代码里的写法只是示例，不当作要发的文件（2026-11-17 真机）", () => {
+    const src = "视频写 `[视频](file:///C:/Users/x/Videos/demo.mp4)` 这样";
+    expect(extractAttachments(src)).toEqual({ attachments: [], text: src });
+  });
+
+  it("围栏代码块里的附件语法也不发", () => {
+    const src = ["```", "[文件](C:/tmp/a.pdf)", "```"].join("\n");
+    expect(extractAttachments(src).attachments).toEqual([]);
+  });
+
+  it("代码外的真附件照发，代码内的示例忽略", () => {
+    const src = ["像 `[文件](C:/tmp/示例.pdf)` 这样：", "[文件](C:/tmp/真文件.pdf)"].join("\n");
+    const { attachments, text } = extractAttachments(src);
+    expect(attachments.map((a) => a.src)).toEqual(["C:/tmp/真文件.pdf"]);
+    expect(text).toContain("`[文件](C:/tmp/示例.pdf)`");
+  });
 });
 
 describe("resolveAttachment（读取与安全闸）", () => {

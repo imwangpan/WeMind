@@ -61,6 +61,25 @@ describe("extractImages", () => {
     expect(images).toEqual([]);
     expect(text).toBe("纯文本回复");
   });
+
+  it("行内代码里的写法只是示例，不当作要发的图（2026-11-17 真机）", () => {
+    const { images, text } = extractImages("图片直接写 `![](路径)` 就行");
+    expect(images).toEqual([]);
+    expect(text).toBe("图片直接写 `![](路径)` 就行");
+  });
+
+  it("围栏代码块里的图片语法也不发", () => {
+    const src = ["示例：", "```md", "![图](C:/tmp/a.png)", "```", "完"].join("\n");
+    const { images } = extractImages(src);
+    expect(images).toEqual([]);
+  });
+
+  it("代码外的真图照发，代码内的示例忽略", () => {
+    const src = ["写 `![](C:/tmp/示例.png)` 这样：", "![](C:/tmp/真图.png)"].join("\n");
+    const { images, text } = extractImages(src);
+    expect(images.map((i) => i.src)).toEqual(["C:/tmp/真图.png"]);
+    expect(text).toContain("`![](C:/tmp/示例.png)`");
+  });
 });
 
 describe("canSendImage（给最终文字留最后一条额度）", () => {

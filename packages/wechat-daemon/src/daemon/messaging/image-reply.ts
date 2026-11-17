@@ -6,6 +6,7 @@ import { readBodyWithLimit } from "@wemind/wechat-ilink-core";
 
 import { assertLocalPath, isSensitiveFilePath } from "./attachments.js";
 import { assertPublicHttpUrl } from "./image-url.js";
+import { maskCodeRegions } from "./markdown-code.js";
 
 /**
  * 从 brain 的文本回复里提取「要作为图片发送」的引用，并返回去掉这些引用后的纯文本。
@@ -96,29 +97,37 @@ export function imageFailureNote(failures: ImageFailure[]): string {
 export function extractImages(text: string): { images: ExtractedImage[]; text: string } {
   const images: ExtractedImage[] = [];
   const seen = new Set<string>();
-  const push = (src: string) => {
+  const ranges: Array<[number, number]> = [];
+  const push = (src: string, start: number, end: number) => {
     const s = src.trim();
     if (s && !seen.has(s)) {
       seen.add(s);
       images.push({ src: s });
     }
+    ranges.push([start, end]);
   };
 
-  let out = text ?? "";
+  const raw = text ?? "";
+  // 代码围栏 / 行内代码里的写法是示例（agent 常会教用户怎么写），不能当成真要发的图。
+  const masked = maskCodeRegions(raw);
   // A/B：Markdown 图片 ![alt](src "title"?)
-  out = out.replace(/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g, (_m, src: string) => {
-    push(src);
-    return "";
-  });
+  for (const m of masked.matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g)) {
+    const start = m.index ?? 0;
+    push(m[1], start, start + m[0].length);
+  }
   // C：裸图片 URL（排除 markdown 链接/图片里的，即前面不是 `(`）
-  out = out.replace(
+  for (const m of masked.matchAll(
     /(?<!\()(https?:\/\/[^\s)]+\.(?:png|jpe?g|gif|webp|bmp)(?:\?[^\s)]*)?)/gi,
-    (m: string) => {
-      push(m);
-      return "";
-    },
-  );
+  )) {
+    const start = m.index ?? 0;
+    push(m[0], start, start + m[0].length);
+  }
 
+  let out = raw;
+  // 从后往前切，避免前面的删除让后面的下标失效。
+  for (const [start, end] of ranges.sort((a, b) => b[0] - a[0])) {
+    out = out.slice(0, start) + out.slice(end);
+  }
   out = out
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")

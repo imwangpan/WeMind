@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { DATA_DIR, classifyMediaByName, type MediaKind } from "@wemind/wechat-ilink-core";
 
 import { agentSensitivePathSnapshot } from "../../agents/agent-registry.js";
+import { maskCodeRegions } from "./markdown-code.js";
 
 /**
  * 出站附件：brain 用显式 Markdown 链接 `[附件](file:///abs/path)` / `[文件](...)` / `[视频](...)`
@@ -179,11 +180,17 @@ export function extractAttachments(text: string): {
 } {
   const attachments: ExtractedAttachment[] = [];
   const seen = new Set<string>();
-  const collect = (input: string, re: RegExp): string =>
-    input.replace(re, (match, label: string, rawSrc: string) => {
-      const src = rawSrc.trim();
+  const ranges: Array<[number, number]> = [];
+  const raw = text ?? "";
+  // 只在正文里找：代码围栏/行内代码里的写法是示例（agent 常会教用户怎么写）。
+  const masked = maskCodeRegions(raw);
+  const collect = (input: string, re: RegExp): void => {
+    for (const m of input.matchAll(re)) {
+      const start = m.index ?? 0;
+      const src = (m[2] ?? "").trim();
       // 出站附件只接受本地绝对路径；http(s) 链接保留在正文里，避免误把网页当文件。
-      if (!src || /^https?:/i.test(src)) return match;
+      if (!src || /^https?:/i.test(src)) continue;
+      const label: string = m[1];
       const kind: MediaKind | undefined =
         label === "视频" ? "video" : label === "文件" ? "file" : undefined;
       const key = `${kind ?? "auto"}:${src}`;
@@ -191,14 +198,20 @@ export function extractAttachments(text: string): {
         seen.add(key);
         attachments.push({ src, kind });
       }
-      return "";
-    });
-  let out = collect(text ?? "", /\[(附件|文件|视频)\]\(\s*<([^>\n]+)>\s*\)/g);
+      ranges.push([start, start + m[0].length]);
+    }
+  };
+  collect(masked, /\[(附件|文件|视频)\]\(\s*<([^>\n]+)>\s*\)/g);
   // 普通形式整段排除 `<` 与 `(`：残缺的尖括号语法、以及含 `)` 的路径都保留为正文，
   // 避免把 `report (1).pdf` 截成 `report (1` 后发错文件。这类路径必须写成 `<...>`。
-  out = collect(out, /\[(附件|文件|视频)\]\(\s*([^<()\n][^<()\n]*?)\s*\)/g);
+  collect(masked, /\[(附件|文件|视频)\]\(\s*([^<()\n][^<()\n]*?)\s*\)/g);
   // 没有附件链接时原样返回：下面的清理只用于「移除链接后留下的空行」，不该改动正文里的 Markdown 代码块空行或首尾空白。
-  if (attachments.length === 0) return { attachments: [], text: text ?? "" };
+  if (attachments.length === 0) return { attachments: [], text: raw };
+  let out = raw;
+  // 从后往前切，避免前面的删除让后面的下标失效。
+  for (const [start, end] of ranges.sort((a, b) => b[0] - a[0])) {
+    out = out.slice(0, start) + out.slice(end);
+  }
   return {
     attachments,
     text: out
