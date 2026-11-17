@@ -834,8 +834,10 @@ async function deliverPending(params: {
   head: string;
   messageId: string;
   onHint?: (text: string) => void;
+  /** 是否真的交到任务手里（调用方据此决定回执措辞：交出去了 vs 没交出去）。 */
+  onOutcome?: (ok: boolean) => void;
 }): Promise<string> {
-  const { from, taskId, batch, head, messageId, onHint } = params;
+  const { from, taskId, batch, head, messageId, onHint, onOutcome } = params;
   const prepared = await prepareInboundMedia(batch.items, { messageId, onHint, role: "worker" });
   const body = composeAgentText(head, prepared.notes);
   const failNote = prepared.failures.length
@@ -854,6 +856,7 @@ async function deliverPending(params: {
     // 返回值里既有错误也有「正在续跑」这类人话回执，不能拿「非空」当失败判据。
     onOutcome: (ok) => {
       delivered = ok;
+      onOutcome?.(ok);
     },
   });
   if (!delivered) {
@@ -1689,14 +1692,24 @@ async function sweepMediaRecipients(
     const token = state.contextTokens[`${account.botId}:${userId}`];
     let extra = "";
     if (batch.items.length) {
-      const r = await deliverPending({
+      const targetId = batch.taskId ?? recipient.taskId;
+      const count = batch.items.length;
+      let delivered = true;
+      const note = await deliverPending({
         from: userId,
-        taskId: batch.taskId ?? recipient.taskId,
+        taskId: targetId,
         batch,
         head: "",
         messageId: batch.messageIds[batch.messageIds.length - 1] ?? "0",
+        onOutcome: (ok) => {
+          delivered = ok;
+        },
       });
-      extra = r ? `\n（把已收到的附件交回去时：${r}）` : "（已把之前收到的附件交给它。）";
+      // 先说清「这几个附件去哪了」，再原样附上任务的回话（续跑提示之类）；不再用「把…交回去时」这种从句。
+      const headline = delivered
+        ? `\n📎 超时前收到的 ${count} 个附件已交给 #${targetId}。`
+        : `\n📎 超时前收到的 ${count} 个附件没能交给 #${targetId}。`;
+      extra = note ? `${headline}\n${note}` : headline;
     }
     log.info(`media-route: recipient #${recipient.taskId} expired for ${userId}`);
     await sends
