@@ -811,7 +811,16 @@ const MEDIA_FLUSH_DEBOUNCE_MAX_MS = 3_000;
  * 返回被丢弃的暂存附件数（调用方据此在回执里交代清楚）。
  */
 function purgeMediaRouteForStopped(from: string, id?: number | "all"): number {
-  return mediaRoute.purgeForStopped(from, id, (taskId) => !!findRecipientTask(from, taskId));
+  const dropped = mediaRoute.purgeForStopped(
+    from,
+    id,
+    (taskId) => !!findRecipientTask(from, taskId),
+  );
+  if (dropped > 0)
+    log.info(
+      `media-route: stop #${id ?? "?"} dropped ${dropped} buffered attachment(s)（${from}）`,
+    );
+  return dropped;
 }
 
 /**
@@ -839,21 +848,28 @@ async function deliverPending(params: {
   log.info(
     `media-route: deliver to #${taskId} attachments=${batch.items.length} images=${prepared.images.length} failures=${prepared.failures.length}`,
   );
-  const err = injectTask(from, text, taskId, undefined, {
+  let delivered = true;
+  const note = injectTask(from, text, taskId, undefined, {
     images: prepared.images.length ? prepared.images : undefined,
+    // 返回值里既有错误也有「正在续跑」这类人话回执，不能拿「非空」当失败判据。
+    onOutcome: (ok) => {
+      delivered = ok;
+    },
   });
-  if (err) {
-    log.warn(`media-route: deliver to #${taskId} failed:`, err.replace(/\n/g, " | "));
+  if (!delivered) {
+    log.warn(`media-route: deliver to #${taskId} failed:`, note.replace(/\n/g, " | "));
     // 任务不在了：只清**属于这条任务**的指针/队列，如实交代（绝不静默丢附件）。
     // 不能无条件 clear：调用方可能在旧批次投递期间已经设了 #2，清掉就把新收件人和新附件一起毁了。
     if (!findRecipientTask(from, taskId)) {
       if (mediaRoute.recipient(from)?.taskId === taskId) mediaRoute.clear(from);
       if (mediaRoute.pendingOwner(from) === taskId) mediaRoute.clearPending(from);
     }
-    return err;
+    return note;
   }
   mediaRoute.touch(from);
-  return failNote ? `⚠️ ${failNote}` : "";
+  // 续跑这类回执要告诉用户，但它不是失败。
+  if (note) log.info(`media-route: deliver to #${taskId} note:`, note.replace(/\n/g, " | "));
+  return [failNote ? `⚠️ ${failNote}` : "", note].filter(Boolean).join("\n");
 }
 
 /** 设置收件人；若还有指向旧任务的暂存附件，先提交给旧任务再切换（绝不静默错投/丢弃）。 */
@@ -865,6 +881,9 @@ function armAndFlush(
   const displaced = mediaRoute.swapRecipient(from, taskId, taskKeyOf(taskId, from));
   if (!displaced) return;
   const { oldTaskId, batch } = displaced;
+  log.info(
+    `media-route: swap recipient -> #${taskId}，先把 ${batch.items.length} 个暂存附件交给 #${oldTaskId}（${from}）`,
+  );
   void deliverPending({
     from,
     taskId: oldTaskId,
@@ -1809,7 +1828,7 @@ export async function runDaemon(): Promise<void> {
   if (pruned?.removed)
     log.info(`pruned inbound media: ${pruned.removed} files, ${pruned.bytes}B left`);
   log.info(
-    `up. v${CLI_VERSION} bot=${account.botId} owner=${owner} allowFrom=${readAllowFrom(DATA_DIR).length}`,
+    `up. v${CLI_VERSION} bot=${account.botId} owner=${owner} allowFrom=${readAllowFrom(DATA_DIR).length} media-route: ttl=${MEDIA_RECIPIENT_TTL_MS}ms debounce=${MEDIA_FLUSH_DEBOUNCE_MS}ms(max ${MEDIA_FLUSH_DEBOUNCE_MAX_MS}ms)`,
   );
   await notifyStart({ baseUrl: account.baseUrl, token: account.botToken }).catch(() => {});
 

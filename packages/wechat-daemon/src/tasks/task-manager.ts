@@ -632,22 +632,30 @@ export function injectTask(
     images?: PromptImage[];
     /** 目标确定后回调其编号（收件人模式据此把指针指向这条任务）。 */
     onTaskId?: (id: number) => void;
+    /**
+     * 是否真的交到了任务手里。返回值里既有错误也有人话回执（如「正在续跑」），
+     * 调用方不能靠「返回值非空」判断失败——收件人模式要靠这个标记决定是否续期、记 WARN。
+     */
+    onOutcome?: (ok: boolean) => void;
   } = {},
 ): string {
-  const done = (r: string): string => {
+  const done = (r: string, ok: boolean): string => {
+    opts.onOutcome?.(ok);
     ackIf(ackId, r);
     return r;
   };
+  const ok = (r: string): string => done(r, true);
+  const fail = (r: string): string => done(r, false);
   const live = liveTasks(to);
   const intr = interruptedTasks(to);
   const body = (text ?? "").trim();
-  if (!body && !opts.images?.length) return done("要回给任务的内容是空的。");
+  if (!body && !opts.images?.length) return fail("要回给任务的内容是空的。");
 
   let target: Task | undefined;
   if (id !== undefined) {
     target = tasks.get(id);
     if (!target || target.userId !== to)
-      return done(`没有 #${id} 号任务。发「任务列表」看现有编号。`);
+      return fail(`没有 #${id} 号任务。发「任务列表」看现有编号。`);
   } else {
     const awaiting = live.filter((t) => t.status === "waiting");
     // 「谁在等就喂谁」优先于「只有一条就喂它」：一条 running + 一条 waiting 时，无前缀消息显然是回给在等的那条
@@ -656,30 +664,30 @@ export function injectTask(
     else if (live.length === 0) {
       if (intr.length === 1) {
         opts.onTaskId?.(intr[0].id);
-        return done(resumeTask(intr[0], body, opts.images));
+        return ok(resumeTask(intr[0], body, opts.images));
       }
       if (intr.length > 1)
-        return done(
+        return fail(
           `有 ${intr.length} 条已中断的任务，请指明编号续跑：${intr.map((t) => `#${t.id}`).join("、")}（写法：\`#${intr[0].id} 继续\`）。`,
         );
-      return done("");
+      return fail("");
     } else {
       const rows = live.map((t) => `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]}`).join("  ");
-      return done(`有 ${live.length} 条任务在跑，请指明要回给哪条：「#<编号> 正文」。\n${rows}`);
+      return fail(`有 ${live.length} 条任务在跑，请指明要回给哪条：「#<编号> 正文」。\n${rows}`);
     }
   }
 
   opts.onTaskId?.(target.id);
-  if (target.status === "interrupted") return done(resumeTask(target, body, opts.images));
+  if (target.status === "interrupted") return ok(resumeTask(target, body, opts.images));
   if (target.status === "waiting" && target.injectResolver) {
     const r = target.injectResolver;
     target.injectResolver = undefined;
     r({ text: body, images: opts.images });
-    return done("");
+    return ok("");
   }
   (target.pendingInjects ??= []).push({ text: body, images: opts.images }); // running 期间：按序累积，等这一步跑完一并处理（不覆盖前一条）
   push(to, `📝 已记下给 #${target.id} 的补充，等当前这步跑完就处理。`);
-  return done("");
+  return ok("");
 }
 
 /** 结束任务：停 worker、清状态、唤醒退出循环。`id` 缺省＝唯一那条；`"all"`＝全部。 */

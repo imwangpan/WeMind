@@ -980,4 +980,25 @@ describe("媒体：图片随指令进入任务回合（收件人模式）", () =
     injectTask("u1", "只回给乙", 2, undefined, { onTaskId: (id) => seen.push(id) });
     expect(seen).toEqual([2]);
   });
+
+  it("onOutcome 区分「真交出」与「找不到」：返回值非空不等于失败", async () => {
+    const outcomes: boolean[] = [];
+    // 没有这条任务 → 失败
+    injectTask("u1", "在吗", 42, undefined, { onOutcome: (ok) => outcomes.push(ok) });
+    expect(outcomes).toEqual([false]);
+
+    const a1 = deferred();
+    acquire.mockImplementationOnce(async () => {
+      const c = fakeConn("kiro");
+      conns.push(c);
+      c.ask.mockReturnValueOnce(a1.promise);
+      return { ok: true, conn: c };
+    });
+    dispatchTask("u1", "任务甲", { agentKey: "kiro" });
+    await vi.waitFor(() => expect(conns.length).toBe(1));
+    // 正在跑：进 pendingInjects，算交出去了（虽然回执是一句人话）
+    injectTask("u1", "补充一句", 1, undefined, { onOutcome: (ok) => outcomes.push(ok) });
+    expect(outcomes).toEqual([false, true]);
+    a1.resolve("甲完成");
+  });
 });
