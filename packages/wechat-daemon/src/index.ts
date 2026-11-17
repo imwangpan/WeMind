@@ -305,7 +305,7 @@ export function planProgressEmission(
 export function parallelTaskHint(others: Array<{ id: number }>): string {
   if (others.length === 0) return "";
   const ids = others.map((t) => `#${t.id}`).join("、");
-  return `\n（${ids} 还在跑，两条并行；要接着它说就发「#N 正文」，或先发「#N」把它设为收件人。）`;
+  return `\n（${ids} 还在运行，与这条并行；要接着它说就发「#N 正文」，或先发「#N」把它设为收件人。）`;
 }
 
 // 静默期心跳默认 15s（配置可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。

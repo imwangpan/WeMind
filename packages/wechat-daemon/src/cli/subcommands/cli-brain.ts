@@ -208,7 +208,7 @@ async function cmdBrainSet(
     );
   } else if (daemonAlive(key)) {
     lines.push(
-      `（daemon 在跑但不是当前版本（不认控制桥）：盘已写好，重启一次才生效——wemind stop ${key} && wemind start ${key}）`,
+      `（daemon 在运行但不是当前版本（不认控制桥）：盘已写好，重启一次才生效——wemind stop ${key} && wemind start ${key}）`,
     );
   } else {
     lines.push(`（daemon 需重启才生效：wemind start ${key}）`);

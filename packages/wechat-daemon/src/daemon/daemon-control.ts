@@ -127,7 +127,7 @@ function setTaskBrain(target: string): string {
   killIdleConns(); // 池里的空闲连接属于旧默认：留着没用（下次按新 agent 取），有任务在跑的那些不动
   const note = "（不写 brain.json，重启后回到配置里的默认）";
   return busy
-    ? `✅ 默认任务大脑：${cur.name} → ${r.agent.name}${note}。\n在跑的任务继续用它自己起的 agent 跑完；**之后的新任务**用新大脑。`
+    ? `✅ 默认任务大脑：${cur.name} → ${r.agent.name}${note}。\n正在运行的任务继续用它自己起的 agent 跑完；**之后的新任务**用新大脑。`
     : `✅ 默认任务大脑：${cur.name} → ${r.agent.name}${note}。`;
 }
 

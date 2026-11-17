@@ -616,7 +616,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     });
     const r = resumeAllInterrupted("u1");
     await vi.waitFor(() => expect(conns.length).toBe(2));
-    expect(r).toContain("已让 2 条任务接着跑：#1、#2");
+    expect(r).toContain("已让 2 条任务继续运行：#1、#2");
     expect(r).toContain("全部结束");
     expect(conns[0].ask.mock.calls[0][3]).toEqual({ strictResume: true });
     expect(listTasks("u1").filter((t) => t.status === "interrupted").length).toBe(0);
@@ -683,19 +683,19 @@ describe("任务表写入磁盘与重启续跑", () => {
     );
     initTasks(tmpDir);
     const list = renderTaskList("u1");
-    // 标题带待继续计数；每条任务一行（先图标后编号），不再靠空行/分隔线分隔
+    // 标题带待继续计数；每条任务一行，全部字段都在表格里（手机端可左右滑动）
     expect(list.startsWith("📋 任务（1 条 · 1 个待继续）")).toBe(true);
     expect(list).toContain("| ⏸️ | #1 kiro | 待继续 | 5 |");
-    expect(list).toContain("**#1** 第一行 第二行");
+    expect(list).toContain("| 第一行 第二行 |");
     expect(list).toContain("「待继续」= 进程不在了");
     expect(list).toContain("全部继续");
-    // 运行中的任务不附最近输出（会把列表撑长），图标也不同
+    // 运行中的任务换图标，但最近输出照样在末列（表格能横向滑动，不怕撑宽）
     const [t] = listTasks("u1");
     t.status = "running";
-    t.lastOutput = "运行中的输出不该出现在列表里";
+    t.lastOutput = "运行中的输出也该出现在列表里";
     const live = renderTaskList("u1");
     expect(live).toContain("| ▶️ | #1 kiro | 运行中 | 5 |");
-    expect(live).not.toContain("运行中的输出不该出现在列表里");
+    expect(live).toContain("| 运行中的输出也该出现在列表里 |");
     expect(live).not.toContain("待继续」= 进程不在了");
   });
   it("无编号「继续」也能续跑（微信侧走的就是这条路）；日常提问不会被陈旧的中断任务吞掉", async () => {
@@ -910,15 +910,15 @@ describe("本地命令的答复（daemon 说了才算）", () => {
     expect(acks).toEqual([{ id: "ack-7", text: "" }]); // 空文案＝「已送达，无别的话」；不写空行、不让人干等
   });
 
-  it("结束：答复就是 daemon 的真实结果（含「没有 #9 号在跑的任务」这类否定答案）", () => {
-    expect(stopTask("u1", 9, "ack-8")).toContain("没有 #9 号在跑的任务");
-    expect(acks[0].text).toContain("没有 #9 号在跑的任务");
+  it("结束：答复就是 daemon 的真实结果（含「没有 #9 号正在运行的任务」这类否定答案）", () => {
+    expect(stopTask("u1", 9, "ack-8")).toContain("没有 #9 号正在运行的任务");
+    expect(acks[0].text).toContain("没有 #9 号正在运行的任务");
   });
 
   it("没有 ackId 时一切照旧（微信侧指令本来就有自己的答复）", () => {
     expect(dispatchTask("u1", "做X")).toContain("已派");
     expect(injectTask("u1", "继续", 9)).toContain("没有 #9 号任务");
-    expect(stopTask("u1", 9)).toContain("没有 #9 号在跑的任务");
+    expect(stopTask("u1", 9)).toContain("没有 #9 号正在运行的任务");
     expect(acks).toEqual([]);
   });
 });

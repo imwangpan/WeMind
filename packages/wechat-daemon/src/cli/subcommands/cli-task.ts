@@ -27,7 +27,7 @@ export function taskAckOutcome(
 ): { text: string; failed: boolean } {
   if (!a)
     return {
-      text: `${fallback}\n（没等到 daemon 答复：它可能还在跑旧版本，或刚启动。用 task-list / task-status 核对实际状态。）`,
+      text: `${fallback}\n（没等到 daemon 答复：它可能还在运行旧版本，或刚启动。用 task-list / task-status 核对实际状态。）`,
       failed: false,
     };
   return { text: a.text || fallback, failed: !a.ok };
@@ -184,11 +184,11 @@ export function cmdTaskList(sel?: string): string {
   const key = pickKey(sel);
   const rows = readTaskRows(key);
   if (!rows)
-    return `账号 ${key}：无任务表（tasks.json / task-state.json 都不存在，daemon 未跑过多任务）。`;
+    return `账号 ${key}：无任务表（tasks.json / task-state.json 都不存在，daemon 没运行过多任务）。`;
   // 任务表是 daemon 的活状态：它没在跑（或还在跑旧版）时，表里的「运行中」只是上次留下的，别当成现在时。
   const stale = daemonAlive(key)
     ? ""
-    : "\n（daemon 未运行：以下状态是它上次留下的记录；没跑完的任务会在下次启动时转为「待继续」，回「继续」可续跑。）";
+    : "\n（daemon 未运行：以下状态是它上次留下的记录；没完成的任务会在下次启动时转为「待继续」，回「继续」可续跑。）";
   if (!rows.length) return `账号 ${key}：当前没有任务。${stale}`;
   const lines = [`账号 ${key} 任务（${rows.length} 条）：`];
   for (const t of rows) {
@@ -216,7 +216,7 @@ export function cmdTaskStatus(sel?: string): string {
   try {
     s = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
   } catch {
-    return `账号 ${key}：无任务状态（task-state.json 不存在，daemon 可能未跑过任务）。`;
+    return `账号 ${key}：无任务状态（task-state.json 不存在，daemon 可能没运行过任务）。`;
   }
   if (!s.active) return `账号 ${key}：当前无活跃任务（idle）。`;
   const since = s.startedAt ? `${Math.round((Date.now() - s.startedAt) / 1000)}s` : "?";

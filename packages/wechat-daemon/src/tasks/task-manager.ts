@@ -201,7 +201,7 @@ export function initTasks(dir: string = DATA_DIR): { interrupted: number[] } {
   for (const t of store.tasks) tasks.set(t.id, { ...t });
   if (hit.length)
     log.info(
-      `重启：${hit.length} 条没跑完的任务已转为「待继续」（编号 ${hit.map((t) => t.id).join("、")}；回「继续」可续跑）`,
+      `重启：${hit.length} 条未完成的任务已转为「待继续」（编号 ${hit.map((t) => t.id).join("、")}；回「继续」可续跑）`,
     );
   emitState();
   return { interrupted: hit.map((t) => t.id) };
@@ -303,7 +303,7 @@ function replyFooter(task: Task, kind: "result" | "interrupted"): string {
     : `\n↩ 回这条任务用「${id} 正文」；不带前缀的消息默认交给大脑（发「${id}」可设为收件人）。`;
 }
 
-/** `任务列表`：编号 / agent / 状态 / 轮次 / 已运行 / 最近输出摘要。 */
+/** `任务列表`：markdown 表格——编号 / agent / 状态 / 轮次 / 已运行 / 最近输出摘要。 */
 export function renderTaskList(userId: string): string {
   const all = listTasks(userId);
   if (!all.length)
@@ -314,33 +314,25 @@ export function renderTaskList(userId: string): string {
     String(x).replace(/\|/g, "∣").replace(/\r?\n/g, " ").replace(/`/g, "'");
   const rows = all.map((t) => {
     const age = t.startedAt ? since(Date.now() - t.startedAt) : "?";
-    return `| ${STATUS_ICON[t.status]} | #${t.id} ${cell(t.agent)} | ${STATUS_LABEL[t.status]} | ${t.turns} | ${age} |`;
+    const recent = t.lastOutput ? cell(t.lastOutput.replace(/\s+/g, " ").trim()).slice(0, 80) : "—";
+    return `| ${STATUS_ICON[t.status]} | #${t.id} ${cell(t.agent)} | ${STATUS_LABEL[t.status]} | ${t.turns} | ${age} | ${recent} |`;
   });
   const title = intr.length
     ? `📋 任务（${all.length} 条 · ${intr.length} 个待继续）`
     : `📋 任务（${all.length} 条）`;
+  // 手机端渲染表格时可以左右滑动，所以「最近输出」直接放末列，不再另起一段；换来的是每条任务只占一行。
   const table = [
-    "| | 任务 | 状态 | 轮次 | 时长 |",
-    "| --- | --- | --- | --- | --- |",
+    "| | 任务 | 状态 | 轮次 | 时长 | 最近输出 |",
+    "| --- | --- | --- | --- | --- | --- |",
     ...rows,
   ].join("\n");
   const out = [title, table];
   const live = all.filter(isLive);
-  if (live.length > 1) out.push("多条在跑：回话用「#<编号> 正文」，结束用「结束任务 <编号>」。");
-  // 最近输出不进表格（会把列撑到看不见），放表下逐条列；运行中的没有可核对的东西，不附。
-  const recent = all.filter((t) => t.lastOutput && t.status !== "running");
-  if (recent.length)
-    out.push(
-      recent
-        .map(
-          (t) =>
-            `**#${t.id}** ${cell((t.lastOutput ?? "").replace(/\s+/g, " ").trim()).slice(0, 80)}`,
-        )
-        .join("\n"),
-    );
+  if (live.length > 1)
+    out.push("多条正在运行：回话用「#<编号> 正文」，结束用「结束任务 <编号>」。");
   if (intr.length)
     out.push(
-      `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着跑（先用「#${intr[0].id}」看它最近在做什么）；一起拉起发「全部继续」，不要的用「结束任务 <编号>」清掉。`,
+      `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着运行（先用「#${intr[0].id}」看它最近在做什么）；一起拉起发「全部继续」，不要的用「结束任务 <编号>」清掉。`,
     );
   return out.join("\n\n");
 }
@@ -392,7 +384,7 @@ export function dispatchTask(
   }
   const got = resolveTaskAgent(opts.agentKey);
   if (!got.ok) {
-    const r = `❌ 不能用「${opts.agentKey}」跑任务：${got.problem}`;
+    const r = `❌ 不能用「${opts.agentKey}」执行任务：${got.problem}`;
     ackIf(opts.ackId, r);
     return r;
   }
@@ -698,7 +690,9 @@ export function injectTask(
       return fail("");
     } else {
       const rows = live.map((t) => `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]}`).join("  ");
-      return fail(`有 ${live.length} 条任务在跑，请指明要回给哪条：「#<编号> 正文」。\n${rows}`);
+      return fail(
+        `有 ${live.length} 条任务正在运行，请指明要回给哪条：「#<编号> 正文」。\n${rows}`,
+      );
     }
   }
 
@@ -711,7 +705,7 @@ export function injectTask(
     return ok("");
   }
   (target.pendingInjects ??= []).push({ text: body, images: opts.images }); // running 期间：按序累积，等这一步跑完一并处理（不覆盖前一条）
-  push(to, `📝 已记下给 #${target.id} 的补充，等当前这步跑完就处理。`);
+  push(to, `📝 已记下给 #${target.id} 的补充，等当前这步做完就处理。`);
   return ok("");
 }
 
@@ -743,25 +737,25 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
     persist();
     emitState();
     const hint = intr.length
-      ? `有 ${intr.length} 条停在半路（待继续）的任务记录（回「继续」接着跑，或「结束任务 <编号>」清掉）。`
+      ? `有 ${intr.length} 条停在半路（待继续）的任务记录（回「继续」接着运行，或「结束任务 <编号>」清掉）。`
       : "";
-    return done(`现在没有在跑的任务。${hint}`);
+    return done(`当前没有正在运行的任务。${hint}`);
   }
   if (id === undefined && live.length > 1) {
     const rows = live.map((t) => `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]}`).join("  ");
     return done(
-      `有 ${live.length} 条任务在跑，请指明编号（「结束任务 <编号>」），或「结束全部任务」。\n${rows}`,
+      `有 ${live.length} 条任务正在运行，请指明编号（「结束任务 <编号>」），或「结束全部任务」。\n${rows}`,
     );
   }
 
   const targets =
     id === "all" ? live : id === undefined ? live.slice(0, 1) : live.filter((t) => t.id === id);
   if (!targets.length) {
-    if (id === undefined) return done("现在没有在跑的任务。");
+    if (id === undefined) return done("当前没有正在运行的任务。");
     if (id === "all") {
       // 「结束全部任务」要连「待继续」的记录一起清：否则用户以为收完了，列表里还挂着一串
       const purged = purgeInterrupted(intr);
-      if (!purged.length) return done("没有要结束的任务：现在没有在跑、也没有待继续的。");
+      if (!purged.length) return done("没有要结束的任务：当前没有正在运行的任务，也没有待继续的。");
       persist();
       emitState();
       return done(`🧹 已清掉 ${purged.length} 条待继续的任务记录（${listIds(purged)}）。`);
@@ -772,9 +766,9 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
       removeStoredTask(store, id);
       persist();
       emitState();
-      return done(`已清掉 #${id} 号任务的记录（它没跑完，之后不会再出现在任务列表里）。`);
+      return done(`已清掉 #${id} 号任务的记录（它没有完成，之后不会再出现在任务列表里）。`);
     }
-    return done(`没有 #${id} 号在跑的任务。发「任务列表」看现有编号。`);
+    return done(`没有 #${id} 号正在运行的任务。发「任务列表」看现有编号。`);
   }
 
   for (const t of targets) {
@@ -805,7 +799,7 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
     const extra = purged.length
       ? `\n🧹 另清掉 ${purged.length} 条待继续的记录（${listIds(purged)}）。`
       : "";
-    return done(`🛑 已结束全部任务（${targets.length} 条）。${extra}`);
+    return done(`🛑 已结束全部任务（${targets.length} 条），当前没有正在运行的任务。${extra}`);
   }
   const one = targets[0];
   return done(targets.length === 1 ? `🛑 任务 #${one.id} 已结束。` : "🛑 任务已结束。");
@@ -825,7 +819,7 @@ export function resetTasksForTest(dir?: string): void {
  */
 export function resumeAllInterrupted(to: string): string {
   const stopped = interruptedTasks(to);
-  if (!stopped.length) return "没有停在半路的任务可继续（在跑、等回复的不用管）。";
+  if (!stopped.length) return "没有停在半路的任务可继续（正在运行、等回复的不用管）。";
   const started: number[] = [];
   const failed: number[] = [];
   for (const t of stopped) {
@@ -836,11 +830,11 @@ export function resumeAllInterrupted(to: string): string {
   if (!started.length)
     return `这 ${stopped.length} 条都没能拉起来：看看日志，或换个说法用「#编号 继续」逐条试。`;
   const parts = [
-    `▶️ 已让 ${started.length} 条任务接着跑：${started.map((id) => `#${id}`).join("、")}`,
+    `▶️ 已让 ${started.length} 条任务继续运行：${started.map((id) => `#${id}`).join("、")}`,
   ];
   if (failed.length) parts.push(`#${failed.join("、#")} 没能拉起来：用「#编号 继续」逐条试。`);
   parts.push(
-    "（它们会并行跑；看某条用「#编号 正文」，停某条用「结束任务 编号」，全停发「全部结束」。）",
+    "（它们会并行运行；看某条用「#编号 正文」，停某条用「结束任务 编号」，全停发「全部结束」。）",
   );
   return parts.join("\n");
 }

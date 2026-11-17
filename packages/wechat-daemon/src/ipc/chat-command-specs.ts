@@ -415,7 +415,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     zh: "全部继续",
     slash: "/resume all",
     cli: "wemind task-resume-all [<key|label>]",
-    brief: "把停在半路的任务全部拉起来并行跑",
+    brief: "把停在半路的任务全部拉起来并行运行",
     match: (t) =>
       /^(?:全部继续|继续全部|全部接着跑|\/resume\s+(?:all|全部))$/i.test(t)
         ? { kind: "resumeAll" }

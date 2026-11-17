@@ -282,14 +282,14 @@ describe("parallelTaskHint（`任务：` 一律新建后的并行教学回执）
 
   it("有别的任务在跑时给出编号、说明并行与两种显式寻址写法", () => {
     const hint = parallelTaskHint([{ id: 3 }]);
-    expect(hint).toContain("#3 还在跑");
-    expect(hint).toContain("两条并行");
+    expect(hint).toContain("#3 还在运行");
+    expect(hint).toContain("与这条并行");
     expect(hint).toContain("#N 正文");
     expect(hint).toContain("设为收件人");
     expect(hint.startsWith("\n")).toBe(true);
   });
 
   it("多条并行时按传入顺序全部列出", () => {
-    expect(parallelTaskHint([{ id: 2 }, { id: 5 }])).toContain("#2、#5 还在跑");
+    expect(parallelTaskHint([{ id: 2 }, { id: 5 }])).toContain("#2、#5 还在运行");
   });
 });
