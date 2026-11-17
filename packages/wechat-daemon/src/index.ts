@@ -1291,7 +1291,7 @@ async function handleFastItem(
       const had = mediaRoute.recipient(from);
       mediaRoute.clear(from);
       const batch = mediaRoute.takePending(from);
-      let r = "🧠 好，之后的文字和附件交给大脑。";
+      let r = "🏠 好，之后的文字和附件交给大脑。";
       if (batch.items.length) {
         // 指针可能已过期（队列却还没被 15s 清扫搬走）：归属以批次自己的 taskId 为准，仍交回去，绝不静默丢。
         const targetId = had?.taskId ?? batch.taskId;
