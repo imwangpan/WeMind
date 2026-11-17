@@ -30,6 +30,8 @@ export interface PendingBatch {
 export class MediaRoute {
   private readonly recipients = new Map<string, Recipient>();
   private readonly pending = new Map<string, PendingBatch>();
+  /** 上次往队列里放附件的时间：用于「等后到的图并批」的静默窗口。 */
+  private readonly lastBuffered = new Map<string, number>();
 
   constructor(
     private readonly ttlMs: number,
@@ -116,8 +118,14 @@ export class MediaRoute {
     if (messageId) batch.messageIds.push(messageId);
     if (taskId !== undefined) batch.taskId = taskId;
     this.pending.set(userId, batch);
+    this.lastBuffered.set(userId, this.now());
     this.touch(userId);
     return { first, count: batch.items.length, displaced };
+  }
+
+  /** 上次入队附件的时刻（没有则 undefined）。防抖窗口按它算「安静了多久」。 */
+  lastBufferedAt(userId: string): number | undefined {
+    return this.lastBuffered.get(userId);
   }
 
   /** 队列里攒的附件属于哪条任务（指针过期后仍能认账）。 */
@@ -153,11 +161,13 @@ export class MediaRoute {
   takePending(userId: string): PendingBatch {
     const batch = this.pending.get(userId) ?? { items: [], messageIds: [] };
     this.pending.delete(userId);
+    this.lastBuffered.delete(userId);
     return batch;
   }
 
   clearPending(userId: string): void {
     this.pending.delete(userId);
+    this.lastBuffered.delete(userId);
   }
 
   /**
@@ -180,6 +190,7 @@ export class MediaRoute {
   reset(): void {
     this.recipients.clear();
     this.pending.clear();
+    this.lastBuffered.clear();
   }
 }
 
@@ -194,8 +205,7 @@ export function deliveryTarget(
   return batch.items.length ? (batch.taskId ?? fallbackTaskId) : fallbackTaskId;
 }
 
-/** poller 对一条入站消息的分拣结果。 */
-export type InboundRoute =
+/** poller 对一条入站消息的分拣结果。 */ export type InboundRoute =
   | { kind: "buffer"; recipientTaskId: number }
   | { kind: "recipient"; recipientTaskId: number }
   | { kind: "fast" }
@@ -222,4 +232,32 @@ export function decideInboundRoute(input: {
   }
   if (!mcpToBrain && fastLane) return { kind: "fast" };
   return { kind: "brain" };
+}
+
+/**
+ * 「等后到的图」：微信里一张图就是一条消息，用户连发几张再立刻发文字时，最后几张可能还在路上。
+ * 触发提交前先等到队列**安静** `quietMs`，让晚到的附件并入同一批；总等待不超过 `maxMs`，
+ * 避免用户一直发图时文字永远等下去。
+ *
+ * 依赖注入式实现（`now`/`sleep`），便于单测不碰真实计时器。返回实际等待的毫秒数。
+ */
+export async function waitForSettledAttachments(params: {
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  lastBufferedAt: () => number | undefined;
+  quietMs: number;
+  maxMs: number;
+}): Promise<number> {
+  const { now, sleep, lastBufferedAt, quietMs, maxMs } = params;
+  const start = now();
+  for (;;) {
+    const last = lastBufferedAt();
+    if (last === undefined) return now() - start;
+    const at = now();
+    const idle = at - last;
+    if (idle >= quietMs) return at - start;
+    const remaining = maxMs - (at - start);
+    if (remaining <= 0) return at - start;
+    await sleep(Math.min(quietMs - idle, remaining));
+  }
 }

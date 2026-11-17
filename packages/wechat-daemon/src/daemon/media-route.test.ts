@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { InboundAttachment } from "./daemon-routing.js";
-import { decideInboundRoute, deliveryTarget, MediaRoute } from "./media-route.js";
+import {
+  decideInboundRoute,
+  deliveryTarget,
+  MediaRoute,
+  waitForSettledAttachments,
+} from "./media-route.js";
 
 /** 队列只存引用，不读内容；用最小占位对象即可。 */
 const att = (id: string) =>
@@ -267,5 +272,99 @@ describe("deliveryTarget（过期批次不错投给新收件人）", () => {
 
   it("没有附件：走当前收件人（纯文字提交）", () => {
     expect(deliveryTarget({ items: [], taskId: 1 }, 2)).toBe(2);
+  });
+});
+
+describe("waitForSettledAttachments（等后到的图并批）", () => {
+  /** 可控时钟：sleep 推进 now，顺便模拟「睡到一半又来了附件」。 */
+  const harness = (plan: { atMs: number; bufferAt?: number }[] = []) => {
+    let now = 0;
+    const buffers: number[] = [];
+    const push = (at: number) => buffers.push(at);
+    for (const step of plan) if (step.bufferAt !== undefined) push(step.bufferAt);
+    const last = () => (buffers.length ? buffers[buffers.length - 1] : undefined);
+    const sleeps: number[] = [];
+    return {
+      setNow: (v: number) => (now = v),
+      buffers,
+      sleeps,
+      deps: {
+        now: () => now,
+        sleep: async (ms: number) => {
+          sleeps.push(ms);
+          now += ms;
+        },
+        lastBufferedAt: last,
+      },
+    };
+  };
+
+  it("队列里没有附件：不等", async () => {
+    const h = harness();
+    expect(await waitForSettledAttachments({ ...h.deps, quietMs: 700, maxMs: 3_000 })).toBe(0);
+    expect(h.sleeps).toEqual([]);
+  });
+
+  it("已经安静够久：直接提交", async () => {
+    const h = harness([{ atMs: 0, bufferAt: 0 }]);
+    h.setNow(1_000);
+    expect(await waitForSettledAttachments({ ...h.deps, quietMs: 700, maxMs: 3_000 })).toBe(0);
+    expect(h.sleeps).toEqual([]);
+  });
+
+  it("刚入队：等到安静 quietMs 为止", async () => {
+    const h = harness([{ atMs: 0, bufferAt: 800 }]);
+    h.setNow(900);
+    expect(await waitForSettledAttachments({ ...h.deps, quietMs: 700, maxMs: 3_000 })).toBe(600);
+    // 起点是 900，安静到 1500 才提交
+    expect(h.sleeps).toEqual([600]);
+  });
+
+  it("等待期间又来了附件：重新计时", async () => {
+    const h = harness([{ atMs: 0, bufferAt: 900 }]);
+    h.setNow(1_000);
+    const wait = waitForSettledAttachments({ ...h.deps, quietMs: 700, maxMs: 3_000 });
+    // 600ms 后（t=1600）新附件到了：再来一张
+    h.setNow(1_600);
+    h.buffers.push(1_600);
+    expect(await wait).toBe(1_300); // 安静到 2300
+    expect(h.sleeps).toEqual([600, 700]);
+  });
+
+  it("总等待有上限：用户一直发图也不会把已发的文字饿死", async () => {
+    let now = 0;
+    let lastAt = 0;
+    const sleeps: number[] = [];
+    const res = await waitForSettledAttachments({
+      now: () => now,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+        now += ms;
+        // 每 100ms 来一张，永远安静不下来
+        lastAt = now;
+      },
+      lastBufferedAt: () => lastAt,
+      quietMs: 700,
+      maxMs: 3_000,
+    });
+    expect(res).toBe(3_000);
+    expect(now).toBe(3_000);
+  });
+});
+
+describe("MediaRoute.lastBufferedAt（防抖依据）", () => {
+  it("入队时记录时间，取走/清空后不再有", () => {
+    let now = 0;
+    const route = new MediaRoute(60_000, () => now);
+    expect(route.lastBufferedAt("u")).toBeUndefined();
+    route.arm("u", 1, "k");
+    now = 100;
+    route.buffer("u", [att("a")], "m1", 1);
+    expect(route.lastBufferedAt("u")).toBe(100);
+    now = 250;
+    route.buffer("u", [att("b")], "m2", 1);
+    expect(route.lastBufferedAt("u")).toBe(250);
+    route.takePending("u");
+    expect(route.lastBufferedAt("u")).toBeUndefined();
   });
 });

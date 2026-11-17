@@ -96,6 +96,7 @@ import {
   decideInboundRoute,
   deliveryTarget,
   MediaRoute,
+  waitForSettledAttachments,
   type PendingBatch,
 } from "./daemon/media-route.js";
 import { LONG_REPLY_THRESHOLD, buildMdReply } from "./daemon/messaging/md-reply.js";
@@ -796,6 +797,13 @@ function notifyFast(): void {
 // 默认 3 分钟：发一组图（每张是一条消息）+ 补一句说明常常超过 1 分钟，太短会在中途切回大脑。
 const MEDIA_RECIPIENT_TTL_MS = Number(process.env.WEMIND_MEDIA_RECIPIENT_TTL_MS) || 180_000;
 const mediaRoute = new MediaRoute(MEDIA_RECIPIENT_TTL_MS);
+// 提交前等「后到的图」并批的静默窗口。微信里一张图一条消息，连发几张再立刻发文字时，最后几张往往还在路上；
+// 等到队列安静 `MEDIA_FLUSH_DEBOUNCE_MS` 才提交（用户一直发图时最多等到 `MEDIA_FLUSH_DEBOUNCE_MAX_MS`）。0 = 关闭。
+const MEDIA_FLUSH_DEBOUNCE_MS = (() => {
+  const v = Number(process.env.WEMIND_MEDIA_FLUSH_DEBOUNCE_MS ?? 700);
+  return Number.isFinite(v) && v >= 0 ? v : 700;
+})();
+const MEDIA_FLUSH_DEBOUNCE_MAX_MS = 3_000;
 
 /**
  * 任务被结束时清掉与它相关的收件人状态（微信 `结束任务` 与本地 `wemind task-stop` 共用）。
@@ -1189,6 +1197,20 @@ async function handleFastItem(
   // ── 收件人模式：无前缀文字与已攒附件一起提交给收件人 ──
   if (item.toRecipientTaskId !== undefined) {
     const taskId = item.toRecipientTaskId;
+    // 「连发几张图 + 立刻发文字」时最后几张还在路上：先等队列安静一小会儿再取，
+    // 免得晚到的那张被挤到下一个回合（下一个回合往往就是「用户早就问完的问题」）。
+    if (MEDIA_FLUSH_DEBOUNCE_MS > 0 && mediaRoute.pendingCount(from) > 0) {
+      const waited = await waitForSettledAttachments({
+        now: Date.now,
+        sleep: async (ms) => {
+          await sleep(ms);
+        },
+        lastBufferedAt: () => mediaRoute.lastBufferedAt(from),
+        quietMs: MEDIA_FLUSH_DEBOUNCE_MS,
+        maxMs: MEDIA_FLUSH_DEBOUNCE_MAX_MS,
+      });
+      if (waited > 0) log.info(`media-route: 等后到的附件 ${waited}ms（#${taskId}）`);
+    }
     const batch = mediaRoute.takePending(from);
     // 队列可能是在**另一条任务**当收件人时攒的（指针过期后重新设过收件人）：按批次归属投递。
     const targetId = deliveryTarget(batch, taskId);

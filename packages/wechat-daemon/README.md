@@ -124,6 +124,7 @@ wemind brain check                   # ③ 验证大脑能实现 ACP（initializ
 | `WECHAT_INBOUND_MEDIA_MAX_MB` / `WECHAT_OUTBOUND_FILE_MAX_MB`                         | 入站文件/视频/语音单文件上限（默认 100）/ 出站附件单文件上限（默认 25）                                                                             |
 | `WECHAT_MEDIA_TTL_DAYS` / `WECHAT_MEDIA_MAX_MB`                                       | 入站媒体（`direct` 为 `<账号>/media/inbound`，`managed` 为副本内）保留天数 / 总量上限（默认 30 天 / 1GB；目录 0700 / 文件 0600；启动时 + 写入媒体时清理、至少间隔 1 小时，节流按目录分别记时，两份目录不互相饿死）                     |
 | `WEMIND_MEDIA_RECIPIENT_TTL_MS`                                                        | 微信「收件人模式」无活动自动退出的时长（默认 180000，即 3 分钟；滑动续期，发附件也算活动；到期把待投递附件补交回去并回执） |
+| `WEMIND_MEDIA_FLUSH_DEBOUNCE_MS`                                                       | 微信「收件人模式」提交前等「后到的图」并批的静默窗口（默认 700；`0` = 关闭；总等待上限 3 秒）                              |
 | `WECHAT_TOOL_PROGRESS_ITEMS`                                                          | 结构化工具进度 item（11/12）开关（**默认关**：微信客户端目前不渲染，只发文本「步骤 N」；`1` = 启用）                                                |
 
 ## 与 MCP 形态的区别

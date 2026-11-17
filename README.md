@@ -411,6 +411,7 @@ npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 | `WEMIND_MAX_WORKERS` / `WEMIND_IDLE_MAX`                | 同时运行的任务数上限（默认 3）/ 池中保留的空闲进程数（默认 2）                                                                      |
 | `WEMIND_MAX_WORKERS_TOTAL`                              | 仅 `scripts/run-all-daemons.ps1` 读取：按账号数均分给每个 daemon 的全局 worker 预算（至少 1）；单独 `wemind start` 不读 |
 | `WEMIND_MEDIA_RECIPIENT_TTL_MS`                         | 「收件人模式」无活动自动退出的时长（默认 180000，即 3 分钟；滑动续期，发附件也算活动）                                |
+| `WEMIND_MEDIA_FLUSH_DEBOUNCE_MS`                        | 「收件人模式」提交前等后到的图并批的静默窗口（默认 700；`0` = 关闭；总等待上限 3 秒）                                  |
 | `WEMIND_WORKER_REAP_MS`                                 | 空闲 worker 进程回收时间（默认 300000，即 5 分钟；**注意不是** `WEMIND_WORKER_IDLE_MS`——那是单轮 prompt 空闲超时）                   |
 | `WEMIND_WORKER_PROGRESS`                                | 是否推送 worker 全程文字进度（默认 `0` 安静；`1` 开启。「正在输入中」始终有）                                                       |
 | `WEMIND_TASK_SCAN_MS`                                   | daemon 扫描本地命令收件箱 `task-inbox/` 与控制桥 `control-inbox/` 的间隔毫秒（默认 1000）                                          |
