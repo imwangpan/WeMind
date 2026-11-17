@@ -144,8 +144,8 @@ describe("task-manager 状态机（单任务：行为与改造前一致）", () 
     });
 
     const ack = dispatchTask("u1", "做X");
-    expect(ack).toContain("已派");
-    expect(ack).not.toContain("#1"); // 单任务免编号：沿用改造前那句话
+    expect(ack).toContain("已派发任务 #1"); // 一律带编号：收件人回执、任务列表都按编号走
+    expect(ack).toContain("结束发「结束任务 1」");
     await vi.waitFor(() => expect(hasActiveTask("u1")).toBe(true));
     const conn = conns[0];
     await vi.waitFor(() => expect(conn.ask).toHaveBeenCalledTimes(1));
@@ -910,11 +910,22 @@ describe("本地命令的答复（daemon 说了才算）", () => {
   it("派发成功：**起进程之后**才答复「已派发 #1」", async () => {
     const r = dispatchTask("u1", "做X", { agentKey: "kiro", ackId: "ack-1" });
     expect(r).toContain("已派发任务 #1"); // dispatchTask 当场返回的文案仍给微信侧用
+    // 一律带编号；「回话」由任务就绪推送负责，这里不重复；「收掉」统一说「结束」
+    expect(r).toContain("结束发「结束任务 1」");
+    expect(r).not.toContain("回话发");
+    expect(r).not.toContain("已派给工作机执行");
     expect(acks.length).toBe(0); // 进程还没起来 → 还不能说「派上了」
     await vi.waitFor(() => expect(acks.length).toBe(1));
     expect(acks[0].id).toBe("ack-1");
     expect(acks[0].text).toContain("已派发任务 #1");
     expect(acks[0].text).toContain("kiro");
+  });
+
+  it("表里没有别的任务、也没写 agent 名：一样带编号", async () => {
+    expect(listTasks("u9")).toEqual([]);
+    const r = dispatchTask("u9", "做Y");
+    expect(r).toContain("已派发任务 #1");
+    expect(r).toContain("结束发「结束任务 1」");
   });
 
   it("达上限被拒：答复是那句警告（不是「已派发」），任务也不留在表里", async () => {

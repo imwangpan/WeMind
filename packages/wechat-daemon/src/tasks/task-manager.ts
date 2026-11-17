@@ -60,8 +60,6 @@ export type Task = {
   conn?: WorkerConn;
   /** 本地命令（`wemind task`）等着的答复编号：起进程有结果了才回，见 `setTaskAckSink`。 */
   ackId?: string;
-  /** 答复里要不要带编号（带 `--agent`/`--cwd` 或已有别的任务时带）。 */
-  numbered?: boolean;
   /** 下一轮是「从中断处续跑」：会话恢复失败要诚实报错，不能静默换空会话。 */
   strictResume?: boolean;
   pendingInjects?: InjectPayload[];
@@ -339,13 +337,14 @@ export function renderTaskList(userId: string): string {
 
 // ---- 派发与续跑 ----
 /**
- * 答复文案：单任务（且没指定 agent、没指定 cwd）沿用改造前那句话——最常见路径不该变得啰嗦；
- * 其余情况（指定了 agent / 已经有多条任务 / 本地派发）带上编号，因为这时编号才有用。
+ * 派发答复：一律带编号。
+ *
+ * 早期只有一条任务时不带编号（`已派给工作机执行`），理由是不啰嗦；但编号现在不复位，
+ * 且派发会把收件人指针指到这条任务、后续回执都写 `#N`，没有编号反而对不上。
+ * 「回话」的说法由任务自己的就绪推送（`replyFooter()`）给出，这里不再重复。
  */
-function ackFor(task: Task, numbered: boolean): string {
-  if (!numbered)
-    return "✅ 已派给工作机执行（任务运行中）。需要你决策或中断时我会主动找你；随时可回复「结束任务」终止。";
-  return `✅ 已派发任务 #${task.id}（${task.agent} 执行）。看进展发「任务列表」，回话发「#${task.id} 正文」，收掉发「结束任务 ${task.id}」。`;
+function ackFor(task: Task): string {
+  return `✅ 已派发任务 #${task.id}（${task.agent} 执行）。需要你决策或中断时我会主动找你；看进展发「任务列表」，结束发「结束任务 ${task.id}」。`;
 }
 
 /** 解析「本任务用哪个 agent」：显式 agent 名优先，否则默认任务大脑。 */
@@ -388,7 +387,6 @@ export function dispatchTask(
     ackIf(opts.ackId, r);
     return r;
   }
-  const numbered = !!opts.agentKey || !!opts.cwd || listTasks(to).length > 0;
   const id = takeNextId(store, to);
   const task: Task = {
     id,
@@ -399,7 +397,6 @@ export function dispatchTask(
     turns: 0,
     startedAt: 0, // 真正起进程时再定（起进程可能失败）
     ag: got.ag,
-    numbered,
   };
   if (opts.cwd) task.cwd = opts.cwd;
   if (opts.ackId) task.ackId = opts.ackId;
@@ -408,7 +405,7 @@ export function dispatchTask(
   persist();
   emitState();
   void runTask(task, text, opts.images);
-  return ackFor(task, numbered);
+  return ackFor(task);
 }
 
 /** 会话键：带用户，避免多用户的编号相撞。 */
@@ -478,7 +475,7 @@ async function runTask(
   if (!task.startedAt) task.startedAt = Date.now();
   persist();
   emitState();
-  ackIf(task.ackId, ackFor(task, task.numbered === true)); // 起进程成功：这时才敢说「已派发」
+  ackIf(task.ackId, ackFor(task)); // 起进程成功：这时才敢说「已派发」
   task.ackId = undefined;
   log.info(`task ${task.id} start agent=${ag.name} conn=${conn.id} cwd=${conn.effectiveCwd()}`);
 

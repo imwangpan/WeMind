@@ -1,0 +1,432 @@
+[assistant]
+I need to continue: after the compression, I was in the middle of: tests fixed, need docs + verify + commit + build + restart. Then the parent user message asks about 清理、/rename 跨会话、Agent 获取任务上下文.
+
+Wait — the latest user message is the one asking about three questions (清理 test records, /rename/brain 切换/session 上下文, Agent 怎么获取任务上下文). And there's an intermediate user message "3、可以加一下，我测试一下，这次注意重启" (m03698ish) which authorized adding the task context hint.
+
+So current task: the user asked 3 questions; I answered them (my message with the 3 answers, then they said "可以加一下，我测试一下，这次注意重启"). Hmm, the visible recent user messages: m03331 (table), then "测试消息都发了。你看下是否都正常" ... Actually the very last user message in the conversation is m03698: "3、可以加一下，我测试一下，这次注意重启".
+
+Hmm wait, looking at the visible history: the last user message shown is "3、可以加一下，我测试一下，这次注意重启". And before that the three-part question about 清理/rename/context. My answer listed 3 fixes and asked. Then user approved #3 (task context hint) and said to restart.
+
+Wait no — the message ordering in the conversation: my last assistant message was the "你问的三件事，我实际查了一遍" answer ending with "要我把「它最近在做什么」也塞进任务上下文提示吗？". Then user said "3、可以加一下，我测试一下，这次注意重启".
+
+So the open work: 
+1. Add task context (latest task list) to the worker hint.
+2. Also fixes 1 and 2 mentioned in my answer? I said I'd fix "清掉记录" wording and the rename claim... Let me recall my answer: three answers: (1) 清理 → suggestion to clean records, maybe a command; (2) /rename 不影响已开会话，brain 重启会换会话，任务上下文只给任务列表; (3) suggestion to add task context hint.
+
+I need to check the current state of the repo to know what's done. Since compression lost details, let me check git status/log to see where things stand.
+
+Let me run git status and log.
+
+Also the nudge offers ranges m03553–m03605 (23K), m03705–m03729 (1.1K), m03731–m03751 (2K). Those are likely: the docs/verify/commit for the table work, then the three-question investigation. I should compress them after I understand the state.
+
+Let me first check the repo state.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && git log --oneline -8 && echo --- && git status --short | head -20"}
+
+[tool • bash]
+e96be74 feat(task-list): 任务列表改用 markdown 表格（图标独立首列，最近输出移到表下）
+aacf017 feat(task-list): 任务列表改用 markdown 表格；结束全部任务连待继续记录一起清
+f64fa18 feat(task-list): 一条任务一行 + 状态图标，去掉块式排版
+0079402 feat(task): 新增「全部继续」「全部结束」，任务列表改块状+分隔线
+f7efa1c feat(task-list): 状态「已中断」改「待继续」，任务列表每条间留空行并附状态说明
+b5b698d fix(media-route): 超时回执里的附件去向改成先说结论，不再用从句
+c5ed918 chore(media-route): 回到大脑的回执改用 🏠（🧠 观感差）
+26d07d1 fix(task-manager): 区分「回执文本」与「投递失败」，续跑不再被记为失败
+---
+ M packages/wechat-daemon/src/cli/subcommands/cli-brain.ts
+ M packages/wechat-daemon/src/cli/subcommands/cli-task.ts
+ M packages/wechat-daemon/src/daemon/daemon-control.ts
+ M packages/wechat-daemon/src/index.test.ts
+ M packages/wechat-daemon/src/index.ts
+ M packages/wechat-daemon/src/ipc/chat-command-specs.ts
+ M packages/wechat-daemon/src/tasks/task-manager.test.ts
+ M packages/wechat-daemon/src/tasks/task-manager.ts
+
+[assistant]
+So the working tree has the uncommitted changes from the "去跑 + 最近输出列" work. I need to:
+1. Run tests.
+2. Update docs (表格 6 列, 去「跑」, 结束全部任务 wording).
+3. docs:tables.
+4. verify.
+5. commit + push + build + restart.
+6. Then add the task-context hint (user approved #3).
+
+Wait — but have I already answered the three questions? The conversation shows my answer then user "3、可以加一下". Yes.
+
+Hmm, but the docs for "去跑" might not be done. Let me run tests first, then docs.
+
+Let me run the three test files + full suite later.
+
+Also note: the user's last message says "这次注意重启" — meaning after building, restart the daemons properly.
+
+Let me proceed: run the three test files.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && npx vitest run packages/wechat-daemon/src/tasks/task-manager.test.ts packages/wechat-daemon/src/index.test.ts packages/wechat-daemon/src/ipc/chat-commands.test.ts 2>&1 | tail -25"}
+
+[tool • bash]
+
+[90mstderr[2m | packages/wechat-daemon/src/tasks/task-manager.test.ts[2m > [22m[2m媒体：图片随指令进入任务回合（收件人模式）[2m > [22m[2mfindRecipientTask：只认属于该用户且存在的编号
+[22m[39m[wemind/wechat-daemon/task][INFO] task 1 start agent=kiro conn=fake-kiro-7b59 cwd=/cwd
+
+[90mstderr[2m | packages/wechat-daemon/src/tasks/task-manager.test.ts[2m > [22m[2m媒体：图片随指令进入任务回合（收件人模式）[2m > [22m[2monTaskId 只在真的定位到任务时触发：没有任务 / 多条歧义都不误 arm
+[22m[39m[wemind/wechat-daemon/task][INFO] task 1 start agent=kiro conn=fake-kiro-c1yo cwd=/cwd
+[wemind/wechat-daemon/task][INFO] task 2 start agent=opencode conn=fake-opencode-so6g cwd=/cwd
+
+[90mstderr[2m | packages/wechat-daemon/src/tasks/task-manager.test.ts[2m > [22m[2m媒体：图片随指令进入任务回合（收件人模式）[2m > [22m[2monTaskId 只在真的定位到任务时触发：没有任务 / 多条歧义都不误 arm
+[22m[39m[wemind/wechat-daemon/task][INFO] task 1 loop ended
+[wemind/wechat-daemon/task][INFO] task 2 loop ended
+
+[90mstderr[2m | packages/wechat-daemon/src/tasks/task-manager.test.ts[2m > [22m[2m媒体：图片随指令进入任务回合（收件人模式）[2m > [22m[2monOutcome 区分「真交出」与「找不到」：返回值非空不等于失败
+[22m[39m[wemind/wechat-daemon/task][INFO] task 1 start agent=kiro conn=fake-kiro-loor cwd=/cwd
+
+[90mstderr[2m | packages/wechat-daemon/src/tasks/task-manager.test.ts[2m > [22m[2m媒体：图片随指令进入任务回合（收件人模式）[2m > [22m[2monOutcome 区分「真交出」与「找不到」：返回值非空不等于失败
+[22m[39m[wemind/wechat-daemon/task][INFO] task 1 loop ended
+
+ [32m✓[39m packages/wechat-daemon/src/tasks/task-manager.test.ts [2m([22m[2m40 tests[22m[2m)[22m[33m 2817[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m98 passed[39m[22m[90m (98)[39m
+[2m   Start at [22m 00:25:25
+[2m   Duration [22m 4.34s[2m (transform 963ms, setup 123ms, collect 4.00s, tests 2.89s, environment 1ms, prepare 413ms)[22m
+
+
+
+[assistant]
+All three test files pass (98 tests). Now docs updates for:
+1. 表格加「最近输出」列 (repowiki 07, 使用指南, run-e2e, 已知坑? CHANGELOG).
+2. `结束全部任务` new wording.
+3. 去「跑」wording in docs.
+
+Then docs:tables, verify, commit, push, build, restart.
+
+Then the task-context hint (item 3 approved).
+
+Let me first find doc passages needing update.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && grep -rn \"已结束全部任务\\|当前没有正在运行\\|现在没有在跑\\|在跑的任务\\|没跑完\" --include=*.md docs README.md AGENTS.md packages/*/README.md | head -20"}
+
+[tool • bash]
+docs/ai/recipes/run-e2e.md:188:**全部继续 / 全部结束（2026-11-17 新增）**：先造两条「待继续」（重启 daemon 让在跑/等回复的任务转态，或手工把 `tasks.json` 的 `status` 改成 `interrupted`）→ 微信发 `全部继续` → 回执 `▶️ 已让 2 条任务接着跑：#1、#2` 并附「它们会并行跑…」；日志 `task: resume-all -> …`，`tasks.json` 里两条都应回到 `running`，且各自 `session/load`（不是 `session/new`）。`/resume all` 等价。再发 `全部结束`（或 `结束所有任务`）→ 回执 `🛑 已结束全部任务（N 条）。`，**并且连「待继续」的记录一起清掉**（`🧹 另清掉 M 条待继续的记录（#1、#2）。`）；只剩待继续记录时回 `🧹 已清掉 M 条待继续的任务记录（…）。`；真的什么都没有时回 `没有要结束的任务：现在没有在跑、也没有待继续的。`（旧文案「当前没有正在运行的任务」已废弃，2026-11-17）。顺带核对：`任务列表` 是 markdown 表格（`| ⏸️ | #5 opencode | 待继续 | 3 | 5h28m |`），表头 `| | 任务 | 状态 | 轮次 | 时长 |`，非运行中的任务在表下逐条 `**#5** 最近输出…`；日志有 `task: list(<user>): 📋 任务（N 条）`。
+docs/ai/已知坑.md:49:- **provider 报错的任务转「待继续」（2026-10-29；2026-11-02 路由改版后仍保留）**：`task-manager.ts` 的 `providerIssue()` 认出模型/账号侧错误（额度/余额、密钥鉴权、计费、模型不存在）→ 该任务**直接转「待继续」**（状态如实反映这轮没跑完，也别停在「等你回复」误导用户）→ 账号修好后回 `#n 继续` 续跑（可续跑任务唯一时裸「继续」直接续跑，多条时回编号清单）。判据是关键字表（错误措辞来自各 agent 的 provider、不统一），**限流优先不归类**（先查 429/rate limit/overloaded 再查账号关键字：Google 的按分钟 429 原文就写着「Quota exceeded … requests per minute」，顺序反了会把限流误判成额度问题）；**认不出的一律按老规矩停在「等你回复」**——宁可多误判一次，也不把偶发失败误判成账号问题。改这里的判据别顺手放宽。
+docs/ai/已知坑.md:67:- **`结束全部任务` 曾经不看「待继续」的记录（2026-11-17 修）**：判断「有没有任务」原只看 `liveTasks()`（内存里在跑的），而重启过一次就会积一串 `interrupted`（「待继续」）记录。用户发 `结束全部任务` 时回的是 `当前没有正在运行的任务。`——他以为收完了，`任务列表` 里却还挂着一串，于是又发一遍，反复得到同一句话。现在 `任务列表` 的「在跑 + 待继续」才是任务全集：不带编号的「全部结束」连记录一起清（`🧹 另清掉 M 条待继续的记录（#1、#2）。`），真的空时回 `没有要结束的任务：现在没有在跑、也没有待继续的。`。**新加任务态或新加「清空」类命令时，先问一句：它处理的是哪几个状态的集合？**
+docs/repowiki/07-远程任务-Worker.md:102:**任务级指定 agent**：`任务 <agent 名>：正文`（冒号前必须是**已知 agent 名**，且整串锚定）永远**派发新任务**，不往在跑的任务里塞；冒号前不是 agent 名时**不当成指定 agent**——`任务 明天：去买菜` 整句仍是正文，照旧派给任务侧（想只跟大脑说话用「问大脑 …」）；`任务`/`任务：`（不带 agent 名）同样**一律新建任务**（2026-11-17 起，此前是「已有任务就发给它」），并行发生时回执会提示怎么接着旧任务说。指定的 agent **只对这条任务生效**，不会改变「默认任务大脑」（要改默认用 `切换任务大脑` / CLI `--worker`）。
+docs/repowiki/07-远程任务-Worker.md:124:> **2026-11-15 补注（连接回收的容错）**：`WorkerConn.dropSession()` 整段 try/catch（清 `session-cwd.json` 写盘失败只 WARN），`task-manager.ts` 两处收尾都写成 `try { conn.dropSession(...) } finally { release(conn) / drop(conn); t.conn = undefined }`。此前 `deleteSessionCwd()` 抛错会跳过 `release`/`drop`，把池连接慢慢耗光，且「正在跑的任务」没被力杀。回归用例见 `task-manager.test.ts` 的「结束任务时的收尾容错」。
+docs/repowiki/07-远程任务-Worker.md:181:- **模型/账号侧出错的任务转「待继续」**（1.2.0）：一轮失败且错误文本是 provider 那类（余额/额度不足、密钥鉴权、计费、模型不存在）时，任务**直接转「待继续」**（状态如实反映这轮没跑完）；修好账号后回 `#n 继续` 续跑（无编号的「继续」走关键字闸 `looksLikeResume()`，`#n 继续` 在解析层按 `#<编号> 正文` 分流）。**限流（429/rate limit/overloaded）优先判为「不算」**，仍停在「等你回复」（等一会儿重试就会好）——判据里限流分支在账号关键字之前，否则 Google 的按分钟 429（原文「Quota exceeded … requests per minute」）会被误判成额度问题。判据是关键字表（`providerIssue()`，错误措辞来自各 agent 的 provider、不统一），**认不出的一律按老规矩停在「等你回复」**——宁可多误判一次，也不把偶发失败误判成账号问题。
+docs/repowiki/10-部署与运维.md:57:**进程数模型**：brain 固定 1 个 ACP 进程；worker 是 **N 个**（进程池：并发上限 `WEMIND_MAX_WORKERS` 默认 3、保留空闲进程上限 `WEMIND_IDLE_MAX` 默认 2、空闲超 `WEMIND_WORKER_REAP_MS` 默认 5 分钟回收）。任务跑完**进程留着复用**（不杀）；例外有两种——正在跑的任务被 `结束任务`/`task-stop` 时是**杀掉**（ACP 回合没法优雅取消，进程不保留），「等你回复」的任务一直占着连接、不计入空闲进程；只有 `wemind stop` / daemon 进程退出才**一次杀光整池**。
+docs/使用指南/使用指南-远程任务（worker）.md:96:- **每条任务一条独立 ACP 连接**：互不干扰，一条卡住/结束不影响其它；任务跑完**留着复用**（不杀），空闲超 5 分钟才回收。两个例外：正在跑的任务被 `结束任务` / `task-stop` 时是**直接杀掉**（ACP 回合没法优雅取消，进程不保留）；停在「等你回复」的任务会一直占着那条连接，不计入空闲进程、也不受 5 分钟回收影响。
+docs/使用指南/使用指南-远程任务（worker）.md:105:- **多任务默认上限 3**（`WEMIND_MAX_WORKERS`）：满了再派发会被**直接拒绝**并提示（不排队，避免任务悄悄等着）。任务跑完**进程留着复用**（不杀），空闲连接超 `WEMIND_WORKER_REAP_MS`（默认 5 分钟）回收；但**正在跑的任务被结束时是直接杀掉**（进程不保留），停在「等你回复」的任务则一直占着连接；`wemind stop` / daemon 退出会一次杀光池里全部 worker。
+docs/使用指南/使用指南-远程任务（worker）.md:112:- **模型/账号侧出错（如余额不足）的任务转「待继续」**：这类错误重试也不会好，停在「等你回复」只会让人以为还能接着干，所以一轮失败就直接转**「待继续」**（状态如实反映这轮没跑完）。提示里会说清是哪类问题（额度/余额不足 · 密钥/鉴权有问题 · 计费问题 · 模型不可用），你处理完账号后回 `#<编号> 继续` 从中断处续跑。限流（429）与超时**不在此列**，仍按原样停在「等你回复」，等你回 `#<编号> 继续` 或补充内容。（无论哪种状态，无前缀的普通消息都不会被任务接走。）
+docs/使用指南/新手教程.md:275:- 看进度发 `任务列表`；不想要了就 `结束任务`（只有恰好一条活跃任务时才是它）、`结束任务 2`（结束 2 号）、`结束全部任务` 或 `全部结束`（不带编号的「全部结束」还会把「待继续」的记录一起清掉，回执里会列出清了哪几个）——有两条以上在跑时不带编号会被拒，它会先回一份编号清单让你指明。重启后没跑完的任务都标「待继续」，想一起拉起来就发 `全部继续`（它们在后台并行跑）。
+docs/使用指南/新手教程.md:283:- **最多同时跑 3 条**（想改设 `WEMIND_MAX_WORKERS`）；满了再派会被拒并告诉你。任务跑完（循环结束）进程**留着复用**，空闲 5 分钟自动回收；停在「等你回复」的任务则一直占着那条连接——它不计入空闲进程、也不受 5 分钟回收影响；正在跑的任务被你 `结束任务` 时是**直接杀掉**（ACP 回合没法优雅取消，进程不保留）。
+docs/使用指南/新手教程.md:284:- **daemon 重启后**：没跑完的任务在 `任务列表` 里标着「待继续」，**不会自己跑起来**；你回 `#2 继续`（只有一条可续跑任务时裸「继续」也行）它才试着接上原来的进度。接不上会直说「这次接不上」，并告诉你重试也是一样的结果——想重来就结束这条任务后重新派一条（把进展写进新任务）；续跑前也会提醒你「半截回合可能已经做过一些动作，注意核对」。
+docs/发布与变更记录/CHANGELOG.md:19:- **`结束全部任务` 连「待继续」的记录一起清（2026-11-17）**：此前 `结束全部任务` 只看「在跑」，一堆「待继续」时回 `当前没有正在运行的任务。`——用户以为已经收完，列表里却还挂着一串。现在不带编号的「全部结束」会连记录一起清并逐个列出；真的什么都没有时回 `没有要结束的任务：现在没有在跑、也没有待继续的。`；单条 `结束任务`（无编号、无在跑）的文案也从「当前没有正在运行的任务」改为「现在没有在跑的任务」+ 待继续条数提示。
+docs/发布与变更记录/CHANGELOG.md:25:- **任务状态「已中断」改名「待继续」，任务列表排版适配手机（2026-11-17）**：`已中断` 读起来像「已经结束」，而它恰恰是**没跑完、可以接着跑**（进程不在了，发「继续」/`#N 继续` 就能续上）。`task-manager.ts` 的 `STATUS_LABEL` 与 CLI `task-list` 的同一处文案都改为 `待继续`，`重启：N 条…转为「待继续」`、`有 N 条任务停在半路（待继续），请指明编号：…` 一并改口。`renderTaskList()` 改为**每条任务之间空一行**（手机上连着 6 条会糊成一坨），`cwd` 挪到单独一行，并在有「待继续」任务时附一句状态说明：`「待继续」= 进程不在了，发「继续」（或「#N 继续」）接着跑；上一步可能已经改过文件，先核对。不要的用「结束任务 <编号>」清掉。`
+docs/设计文档/受控 ACP 工作机（Worker）设计文档.md:73:- **工作机是个进程池**（阶段 2，随 1.2.0 发布）：`worker-pool.ts` 管多个 worker 进程（每任务一条独立连接），跑完**留着复用**、空闲回收，并发上限默认 3（例外：正在跑的任务被结束时**杀掉**、进程不保留；停在「等回复」的任务占着那条连接，不计入空闲进程）。
+docs/设计文档/受控 ACP 工作机（Worker）设计文档.md:179:- **资源**：每个 worker 是一个常驻 agent 进程（内存/算力开销）；改成进程池后任务跑完**留着复用**而不是跑完即杀——用常驻换启动开销，并发上限就是这个平衡的闸。例外：正在跑的任务被中途结束是**杀掉**（回合没法优雅取消），「等回复」的任务占着连接、不计入空闲进程。
+docs/设计文档/远程任务（Worker）接收、发送非文本消息设计与实现.md:228:`任务：正文` **立即派发**（worker 马上开跑，无额外延迟）；随后发来的附件进待投递队列，在下一个提交点作为**后续回合**注入这条在跑的任务。附件与首句不同回合，符合「微信装不下图文同条」的现实。
+
+
+[assistant]
+Docs need several updates. Let me focus on the ones affected by this change:
+
+1. `docs/ai/recipes/run-e2e.md:188` — update expectations: table with 6 columns, `已结束全部任务（N 条），当前没有正在运行的任务。`, `没有要结束的任务：当前没有正在运行的任务，也没有待继续的。`, `已让 2 条任务继续运行`, `它们会并行运行`, and the last-output column.
+
+2. `docs/ai/已知坑.md:67` — update the wording quoted there (`当前没有正在运行的任务。` → new wording).
+
+3. `docs/repowiki/07-远程任务-Worker.md` — table description (6 columns incl. 最近输出), 全部结束回执 wording.
+
+4. `docs/使用指南/使用指南-远程任务（worker）.md` and 新手教程 — table description + 结束全部任务 wording.
+
+5. `CHANGELOG.md` — update entries for the 6-column table + wording.
+
+6. Also "任务列表排版" mention in repowiki/07 & 使用指南.
+
+Let me look at the exact passages to patch. Let me view relevant lines.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && grep -n \"任务列表\" docs/repowiki/07-远程任务-Worker.md docs/使用指南/使用指南-远程任务（worker）.md docs/使用指南/新手教程.md docs/ai/recipes/run-e2e.md | head -20"}
+
+[tool • bash]
+docs/repowiki/07-远程任务-Worker.md:165:| `任务列表` / `/tasks` | markdown 表格：图标 + 编号 + agent + 状态 + 轮次 + 时长；非运行中的再在表下逐条列最近输出 |
+docs/repowiki/07-远程任务-Worker.md:176:- **任务列表排版（2026-11-17 定型）**：**markdown 表格**——第一列状态图标（`▶️` 运行中 / `💬` 等你回复 / `⏸️` 待继续），其余列 `#编号 agent` / 状态 / 轮次 / 时长，标题带待继续计数 `📋 任务（6 条 · 3 个待继续）`；非运行中任务的最近输出不进表格（会把列撑爆），放在表下逐条 `**#5** …`（压成单行、截断 80 字）。**微信能渲染 markdown 表格**（2026-11-17 实测确认；此前「不渲染」的结论是错的），但单元格里的 `|` 会破表、反引号会把整行吞掉，统一过 `cell()`（`|`→`∣`、反引号→单引号、换行→空格）。空行仍会被压掉，结构靠表格/序号/分隔线承载，不靠空行与字符对齐。
+docs/repowiki/07-远程任务-Worker.md:195:- 未完成的任务标为 **「待继续」**，在 `任务列表` 可见；
+docs/repowiki/07-远程任务-Worker.md:271:| `task-list [<key\|label>]` | 任务列表（编号/agent/状态/轮次/时长） |
+docs/使用指南/使用指南-远程任务（worker）.md:59:任务列表                                                ← 编号 + agent + 状态 + 轮次
+docs/使用指南/使用指南-远程任务（worker）.md:72:| **看状态** | worker 推来的 `🤖【任务】…` 消息；或 `任务列表` / `/tasks` | `task-status [<key\|label>]` / `task-list [<key\|label>]`（有任务表时两者是同源的一份列表；表空/不存在才退回读单个记录） |
+docs/使用指南/使用指南-远程任务（worker）.md:110:- **中断恢复**：worker 崩溃/超时会提示「回复『继续』恢复」，回 `继续` 会尝试从上次会话续上（`session/load`，不支持时 `session/resume`）。**daemon 重启**后未完成的任务则标为**「待继续」**（在 `任务列表` 可见），**不会**自动跑起来；你回 `继续`（多条时 `#<编号> 继续`）才拉进程 + 按该 agent 的能力试 `session/load` → `session/resume` 续跑；要一起拉起来就发 `全部继续`。**接不上会明确说「这次接不上」**，不会假装成功——而且它**不会**劝你「把进展重述一遍」：重述也是走同一条恢复路径、还是接不上。真想从这条任务重来，就 `结束任务 <编号>` 后重新派一条（把进展写进新任务里）；续跑前会提示「半截回合的副作用可能已经发生，注意核对」。
+docs/使用指南/使用指南-远程任务（worker）.md:111:- **任务列表排版（2026-11-17 定型）**：**markdown 表格**——图标列 `▶️` 运行中 / `💬` 等你回复 / `⏸️` 待继续，其余列 `#编号 agent` / 状态 / 轮次 / 时长；非运行中任务的最近输出放在表下逐条 `**#5** …`（≤80 字）。微信能渲染 markdown 表格，但单元格里的 `|` 与反引号要先处理（`cell()`），空行仍会被压掉。
+docs/使用指南/新手教程.md:249:| `任务列表` / `结束任务`                                      | 看任务 / 结束任务                                                      |
+docs/使用指南/新手教程.md:259:- **`AI` / `切换大脑` / `切换任务大脑` / `交接` 这四条是账号级指令**（在代码里只有登录者能发；何况微信平台本来就只有你能给这个 bot 发消息）——它们影响整个账号的大脑。**会话管理（新会话 / 会话列表 / 恢复会话 / 重命名 / 删除）和任务指令（派发、`#n` 回话、任务列表、结束任务）是「登录者自己的」**：永远只属于你一个人。
+docs/使用指南/新手教程.md:275:- 看进度发 `任务列表`；不想要了就 `结束任务`（只有恰好一条活跃任务时才是它）、`结束任务 2`（结束 2 号）、`结束全部任务` 或 `全部结束`（不带编号的「全部结束」还会把「待继续」的记录一起清掉，回执里会列出清了哪几个）——有两条以上在跑时不带编号会被拒，它会先回一份编号清单让你指明。重启后没跑完的任务都标「待继续」，想一起拉起来就发 `全部继续`（它们在后台并行跑）。
+docs/使用指南/新手教程.md:284:- **daemon 重启后**：没跑完的任务在 `任务列表` 里标着「待继续」，**不会自己跑起来**；你回 `#2 继续`（只有一条可续跑任务时裸「继续」也行）它才试着接上原来的进度。接不上会直说「这次接不上」，并告诉你重试也是一样的结果——想重来就结束这条任务后重新派一条（把进展写进新任务）；续跑前也会提醒你「半截回合可能已经做过一些动作，注意核对」。
+docs/ai/recipes/run-e2e.md:184:微信端等价：`任务：xxx`、`任务 opencode：xxx`、`任务列表`、`#2 继续`、`结束任务 2`。
+docs/ai/recipes/run-e2e.md:186:**任务列表排版（2026-11-17 定型）**：发 `任务列表` 应收到 markdown 表格（微信能渲染），第一列是状态图标 `⏸️ #5 opencode | 待继续 | 3 | 5h52m` 这种行；多条「待继续」时表下逐条 `**#5** 最近输出…`（≤80 字）。表格里**不应出现**裸 `|`（会被 `cell()` 换成 `∣`）或反引号（会吞整行）。日志 `task: list(<user>): 📋 任务（N 条…）`。
+docs/ai/recipes/run-e2e.md:188:**全部继续 / 全部结束（2026-11-17 新增）**：先造两条「待继续」（重启 daemon 让在跑/等回复的任务转态，或手工把 `tasks.json` 的 `status` 改成 `interrupted`）→ 微信发 `全部继续` → 回执 `▶️ 已让 2 条任务接着跑：#1、#2` 并附「它们会并行跑…」；日志 `task: resume-all -> …`，`tasks.json` 里两条都应回到 `running`，且各自 `session/load`（不是 `session/new`）。`/resume all` 等价。再发 `全部结束`（或 `结束所有任务`）→ 回执 `🛑 已结束全部任务（N 条）。`，**并且连「待继续」的记录一起清掉**（`🧹 另清掉 M 条待继续的记录（#1、#2）。`）；只剩待继续记录时回 `🧹 已清掉 M 条待继续的任务记录（…）。`；真的什么都没有时回 `没有要结束的任务：现在没有在跑、也没有待继续的。`（旧文案「当前没有正在运行的任务」已废弃，2026-11-17）。顺带核对：`任务列表` 是 markdown 表格（`| ⏸️ | #5 opencode | 待继续 | 3 | 5h28m |`），表头 `| | 任务 | 状态 | 轮次 | 时长 |`，非运行中的任务在表下逐条 `**#5** 最近输出…`；日志有 `task: list(<user>): 📋 任务（N 条）`。
+docs/ai/recipes/run-e2e.md:192:**provider 报错不抢消息（2026-10-29 新增，真机最省事的做法是拿一条余额不足的 agent 现成复现）**：派一条注定失败的任务（如当前 `deepseek` 余额不足）→ 推送应是「中断了（**额度/余额不足**）」、`任务列表` 显示「**待继续**」而不是「等你回复」→ **紧接着发一条无编号的普通消息**（如「在吗」）→ 它必须**走大脑**（修复前：被那条 waiting 任务吞掉，又白失败一轮）；**账号修好后**再回「继续」/`#n 继续` 才是能续上的那一步（账号没修好时续跑只是又失败一轮、退回「待继续」，这是预期的）。日志对照 `task <n> turn failed:` 紧跟着的 `task <n> provider issue（…）→ 已转「待继续」`。
+docs/ai/recipes/run-e2e.md:291:期望：`任务列表` 显示该任务「待继续」；回「继续」（或 `#n 继续`）**才**拉进程续跑，上下文接上；agent 不支持恢复时给「这次接不上」这类诚实文案（并指出重试无效、要重来就结束这条任务后重新派），**不**假装成功；编号不归零（新任务编号接着排）。
+docs/ai/recipes/run-e2e.md:349:复现：`wemind stop <key> && wemind start <key>` → 不在微信发消息 → 本地 `wemind task "…"` 派一条短任务 → 等它跑完 → 结果没到（修复前）。修复后同样的步骤：日志出现「`send -2（旧 token）→ 挂起，累计 N 条`」→ 在微信发任意一条消息 → 日志「`新 token 已到 → 补发挂起消息 N 条`」→ 补发真的到达（排在那一批消息触发的进度/答案之前）。挂起只在「该用户本进程还没发过消息」时有意义（此后 `-2` 按限流处理、不挂起）；队列只在内存、每人上限 20 条、每轮最多补发 5 条且不越过本回合留给答复的额度、同一条最多补发 3 次（超过放弃并记日志）；daemon 再重启一次队列会丢，但结果仍在 `tasks.json`/`任务列表`。
+docs/ai/recipes/run-e2e.md:359:实测（2026-10-29，本机真 daemon + DSH 余额不足）：重启 daemon（顺带把上一版留下的 waiting 任务 #12 读回成「待继续」）→ 本地派 #13 → 日志 `w1 ← session/prompt#4 ERROR … Insufficient Balance` → `task 13 turn failed: …` → `任务列表` 显示 `#13 [deepseek] 待继续 · 0 轮`，最近输出是「中断了（**额度/余额不足**）。这类错误重试也不会好——修好后回复「#13 继续」…」；`workers.pid.json` 为空、无残留 `dsh` 进程（失败时 `ask()` 已 `kill()` → `release()` 把死连接摘出池，不会留死壳被下一条任务复用）。
+
+
+[assistant]
+Let me now apply doc updates with a script (careful with special chars). I'll use node with replacements.
+
+Docs to update:
+
+1. `docs/repowiki/07-远程任务-Worker.md:165`: `| 任务列表 / /tasks | markdown 表格：图标 + 编号 + agent + 状态 + 轮次 + 时长；非运行中的再在表下逐条列最近输出 |` → `… + 时长 + 最近输出（末列，手机可横向滑动） |`
+
+2. `docs/repowiki/07-远程任务-Worker.md:176`: rewrite "任务列表排版" bullet: 6 columns incl 最近输出, note about 最近输出 in table now.
+
+3. `docs/repowiki/07-远程任务-Worker.md:271`: CLI table row — CLI unchanged (2-space). Fine.
+
+4. `docs/使用指南/使用指南-远程任务（worker）.md:111`: same as 2.
+
+5. `docs/使用指南/使用指南-远程任务（worker）.md:59`: code block `任务列表 ← 编号 + agent + 状态 + 轮次` → add 最近输出.
+
+6. `docs/ai/recipes/run-e2e.md:186`: update to 6 columns and note 最近输出 column.
+
+7. `docs/ai/recipes/run-e2e.md:188`: update wordings.
+
+8. `docs/ai/已知坑.md:67`: update quoted old/new wording.
+
+9. `CHANGELOG.md:19` and `:25` — add entries about 最近输出 column + wording 运行.
+
+10. `新手教程:275`: add 结束全部任务 wording? Not necessary (it's descriptive). But "并行跑" → "并行运行"? That's doc prose; the user asked about 提示消息. Leave prose mostly, but the docs quote receipts — update quotes.
+
+Let me also update `AGENTS.md` if it mentions 任务列表 format... probably not.
+
+Let me write a node script with replacements.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && cat > /tmp/fix1.mjs <<'EOF'\nimport fs from \"node:fs\";\nconst rep = (p, pairs) => {\n  let s = fs.readFileSync(p, \"utf8\");\n  for (const [a, b] of pairs) {\n    if (!s.includes(a)) { console.log(\"MISS\", p, a.slice(0, 40)); continue; }\n    s = s.split(a).join(b);\n  }\n  fs.writeFileSync(p, s);\n};\nrep(\"docs/repowiki/07-远程任务-Worker.md\", [\n  [\"| `任务列表` / `/tasks` | markdown 表格：图标 + 编号 + agent + 状态 + 轮次 + 时长；非运行中的再在表下逐条列最近输出 |\",\n   \"| `任务列表` / `/tasks` | markdown 表格：图标 + 编号 + agent + 状态 + 轮次 + 时长 + 最近输出（末列；手机上表格可横向滑动） |\"],\n  [\"其余列 `#编号 agent` / 状态 / 轮次 / 时长，标题带待继续计数 `📋 任务（6 条 · 3 个待继续）`；非运行中任务的最近输出不进表格（会把列撑爆），放在表下逐条 `**#5** …`（压成单行、截断 80 字）。\",\n   \"其余列 `#编号 agent` / 状态 / 轮次 / 时长 / 最近输出（压成单行、截断 80 字；没有输出的显示 `—`），标题带待继续计数 `📋 任务（6 条 · 3 个待继续）`。最近输出放末列而不是表下：2026-11-17 真机确认微信渲染表格可左右滑动，不怕撑宽，换来「一条任务一行」。\"],\n]);\nrep(\"docs/使用指南/使用指南-远程任务（worker）.md\", [\n  [\"任务列表                                                ← 编号 + agent + 状态 + 轮次\",\n   \"任务列表                                                ← 编号 + agent + 状态 + 轮次 + 最近输出\"],\n  [\"其余列 `#编号 agent` / 状态 / 轮次 / 时长；非运行中任务的最近输出放在表下逐条 `**#5** …`（≤80 字）。微信能渲染 markdown 表格，但单元格里的 `|` 与反引号要先处理（`cell()`），空行仍会被压掉。\",\n   \"其余列 `#编号 agent` / 状态 / 轮次 / 时长 / **最近输出**（压成单行、≤80 字，没有的显示 `—`）。最近输出进表格是因为微信渲染表格可以左右滑动，不会把列撑爆；一条任务一行，手机上更好扫。微信能渲染 markdown 表格，但单元格里的 `|` 与反引号要先处理（`cell()`），空行仍会被压掉。\"],\n]);\nrep(\"docs/ai/recipes/run-e2e.md\", [\n  [\"第一列是状态图标 `⏸️ #5 opencode | 待继续 | 3 | 5h52m` 这种行；多条「待继续」时表下逐条 `**#5** 最近输出…`（≤80 字）。\",\n   \"第一列是状态图标，行如 `| ⏸️ | #5 opencode | 待继续 | 3 | 5h52m | 最近输出… |`（末列是最近输出，压成单行、≤80 字，没有的显示 `—`）。\"],\n  [\"→ 回执 `▶️ 已让 2 条任务接着跑：#1、#2` 并附「它们会并行跑…」\",\n   \"→ 回执 `▶️ 已让 2 条任务继续运行：#1、#2` 并附「它们会并行运行…」\"],\n  [\"→ 回执 `🛑 已结束全部任务（N 条）。`\",\n   \"→ 回执 `🛑 已结束全部任务（N 条），当前没有正在运行的任务。`\"],\n  [\"真的什么都没有时回 `没有要结束的任务：现在没有在跑、也没有待继续的。`（旧文案「当前没有正在运行的任务」已废弃，2026-11-17）。\",\n   \"真的什么都没有时回 `没有要结束的任务：当前没有正在运行的任务，也没有待继续的。`（2026-11-17）。\"],\n  [\"表头 `| | 任务 | 状态 | 轮次 | 时长 |`，非运行中的任务在表下逐条 `**#5** 最近输出…`\",\n   \"表头 `| | 任务 | 状态 | 轮次 | 时长 | 最近输出 |`\"],\n]);\nrep(\"docs/ai/已知坑.md\", [\n  [\"真的空时回 `没有要结束的任务：现在没有在跑、也没有待继续的。`\",\n   \"真的空时回 `没有要结束的任务：当前没有正在运行的任务，也没有待继续的。`；只收掉在跑的时回 `🛑 已结束全部任务（N 条），当前没有正在运行的任务。`\"],\n]);\nEOF\nnode /tmp/fix1.mjs"}
+
+[tool • bash]
+(no output)
+
+[assistant]
+No MISS printed → all replacements applied. Now CHANGELOG entries. Let me look at the current Unreleased section head to add entries about the table column + wording.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && sed -n '1,35p' docs/发布与变更记录/CHANGELOG.md"}
+
+[tool • bash]
+# Changelog
+
+本文件记录本 Fork 相对上游 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server) 的改动。
+
+> **版本边界**：下面每个 `## [x.y.z]` 段只记**该版本发布时**的行为。发布之后才改的行为进 `## [Unreleased]`，不要回改已发布版本的条目——用户装的 1.4.0 与条目描述必须对得上。各版本条目里的源码路径是**发布当时**的路径；2026-11-06 起 `src/` 已分层，旧路径不再存在，现行位置见 [`docs/ai/代码地图.md`](../ai/代码地图.md)。
+
+## [Unreleased] — 发布后的改动（2026-11-17 起）
+
+<!-- 下一个版本发布时，把本节内容整体移入新的 `## [x.y.z]` 段，并写上实际发布日。 -->
+
+### Added
+
+- **worker 接收图片/文件等非文本消息（2026-11-16）**：微信侧非文本消息本身不带地址，新增**收件人模式**——`#<编号>` / `发给任务 <编号>` 只把任务设为收件人（`任务：` / `#<编号> 正文` / `继续` 顺带设置），之后不带前缀的文字与附件都交给该任务。附件先入内存待投递队列（首批回执 `📎 已把收到的附件交给 #N…`），下一句文字或 `好了`/`就这样` 时经 `prepareInboundMedia()`（`daemon/messaging/inbound-media.ts`，从 `index.ts` 抽出的 brain 媒体管线）下载解密，图片以 ACP `image` 块、文件/视频/无转写语音以本地路径说明并入同一个 `injectTask(..., { images })` 回合；`applyMediaToPrompt()`（`acp/prompt-media.ts`）让 brain 与 worker 共用同一套「不支持图片就给明确说明、不臆测内容」的降级。收件人按发送者隔离、内存态（`daemon/media-route.ts` 的 `MediaRoute`），静默 3 分钟（`WEMIND_MEDIA_RECIPIENT_TTL_MS`，默认 `180000`）滑动超时自动退出并把队列里的附件补交回去，`回到大脑` / `/to-brain` 主动退出，`问大脑：…` 只逃逸一句，任务结束或 `结束任务` 自动清除。**未设收件人时行为不变**：带附件的消息仍一律交给大脑（`isFastLane()` / `shouldResumeInBrainQueue()` 的安全降级保留）。
+- **brain 逃逸前缀扩展**：除 `问大脑` 外新增 `大脑：xxx` / `大脑 xxx` 与 `brain: xxx` / `brain xxx`（大小写不敏感，必须带冒号或空格）；不带斜杠，避免与 `切换大脑` 的 `/brain` 冲突。
+- **worker 任务结果可以发图片/文件/视频（2026-11-16）**：worker 在结果里写 `![](本地路径或 http 直链)`、`[附件](file:///绝对路径)` / `[文件](…)` / `[视频](…)`，daemon 用与大脑相同的出站管线（`sendReplyMedia()`：`extractImages()` / `extractAttachments()` → `resolveImageBytes()` / `resolveAttachment()`）解析成独立媒体消息再发正文。每张图片/每个文件各占一条连发额度；敏感文件同样被 denylist 拦截，「允许敏感文件」窗口内放行；失败时正文里保留原路径并附说明。worker 每个任务会话首轮会收到一次「可发图/发文件」约定提示（`hintedSessions`）。同一用户的多条任务推送按顺序串行（媒体要先下载/读盘）。任务推送末尾的提示改为「不带前缀的消息**默认**交给大脑（发「#N」可设为收件人）」，收件人模式下不再误导。
+
+### Changed
+
+- **`结束全部任务` 连「待继续」的记录一起清（2026-11-17）**：此前 `结束全部任务` 只看「在跑」，一堆「待继续」时回 `当前没有正在运行的任务。`——用户以为已经收完，列表里却还挂着一串。现在不带编号的「全部结束」会连记录一起清并逐个列出；真的什么都没有时回 `没有要结束的任务：现在没有在跑、也没有待继续的。`；单条 `结束任务`（无编号、无在跑）的文案也从「当前没有正在运行的任务」改为「现在没有在跑的任务」+ 待继续条数提示。
+
+- **新增 `全部继续` / `全部结束`（2026-11-17）**：`全部继续`（`继续全部` / `/resume all`）把停在半路（「待继续」）的任务一起拉起来并行跑，回执列出编号并提示它们并行；`结束全部任务` 之外补了同义的 `全部结束` / `结束所有任务`。此前多任务并存时只能逐条 `#<编号> 继续`，重启一次就积一批「待继续」，手机上逐条发很麻烦。
+- **任务列表改成 markdown 表格（2026-11-17，三次调整）**：先是「块 + 空行」，真机上没改善（微信客户端会把连续空行压成一行），换分隔线后仍然太长；中间一版是「一条任务一行」，最后按用户反馈改成 **markdown 表格**——第一列 `▶️/💬/⏸️` 图标（运行中/等你回复/待继续），其余列 `#编号 agent` / 状态 / 轮次 / 时长，标题带待继续计数（`📋 任务（6 条 · 3 个待继续）`）；非运行中任务的最近输出不进表格（会把列撑爆），放表下逐条 `**#5** …`（单行、≤80 字）。**微信能渲染 markdown 表格**（此前「不渲染」的判断是错的，已纠正）；单元格里的 `|` 与反引号需先转义（`cell()`），空行仍会被压掉。`任务列表` 快车道回执补了日志 `task: list(<user>)`，事后能从 `daemon.log` 核实。
+- **`任务：xxx` / `>xxx` 一律新建任务（2026-11-17）**：此前是「有活跃任务就发给它/追加」——而活跃与否是用户看不见的状态（`waiting` 也算活跃），同一句话时而新建、时而被旧任务吞掉。现在 `index.ts` 的 `toWorker` 分支只调 `dispatchTask`，要接着某条说请用 `#<编号> 正文` 或先把它设为收件人；并行发生时回执带一句教学（`parallelTaskHint()`：`#N 还在跑，两条并行；要接着它说就发「#N 正文」…`）。`任务 <agent>：…` 原本就是新建，行为不变。
+- **收件人默认等待时间 1 分钟 → 3 分钟（2026-11-17）**：`WEMIND_MEDIA_RECIPIENT_TTL_MS` 默认值改 `180000`。一次发一组图（每张都是一条消息）再加一句说明，很容易超过 1 分钟，太短会在中途悄悄切回大脑。
+- **任务状态「已中断」改名「待继续」，任务列表排版适配手机（2026-11-17）**：`已中断` 读起来像「已经结束」，而它恰恰是**没跑完、可以接着跑**（进程不在了，发「继续」/`#N 继续` 就能续上）。`task-manager.ts` 的 `STATUS_LABEL` 与 CLI `task-list` 的同一处文案都改为 `待继续`，`重启：N 条…转为「待继续」`、`有 N 条任务停在半路（待继续），请指明编号：…` 一并改口。`renderTaskList()` 改为**每条任务之间空一行**（手机上连着 6 条会糊成一坨），`cwd` 挪到单独一行，并在有「待继续」任务时附一句状态说明：`「待继续」= 进程不在了，发「继续」（或「#N 继续」）接着跑；上一步可能已经改过文件，先核对。不要的用「结束任务 <编号>」清掉。`
+- **收件人提交前等「后到的图」并批（2026-11-17）**：微信里一张图就是一条消息，用户「连发几张 + 立刻发文字」时最后几张往往还在路上，原先会被挤到下一个回合（看起来像「少发了一张」）。现在触发提交（文字 / `好了`）且队列非空时，先等附件队列**安静 700ms**（`WEMIND_MEDIA_FLUSH_DEBOUNCE_MS`，`0` 关闭）再取，晚到的附件并入同一批；总等待上限 3 秒，避免用户一直发图时已发出的文字永远等下去。只对用户触发的提交生效，TTL 到期 / 换收件人 / `回到大脑` / `结束任务` 一律立即处理。
+- **收件人超时回执加自我标识（2026-11-17）**：文案改为 `⌛ 提醒：收件人 #N 已超时自动取消，之后的文字和附件交给大脑。` 并附一行「这是定时器单独发的提醒，不是对你上一条消息的回复」——它是 15s 清扫定时器发的，常被误读成对刚发那句任务的回复。**同日再改**：附件去向不再写成「（把已收到的附件交回去时：…）」这种从句，改为先说结论 `📎 超时前收到的 N 个附件已交给 #N。`（交不出去时 `没能交给 #N。` 加原因），任务自己的回话（续跑提示之类）另起一行原样附上；判据用 `deliverPending()` 的 `onOutcome`。
+
+### Fixed
+
+- **代码围栏 / 行内代码里的媒体语法不再被当成真要发的附件（2026-11-17，真机发现）**：worker 只是解释用法（「视频写 `[视频](file:///…)` 这样」「图片直接写 `![](路径)` 就行」），daemon 却按示例去读盘/下载，失败后还在答复末尾追加「有 N 个附件没能下载」。现在 `maskCodeRegions()`（`daemon/messaging/markdown-code.ts`）先把围栏代码块与行内代码遮成**等长空白**，`extractImages()` / `extractAttachments()` 只在正文里匹配；正文里的真图片/真附件照常发。
+
+## [2.1.0] Agent 接入配置化与插件化（P0–P4）· 审计修复（2026-11-17）
+
+> 同批无需发布 `@wemind/wechat-mcp`：本版只改 `packages/wechat-daemon`，MCP 包保持 `1.1.4`。
+
+
+[assistant]
+Let me update the CHANGELOG:
+1. The "任务列表改成 markdown 表格" entry: update to 6 columns incl 最近输出, and "四次调整"? Actually now it's 4 iterations: 块+空行 → 分隔线 → 一条一行 → 表格 → 表格+最近输出列. Let me say「四次调整」 and describe final.
+2. The `结束全部任务` entry: update wording quotes.
+3. The 全部继续 entry: `并行跑` → `并行运行`; `它们在后台并行跑`.
+4. The 任务： 一律新建 entry: `#N 还在跑，两条并行` → `#N 还在运行，与这条并行`.
+5. 待继续 entry: `接着跑` → `接着运行`.
+6. Add note about 文案统一用「运行」.
+
+Let me apply.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && cat > /tmp/fix2.mjs <<'EOF'\nimport fs from \"node:fs\";\nconst p = \"docs/发布与变更记录/CHANGELOG.md\";\nlet s = fs.readFileSync(p, \"utf8\");\nconst pairs = [\n  [\"现在不带编号的「全部结束」会连记录一起清并逐个列出；真的什么都没有时回 `没有要结束的任务：现在没有在跑、也没有待继续的。`；单条 `结束任务`（无编号、无在跑）的文案也从「当前没有正在运行的任务」改为「现在没有在跑的任务」+ 待继续条数提示。\",\n   \"现在不带编号的「全部结束」会连记录一起清并逐个列出；只收掉在跑的时回 `🛑 已结束全部任务（N 条），当前没有正在运行的任务。`；真的什么都没有时回 `没有要结束的任务：当前没有正在运行的任务，也没有待继续的。`；单条 `结束任务`（无编号、无在跑）回 `当前没有正在运行的任务。` + 待继续条数提示。\"],\n  [\"把停在半路（「待继续」）的任务一起拉起来并行跑，回执列出编号并提示它们并行\",\n   \"把停在半路（「待继续」）的任务一起拉起来并行运行（回执 `▶️ 已让 N 条任务继续运行：#1、#2`）\"],\n  [\"**任务列表改成 markdown 表格（2026-11-17，三次调整）**：先是「块 + 空行」，真机上没改善（微信客户端会把连续空行压成一行），换分隔线后仍然太长；中间一版是「一条任务一行」，最后按用户反馈改成 **markdown 表格**——第一列 `▶️/💬/⏸️` 图标（运行中/等你回复/待继续），其余列 `#编号 agent` / 状态 / 轮次 / 时长，标题带待继续计数（`📋 任务（6 条 · 3 个待继续）`）；非运行中任务的最近输出不进表格（会把列撑爆），放表下逐条 `**#5** …`（单行、≤80 字）。\",\n   \"**任务列表改成 markdown 表格（2026-11-17，四次调整）**：先是「块 + 空行」，真机上没改善（微信客户端会把连续空行压成一行），换分隔线后仍然太长；第三版是「一条任务一行」，第四版按用户反馈改成 **markdown 表格**——第一列 `▶️/💬/⏸️` 图标（运行中/等你回复/待继续），其余列 `#编号 agent` / 状态 / 轮次 / 时长 / **最近输出**（末列、单行 ≤80 字、没有的显示 `—`），标题带待继续计数（`📋 任务（6 条 · 3 个待继续）`）。最近输出从表下移进表格，是用户真机确认「微信渲染表格可左右滑动」后改的：不怕撑宽，代价只是需要横向滑一下，换来每条任务只占一行。\"],\n  [\"（`parallelTaskHint()`：`#N 还在跑，两条并行；要接着它说就发「#N 正文」…`）\",\n   \"（`parallelTaskHint()`：`#N 还在运行，与这条并行；要接着它说就发「#N 正文」…`）\"],\n  [\"并在有「待继续」任务时附一句状态说明：`「待继续」= 进程不在了，发「继续」（或「#N 继续」）接着跑；上一步可能已经改过文件，先核对。不要的用「结束任务 <编号>」清掉。`\",\n   \"并在有「待继续」任务时附一句状态说明：`「待继续」= 进程不在了，发「继续」（或「#N 继续」）接着运行；上一步可能已经改过文件，先核对。不要的用「结束任务 <编号>」清掉。`\"],\n  [\"### Fixed\\n\",\n   \"### Fixed\\n\\n- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。\\n\"],\n];\nfor (const [a, b] of pairs) {\n  if (!s.includes(a)) console.log(\"MISS:\", a.slice(0, 50));\n  s = s.split(a).join(b);\n}\nfs.writeFileSync(p, s);\nEOF\nnode /tmp/fix2.mjs && grep -c \"运行\" docs/发布与变更记录/CHANGELOG.md"}
+
+[tool • bash]
+51
+
+
+[assistant]
+No MISS. Now:
+1. `npm run docs:tables` (brief changed).
+2. Check other docs for "跑" in receipts — e.g., `docs/ai/recipes/run-e2e.md` already updated for some.
+3. Update `docs/repowiki/07` and 使用指南 for 结束全部任务 wording? Let me grep for the old wording "现在没有在跑" across md — earlier grep showed 已知坑:67 which I fixed, CHANGELOG:19 fixed, run-e2e fixed.
+
+Let me also grep for `已结束全部任务（N 条）。` and `接着跑：` in docs.
+
+Then run docs:tables + verify.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && grep -rn \"已结束全部任务（N 条）。\\|接着跑：#\\|并行跑\\|现在没有在跑\" --include=*.md docs README.md AGENTS.md packages/*/README.md | head"}
+
+[tool • bash]
+docs/repowiki/07-远程任务-Worker.md:167:| `全部继续` / `继续全部` / `/resume all` | 把停在半路（「待继续」）的任务**全部拉起来并行跑**；重启后连「等你回复」的也会变成「待继续」，一并拉起 |
+docs/使用指南/新手教程.md:275:- 看进度发 `任务列表`；不想要了就 `结束任务`（只有恰好一条活跃任务时才是它）、`结束任务 2`（结束 2 号）、`结束全部任务` 或 `全部结束`（不带编号的「全部结束」还会把「待继续」的记录一起清掉，回执里会列出清了哪几个）——有两条以上在跑时不带编号会被拒，它会先回一份编号清单让你指明。重启后没跑完的任务都标「待继续」，想一起拉起来就发 `全部继续`（它们在后台并行跑）。
+docs/发布与变更记录/CHANGELOG.md:31:- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。
+docs/发布与变更记录/CHANGELOG.md:52:- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。
+docs/发布与变更记录/CHANGELOG.md:71:- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。
+docs/发布与变更记录/CHANGELOG.md:113:- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。
+docs/发布与变更记录/CHANGELOG.md:133:- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。
+docs/发布与变更记录/CHANGELOG.md:154:- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。
+docs/发布与变更记录/CHANGELOG.md:172:- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。
+docs/发布与变更记录/CHANGELOG.md:181:- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。
+
+
+[assistant]
+Oops: the `### Fixed\n` replacement hit EVERY occurrence of "### Fixed" in CHANGELOG (multiple release sections), inserting my entry 8 times. I need to remove the duplicates, keeping only the first (Unreleased section).
+
+Let me fix: remove all but the first occurrence of that bullet block.
+
+Also fix:
+- repowiki 07:167 `并行跑` → `并行运行`.
+- 新手教程 275 `并行跑` → `并行运行`, `没跑完的任务` fine (prose)? The user's rule is about 提示消息; but for consistency in docs quoting user-facing behavior, update the quoted receipts. `有两条以上在跑` → `有两条以上正在运行`.
+
+Let me do the CHANGELOG dedupe first.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && cat > /tmp/fix3.mjs <<'EOF'\nimport fs from \"node:fs\";\nconst p = \"docs/发布与变更记录/CHANGELOG.md\";\nlet s = fs.readFileSync(p, \"utf8\");\nconst block = \"\\n- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。\\n\";\nconst parts = s.split(block);\nconsole.log(\"occurrences:\", parts.length - 1);\ns = parts[0] + block + parts.slice(1).join(\"\");\nfs.writeFileSync(p, s);\nEOF\nnode /tmp/fix3.mjs && grep -c \"提示文案统一用\" docs/发布与变更记录/CHANGELOG.md"}
+
+[tool • bash]
+occurrences: 12
+1
+
+
+[assistant]
+12 occurrences → now 1. But wait: `parts[0] + block + parts.slice(1).join("")` — this keeps block only after the first part, and removes all subsequent blocks (since the join drops the separator block). Good, now 1.
+
+But is the remaining one in the Unreleased section? parts[0] ends at the first occurrence, which is the Unreleased `### Fixed` (the first in file order). Let me verify.
+
+Then fix the two remaining 并行跑 in docs.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && grep -n \"提示文案统一用\\|^## \\[\" docs/发布与变更记录/CHANGELOG.md | head -6 && echo --- && cat > /tmp/fix4.mjs <<'EOF'\nimport fs from \"node:fs\";\nconst rep=(p,pairs)=>{let s=fs.readFileSync(p,\"utf8\");for(const [a,b] of pairs){if(!s.includes(a))console.log(\"MISS\",p,a.slice(0,30));s=s.split(a).join(b);}fs.writeFileSync(p,s);};\nrep(\"docs/repowiki/07-远程任务-Worker.md\",[[\"**全部拉起来并行跑**\",\"**全部拉起来并行运行**\"]]);\nrep(\"docs/使用指南/新手教程.md\",[[\"有两条以上在跑时不带编号会被拒\",\"有两条以上正在运行时不带编号会被拒\"],[\"（它们在后台并行跑）\",\"（它们在后台并行运行）\"]]);\nEOF\nnode /tmp/fix4.mjs"}
+
+[tool • bash]
+7:## [Unreleased] — 发布后的改动（2026-11-17 起）
+31:- **提示文案统一用「运行」不用「跑」（2026-11-17）**：任务列表、`全部继续`、`结束全部任务`、并行提示、CLI 的 `task-list` / 内存误用提示等用户可见文案里的「在跑 / 接着跑 / 并行跑 / 没跑完」一律改为「运行」口径（`正在运行` / `接着运行` / `并行运行` / `未完成`）；`续跑` 作为既有术语保留，解析层匹配用户输入的 `接着跑|继续跑` 也不动。
+35:## [2.1.0] Agent 接入配置化与插件化（P0–P4）· 审计修复（2026-11-17）
+56:## [2.0.0] 本机 Agent 终端等效工作模式（默认 direct）· `wemind config|workspace|env`（2026-11-16）
+87:## [1.8.0] 统一日志出口 · 错误定位到 .ts 行号 · `wemind log`（2026-11-11）
+111:## [1.7.0] GitHub Copilot 预设 · 构建拓扑改为 JIT（2026-11-10）
+---
+
+
+[assistant]
+Good — the single remaining entry is at line 31, in the Unreleased section (which starts at line 7 and ends at 35). 
+
+Now: `npm run docs:tables` (spec brief changed), then full verify.
+
+Also need to check `docs/repowiki/07` line 165 already updated; and whether the 任务列表 description in 新手教程 needs the 最近输出 column. Line 249 is just a command table row. Fine.
+
+Let me run docs:tables and format, then verify.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && npm run docs:tables 2>&1 | tail -5 && npx oxfmt --check docs packages/*/README.md README.md AGENTS.md 2>&1 | tail -3"}
+
+[tool • bash]
+> wemind@1.0.1 docs:tables
+> node scripts/gen-docs-tables.mjs
+
+已更新 README.md 的「cli-commands」表格
+docs:tables 完成。
+
+Format issues found in above 57 files. Run without `--check` to fix.
+Finished in 3533ms on 62 files using 8 threads.
+
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && npm run format >/dev/null 2>&1; git diff --stat | tail -5 && npm run verify 2>&1 | tail -25"}
+
+[tool • bash]
+ packages/wechat-daemon/src/index.ts                |  2 +-
+ .../wechat-daemon/src/ipc/chat-command-specs.ts    |  2 +-
+ .../wechat-daemon/src/tasks/task-manager.test.ts   | 20 ++++----
+ packages/wechat-daemon/src/tasks/task-manager.ts   | 58 ++++++++++------------
+ 15 files changed, 64 insertions(+), 68 deletions(-)
+ [32m✓[39m packages/wechat-mcp/src/tools/session-result.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/wechat-daemon/src/cli/cli-dispatch.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/wechat-daemon/src/acp/agent-probe.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 25668[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m未显式 --shell 也能探测 .cmd 适配器 [33m 1749[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m裸名探针按 PATH + PATHEXT 找到 .cmd 适配器 [33m 1821[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m默认只做握手与恢复，不发真实 prompt [33m 1492[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m--deep 发真实 prompt 并验证恢复后的上下文 [33m 1800[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m非空 mcpServers 被拒绝时回退空会话，并写进草稿 [33m 1584[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m--mcp [] 不把 MCP 误报为已测试；显式条目会补 ACP env 数组 [33m 3404[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22mload / resume 复用 session/new 时实际传入的 mcpServers [33m 3507[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m恢复失败不伪造 restore，草稿仍可校验 [33m 1618[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m--deep 的恢复、工具与图片任一失败都不能假绿 [33m 5490[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m草稿写出探针时间与 agent 版本 [33m 1488[2mms[22m[39m
+   [33m[2m✓[22m[39m probeAgent[2m > [22m恢复后有历史回放时草稿自动写 replayOnLoad [33m 1691[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m122 passed[39m[22m[90m (122)[39m
+[2m      Tests [22m [1m[32m1398 passed[39m[22m[2m | [22m[33m4 skipped[39m[90m (1402)[39m
+[2m   Start at [22m 00:26:59
+[2m   Duration [22m 26.70s[2m (transform 5.23s, setup 2.31s, collect 20.78s, tests 92.42s, environment 36ms, prepare 19.45s)[22m
+
+check-agent-docs 通过：10 个预设的接入文档都完整。
+docs:tables 通过：三张表都与代码一致。
+doc-impact 通过：1 条规则要求的文档都已在本次改动中同步。
+checked 561 relative links in 63 markdown files
+OK: no broken relative links
+
+
+[assistant]
+Wait — did `npm run verify` exit 0? It printed the last 25 lines showing tests pass and guards pass. Let me confirm exit code separately. Also the test count is 1398 (docs say 1393? Let me check: docs snapshot may say 122 files / 1393. Hmm, earlier it was 1392/1396. Now 1398 because I added test cases/assertions? Let me check the docs snapshot values and update.
+
+Let me check exit code and doc snapshot.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && npm run verify >/tmp/v.log 2>&1; echo \"EXIT=$?\"; grep -rn \"1392\\|1393\\|1396\\|1398\" docs/ai/代码地图.md docs/repowiki/11-开发指南.md docs/ai/README.md"}
+
+[tool • bash]
+EXIT=0
+docs/ai/代码地图.md:112:> **2026-11-16 更新**：新增 `daemon/media-route.test.ts`（收件人/待投递队列、`decideInboundRoute`、`deliveryTarget`、`purgeForStopped`）、`daemon/messaging/inbound-media.test.ts`、`acp/prompt-media.test.ts`；合并 `main` 后全量 `npm test` **122 个测试文件 / 1396 passed + 4 skipped**（含 `media-route.test.ts` 的 `waitForSettledAttachments()` 防抖用例）。
+docs/repowiki/11-开发指南.md:72:测试用 [vitest](https://vitest.dev/)，根目录 `npm test` 跑全部（2026-11-17 合并 `main` 后全量实测 **122 个测试文件 / 1396 passed + 4 skipped**；新建 `cli/subcommands/cli-config.test.ts`，并补齐 `config.test.ts` / `atomic-json.test.ts` / `inherit.test.ts` / `acp-reverse.test.ts` / `media-store.test.ts` / `acp-connection.test.ts` / `task-manager.test.ts` / `brain-switch.test.ts` / `daemon-control.test.ts` / `parity-direct.test.ts` / `scripts/doc-guards.test.mjs` 的用例；`manage.test.ts` 的进程树用例与 `account.test.ts` 的 POSIX 权限用例仅 POSIX 执行，Windows 上显示 skipped）。跑全量时加 `NODE_OPTIONS=` 前缀清掉环境里的调试器注入，否则 spawn 类用例会超时（本机即如此）。
+
+
+[assistant]
+Counts moved to 1398 (I added assertions/behaviour? perhaps the earlier count was 1396 before adding the new test block rewrite; actually I changed an existing test, not added. Hmm, 1396 → 1398: maybe because task-manager tests got +2? Earlier in b70 I noted 40 tests in task-manager.test.ts; now 40. Hmm.
+
+Whatever, the current truth is 122 files / 1398 passed + 4 skipped. Update both docs.
+
+Then commit, push, build, restart, and then add the task-context hint (item 3).
+
+Wait — should I do the task-context hint before committing? It's a separate feature. The user said "3、可以加一下，我测试一下，这次注意重启". So implement it, then verify, commit (can be one commit or two). I'll do one commit for the table/wording, then implement the hint and another commit — cleaner.
+
+Actually simpler: commit the current work first (table column + wording), push, then implement the hint, verify, commit, push, build, restart once. But the user wants to test with a restart. Fine: after both commits, restart.
+
+Let me update the two snapshots and commit.
+
+[assistant • bash]
+{"command":"cd /d/workspace/projects/WeMind && node - <<'EOF'\nconst fs=require(\"node:fs\");\nfor (const p of [\"docs/ai/代码地图.md\",\"docs/repowiki/11-开发指南.md\"]) {\n  let s=fs.readFileSync(p,\"utf8\");\n  s=s.split(\"122 个测试文件 / 1396 passed + 4 skipped\").join(\"122 个测试文件 / 1398 passed + 4 skipped\");\n  fs.writeFileSync(p,s);\n}\nEOF\ngit add -A && git commit -q -m \"feat(task-list): 最近输出进表格末列；提示文案统一用「运行」\" && git log --oneline -1"}
+
+[tool • bash]
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 171ms on 257 files using 8 threads.
+doc-impact 通过：1 条规则要求的文档都已在本次改动中同步。
+check-agent-docs 通过：10 个预设的接入文档都完整。
+eeb7324 feat(task-list): 最近输出进表格末列；提示文案统一用「运行」
