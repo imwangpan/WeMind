@@ -482,7 +482,7 @@ describe("多任务与编号", () => {
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
     const list = renderTaskList("u1");
     expect(list).toContain("#1");
-    expect(list).toContain("[qoder]");
+    expect(list).toContain("#1 qoder · 等你回复 · 1 轮");
     expect(list).toContain("等你回复");
     expect(list).toContain("1 轮");
     expect(list).toContain("我先问你一件事");
@@ -621,7 +621,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     expect(conns.length).toBe(0); // 没起进程
   });
 
-  it("任务列表：多条之间留空行，只在有「待继续」时附状态说明", () => {
+  it("任务列表：一条任务一行（带状态图标），运行中不附最近输出", () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),
       JSON.stringify({
@@ -633,31 +633,31 @@ describe("任务表写入磁盘与重启续跑", () => {
             userId: "u1",
             agent: "kiro",
             key: "task-1@u1",
-            status: "running",
-            turns: 2,
-            startedAt: 1,
-            lastOutput: "第一条的输出",
-          },
-          {
-            id: 2,
-            userId: "u1",
-            agent: "kiro",
-            key: "task-2@u1",
-            status: "running",
-            turns: 1,
-            startedAt: 2,
+            status: "interrupted",
+            turns: 5,
+            startedAt: Date.now() - 3_600_000,
+            lastOutput: "第一行\n第二行",
           },
         ],
       }),
     );
     initTasks(tmpDir);
     const list = renderTaskList("u1");
-    // 手机上连着多条会糊在一起：标题之后、任务之间都要空一行
-    expect(list.startsWith("📋 任务（2 条）\n\n#1 ")).toBe(true);
-    expect(list).toContain("\n────────\n#2 "); // 空行可能被客户端压掉，分隔线兜底
+    // 标题带待继续计数；每条任务一行（先图标后编号），不再靠空行/分隔线分隔
+    expect(list.startsWith("📋 任务（1 条 · 1 个待继续）")).toBe(true);
+    expect(list).toContain("⏸️ #1 kiro · 待继续 · 5 轮");
+    expect(list).toContain("↳ 最近：第一行 第二行");
     expect(list).toContain("「待继续」= 进程不在了");
+    expect(list).toContain("全部继续");
+    // 运行中的任务不附最近输出（会把列表撑长），图标也不同
+    const [t] = listTasks("u1");
+    t.status = "running";
+    t.lastOutput = "运行中的输出不该出现在列表里";
+    const live = renderTaskList("u1");
+    expect(live).toContain("▶️ #1 kiro · 运行中 · 5 轮");
+    expect(live).not.toContain("运行中的输出不该出现在列表里");
+    expect(live).not.toContain("待继续」= 进程不在了");
   });
-
   it("无编号「继续」也能续跑（微信侧走的就是这条路）；日常提问不会被陈旧的中断任务吞掉", async () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),

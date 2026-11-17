@@ -267,6 +267,13 @@ function since(ms: number): string {
   return `${Math.floor(m / 60)}h${m % 60}m`;
 }
 
+/** 任务列表里的状态图标：手机上一眼能分出「在跑 / 等你 / 停住」。 */
+const STATUS_ICON: Record<TaskStatus, string> = {
+  running: "▶️",
+  waiting: "💬",
+  interrupted: "⏸️",
+};
+
 const STATUS_LABEL: Record<TaskStatus, string> = {
   running: "运行中",
   waiting: "等你回复",
@@ -301,26 +308,29 @@ export function renderTaskList(userId: string): string {
   const all = listTasks(userId);
   if (!all.length)
     return "📋 当前没有任务。派发：直接发「任务：正文」或「任务 <agent 名>：正文」。";
-  const blocks = all.map((t) => {
-    const age = t.startedAt ? since(Date.now() - t.startedAt) : "?";
-    const head = `#${t.id} [${t.agent}] ${STATUS_LABEL[t.status]} · ${t.turns} 轮 · ${age}`;
-    const cwd = t.cwd ? `\n   cwd：${t.cwd}` : "";
-    const out = t.lastOutput
-      ? `\n   最近输出：${t.lastOutput.replace(/\n/g, " ").slice(0, 80)}`
-      : "";
-    return `${head}${cwd}${out}`;
-  });
-  // 每条之间既留空行、也放一条分隔线：手机客户端可能把连续空行压成一行，分隔线不会丢。
-  const lines = [`📋 任务（${all.length} 条）`, blocks.join("\n────────\n")];
-  const live = all.filter(isLive);
-  if (live.length > 1)
-    lines.push(`多条任务并行：回话用「#<编号> 正文」，结束用「结束任务 <编号>」。`);
   const intr = all.filter((t) => t.status === "interrupted");
+  // 一条任务一行：先图标再编号，扫一眼就知道哪条要处理。手机上过长的行会被折断，所以字段只留必要项。
+  const lines = all.map((t) => {
+    const age = t.startedAt ? since(Date.now() - t.startedAt) : "?";
+    const head = `${STATUS_ICON[t.status]} #${t.id} ${t.agent} · ${STATUS_LABEL[t.status]} · ${t.turns} 轮 · ${age}`;
+    // 只有「可能要接着说话」的任务才附最近输出：运行中的任务没有可核对的东西，带上只会把列表撑长。
+    const out =
+      t.lastOutput && t.status !== "running"
+        ? `\n   ↳ 最近：${t.lastOutput.replace(/\n/g, " ").slice(0, 40)}`
+        : "";
+    return `${head}${out}`;
+  });
+  const title = intr.length
+    ? `📋 任务（${all.length} 条 · ${intr.length} 个待继续）`
+    : `📋 任务（${all.length} 条）`;
+  const out = [title, lines.join("\n")];
+  const live = all.filter(isLive);
+  if (live.length > 1) out.push("多条在跑：回话用「#<编号> 正文」，结束用「结束任务 <编号>」。");
   if (intr.length)
-    lines.push(
-      `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着跑；上一步可能已经改过文件，先核对。不要的用「结束任务 <编号>」清掉。`,
+    out.push(
+      `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着跑（先用「#${intr[0].id}」看它最近在做什么）；一起拉起发「全部继续」，不要的用「结束任务 <编号>」清掉。`,
     );
-  return lines.join("\n\n");
+  return out.join("\n\n");
 }
 
 // ---- 派发与续跑 ----
