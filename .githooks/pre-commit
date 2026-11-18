@@ -19,6 +19,12 @@ if ! node scripts/doc-impact.mjs --check --staged; then
   exit 1
 fi
 
+if ! node scripts/check-user-copy.mjs; then
+  echo ""
+  echo "面向用户的文案检查未通过：按上面清单改成日常说法（别用直译腔和内部术语）；确属技术说明时在行内加 copy-ok: 理由。"
+  exit 1
+fi
+
 if ! node scripts/check-agent-docs.mjs; then
   echo ""
   echo "接入文档完整性检查未通过：按上面缺口补齐（没有待测项就在「## 待实测」下写「无」）。"

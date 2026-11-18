@@ -33,7 +33,7 @@ wemind task "整理本周周报" --agent kiro
 
 # 看进展（状态 + 轮次 + 最近输出，不依赖微信）
 wemind task-status      # 有任务表时与 task-list 同源（同一份列表）；表空/不存在才退回读单个记录
-wemind task-list        # 全部任务：编号 / 状态 / 最近输出 / agent / 轮次 / 已运行
+wemind task-list        # 全部任务（一条一段）：编号 / agent / 状态 / 轮次 / 已运行 + 一行「最近输出」
 
 # 回复它的提问 / 让它继续 / 结束（只有一条任务时可省略编号）
 wemind task-reply "第 2 点不用查，其它都查"

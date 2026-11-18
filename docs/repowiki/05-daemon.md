@@ -202,7 +202,7 @@ graph TD
     C0 -->|否| C1{"parseControl?<br/>MCP / 新会话 / 会话列表 / 恢复 / 重命名 / 删除 / 切脑 / 交接 / 工作区 / 微信配置 / 帮助"}
     C1 -->|是| H1["handleControl<br/>（各自处理；切脑/交接仅登录者）"]
     C1 -->|否| C2{"parseTaskControl?"}
-    C2 -->|结束任务/任务列表/#n/发给任务 n| H2["stopTask / 列表 / 发给指定编号<br/>（裸 #n = 设收件人）"]
+    C2 -->|结束任务/全部结束/任务列表/全部继续/#n/发给任务 n| H2["stopTask / renderTaskList / resumeAllInterrupted / 发给指定编号<br/>（裸 #n = 设收件人；全部结束连「待继续」记录一起清）"]
     C2 -->|任务：/ &gt;/ 任务 &lt;agent&gt;：| H3["有任务→发给它<br/>无任务或指定了 agent→dispatchTask"]
     C2 -->|否| C4{"出队时仍可续跑?"}
     C4 -->|是| H5["当作续跑发给任务（injectTask）"]

@@ -48,7 +48,7 @@
 
 ## Design
 
-- [docs/设计文档/文档守卫设计.md](docs/设计文档/文档守卫设计.md): current design of the three documentation guards (`doc-impact`, `check-agent-docs`, `gen-docs-tables`) — architecture, 13 path rules plus `STALE_FACTS` content-level checks that reject retired conclusions with file:line, entry points, limits, maintenance guide.
+- [docs/设计文档/文档守卫设计.md](docs/设计文档/文档守卫设计.md): current design of the four repo guards (`doc-impact`, `check-agent-docs`, `gen-docs-tables`, `check-user-copy` — the last one scans user-facing string literals in `packages/wechat-daemon/src` for literal-translation jargon and internal terms) — architecture, 13 path rules plus `STALE_FACTS` content-level checks that reject retired conclusions with file:line, entry points, limits, maintenance guide.
 - [docs/设计文档/源码目录分层设计.md](docs/设计文档/源码目录分层设计.md): implemented design layering `packages/wechat-daemon/src/` into 8 subsystem directories with 7 subdirectories, splitting data/stateless modules, and the per-directory doc-sync workflow.
 - [docs/设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md](docs/设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md): current design and implementation notes for terminal-equivalent local-agent mode — direct (default) / managed homes, WeChat-only overlays, workspace, MCP policy, yolo, session sharing, migration and acceptance (admin MCP recorded as cancelled).
 - [docs/设计文档/远程任务（Worker）human-in-the-loop 设计与实现.md](<docs/设计文档/远程任务（Worker）human-in-the-loop 设计与实现.md>): current design and implementation of remote tasks (human-in-the-loop) — controlled ACP worker processes, multi-task table + process pool, message routing and task state machine, session resume, config/permission/MCP policy, progress feedback, dual WeChat/CLI entry, restart discipline, invariants.
@@ -57,9 +57,9 @@
 
 ## Historical (archived, not current behavior)
 
-- [docs/设计文档/](docs/设计文档/): Plan C master design and CLI-ization design (historical); the current doc-guard / remote-task / local-agent-mode / agent-definition designs are listed above.
-- [docs/审查与质量记录/](docs/审查与质量记录/): 2026-11-02 audit snapshot, 2026-11-04 archive list, 2026-11-05 source-layout refactor design (not implemented), and the 2026-11-05 audit lessons.
-- [docs/待办与后续计划/](docs/待办与后续计划/): deferred work — task numbering and record size (describes current behavior), quote-message text cache (`ref_msg` often carries only `svr_id`), and a WeMind-owned "admin MCP" (idea only, not implemented).
+- [docs/设计文档/](docs/设计文档/): historical docs — [受控 ACP 工作机（Worker）设计文档](<docs/设计文档/受控 ACP 工作机（Worker）设计文档.md>) (the renamed Plan C master design) and [wemind CLI 化设计](docs/设计文档/wemind-CLI化设计.md); the current doc-guard / remote-task / local-agent-mode / agent-definition designs are listed above.
+- [docs/审查与质量记录/](docs/审查与质量记录/): 2026-11-02 audit snapshot, 2026-11-04 archive list, 2026-11-05 source-layout refactor design (not implemented), the 2026-11-05 audit lessons, and the 2026-11-18 on-device test record for worker media (inbound recipient mode + outbound attachments; 19 cases, 6 defects found and fixed).
+- [docs/待办与后续计划/](docs/待办与后续计划/): deferred work — task numbering and record size (describes current behavior), quote-message text cache (`ref_msg` often carries only `svr_id`), a WeMind-owned "admin MCP" (idea only, not implemented), and URL-sourced outbound media (files/videos via http(s) links, deferred to the next iteration).
 - [docs/待办与后续计划/待办-自带管理-MCP.md](docs/待办与后续计划/待办-自带管理-MCP.md): the deferred WeMind-owned "admin MCP" idea — exposing config/session/task/workspace management as MCP tools to agents; recorded 2026-11-14 as not implemented (cancellation noted in the local-agent-mode design).
 
 ## Agent integration

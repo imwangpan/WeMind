@@ -45,6 +45,9 @@ jobs:
         run: node scripts/check-agent-docs.mjs
       - name: Check generated doc tables
         run: node scripts/gen-docs-tables.mjs --check
+
+      - name: 面向用户的文案
+        run: node scripts/check-user-copy.mjs
       - name: Check docs impact
         env:
           DOCS_IMPACT_MESSAGE: ${{ github.event.pull_request.body }}

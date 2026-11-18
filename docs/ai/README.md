@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **最后核对**：2026-11-17
+> **最后核对**：2026-11-18
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -103,6 +103,7 @@ poller（长轮询，不被大脑阻塞）
 - **ACP 协议边界**：agent 定义里的 `restore` 只表达「优先用 `load` 还是 `resume`」，两个都不支持时退化为新建会话（`session/new`），不是启动失败；`applyAcpModel()` 只吞 agent **明确回的 JSON-RPC error 帧**（有数字 `code`），超时 / `acp process reset` / 无进程 / 写帧失败一律抛出让上层 kill 重建；`handleAcpFrame()` 把 `session/prompt` 的**响应帧**也算首帧（committed-only agent 不误报「首帧 -1」），`clearAcpTurn()` 归零 `startedAt`/`firstFrameAt`/`sessionId`，回合计时不串到下一轮；`acp-reverse.ts` 要求 allow 候选项有非空字符串 `optionId`，一个合法项都没有就回 `cancelled` 并记 WARN，`WEMIND_ACP_AUTO_ALLOW` 空白串/未设置都按默认 yolo；`brain check` 起的自检副本在 `mcpDelivery: "acp"` 时同样剥离全部 MCP 条目（`copyProfilePatch` 的 `stripAllMcp`）。
 - **配置写入与 CLI 边界**：`parseConfigPath()` 拒绝 `__proto__` / `constructor` / `prototype`；`openEditor()` 不给不存在的非 `.json`/`.jsonc` 文件预建 `{}`（明确报错）；`takeOpt()` 拒绝空值/缺值/下一个是 `--flag`；`config mcp disable` 在 `direct` 下先 `removeMcp()`，失败就不写 overlay、不再假成功（overlay 写失败会尽力把激活集加回去并报错），`mcp-brain.ts` 的 `saveActive()` 用传入的 `list` 写回；`loadWorkspaceConfig()` 对损坏文件返回 `problem`（`config show` / `workspace show` 显示、`workspace set` 拒绝写入并提示修复或 `workspace reset`）；`config env clear` 区分「已删除」与「不存在」，`mergeEnvSnapshot()` 过滤 undefined 值。
 - **落盘与清理**：原子写 `writeFileAtomic()` 的临时文件固定 `mode: 0o600`；`managed` 副本的 `.wemind-inherited.json` 清单由 `safeManifestNames()` 过滤 `../` 与绝对路径；入站媒体清理节流**按目录分别记时**（`lastPruneByDir` / `resetInboundMediaPruneClock()`），`direct` 与 `managed` 两份 inbound 目录不互相饿死一小时。
+- **面向用户的文案守卫**：`scripts/check-user-copy.mjs` 扫 `packages/wechat-daemon/src` 里的字符串字面量，拦「停在半路 / 拉起 / 收掉 / 兜底 / 口径 / 落盘 / 幂等 / 埋点」这类直译腔与内部术语；注释行与 `log.*`/`console.*` 不扫，行内 `copy-ok: <理由>` 可豁免。它进了 `npm run verify`，与三个文档守卫并列。
 - **文档守卫自身 + 测试**：`doc-impact` 补 C-quoted git 路径还原（`unquoteGitPath` / `parseLsFiles`）、`--staged` 读 index blob、内容扫描跳过代码围栏、`testRe()` 每次重置 `lastIndex`、dirty diff 用 `--untracked-files=no`、`1\.0\.107(?!\d)` 不误报 `1.0.1070`；用例在 `scripts/doc-guards.test.mjs`，本轮新增测试含 `packages/wechat-daemon/src/cli/subcommands/cli-config.test.ts`（另补齐 `config.test.ts`、`atomic-json.test.ts`、`inherit.test.ts`、`acp-reverse.test.ts`、`media-store.test.ts`、`acp-connection.test.ts`、`task-manager.test.ts`、`brain-switch.test.ts`、`daemon-control.test.ts`、`parity-direct.test.ts`）。
 
 ---

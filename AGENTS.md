@@ -72,8 +72,8 @@ scripts/                常驻外壳（run-daemon.ps1 默认薄壳 / -Mode shell
 
 ```powershell
 npm run build / typecheck / test / lint   # build 只打两个发布包（先 typecheck core）；core 无 build/dist
-npm run verify       # 提交前统一自检（CI 同口径：含三个文档守卫 + 相对链接；doc-impact 另跑内容级校验）
-npm run doc-impact / doc-impact:check / check:agent-docs / docs:tables / docs:tables:check   # 文档守卫
+npm run verify       # 提交前统一自检（CI 同口径：含四个脚本守卫 + 相对链接；doc-impact 另跑内容级校验）
+npm run doc-impact / doc-impact:check / check:agent-docs / docs:tables / docs:tables:check / check:user-copy   # 文档与文案守卫
 wemind login --label 名 --start / list / start|stop <key|label>
 wemind log [key|label] [--lines N] [--errors] [--file N]   # daemon.log 尾部（全量日志；--errors 筛错误+前后 2 行上下文、--file 看轮转）
 wemind start --all | <key1> <key2>…      # 启动所有 / 指定的多个账号（原生自启触发时用 --all）
