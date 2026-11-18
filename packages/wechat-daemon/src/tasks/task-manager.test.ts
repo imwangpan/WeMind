@@ -523,7 +523,8 @@ describe("多任务与编号", () => {
     await vi.waitFor(() => expect(awaitingTasks("u1").length).toBe(1));
     const list = renderTaskList("u1");
     expect(list).toContain("#1");
-    expect(list).toContain("| 💬 | #1 qoder | 等你回复 | 1 |");
+    expect(list).toContain("| #1 | 💬 等你回复 |");
+    expect(list).toContain("我先问你一件事 | qoder | 1 |");
     expect(list).toContain("等你回复");
     expect(list).toContain("| 1 |");
     expect(list).toContain("我先问你一件事");
@@ -712,7 +713,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     expect(conns.length).toBe(0); // 没起进程
   });
 
-  it("任务列表：一条任务一行（带状态图标），运行中不附最近输出", () => {
+  it("任务列表：一条任务一行，列序为编号 / 状态 / 最近输出 / agent / 轮次 / 时长", () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),
       JSON.stringify({
@@ -736,19 +737,17 @@ describe("任务表写入磁盘与重启续跑", () => {
     const list = renderTaskList("u1");
     // 标题带待继续计数；每条任务一行，全部字段都在表格里（手机端可左右滑动）
     expect(list.startsWith("📋 任务（1 条 · 1 个待继续）")).toBe(true);
-    expect(list).toContain("| ⏸️ | #1 kiro | 待继续 | 5 |");
-    expect(list).toContain("| 第一行 第二行 |");
+    expect(list).toContain("| #1 | ⏸️ 待继续 | 第一行 第二行 | kiro | 5 |");
     expect(list).toContain("「待继续」= 进程不在了");
     expect(list).toContain("全部继续");
-    // 裸「#N」是设收件人，不是「看它最近在做什么」——近况就在表格末列，别引导用户发错
+    // 裸「#N」是设收件人，不是「看它最近在做什么」——近况就在表格里，别引导用户发错
     expect(list).not.toContain("看它最近在做什么");
-    // 运行中的任务换图标，但最近输出照样在末列（表格能横向滑动，不怕撑宽）
+    // 运行中同样带最近输出：最想先看到的信息排在编号、状态之后
     const [t] = listTasks("u1");
     t.status = "running";
     t.lastOutput = "运行中的输出也该出现在列表里";
     const live = renderTaskList("u1");
-    expect(live).toContain("| ▶️ | #1 kiro | 运行中 | 5 |");
-    expect(live).toContain("| 运行中的输出也该出现在列表里 |");
+    expect(live).toContain("| #1 | ▶️ 运行中 | 运行中的输出也该出现在列表里 | kiro | 5 |");
     expect(live).not.toContain("待继续」= 进程不在了");
   });
   it("无编号「继续」也能续跑（微信侧走的就是这条路）；日常提问不会被陈旧的中断任务吞掉", async () => {

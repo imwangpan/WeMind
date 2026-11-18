@@ -301,7 +301,7 @@ function replyFooter(task: Task, kind: "result" | "interrupted"): string {
     : `\n↩ 回这条任务用「${id} 正文」；不带前缀的消息默认交给大脑（发「${id}」可设为收件人）。`;
 }
 
-/** `任务列表`：markdown 表格——编号 / agent / 状态 / 轮次 / 已运行 / 最近输出摘要。 */
+/** `任务列表`：markdown 表格——编号 / 状态 / 最近输出 / agent / 轮次 / 已运行。 */
 export function renderTaskList(userId: string): string {
   const all = listTasks(userId);
   if (!all.length)
@@ -313,14 +313,15 @@ export function renderTaskList(userId: string): string {
   const rows = all.map((t) => {
     const age = t.startedAt ? since(Date.now() - t.startedAt) : "?";
     const recent = t.lastOutput ? cell(t.lastOutput.replace(/\s+/g, " ").trim()).slice(0, 80) : "—";
-    return `| ${STATUS_ICON[t.status]} | #${t.id} ${cell(t.agent)} | ${STATUS_LABEL[t.status]} | ${t.turns} | ${age} | ${recent} |`;
+    return `| #${t.id} | ${STATUS_ICON[t.status]} ${STATUS_LABEL[t.status]} | ${recent} | ${cell(t.agent)} | ${t.turns} | ${age} |`;
   });
   const title = intr.length
     ? `📋 任务（${all.length} 条 · ${intr.length} 个待继续）`
     : `📋 任务（${all.length} 条）`;
-  // 手机端渲染表格时可以左右滑动，所以「最近输出」直接放末列，不再另起一段；换来的是每条任务只占一行。
+  // 列序按「用户最想先看到什么」排：编号 → 状态 → 最近输出，后面才是 agent / 轮次 / 时长（手机端可左右滑动）。
+  // 图标不再单独占一列（2026-11-18 实测后调整），挪进状态列里保留。
   const table = [
-    "| | 任务 | 状态 | 轮次 | 时长 | 最近输出 |",
+    "| 任务 | 状态 | 最近输出 | Agent | 轮次 | 时长 |",
     "| --- | --- | --- | --- | --- | --- |",
     ...rows,
   ].join("\n");
