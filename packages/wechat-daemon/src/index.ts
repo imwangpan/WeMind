@@ -1090,7 +1090,7 @@ async function pollerLoop(
               .sendNotice(
                 from,
                 msg.context_token,
-                `📎 已把收到的附件交给 #${route.recipientTaskId}（再发文字、「好了」就一起提交）。`,
+                `📎 已把收到的附件交给 #${route.recipientTaskId}（再发一句文字，或发「好了」，就一起提交）。`,
                 state.contextTokens[`${account.botId}:${from}`],
               )
               .catch(() => {});
