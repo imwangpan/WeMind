@@ -290,7 +290,7 @@ export function cmdEnv(rest: string[]): string {
     return [
       `${dryRun ? "（预览，未写入）" : "已写入"} ${envSnapshotPath(dir)}`,
       `捕获键：${Object.keys(snap.keys).join(", ") || "（空）"}`,
-      "只含白名单非敏感变量；API key/token/密码不会落盘。",
+      "只含白名单非敏感变量；API key/token/密码不会存到文件。",
     ].join("\n");
   }
   if (sub === "show") {

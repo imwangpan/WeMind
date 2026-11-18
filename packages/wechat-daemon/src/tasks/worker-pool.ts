@@ -96,7 +96,7 @@ export function planAcquire(
   if (busy >= limits.maxConcurrent)
     return {
       kind: "reject",
-      problem: `同时运行的任务数已达上限（${limits.maxConcurrent} 个）。等一个跑完，或先「结束任务 <编号>」收掉不再需要的。`,
+      problem: `同时运行的任务数已达上限（${limits.maxConcurrent} 个）。等一个跑完，或先用「结束任务 <编号>」结束不再需要的任务。`,
     };
   const reusable = conns
     .filter((c) => c.state === "idle" && c.key === key)

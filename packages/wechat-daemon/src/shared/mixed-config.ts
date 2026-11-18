@@ -136,7 +136,7 @@ export async function promptForMixedConfig(): Promise<"keep-native" | "keep-pm2"
   print("\n检测到双重自启配置：");
   print("  · 系统触发器（计划任务 / systemd / LaunchAgent）");
   print("  · PM2 实例（wemind-*）");
-  print("\n同一个账号被拉起两次会争抢同一个 bot token，必须只保留一种。\n");
+  print("\n同一个账号被启动两次会争抢同一个 bot token，必须只保留一种。\n");
   print("请选择处理方式：");
   print("  1) 只保留系统触发器（删除所有 PM2 实例）");
   print("  2) 只保留 PM2（删除所有系统触发器）");

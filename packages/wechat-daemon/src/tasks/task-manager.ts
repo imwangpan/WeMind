@@ -330,7 +330,7 @@ export function renderTaskList(userId: string): string {
     out.push("多条正在运行：回话用「#<编号> 正文」，结束用「结束任务 <编号>」。");
   if (intr.length)
     out.push(
-      `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着运行；想把它们全部恢复运行就发「全部继续」，不要的用「结束任务 <编号>」清掉。`,
+      `「待继续」= 进程不在了，发「继续」（或「#${intr[0].id} 继续」）接着运行；想全部继续就发「全部继续」，不要的用「结束任务 <编号>」清掉。`,
     );
   return out.join("\n\n");
 }
@@ -692,7 +692,7 @@ export function injectTask(
       }
       if (intr.length > 1)
         return fail(
-          `有 ${intr.length} 条任务停在半路（待继续），请指明编号：${intr.map((t) => `#${t.id}`).join("、")}（写法：\`#${intr[0].id} 继续\`；不要了就「结束任务 ${intr[0].id}」）。`,
+          `有 ${intr.length} 条「待继续」的任务，请指明编号：${intr.map((t) => `#${t.id}`).join("、")}（写法：\`#${intr[0].id} 继续\`；不要了就「结束任务 ${intr[0].id}」）。`,
         );
       return fail("");
     } else {
@@ -744,7 +744,7 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
     persist();
     emitState();
     const hint = intr.length
-      ? `有 ${intr.length} 条停在半路（待继续）的任务记录（回「继续」接着运行，或「结束任务 <编号>」清掉）。`
+      ? `有 ${intr.length} 条「待继续」的任务记录（回「继续」接着运行，或「结束任务 <编号>」清掉）。`
       : "";
     return done(`当前没有正在运行的任务。${hint}`);
   }
@@ -820,13 +820,13 @@ export function resetTasksForTest(dir?: string): void {
 }
 
 /**
- * 「全部继续」：把停在半路（interrupted）的任务全部恢复运行。
+ * 「全部继续」：把「待继续」（interrupted）的任务全部恢复运行。
  * 在跑/等回复的不动——它们本来就在，不需要再动。
  * 单条失败不影响其它条：逐条记结果，回执里分开报。
  */
 export function resumeAllInterrupted(to: string): string {
   const stopped = interruptedTasks(to);
-  if (!stopped.length) return "没有停在半路的任务可继续（正在运行、等回复的不用管）。";
+  if (!stopped.length) return "没有「待继续」的任务（正在运行、等回复的不用管）。";
   const started: number[] = [];
   const failed: number[] = [];
   for (const t of stopped) {
@@ -835,7 +835,7 @@ export function resumeAllInterrupted(to: string): string {
     });
   }
   if (!started.length)
-    return `这 ${stopped.length} 条都没能恢复运行：看看日志，或换个说法用「#编号 继续」逐条试。`;
+    return `这 ${stopped.length} 条都没能恢复运行：看看日志，或用「#编号 继续」逐条试。`;
   const parts = [
     `▶️ 已让 ${started.length} 条任务继续运行：${started.map((id) => `#${id}`).join("、")}`,
   ];

@@ -10,3 +10,6 @@ _daemon.*
 .claude/
 .vscode/
 .worktrees/
+
+# 本地待办清单（个人工作台，不入库）
+TODO.md

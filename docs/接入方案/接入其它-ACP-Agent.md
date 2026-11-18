@@ -288,7 +288,7 @@ wemind brain set acme --restart          # 写入 brain.json 并重启 daemon
 | `probe` | 否 | 探测结论元数据（顶层字段，不是运行期能力）：`{ "at": "ISO 8601 时间", "agentVersion"?: "..." }`。`agent probe --draft` 会写；只用于展示「上次在哪个版本上测过」，不改变启动或会话行为 |
 | `sessionMode` | 否 | 会话建立/恢复后经 `session/set_mode { sessionId, modeId }` 切到的模式（**agent 自己的 ACP 接口**；用于免审批：claude-code `bypassPermissions`、codex `agent-full-access`）。会话回包报告 `modes.availableModes` 且不含该值时**跳过**并记日志；调用失败只记日志、不拖垮回合。`WEMIND_ACP_SESSION_MODE=0/false/off/no` 关闭，其它非空值 = 覆盖 modeId |
 | `replayOnLoad` | 否 | `session/load`/`resume` **返回后仍会异步回放历史帧**的 agent（gemini 的 `loadSession` 里 `streamHistory` 不 await）：恢复后先等帧流安静（200ms 静默窗口、最多 3s）再发本轮 prompt，否则历史会被拼进本轮答复。默认 `false` |
-| `restore` | 否 | 恢复会话的方式：`load`（默认）或 `resume`（如 DSH） |
+| `restore` | 否 | 恢复会话的方式：`load`（默认）或 `resume`（如 DSH）；两个都不支持时 daemon 退化为新建会话（`session/new`），不会因此启动失败 |
 | `images` | 否 | 是否接受图片输入（默认 `true`；`false` 时 daemon 对带图消息友好拒绝，如 DSH / Cline） |
 | `firstFrameMs` | 否 | 首帧超时覆盖（默认 25s；慢启动 / committed-only agent 可放宽） |
 | `heartbeatMs` | 否 | 静默期心跳间隔覆盖（默认 15s；有 thought/tool/usage 帧的 agent 通常不需要） |

@@ -646,7 +646,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     await vi.waitFor(() => expect(has(pushed, "接着干")).toBe(true));
   });
 
-  it("全部继续：把停在半路的都拉起来（重启后等回复的也算待继续）", async () => {
+  it("全部继续：把「待继续」的都恢复运行（重启后等回复的也算「待继续」）", async () => {
     fs.writeFileSync(
       path.join(tmpDir, "tasks.json"),
       JSON.stringify({
@@ -674,7 +674,7 @@ describe("任务表写入磁盘与重启续跑", () => {
   });
 
   it("全部继续：没有待继续的任务时直接说清楚", () => {
-    expect(resumeAllInterrupted("nobody")).toContain("没有停在半路的任务可继续");
+    expect(resumeAllInterrupted("nobody")).toContain("没有「待继续」的任务");
   });
 
   it("多条「待继续」任务时裸「继续」不替你选：进任务侧、回编号清单", () => {
@@ -708,7 +708,7 @@ describe("任务表写入磁盘与重启续跑", () => {
     expect(initTasks(tmpDir).interrupted).toEqual([1, 2]);
     // 路由闸放行（有可续跑任务），但 injectTask 在「活跃 0 条 + 已中断多条」时不替用户挑
     expect(shouldResumeTask("继续", { awaiting: 0, active: false, interrupted: 2 })).toBe(true);
-    expect(injectTask("u1", "继续")).toContain("有 2 条任务停在半路（待继续）");
+    expect(injectTask("u1", "继续")).toContain("有 2 条「待继续」的任务");
     expect(conns.length).toBe(0); // 没起进程
   });
 

@@ -325,7 +325,7 @@ export const AGENT_DEFINITION_FIELDS: readonly AgentDefinitionField[] = [
   {
     key: "restore",
     kind: { kind: "enum", values: AGENT_RESTORE_MODES },
-    desc: "恢复会话的方式：load / resume（都没有则退化为新建，由客户端兜底）",
+    desc: "恢复会话的方式：load / resume（两个都不支持时退化为新建会话）",
   },
   {
     key: "replayOnLoad",
