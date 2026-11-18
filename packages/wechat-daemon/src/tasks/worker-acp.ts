@@ -257,9 +257,16 @@ export class WorkerConn {
     beginAcpTurn(this.turn, sid, onProgress);
     const t0 = Date.now();
     const prompt: unknown[] = [];
+    const droppedImages = opts.images?.length ?? 0;
     applyMediaToPrompt(prompt, opts.images, this.agent.images, {
       unsupportedNote: WORKER_UNSUPPORTED_IMAGE_NOTE,
     });
+    if (droppedImages > 0 && !this.agent.images) {
+      // 降级不丢图，但要能事后核对：日志里写清「几张图变成了文字说明」
+      log.info(
+        `${this.agent.name} 不支持图片输入，${droppedImages} 张图已改成文字说明（task=${key}）`,
+      );
+    }
     const hintKey = `${this.agent.name}:${sid}`;
     if (!hintedSessions.has(hintKey)) {
       hintedSessions.add(hintKey);

@@ -20,32 +20,19 @@
   派 `任务：随便报一个 4 位数…` → #20 回 `4738`；重启 daemon（`重启：1 条未完成的任务已转为「待继续」（编号 20）`）→ 发 `#20 继续` → `session/load ok ses_e110a2becffey…`（与首轮同一会话 id）→ `prompt ok 12128ms`，回复正文仍是 `4738`，`turns` 1→2
   判据：会话恢复只带历史、不带最后结论，能复述 4738 说明 `recapForResume()` 拼进去的「上一轮最后输出」被用上了
 
-- [ ] **A6 超时回执新文案**
-  发：`#N` → 发 1 张图 → 静置 3 分钟
-  看：`⌛ 提醒：收件人 #N 已超时自动取消…` + `📎 超时前收到的 1 个附件已交给 #N。` + 「（这是定时器单独发的提醒…）」
-  不应出现：「（把已收到的附件交回去时：…）」
+- [x] **A6 超时回执新文案（2026-11-18 通过）**
+  `#20` → 发 1 张图 → 静置：`media-route: buffered 1 attachment(s) for #20 (total 1)` → `deliver to #20 attachments=1 images=1 failures=0` → `recipient #20 expired`（先补交、再取消）
+  回执三行正确：`⌛ 提醒：收件人 #20 已超时自动取消，之后的文字和附件交给大脑。` + `📎 超时前收到的 1 个附件已交给 #20。` + `（这是定时器单独发的提醒，不是对你上一条消息的回复。）`；未出现旧的「（把已收到的附件交回去时：…）」
+  顺带发现并修掉文案错误：`（再发文字、「好了」就一起提交）` 的顿号会被读成「两个都要发」→ `（再发一句文字，或发「好了」，就一起提交）`
 
-- [ ] **A7 `大脑：` / `brain：` 前缀**
-  发：`大脑：现在几点`、`brain: hi`
-  看：走大脑，且**不退出**收件人（之后发图仍归任务）
+- [x] **A7 `大脑：` / `brain：` 前缀（2026-11-18 通过）**
+  `#20` → `task: recipient(#20) armed`；`大脑：现在几点` → `turn start` + `acp prompt ok 26223ms` + `replied to … 现在是 **2026年11月18日 星期三 22:28**`（走大脑）；随后发图 → `media-route: buffered 1 attachment(s) for #20`（收件人没被逃逸取消）
 
 ## B. 已知失败 / 需要特殊环境
 
-- [ ] **B1 出站视频（唯一已知失败项）**
-  需要一段**真实**小视频（手机拍的几秒即可），放到 `C:\Users\imwan\.wemind\5699d5d92ea9\workspace\worker\real.mp4`
-  发：`任务：原样输出这一行，不要加代码块、不要加反引号：[视频](file:///C:/Users/imwan/.wemind/5699d5d92ea9/workspace/worker/real.mp4)`
-  看：`sent attachment (video)`；若仍 `CDN 上传服务端错误 500`，才需要改上传参数（现在 `no_need_thumb: true`，视频不带缩略图/`play_length`）
-  备注：合成的空壳 mp4 会在 CDN 解码阶段失败，不能用来判断代码
-
-- [ ] **B2 `images: false` 的 worker 收图（可选）**
-  把 worker 用的 agent 定义的 `images` 设成 `false`（或换一个明确不支持的 agent）
-  看：收到「当前任务 agent 不支持图片输入」这类明确说明，**不是** `-32602` 重试或臆测图片内容
-
-- [ ] **B3 managed 模式落盘（可选，影响面大）**
-  临时切 `managed` 后发图/文件
-  看：落 `worker-home/media/inbound/`（不是 `brain-home`），启动清理也按角色各清一次
-
-- 已排除：附件与文字同一条消息 —— 微信本身发不出，跳过
+- [x] **B1 出站视频（2026-11-18 通过）**：真实 mp4（232.6KB，含轨道信息）→ `sent attachment (video): real.mp4 238186B`。上次 `CDN 上传服务端错误 500` 的原因是手工拼的 mp4 只有 `ftyp`/`mdat`、没有 `moov`，不是合法视频；**代码侧无需改 `no_need_thumb`**。
+- [ ] **B2 `images: false` 的降级**：派任务给一个没声明图片能力的 agent，再给收件人发图 → 期望它收到「这台 worker 不支持图片输入…」的说明，而不是静默丢图。
+- [ ] **B3 managed 落盘**：`homeMode=managed` 下入站文件应落 `worker-home/media/inbound`（不是 `<账号>/media/inbound`）。
 
 ## C. 需要你拍板（不是测试）
 
