@@ -280,11 +280,13 @@ describe("parallelTaskHint（`任务：` 一律新建后的并行教学回执）
     expect(parallelTaskHint([])).toBe("");
   });
 
-  it("有别的任务在跑时给出编号、说明并行与两种显式寻址写法", () => {
+  it("有别的任务在跑时给出真实编号、说明会同时跑与两种显式寻址写法", () => {
     const hint = parallelTaskHint([{ id: 3 }]);
     expect(hint).toContain("#3 还在运行");
-    expect(hint).toContain("与这条并行");
-    expect(hint).toContain("#N 正文");
+    expect(hint).toContain("这条会同时开始");
+    // 必须写真实编号，不能留「#N」让用户自己换算
+    expect(hint).toContain("要接着 #3 说就发「#3 正文」");
+    expect(hint).not.toContain("#N");
     expect(hint).toContain("设为收件人");
     expect(hint.startsWith("\n")).toBe(true);
   });

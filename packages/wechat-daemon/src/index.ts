@@ -297,15 +297,17 @@ export function planProgressEmission(
 }
 
 /**
- * `任务：…` 派发成功后的追加说明：派发时若还有别的任务活着（running/waiting），补一句「并行 + 怎么接着它说话」。
+ * `任务：…` 派发成功后的追加说明：派发时若还有别的任务活着（running/waiting），补一句「会同时跑 + 怎么接着它说」。
  *
- * 2026-11-17 起 `任务：` 一律新建任务，不再「有活跃任务就追加」，所以并行会真实发生；
- * 这里只是教学入口（用户靠它学 `#N 正文` 与收件人写法），不阻止也不改变派发结果。没有并行时返回空串。
+ * 2026-11-17 起 `任务：` 一律新建任务，不再「有活跃任务就追加」，所以两条同时跑会真实发生；
+ * 这里只是教学入口（用户靠它学「#N 正文」与收件人写法），不阻止也不改变派发结果。没有其它任务时返回空串。
+ * 句子里必须用真实编号：写成「#N」用户还得自己换算。
  */
 export function parallelTaskHint(others: Array<{ id: number }>): string {
   if (others.length === 0) return "";
   const ids = others.map((t) => `#${t.id}`).join("、");
-  return `\n（${ids} 还在运行，与这条并行；要接着它说就发「#N 正文」，或先发「#N」把它设为收件人。）`;
+  const first = `#${others[0]?.id ?? ""}`;
+  return `\n（${ids} 还在运行，这条会同时开始。要接着 ${first} 说就发「${first} 正文」，或者先发「${first}」把它设为收件人。）`;
 }
 
 // 静默期心跳默认 15s（配置可放宽，如 DSH 的 60s）；间隔在每回合开头算，见 handleMessage 的 heartbeatMsValue。
