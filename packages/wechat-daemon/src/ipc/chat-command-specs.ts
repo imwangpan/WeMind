@@ -406,7 +406,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     zh: "任务列表",
     slash: "/tasks",
     cli: "wemind task-list [<key|label>]",
-    brief: "#编号 / 状态（带图标）/ 最近输出 / agent / 轮次 / 时长",
+    brief: "列出所有任务：编号、状态、最近输出、agent、轮次、时长",
     match: (t) => (/^(?:任务列表|任务清单|列出任务|\/tasks?)$/i.test(t) ? { kind: "tasks" } : null),
   },
   {
@@ -414,6 +414,7 @@ export const TASK_COMMAND_SPECS: CommandSpec<TaskCommand>[] = [
     section: "task",
     zh: "全部继续",
     slash: "/resume all",
+    cli: "wemind task-resume-all [<key|label>]",
     brief: "把「待继续」的任务全部恢复运行（并行）",
     match: (t) =>
       /^(?:全部继续|继续全部|全部接着跑|\/resume\s+(?:all|全部))$/i.test(t)

@@ -22,6 +22,7 @@ import {
   cmdTask,
   cmdTaskList,
   cmdTaskReply,
+  cmdTaskResumeAll,
   cmdTaskStatus,
   cmdTaskStop,
   parseTaskId,
@@ -161,6 +162,9 @@ export async function runManage(argv: string[]): Promise<void> {
       print(await cmdTaskReply(text, sel, id));
       break;
     }
+    case "task-resume-all":
+      print(await cmdTaskResumeAll(rest[0]));
+      break;
     case "task-list":
       print(cmdTaskList(rest[0]));
       break;

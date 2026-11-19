@@ -5,6 +5,7 @@ import { agentConfigFor, loadBrainConfig } from "../agents/brain-config.js";
 import { resolvePresetByName, type ResolvedAgent } from "../agents/brain-agents.js";
 import type { PromptImage } from "../acp/prompt-media.js";
 import { acquire, drop, release, poolSummary } from "./worker-pool.js";
+import { STATUS_ICON, STATUS_LABEL, since } from "./task-table.js";
 import type { WorkerConn, WorkerProgressEvent } from "./worker-acp.js";
 import {
   emptyTaskStore,
@@ -256,27 +257,6 @@ export function hasActiveTask(to?: string): boolean {
 }
 /** 池状态摘要（`AI`/`wemind list` 展示用）。 */
 export const taskPoolSummary = poolSummary;
-
-function since(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  return `${Math.floor(m / 60)}h${m % 60}m`;
-}
-
-/** 任务列表里的状态图标：手机上一眼能分出「在跑 / 等你 / 停住」。 */
-const STATUS_ICON: Record<TaskStatus, string> = {
-  running: "▶️",
-  waiting: "💬",
-  interrupted: "⏸️",
-};
-
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  running: "运行中",
-  waiting: "等你回复",
-  interrupted: "待继续",
-};
 
 /** 任务标签：多条任务时带编号（单任务免编号，延续改造前的顺手）。 */
 function labelOf(task: Task): string {

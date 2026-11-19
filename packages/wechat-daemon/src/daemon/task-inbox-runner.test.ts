@@ -30,6 +30,10 @@ function setup() {
       calls.push(`stop:${id ?? ""}:${ackId ?? ""}`);
       return "ok";
     },
+    resumeAll: (_owner, ackId) => {
+      calls.push(`resumeAll:${ackId ?? ""}`);
+      return "ok";
+    },
     writeAck: (id, text) => acks.push({ id, text }),
     log: () => {},
   };
@@ -58,6 +62,14 @@ describe("scanTaskInbox：命令分发编排", () => {
     writeCmd(h.dir, "003-stop.json", { kind: "stop", id: "all", ack: "a3" });
     scanTaskInbox(h.dir, "owner", h.ops);
     expect(h.calls).toEqual(["dispatch:写周报:pi:D:/work:a1", "inject:继续:5:a2", "stop:all:a3"]);
+    expect(remaining(h.dir)).toEqual([]);
+  });
+
+  it("resumeAll 交给 daemon 侧的「全部继续」实现，回执编号透传", () => {
+    const h = setup();
+    writeCmd(h.dir, "001-resume-all.json", { kind: "resumeAll", ack: "a9" });
+    scanTaskInbox(h.dir, "owner", h.ops);
+    expect(h.calls).toEqual(["resumeAll:a9"]);
     expect(remaining(h.dir)).toEqual([]);
   });
 

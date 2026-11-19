@@ -8,6 +8,7 @@ import {
   writeTaskCmd as writeTaskCommand,
 } from "../../tasks/task-inbox.js";
 import { daemonAlive, pickKey, requireDaemonAlive } from "../cli-context.js";
+import { renderTaskTable } from "../../tasks/task-table.js";
 
 // ===== 本地任务命令（文件桥）：写 task-inbox/*.json，由 daemon 扫描执行；状态读 task-state.json，结果读 task-out/*.json =====
 
@@ -144,6 +145,17 @@ export async function cmdTaskStop(sel?: string, id?: number | "all"): Promise<st
   return await taskOutcome(key, ackId, fallback);
 }
 
+/**
+ * `task-resume-all`：与微信「全部继续」同一实现（`resumeAllInterrupted()`）——把停在半路的任务全部拉起来并行跑。
+ * 与 `task-reply`/`task-stop` 一样经 `task-inbox/` 交给 daemon：状态在 daemon 进程里，CLI 不能自己改。
+ */
+export async function cmdTaskResumeAll(sel?: string): Promise<string> {
+  const key = pickKey(sel);
+  requireDaemonAlive(key);
+  const ackId = writeTaskCmd(key, { kind: "resumeAll" });
+  return await taskOutcome(key, ackId, "已让「待继续」的任务全部继续运行。");
+}
+
 type WmTaskRow = {
   id: number;
   userId: string;
@@ -153,11 +165,6 @@ type WmTaskRow = {
   startedAt: number;
   lastOutput?: string;
   cwd?: string;
-};
-const STATUS_ZH: Record<string, string> = {
-  running: "运行中",
-  waiting: "等你回复",
-  interrupted: "待继续",
 };
 
 /**
@@ -190,15 +197,17 @@ export function cmdTaskList(sel?: string): string {
     ? ""
     : "\n（daemon 未运行：以下状态是它上次留下的记录；没完成的任务会在下次启动时转为「待继续」，回「继续」可续跑。）";
   if (!rows.length) return `账号 ${key}：当前没有任务。${stale}`;
-  const lines = [`账号 ${key} 任务（${rows.length} 条）：`];
-  for (const t of rows) {
-    const age = t.startedAt ? `${Math.round((Date.now() - t.startedAt) / 1000)}s` : "?";
-    lines.push(
-      `  #${t.id} [${t.agent}] ${STATUS_ZH[t.status] ?? t.status} · ${t.turns} 轮 · ${age}${t.cwd ? ` · cwd=${t.cwd}` : ""}`,
-    );
-    if (t.lastOutput) lines.push(`      ${t.lastOutput.replace(/\n/g, " ").slice(0, 140)}`);
-  }
-  return lines.join("\n") + stale;
+  const table = renderTaskTable(
+    rows.map((t) => ({
+      id: t.id,
+      agent: t.agent,
+      status: t.status,
+      turns: t.turns,
+      ...(t.startedAt ? { startedAt: t.startedAt } : {}),
+      ...(t.lastOutput ? { lastOutput: t.lastOutput } : {}),
+    })),
+  );
+  return `账号 ${key} 任务（${rows.length} 条）：\n${table}${stale}`;
 }
 
 export function cmdTaskStatus(sel?: string): string {

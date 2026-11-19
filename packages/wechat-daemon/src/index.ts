@@ -1920,6 +1920,13 @@ export async function runDaemon(): Promise<void> {
       return r;
     },
     writeAck: (ackId: string | undefined, text: string) => writeTaskAck(DATA_DIR, ackId, text),
+    // 本地 `wemind task-resume-all`：与微信「全部继续」走同一个实现，回执写回 task-out/
+    resumeAll: (to: string, ackId?: string) => {
+      const r = resumeAllInterrupted(to);
+      log.info("task: resume-all(local) ->", r.replace(/\n/g, " | "));
+      writeTaskAck(DATA_DIR, ackId, r);
+      return r;
+    },
     log: leveledLog,
   };
   setInterval(() => {

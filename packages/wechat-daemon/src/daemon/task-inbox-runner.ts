@@ -13,6 +13,8 @@ export type TaskInboxOps = {
   ) => string;
   inject: (owner: string, text: string, id?: number, ackId?: string) => string;
   stop: (owner: string, id?: number | "all", ackId?: string) => string;
+  /** 把停在半路（待继续）的任务全部拉起来并行跑；返回给用户的回执文本。 */
+  resumeAll: (owner: string, ackId?: string) => string;
   writeAck: (ackId: string | undefined, text: string) => void;
   log: LeveledLog;
 };
@@ -80,6 +82,12 @@ export function scanTaskInbox(dataDir: string, owner: string, ops: TaskInboxOps)
           id ? `#${id}` : "-",
           String(cmd.text ?? "").slice(0, 40),
           r.slice(0, 40),
+        );
+      } else if (cmd.kind === "resumeAll") {
+        ops.log(
+          "info",
+          "local task resume-all:",
+          ops.resumeAll(owner, cmd.ack === undefined ? undefined : String(cmd.ack)).slice(0, 60),
         );
       } else if (cmd.kind === "stop") {
         ops.log(

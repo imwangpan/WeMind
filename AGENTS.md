@@ -87,7 +87,7 @@ wemind config reload   # 重读 Agent 配置、重新 seed 槽位并三态重启
 wemind mcp list|enable|disable|add|remove   # 仅 managed 的 brain 激活集；direct 下聊天指令转给 Agent（CLI 只提示改 Agent 配置）
 wemind workspace show|set|reset [--role brain|worker]   # 默认工作区；新会话生效
 wemind env capture|show|clear   # 非敏感环境快照（PATH/代理/locale）
-wemind session list|new|resume|rename|delete / task-list|task-reply|task-stop
+wemind session list|new|resume|rename|delete / task-list|task-resume-all|task-reply|task-stop
 node packages/wechat-daemon/dist/cli.js brain   # 从源码跑等价命令
 pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
 ```

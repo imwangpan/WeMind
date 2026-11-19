@@ -319,6 +319,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 | `task` |
 | `task-list` |
 | `task-reply` |
+| `task-resume-all` |
 | `task-status` |
 | `task-stop` |
 | `version` |
@@ -349,7 +350,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 | 任务 [<agent 名>：]正文 | 派发新任务（一律新建，不追加到已有任务）；带 agent 名就由它执行（只影响这一条） |
 | #<编号> 正文 | 给指定编号的任务回话（回任务都用它；无前缀消息走大脑） |
 | #<编号>、发给任务 <编号> | 把某条任务设为收件人：之后的文字、图片、文件都交给它 |
-| 任务列表 | #编号 / 状态（带图标）/ 最近输出 / agent / 轮次 / 时长 |
+| 任务列表 | 列出所有任务：编号、状态、最近输出、agent、轮次、时长 |
 | 全部继续 | 把「待继续」的任务全部恢复运行（并行） |
 | 结束任务 [编号]、全部结束 | 结束任务（进程留着复用） |
 <!-- END:auto cli-commands -->
