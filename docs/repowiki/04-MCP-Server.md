@@ -140,7 +140,7 @@ sequenceDiagram
 
 MCP server 用 [tsdown](https://tsdown.dev/)（rolldown + oxc，tsup 的继任者）打包：
 
-- 输出 ESM、target node20、入口 `src/index.ts`，并用 `outExtensions` 强制输出 `dist/index.js`（而非默认 `.mjs`，保持 bin/main 引用不变）；
+- 输出 ESM、target node24、入口 `src/index.ts`，并用 `outExtensions` 强制输出 `dist/index.js`（而非默认 `.mjs`，保持 bin/main 引用不变）；
 - **`deps.alwaysBundle: ["@wemind/wechat-ilink-core", "uqr"]`** —— 把内核和二维码编码器内联进单一产物，发布时无需单独发布 core，用户也不用为登录二维码多装一个包（uqr tree-shake 后约 20KB）；
 - 其余运行时依赖（MCP SDK / zod）保持 external，但**已声明在 `dependencies`**，安装包时由 npm / npx 一并装好；只有离线手工部署或自行重新打包时才需要单独准备；
 - **`dts: false`** —— 该包不对外暴露类型；关掉也避免 tsdown 加载 `typescript` 包（TypeScript 7.0 原生已不再暴露旧 JS API，否则启动即报错）；

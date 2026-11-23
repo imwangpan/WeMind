@@ -51,7 +51,7 @@ npm i -g @agentclientprotocol/claude-agent-acp
 claude-agent-acp --version     # 0.99.1
 ```
 
-- **Node ≥22**（适配器 `engines` 要求），**而且必须是运行 daemon 的那个 Node**：适配器是 daemon spawn 出来的子进程，继承 daemon 的 PATH 与 Node。发布包 `engines` 只声明 `>=20.19`，`agentProblem()` 也只查 PATH 上有没有 `claude-agent-acp`、**不查 Node 版本**——所以 Node 20 的 daemon 能通过 `wemind brain` 预检、却会在 spawn/握手时失败。
+- **Node ≥22**（适配器 `engines` 要求），**而且必须是运行 daemon 的那个 Node**：适配器是 daemon spawn 出来的子进程，继承 daemon 的 PATH 与 Node。发布包 `engines` 要求 `>=24.11`，`agentProblem()` 仍只查 PATH 上有没有 `claude-agent-acp`、**不查 Node 版本**——适配器的 Node 要求要用户自己保证。
 - 适配器依赖 `@anthropic-ai/claude-agent-sdk`，后者带一个平台原生 Claude Code 二进制（Windows：`@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe`）。**不要用 `--omit=optional` 安装**，否则会报 `Claude native binary not found`。
 - 已经装了独立 Claude Code 的话，可以让适配器直接用它：
 
@@ -176,7 +176,7 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 
 已确认的限制（均来自上文实测与预设配置）：
 
-- **必须全局安装，且 Node ≥22**：适配器是 daemon spawn 出来的子进程，继承 daemon 的 PATH 与 Node；`agentProblem()` 只查 PATH 上有没有 bin、**不查版本**，所以 Node 20 的 daemon 能通过 `wemind brain` 预检、却会在 spawn/握手时失败（§2.1）。
+- **必须全局安装，且 Node ≥22**：适配器是 daemon spawn 出来的子进程，继承 daemon 的 PATH 与 Node；`agentProblem()` 只查 PATH 上有没有 bin、**不查版本**，适配器的 Node 要求要用户自己保证（§2.1）。
 - **`settings.json` / `plugins/` 的落点随模式变化**：`direct` 下直接使用真实 `~/.claude`，你在 Claude Code 里设的 `hooks` / `permissions` / 插件会生效；`managed` 下才不继承 `settings.json` / `plugins/`，权限由 `sessionMode` 负责（§2.2、§3）。`direct` 发现 `wechat` MCP 只告警；WeMind 自己生成的集合永久排除它。
 - **模型不由 WeMind 下发**：预设没有 `model` 字段，跟随 Claude Code 自身配置与 daemon 环境；要固定需 `wemind brain set claude-code --model "…"` 并应用（§2.2）。
 - **`bypassPermissions` 是全量放行**：消息一旦被 daemon 接受，AI 就能在运行 daemon 的机器上执行工具（含 shell / 写文件）；唯一能收紧的开关是 `WEMIND_ACP_SESSION_MODE=0`（§7）。

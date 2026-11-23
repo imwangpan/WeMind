@@ -62,7 +62,7 @@ WeMind 把「个人微信」变成一个 AI Agent 的输入输出通道。它基
 | 项目 | 值 |
 |------|-----|
 | 仓库名 | WeMind（Fork 自 [Howardzhangdqs/mcp-wechat-server](https://github.com/Howardzhangdqs/mcp-wechat-server)） |
-| 语言 / 运行时 | TypeScript / Node.js >= 20.19（Node 20/22 CI 验证、Node 24 实测；构建需 22.18+） |
+| 语言 / 运行时 | TypeScript / Node.js >= 24.11（CI 在 24.11 与 24 上验证；构建同样需 24.11+） |
 | 仓库结构 | npm workspaces monorepo（3 个 package） |
 | 后端渠道 | 腾讯 iLink / 微信 ClawBot（`ilinkai.weixin.qq.com`） |
 | 默认 AI 大脑 | `auto`：按 `opencode → cline → qoder → gemini → deepseek → kiro` 探测（`claude-code` / `codex` / `pi` 是适配器类，只能显式选用）；写入磁盘在 `<数据目录>/brain.json` |

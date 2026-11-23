@@ -76,7 +76,7 @@ wemind session list          # 会话列表（新会话 / 恢复会话 / 重命�
 
 ## 环境要求
 
-- [Node.js](https://nodejs.org/) >= 20.19（发布包 `engines` 的下限；CI 在 Node 20 与 22 上验证，已在 Node 24 实测）。**从源码构建**需要 Node >= 22.18（`tsdown` 的 engines 要求；只安装/运行 `@wemind/cli`、`@wemind/wechat-mcp` 不受影响）
+- [Node.js](https://nodejs.org/) >= 24.11（发布包 `engines` 的下限；CI 在 Node 24.11 与 24 上验证）。**从源码构建**同样需要 Node >= 24.11（`tsdown` 的 engines 是 `^22.18.0 || >=24.11.0`；Node 20 已于 2026-04 EOL，不再支持）
 
 ## 项目结构（npm workspaces 三包）
 

@@ -284,7 +284,7 @@ foreach ($v in $vars) {
 
 # ---------- 结论 ----------
 Section "提示"
-if (-not $nodeExe) { Write-Output '- 没有 node：daemon 起不来。装 Node 22+，或把 fnm/Volta 的 node 放进 PATH。' }
+if (-not $nodeExe) { Write-Output '- 没有 node：daemon 起不来。装 Node 24.11+，或把 fnm/Volta 的 node 放进 PATH。' }
 if (-not (Get-Command kiro-cli -ErrorAction SilentlyContinue) -and
     -not (Get-Command opencode -ErrorAction SilentlyContinue) -and
     -not $dshDesktop) {

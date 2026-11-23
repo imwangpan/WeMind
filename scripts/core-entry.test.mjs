@@ -97,6 +97,12 @@ describe("core 是 JIT 源码包（source-first）", () => {
     const root = readJson("package.json");
     expect(root.scripts.build).not.toContain("build -w @wemind/wechat-ilink-core");
     expect(root.scripts.typecheck).not.toContain("build -w @wemind/wechat-ilink-core");
-    expect(root.scripts.build).toContain("typecheck -w @wemind/wechat-ilink-core");
+    expect(root.scripts.build).toBe("node scripts/build.mjs");
+    expect(root.scripts.typecheck).toBe("node scripts/typecheck.mjs");
+    // 新脚本仍然先 typecheck core（不 emit），再打两个发布包；这条不变量由脚本内容保证。
+    const buildScript = readText("scripts/build.mjs");
+    expect(buildScript).toContain('"packages/wechat-ilink-core"');
+    expect(buildScript).toContain('"tsconfig.json"');
+    expect(buildScript).not.toContain("packages/wechat-ilink-core/tsdown.config.ts");
   });
 });

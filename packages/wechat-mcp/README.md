@@ -2,7 +2,7 @@
 
 > 基于 **MCP（Model Context Protocol）** 的微信 Bot server——让任何兼容 MCP 的 AI Agent 通过**个人微信**收发消息。底层走腾讯官方 **iLink / 微信 ClawBot** 通道。
 
-[WeMind](https://github.com/imwangpan/WeMind) monorepo 中已发布到 npm 的包（`@wemind/wechat-mcp`）；内核已内联进产物，对外只需这一个自包含的包。
+[WeMind](https://github.com/imwangpan/WeMind) monorepo 中已发布到 npm 的包（`@wemind/wechat-mcp`）；内核已内联进产物，对外只需这一个自包含的包。要求 **Node.js ≥ 24.11**（发布包 `engines` 的下限）。
 
 产物 `dist/index.js` 同时带 `dist/index.js.map`。Node 默认不应用 sourcemap，所以 server 在打印 fatal 错误时自己读同目录的这张 map，日志里的堆栈直接写成 `src/xxx.ts:12` 这样的源码位置，不需要在 MCP 客户端配置里设任何环境变量；map 与产物同一次构建、同一目录，版本天然配对。
 

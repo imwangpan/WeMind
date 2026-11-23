@@ -4,7 +4,7 @@ export default defineConfig({
   entry: ["src/index.ts"],
   format: ["esm"],
   platform: "node",
-  target: "node20",
+  target: "node24",
   outDir: "dist",
   clean: true,
   // 未解析依赖（例如 core 没被内联）默认只是 warning + exit 0，产物会带裸包名 import；升级为硬失败。

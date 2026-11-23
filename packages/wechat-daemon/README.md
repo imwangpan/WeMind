@@ -10,7 +10,7 @@
 
 ## 环境要求
 
-1. Node.js >= 20.19；
+1. Node.js >= 24.11；
 2. PATH 上有一个支持 **ACP** 的 agent CLI。
 
 ### 已适配的 Agent CLI
