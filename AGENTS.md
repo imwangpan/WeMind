@@ -72,6 +72,7 @@ scripts/                常驻外壳（run-daemon.ps1 默认薄壳 / -Mode shell
 
 ```powershell
 npm run build / typecheck / test / lint   # build 只打两个发布包（先 typecheck core）；core 无 build/dist
+                                          # build/typecheck 由 scripts/{build,typecheck}.mjs 直调 tsc/tsdown（typecheck 三包并行）
 npm run verify       # 提交前统一自检（CI 同口径：含四个脚本守卫 + 相对链接；doc-impact 另跑内容级校验）
 npm run doc-impact / doc-impact:check / check:agent-docs / docs:tables / docs:tables:check / check:user-copy   # 文档与文案守卫
 wemind login --label 名 --start / list / start|stop <key|label>

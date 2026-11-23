@@ -1,0 +1,52 @@
+#!/usr/bin/env node
+/**
+ * 构建两个发布包：先 core 类型检查，再并行 tsdown。
+ *
+ * 原来是 `npm run typecheck -w core && npm run build -w cli -w mcp`，
+ * 三层 npm 启动占了大半耗时（tsdown 本身只要 70–180ms）。这里直接跑
+ * `node <tsc 入口>` 和 `node <tsdown 入口>`，并用包的目录当 cwd
+ * （tsdown 的 entry 是相对 cwd 的 `src/...`）。
+ *
+ * 产物输出按顺序汇总，失败时带上该包的完整输出。
+ */
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const tsc = path.join(root, "node_modules/typescript/bin/tsc");
+const tsdown = path.join(root, "node_modules/tsdown/dist/run.mjs");
+
+function run(args, cwd) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    child.stdout.on("data", (chunk) => (out += chunk));
+    child.stderr.on("data", (chunk) => (out += chunk));
+    child.on("error", (err) => resolve({ code: 1, out: `${out}${err.message}\n` }));
+    child.on("close", (code) => resolve({ code: code ?? 1, out }));
+  });
+}
+
+const core = await run([tsc, "-p", path.join("packages/wechat-ilink-core", "tsconfig.json")], root);
+if (core.code !== 0) {
+  process.stderr.write(`[wechat-ilink-core] 类型检查失败\n${core.out}`);
+  process.exit(core.code);
+}
+
+const builds = await Promise.all([
+  run([tsdown, "-c", "tsdown.config.ts"], path.join(root, "packages/wechat-daemon")),
+  run([tsdown, "-c", "tsdown.config.ts"], path.join(root, "packages/wechat-mcp")),
+]);
+
+let failed = false;
+for (const [index, name] of ["wechat-daemon", "wechat-mcp"].entries()) {
+  const result = builds[index];
+  if (result.code === 0) {
+    process.stdout.write(result.out.trim() ? `${result.out.trim()}\n` : `${name} built\n`);
+  } else {
+    failed = true;
+    process.stderr.write(`\n[${name}] 构建失败\n${result.out}`);
+  }
+}
+if (failed) process.exit(1);
