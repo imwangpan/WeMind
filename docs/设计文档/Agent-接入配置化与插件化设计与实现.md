@@ -31,15 +31,15 @@
 
 **但"改预设就够"不成立，预设之外还有按 agent 名或专用格式写死的代码：**
 
-| 位置 | 写死了什么 |
-| --- | --- |
-| `agents/brain-agents.ts` | `AUTO_PROBE_ORDER` 顺序表、`ADAPTER_INSTALL_HINT`、`agentProblem()` 的三条名字分支、`authHint()` 仅 cline、kiro 的 engine 探测与 `permissions.yaml` 生成、DSH 的 session patch 文件正文 |
-| `agents/managed/mcp-adapters.ts` | `MCP_ADAPTERS` 是**按文件格式**的表（4 个 adapter）；新增一种格式就要新增 adapter + `mcpFormat` 取值 + 分派分支 |
-| `agents/managed/dsh-mcp.ts` / `toml-mcp.ts` | 手写的 YAML / TOML 子集解析（只读） |
-| `agents/profile-model.ts` | DSH `cordis.patch.yml` 的默认模型读取与 MCP 剥离 |
-| `agents/cline-credentials.ts` | 从 `providers.json` 派生 `CLINE_PROVIDER` / `CLINE_API_KEY` |
-| `agents/config/config-fingerprint.ts` | Claude Code 的易变文件清单（避免每轮重启） |
-| `daemon/messaging/attachments.ts` | 出站敏感文件 denylist 里按 `realHome` 派生 + 三条硬编码路径 |
+| 位置                                        | 写死了什么                                                                                                                                                                              |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents/brain-agents.ts`                    | `AUTO_PROBE_ORDER` 顺序表、`ADAPTER_INSTALL_HINT`、`agentProblem()` 的三条名字分支、`authHint()` 仅 cline、kiro 的 engine 探测与 `permissions.yaml` 生成、DSH 的 session patch 文件正文 |
+| `agents/managed/mcp-adapters.ts`            | `MCP_ADAPTERS` 是**按文件格式**的表（4 个 adapter）；新增一种格式就要新增 adapter + `mcpFormat` 取值 + 分派分支                                                                         |
+| `agents/managed/dsh-mcp.ts` / `toml-mcp.ts` | 手写的 YAML / TOML 子集解析（只读）                                                                                                                                                     |
+| `agents/profile-model.ts`                   | DSH `cordis.patch.yml` 的默认模型读取与 MCP 剥离                                                                                                                                        |
+| `agents/cline-credentials.ts`               | 从 `providers.json` 派生 `CLINE_PROVIDER` / `CLINE_API_KEY`                                                                                                                             |
+| `agents/config/config-fingerprint.ts`       | Claude Code 的易变文件清单（避免每轮重启）                                                                                                                                              |
+| `daemon/messaging/attachments.ts`           | 出站敏感文件 denylist 里按 `realHome` 派生 + 三条硬编码路径                                                                                                                             |
 
 **没有任何加载外部定义的机制。** 全仓库无插件/动态加载注册表；唯一的注册表就是编译进产物的 `ACP_AGENT_PRESETS` 与 `MCP_ADAPTERS`。agent 名在 CLI 与微信指令里是白名单（`cli/subcommands/cli-brain.ts` 的 `brain set` / `switch`、`daemon/daemon-control.ts` 的「切换大脑」、`ipc/chat-command-specs.ts` 的「任务 \<agent\>」），`brain.json` 里给**非预设名**写 override 是死数据（`agents/brain-agents.ts` 的 `resolveAgentCore` 会置 `known=false` 并把 key 回落到 `kiro`）。用户今天唯一能做的是**借一个已有预设的身份**（`wemind brain set <已有名> --bin/--args/…`）。
 
@@ -60,29 +60,29 @@
 
 ## 2. 已确认决策
 
-| # | 决策点 | 取值 |
-| --- | --- | --- |
-| 1 | 扩展单元 | 分层：纯数据定义是主路径；数据表达不了才引用可安装代码模块（插件＝逃生舱） |
-| 2 | 插件形态 | 定义里 `adapter` 字段指向模块，模块按**稳定命名 hook 契约**注册 |
-| 3 | 插件能力边界 | 只碰**文件格式**与 **spawn 前准备**（env 派生/生成启动前文件/引擎探测/附加参数）；协议层与反向请求永不开放 |
-| 4 | 插件适用面 | 只服务 ACP；非 ACP backend 不做 |
-| 5 | 定义位置 | `~/.wemind/.agents/`（点号目录，避开账号 key 撞名），可用 `WEMIND_HOME` 覆盖 |
-| 6 | 分发 | 本机文件 + 可选 npm 定义包（包内固定位置，`agent add` **复制**即安装）；运行期绝不联网拉取 |
-| 7 | 优先级 | 内置 < 数据包 < 本机定义 < `brain.json` 字段 override < 环境变量 |
-| 8 | 同名覆盖 | **整条替换** + 三处可见性；不加闸（加闸只会把模型推向绕过 `check` 的路） |
-| 9 | 探针时机 | 只在 `agent add` / 显式重探时跑；结论写进定义并记下探测时的 agent 版本 |
-| 10 | `agent check` 深度 | schema + **起进程握手**（`initialize` + `session/new`），不发真实 prompt；`--deep` 才发 |
-| 11 | 内置预设 | 10 条全部迁成同一份数据 + schema 校验（dogfood，内置与用户同一套词汇表） |
-| 12 | 文档守卫 | 键源从 `brain-presets.ts` 改成**内置数据文件**；用户目录不受守卫管 |
-| 13 | 自助接入 | `agent spec`（规格 + 说明书）+ `probe --draft` + `agent check` 闭环 |
-| 14 | 微信侧接入 | **不新增微信指令**：用户消息直接交给当前大脑，由大脑用自己的工具写定义；大脑靠一条一次性提示知道这条路 |
-| 15 | 信任 | 安装即授权（不加额外确认）+ 透明展示来源与"会执行代码的 adapter" |
-| 16 | 接入后行为 | **不自动切换**大脑；回执里给一句"要切过去就说『切到 X』" |
-| 17 | 失败语义 | 坏定义 fail-closed（沿用现有退出码 78），但报错必须说清是哪份定义、坏在哪、怎么修 |
-| 18 | 版本兼容 | 定义带 `schemaVersion`、插件声明 `apiVersion`；不匹配 fail-closed |
-| 19 | 生效时机 | 新定义落地即可热切换（不重启）；定义改动不引入文件监听 |
-| 20 | 用户定义的地位 | 与内置**完全平等**（可当 brain/worker、可被微信选中），但**不参与**自动挑脑 |
-| 21 | 实施方案 | 反向检验后：**不采用**"单一脚本适配器"那种更粗的方案 |
+| #   | 决策点             | 取值                                                                                                       |
+| --- | ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| 1   | 扩展单元           | 分层：纯数据定义是主路径；数据表达不了才引用可安装代码模块（插件＝逃生舱）                                 |
+| 2   | 插件形态           | 定义里 `adapter` 字段指向模块，模块按**稳定命名 hook 契约**注册                                            |
+| 3   | 插件能力边界       | 只碰**文件格式**与 **spawn 前准备**（env 派生/生成启动前文件/引擎探测/附加参数）；协议层与反向请求永不开放 |
+| 4   | 插件适用面         | 只服务 ACP；非 ACP backend 不做                                                                            |
+| 5   | 定义位置           | `~/.wemind/.agents/`（点号目录，避开账号 key 撞名），可用 `WEMIND_HOME` 覆盖                               |
+| 6   | 分发               | 本机文件 + 可选 npm 定义包（包内固定位置，`agent add` **复制**即安装）；运行期绝不联网拉取                 |
+| 7   | 优先级             | 内置 < 数据包 < 本机定义 < `brain.json` 字段 override < 环境变量                                           |
+| 8   | 同名覆盖           | **整条替换** + 三处可见性；不加闸（加闸只会把模型推向绕过 `check` 的路）                                   |
+| 9   | 探针时机           | 只在 `agent add` / 显式重探时跑；结论写进定义并记下探测时的 agent 版本                                     |
+| 10  | `agent check` 深度 | schema + **起进程握手**（`initialize` + `session/new`），不发真实 prompt；`--deep` 才发                    |
+| 11  | 内置预设           | 10 条全部迁成同一份数据 + schema 校验（dogfood，内置与用户同一套词汇表）                                   |
+| 12  | 文档守卫           | 键源从 `brain-presets.ts` 改成**内置数据文件**；用户目录不受守卫管                                         |
+| 13  | 自助接入           | `agent spec`（规格 + 说明书）+ `probe --draft` + `agent check` 闭环                                        |
+| 14  | 微信侧接入         | **不新增微信指令**：用户消息直接交给当前大脑，由大脑用自己的工具写定义；大脑靠一条一次性提示知道这条路     |
+| 15  | 信任               | 安装即授权（不加额外确认）+ 透明展示来源与"会执行代码的 adapter"                                           |
+| 16  | 接入后行为         | **不自动切换**大脑；回执里给一句"要切过去就说『切到 X』"                                                   |
+| 17  | 失败语义           | 坏定义 fail-closed（沿用现有退出码 78），但报错必须说清是哪份定义、坏在哪、怎么修                          |
+| 18  | 版本兼容           | 定义带 `schemaVersion`、插件声明 `apiVersion`；不匹配 fail-closed                                          |
+| 19  | 生效时机           | 新定义落地即可热切换（不重启）；定义改动不引入文件监听                                                     |
+| 20  | 用户定义的地位     | 与内置**完全平等**（可当 brain/worker、可被微信选中），但**不参与**自动挑脑                                |
+| 21  | 实施方案           | 反向检验后：**不采用**"单一脚本适配器"那种更粗的方案                                                       |
 
 ---
 
@@ -97,18 +97,18 @@
 
 **下表的顺序就是权威顺序**：`AgentDefinition` 类型的分组、`AGENT_DEFINITION_FIELDS` 字段表与自动生成的 JSON Schema 都按它排列，改一处要三处一起改。
 
-| 分组 | 字段（沿用今天的名字） |
-| --- | --- |
-| 身份与启动 | `name` / `bin` / `binWin` / `fallbackBinPaths` / `requiresBins` / `args` / `shell` |
-| 目录与继承 | `homeEnvVar` / `realHome` / `configSubdir` / `inheritDirs` / `inheritFiles` / `extraConfigFiles` |
-| MCP | `mcpFormat` / `mcpConfigFile` / `catalogFile` / `acpMcpServers` / `mcpDelivery` |
-| 会话与能力 | `restore` / `replayOnLoad` / `images` / `sessionMode` / `isolateSessions`※ |
-| 超时与心跳 | `firstFrameMs` / `heartbeatMs` |
-| 模型 | `model` / `modelArg` / `realProfile`※ |
-| 环境 | `env` / `envDefaults` |
-| 副本设置（仅 `managed`） | `settingsBase` / `settingsDefaults` / `credentialFiles` / `identityFiles` |
-| 引擎差异 | `kiroEngine`※ |
-| 插件与探测 | `adapter` / `probe`——**独立键**，不在数据字段表里，由各自的校验函数处理 |
+| 分组                     | 字段（沿用今天的名字）                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| 身份与启动               | `name` / `bin` / `binWin` / `fallbackBinPaths` / `requiresBins` / `args` / `shell`               |
+| 目录与继承               | `homeEnvVar` / `realHome` / `configSubdir` / `inheritDirs` / `inheritFiles` / `extraConfigFiles` |
+| MCP                      | `mcpFormat` / `mcpConfigFile` / `catalogFile` / `acpMcpServers` / `mcpDelivery`                  |
+| 会话与能力               | `restore` / `replayOnLoad` / `images` / `sessionMode` / `isolateSessions`※                       |
+| 超时与心跳               | `firstFrameMs` / `heartbeatMs`                                                                   |
+| 模型                     | `model` / `modelArg` / `realProfile`※                                                            |
+| 环境                     | `env` / `envDefaults`                                                                            |
+| 副本设置（仅 `managed`） | `settingsBase` / `settingsDefaults` / `credentialFiles` / `identityFiles`                        |
+| 引擎差异                 | `kiroEngine`※                                                                                    |
+| 插件与探测               | `adapter` / `probe`——**独立键**，不在数据字段表里，由各自的校验函数处理                          |
 
 ※ 这 3 个是**数据字段、但语义要靠代码解释**（见 §3.3）：`realProfile`（profile 读写）、`isolateSessions`（启动前生成会话 patch 文件）、`kiroEngine`（引擎探测与免审批方式）。另外 `credentialEnv` 是函数值，必须留在代码侧。
 
@@ -131,17 +131,17 @@
 
 定义是 JSON，需要代码时在 `adapter` 字段写模块说明符（包名或绝对路径），模块默认导出注册一组**命名 hook**。hook 名是稳定契约，对应今天写死在核心里那批逻辑：
 
-| hook | 替换掉今天的 |
-| --- | --- |
-| `mcp.readCatalog` / `mcp.writeCatalog` / `mcp.stripSettings` / `mcp.toAcp` / `mcp.nativeCatalog` | `MCP_ADAPTERS` 里按格式分派的 4 个 adapter（`mcp-adapters.ts`） |
-| `settings.inherit` | `jsonMcpServers.inheritSettings` 里按 `mcp.json` 名字特判的逻辑 |
-| `profile.readDefaultModel` / `profile.copyForManaged` / `profile.managedFiles` / `profile.stripManagedWechat` / `profile.hints` | `profile-model.ts`（DSH `cordis.patch.yml`） |
-| `env.derive` | `cline-credentials.ts` 的 `clineCredentialEnv` |
-| `engine.prepareArgs` | `brain-agents.ts` 的 kiro v2/v3 探测与 `stripKiroV2TrustArgs` |
-| `spawn.prepareArgs` / `spawn.prepare` / `spawn.prepareManaged` | DSH 的 session patch 文件生成（`dshSessionPatchFor` / `prepareAgent`）、kiro 的 `permissions.yaml` |
-| `fingerprint.volatile` | `config-fingerprint.ts` 里 Claude Code 的易变文件清单 |
-| `paths.sensitive` | `attachments.ts` 里按 `realHome` 派生 + 三条硬编码的敏感路径 |
-| `hints.install` / `hints.auth` / `hints.autoProbe` | 安装/认证提示与 `AUTO_PROBE_ORDER` 的名字分支 |
+| hook                                                                                                                            | 替换掉今天的                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `mcp.readCatalog` / `mcp.writeCatalog` / `mcp.stripSettings` / `mcp.toAcp` / `mcp.nativeCatalog`                                | `MCP_ADAPTERS` 里按格式分派的 4 个 adapter（`mcp-adapters.ts`）                                    |
+| `settings.inherit`                                                                                                              | `jsonMcpServers.inheritSettings` 里按 `mcp.json` 名字特判的逻辑                                    |
+| `profile.readDefaultModel` / `profile.copyForManaged` / `profile.managedFiles` / `profile.stripManagedWechat` / `profile.hints` | `profile-model.ts`（DSH `cordis.patch.yml`）                                                       |
+| `env.derive`                                                                                                                    | `cline-credentials.ts` 的 `clineCredentialEnv`                                                     |
+| `engine.prepareArgs`                                                                                                            | `brain-agents.ts` 的 kiro v2/v3 探测与 `stripKiroV2TrustArgs`                                      |
+| `spawn.prepareArgs` / `spawn.prepare` / `spawn.prepareManaged`                                                                  | DSH 的 session patch 文件生成（`dshSessionPatchFor` / `prepareAgent`）、kiro 的 `permissions.yaml` |
+| `fingerprint.volatile`                                                                                                          | `config-fingerprint.ts` 里 Claude Code 的易变文件清单                                              |
+| `paths.sensitive`                                                                                                               | `attachments.ts` 里按 `realHome` 派生 + 三条硬编码的敏感路径                                       |
+| `hints.install` / `hints.auth` / `hints.autoProbe`                                                                              | 安装/认证提示与 `AUTO_PROBE_ORDER` 的名字分支                                                      |
 
 **外部模块的加载口径**：定义里的 `adapter.module` 可以是包名、绝对路径或以 `./` / `../` 开头的相对路径；模块默认导出 `{ apiVersion: 1, ...hooks }`。CJS 插件走同步 `require`，ESM 插件在 CLI / daemon 启动时异步预加载；契约版本不符、未知顶层键、未知嵌套键、`mcp` 缺少接口方法、模块无法解析都 **fail-closed**。`agent add` 会把相对路径的 adapter 复制到定义目录下并改写 `adapter.module`；包名与绝对路径保持原样，运行期不联网拉取。插件只能补文件格式与 spawn 前准备，不能替换会话恢复、回合帧、静默等待、权限应答或任何反向请求。
 
@@ -197,14 +197,14 @@
 
 ## 4. 命令面
 
-| 命令 | 作用 |
-| --- | --- |
-| `wemind agent list` | 名称、来源（内置 / 数据包 / 本机）、可用性、探测记录 |
-| `wemind agent show <name> [--explain]` | 最终生效值；`--explain` 打印每一层的来源 |
-| `wemind agent spec [--json]` | 规格 + 说明书 + 示例（同一份源的 Markdown / JSON Schema） |
-| `wemind agent probe <bin> [--args …] [--draft] [--deep]` | 能力探针；`--draft` 产出定义草稿 |
-| `wemind agent check <name\|file> [--schema] [--deep]` | 默认真实 ACP 握手；`--schema` 只校验数据、不启动进程；`--deep` 再发一条真实 prompt |
-| `wemind agent add <pkg\|file>` / `wemind agent remove <name>` | 复制安装 / 移除本机定义 |
+| 命令                                                          | 作用                                                                               |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `wemind agent list`                                           | 名称、来源（内置 / 数据包 / 本机）、可用性、探测记录                               |
+| `wemind agent show <name> [--explain]`                        | 最终生效值；`--explain` 打印每一层的来源                                           |
+| `wemind agent spec [--json]`                                  | 规格 + 说明书 + 示例（同一份源的 Markdown / JSON Schema）                          |
+| `wemind agent probe <bin> [--args …] [--draft] [--deep]`      | 能力探针；`--draft` 产出定义草稿                                                   |
+| `wemind agent check <name\|file> [--schema] [--deep]`         | 默认真实 ACP 握手；`--schema` 只校验数据、不启动进程；`--deep` 再发一条真实 prompt |
+| `wemind agent add <pkg\|file>` / `wemind agent remove <name>` | 复制安装 / 移除本机定义                                                            |
 
 **受影响的既有命令**：`wemind brain set` / `brain switch` / 微信「切换大脑」/「任务 \<agent\>」的**名字白名单放开**为"已定义的 agent"；`wemind config agent <name> show\|set` 的语义扩展为：**有 adapter 走 adapter 的读写 hook，纯数据定义按其声明的 `mcpFormat` 走内置格式 adapter，格式不认识时明确报错**（不搞"用户定义的 agent 一律不支持"）。
 

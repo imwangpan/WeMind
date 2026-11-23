@@ -55,17 +55,17 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 ### 核心 API 一览
 
-| 函数 | 端点 | 作用 | 超时 |
-|------|------|------|------|
-| `getUpdates` | `ilink/bot/getupdates` | 长轮询收消息（携带游标 `get_updates_buf`；uint64 ID 无损解析） | 默认 35s |
-| `sendMessage` | `ilink/bot/sendmessage` | 发消息（文本/图片/文件/视频；返回解析后的响应，`message_id` 为字符串） | 15s |
-| `sendItem` | `ilink/bot/sendmessage` | 发单个结构化 item（工具进度 11/12 等），每次只放一个 item | 15s |
-| `sendTyping` | `ilink/bot/sendtyping` | 打字状态（显示/取消） | 15s |
-| `getConfig` | `ilink/bot/getconfig` | 取 `typing_ticket`（sendTyping 必需） | 15s |
-| `getUploadUrl` | `ilink/bot/getuploadurl` | 取 CDN 上传地址（发图/发文件） | 15s |
-| `fetchQRCode` | `ilink/bot/get_bot_qrcode` | 取登录二维码（POST + `local_token_list`） | 15s |
-| `pollQRStatus` | `ilink/bot/get_qrcode_status` | 轮询扫码状态 | 35s |
-| `notifyStart` / `notifyStop` | `ilink/bot/msg/notifystart` `notifystop` | 上线/下线通知（best-effort，失败不阻断） | 15s |
+| 函数                         | 端点                                     | 作用                                                                   | 超时     |
+| ---------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- | -------- |
+| `getUpdates`                 | `ilink/bot/getupdates`                   | 长轮询收消息（携带游标 `get_updates_buf`；uint64 ID 无损解析）         | 默认 35s |
+| `sendMessage`                | `ilink/bot/sendmessage`                  | 发消息（文本/图片/文件/视频；返回解析后的响应，`message_id` 为字符串） | 15s      |
+| `sendItem`                   | `ilink/bot/sendmessage`                  | 发单个结构化 item（工具进度 11/12 等），每次只放一个 item              | 15s      |
+| `sendTyping`                 | `ilink/bot/sendtyping`                   | 打字状态（显示/取消）                                                  | 15s      |
+| `getConfig`                  | `ilink/bot/getconfig`                    | 取 `typing_ticket`（sendTyping 必需）                                  | 15s      |
+| `getUploadUrl`               | `ilink/bot/getuploadurl`                 | 取 CDN 上传地址（发图/发文件）                                         | 15s      |
+| `fetchQRCode`                | `ilink/bot/get_bot_qrcode`               | 取登录二维码（POST + `local_token_list`）                              | 15s      |
+| `pollQRStatus`               | `ilink/bot/get_qrcode_status`            | 轮询扫码状态                                                           | 35s      |
+| `notifyStart` / `notifyStop` | `ilink/bot/msg/notifystart` `notifystop` | 上线/下线通知（best-effort，失败不阻断）                               | 15s      |
 
 ### 两个健壮性细节
 
@@ -79,13 +79,13 @@ POST 请求还会带：`Content-Type: application/json`、`AuthorizationType: il
 
 ### 关键枚举
 
-| 枚举 | 取值 | 含义 |
-|------|------|------|
-| `MessageType` | `USER=1` / `BOT=2` | 消息方向（入站为 USER） |
+| 枚举              | 取值                                                                                                   | 含义                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| `MessageType`     | `USER=1` / `BOT=2`                                                                                     | 消息方向（入站为 USER）                |
 | `MessageItemType` | `TEXT=1` / `IMAGE=2` / `VOICE=3` / `FILE=4` / `VIDEO=5` / `TOOL_CALL_START=11` / `TOOL_CALL_RESULT=12` | 消息项类型（工具进度 item 见下方约定） |
-| `MessageState` | `NEW=0` / `GENERATING=1` / `FINISH=2` | 消息状态（见下方关键约定） |
-| `TypingStatus` | `TYPING=1` / `CANCEL=2` | 打字状态 |
-| `UploadMediaType` | `IMAGE=1` / `VIDEO=2` / `FILE=3` / `VOICE=4` | 上传媒体类型 |
+| `MessageState`    | `NEW=0` / `GENERATING=1` / `FINISH=2`                                                                  | 消息状态（见下方关键约定）             |
+| `TypingStatus`    | `TYPING=1` / `CANCEL=2`                                                                                | 打字状态                               |
+| `UploadMediaType` | `IMAGE=1` / `VIDEO=2` / `FILE=3` / `VOICE=4`                                                           | 上传媒体类型                           |
 
 **`MessageState` 的关键约定**：文本进度/中间消息必须用 `GENERATING`，仅最终答案用 `FINISH`。因为 `FINISH` 会结束当前回合（关闭该 context 的发送窗口），如果文本进度也用 `FINISH` 会提前关掉会话。这是排查「重任务收不到结果」时纠正的关键认知（详见 [5. daemon](05-daemon.md)）。**结构化工具 item 是例外**：它们用 `FINISH`（官方实现如此，真机用 `GENERATING` 时客户端不显示）。
 
@@ -124,10 +124,10 @@ iLink 有两个语义不同的错误字段，**它们不是按接口划分的**�
 
 已知错误码：
 
-| 码 | 字段 | 含义 | 处理 |
-|----|------|------|------|
-| `0` | ret | 成功 | — |
-| `-2` | ret | 参数错误（Parameter error） | 检查请求参数 |
+| 码    | 字段    | 含义                        | 处理                                  |
+| ----- | ------- | --------------------------- | ------------------------------------- |
+| `0`   | ret     | 成功                        | —                                     |
+| `-2`  | ret     | 参数错误（Parameter error） | 检查请求参数                          |
 | `-14` | errcode | 会话过期（Session expired） | 重新登录（本项目对该账号冷却 1 小时） |
 
 **关于 `-2` 的重要澄清**：官方定义是「参数错误」，**不是**「context_token 按时间过期」。常见诱因是 context_token 失效/不匹配，或被复用为**发送限流**（短时连续发送过多）。真正「按会话过期」的是 `-14`。**daemon 重启后** `state.contextTokens` 里是上次运行留下的 token，用户下一条消息之前它必然失效——这类「必须送达」的推送由 daemon 挂起、等新 token 到达再补发（见 [05-daemon](05-daemon.md#串行发送链)）。
@@ -138,15 +138,15 @@ iLink 有两个语义不同的错误字段，**它们不是按接口划分的**�
 
 与业务错误码正交，这里只管「网络传输」层面的失败。`classifyTransportError` 把 fetch/网络错误归类：
 
-| kind | retryable | 触发 |
-|------|-----------|------|
-| `timeout` | 是 | AbortError（超时） |
-| `dns` | 是 | ENOTFOUND |
-| `connection` | 是 | ECONNRESET / socket hang up |
-| `network` | 是 | ECONNREFUSED / fetch failed 等 |
-| `http` | 429 / 5xx 是，其它 4xx 否 | `HttpStatusError`（HTTP 非 2xx） |
-| `tls` | **否** | cert / tls / ssl 错误 |
-| `unknown` | 否 | 其它 |
+| kind         | retryable                 | 触发                             |
+| ------------ | ------------------------- | -------------------------------- |
+| `timeout`    | 是                        | AbortError（超时）               |
+| `dns`        | 是                        | ENOTFOUND                        |
+| `connection` | 是                        | ECONNRESET / socket hang up      |
+| `network`    | 是                        | ECONNREFUSED / fetch failed 等   |
+| `http`       | 429 / 5xx 是，其它 4xx 否 | `HttpStatusError`（HTTP 非 2xx） |
+| `tls`        | **否**                    | cert / tls / ssl 错误            |
+| `unknown`    | 否                        | 其它                             |
 
 一个易踩的坑（已规避）：**TLS 判定必须排在 `fetch failed` 兜底之前**。Node fetch 的网络失败顶层恒为 `TypeError: fetch failed`，真正的 cert/tls 原因在 `err.cause` 里；若顺序反了，TLS 分支会被 `fetch failed` 先匹配成可重试，变成死代码。
 

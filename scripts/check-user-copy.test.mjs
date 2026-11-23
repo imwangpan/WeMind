@@ -29,7 +29,7 @@ describe("findViolations", () => {
   });
 
   it("行尾注释里的词也不算", () => {
-    const src = 'const n = 3; // 兜底用，任务拉起后再看';
+    const src = "const n = 3; // 兜底用，任务拉起后再看";
     expect(findViolations(src, "x.ts")).toEqual([]);
   });
 

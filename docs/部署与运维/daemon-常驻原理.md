@@ -46,13 +46,13 @@
 
 三层进程各写一个 PID 文件到账号数据目录 `~/.wemind/<key>/`：
 
-| 文件               | 属于                      | 写入者                                            | 用途                                                                                                                                                                                                                    |
-| ------------------ | ------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 文件               | 属于                      | 写入者                                                                                             | 用途                                                                                                                                                                                                                    |
+| ------------------ | ------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `wrapper.pid`      | ① 后台守护进程            | `watchdog-runner.ts`（builtin，含 `run-daemon.ps1` 默认的 cli 模式）/ `run-daemon.ps1 -Mode shell` | 管理命令据此停掉它（否则停了 daemon 会被立刻重拉）；兼作单实例守卫                                                                                                                                                      |
-| `daemon.pid`       | ② daemon                  | `index.ts` 启动时                                 | 精确定位本账号 node 进程                                                                                                                                                                                                |
-| `brain.pid`        | ③ 大脑                    | `acp-brain.ts` spawn 后                           | 区分「bot 的大脑」与用户自己日常用的 agent，便于清理                                                                                                                                                                    |
-| `workers.pid.json` | ③' worker（可能多条并存） | `worker-pool.ts` / `worker-acp.ts` spawn 后       | 远程任务进程的**记录**（每条含起进程时真实用的 bin/args，供逐条身份校验；单条为对象、多条为数组）；`stop` 时一并清理（漏了会留下孤儿进程占着会话）。旧账号只有裸整数 `worker.pid`，仍按「配置算特征串」的老办法兼容读取 |
-| `pm2.app.json`     | ① 后台守护进程            | `pm2-runner.ts`（仅 `--runner pm2`）              | pm2 的 app 声明（名字/重拉策略/日志/`WECHAT_ACCOUNT`）；由 `wemind start --runner pm2` 生成后 `pm2 start`                                                                                                               |
+| `daemon.pid`       | ② daemon                  | `index.ts` 启动时                                                                                  | 精确定位本账号 node 进程                                                                                                                                                                                                |
+| `brain.pid`        | ③ 大脑                    | `acp-brain.ts` spawn 后                                                                            | 区分「bot 的大脑」与用户自己日常用的 agent，便于清理                                                                                                                                                                    |
+| `workers.pid.json` | ③' worker（可能多条并存） | `worker-pool.ts` / `worker-acp.ts` spawn 后                                                        | 远程任务进程的**记录**（每条含起进程时真实用的 bin/args，供逐条身份校验；单条为对象、多条为数组）；`stop` 时一并清理（漏了会留下孤儿进程占着会话）。旧账号只有裸整数 `worker.pid`，仍按「配置算特征串」的老办法兼容读取 |
+| `pm2.app.json`     | ① 后台守护进程            | `pm2-runner.ts`（仅 `--runner pm2`）                                                               | pm2 的 app 声明（名字/重拉策略/日志/`WECHAT_ACCOUNT`）；由 `wemind start --runner pm2` 生成后 `pm2 start`                                                                                                               |
 
 > **身份校验（防 pid 复用）**：pid 会被系统复用（尤其**重启后**）——只凭「pid 还活着」就杀进程或判定「运行中」，可能**误杀别人的进程**、或反而看不出「其实没起来」。所以所有基于 pid 文件的判断/停止都会先**核对该 pid 的命令行是否确属本程序**（`proc-identity.ts`）：daemon 与后台守护进程需命中**三组**特征串之一——`wemind` + `cli.js`（npm 安装与仓库绝对路径）、`wechat-daemon` + `dist` + `cli.js`（在仓库根用**相对路径**手跑；命令行里既没有仓库名也没有包名）、`run-daemon.ps1`（源码开发期的 PowerShell 版）；大脑/worker 需含其启动命令（如 `opencode acp`，据此与用户自己的 `opencode serve` 区分）。查不到命令行时**不再一律判否**，而是三态：`identifyProcess()` 返回 `ours` / `other` / `unknown`。**unknown 不等于 other**：`start` 与后台守护进程单实例守卫 fail-closed（拒绝启动，避免双开抢 token），`stop` 不杀且保留 pid 文件，`wemind list` 显示「无法确认」。Windows 查询输出用 `WEMIND|<pid>|<base64(UTF-8)>` 编码，避免 PS 5.1 控制台代码页（中文 Windows 为 936）把命令行解码成乱码；PowerShell 解析走 `shared/process/powershell.ts`（5.1 优先，缺失回退 `pwsh`）。
 >
@@ -207,12 +207,12 @@ if (-not $createdNew) { 记日志「已有实例在跑」; exit 0 }   # 抢不�
 
 **现行做法（所有平台、安装版与源码版一致）：`wemind autostart install`**——默认给所有已登记账号装；`--key` / `--label` 只装一个。它按平台生成触发器，检测到 PM2 时优先用 PM2：
 
-| 平台 | 触发器 | 触发后执行 | 谁负责重拉 |
-|------|--------|------------|------------|
-| Windows | 登录触发的计划任务（当前用户，不需要管理员；被受管策略拒绝时降级 `HKCU\...\Run`） | `wemind start --all`（只装部分账号时是 `start <key…>`） | 内置 `_watchdog` |
-| Linux | `~/.config/systemd/user/wemind@<key>.service` | `wemind daemon`（前台常驻） | systemd（`Restart=always`） |
-| macOS | `~/Library/LaunchAgents/dev.wemind.<key>.plist` | `wemind daemon`（前台常驻） | launchd（`KeepAlive`） |
-| 任意（装了 PM2） | pm2 自身（`wemind-<key>` 实例） | `wemind daemon`（声明 `args: "daemon"`） | pm2 |
+| 平台             | 触发器                                                                            | 触发后执行                                              | 谁负责重拉                  |
+| ---------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------- |
+| Windows          | 登录触发的计划任务（当前用户，不需要管理员；被受管策略拒绝时降级 `HKCU\...\Run`） | `wemind start --all`（只装部分账号时是 `start <key…>`） | 内置 `_watchdog`            |
+| Linux            | `~/.config/systemd/user/wemind@<key>.service`                                     | `wemind daemon`（前台常驻）                             | systemd（`Restart=always`） |
+| macOS            | `~/Library/LaunchAgents/dev.wemind.<key>.plist`                                   | `wemind daemon`（前台常驻）                             | launchd（`KeepAlive`）      |
+| 任意（装了 PM2） | pm2 自身（`wemind-<key>` 实例）                                                   | `wemind daemon`（声明 `args: "daemon"`）                | pm2                         |
 
 > **触发器绝不能执行 `wemind autostart install`**——每次登录都会重新安装一遍。Windows 触发器只执行 `start --all`（只装部分账号时是 `start <key…>`）；Linux/macOS 的 supervisor 本身负责重拉，单元里写 `wemind start` 会立刻退出并被无限重启。
 >
@@ -281,15 +281,15 @@ foreach ($key in $accounts) {
 
 ## 9. 故障模式与恢复一览
 
-| 现象                               | 机制层         | 表现 / 恢复                                                                      |
-| ---------------------------------- | -------------- | -------------------------------------------------------------------------------- |
-| daemon 崩溃（含旧的静默 `code=1`） | ① 后台守护进程 | 日志 `daemon exited (code=...)` → 5s 后重拉；已加全局异常处理器从源头减少崩溃    |
-| 大脑（agent）假死/超时             | ③ acp-brain    | 杀进程 → 下条消息重建 + `session/load`/`resume` 恢复上下文                       |
-| 网络抖动 `getUpdates fetch failed` | ② poller       | try/catch + 2s 后重试，不崩                                                      |
-| 登录会话过期 `-14`                 | ② daemon       | 暂停 1 小时，等重新登录后自动恢复                                                |
+| 现象                               | 机制层         | 表现 / 恢复                                                                        |
+| ---------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
+| daemon 崩溃（含旧的静默 `code=1`） | ① 后台守护进程 | 日志 `daemon exited (code=...)` → 5s 后重拉；已加全局异常处理器从源头减少崩溃      |
+| 大脑（agent）假死/超时             | ③ acp-brain    | 杀进程 → 下条消息重建 + `session/load`/`resume` 恢复上下文                         |
+| 网络抖动 `getUpdates fetch failed` | ② poller       | try/catch + 2s 后重试，不崩                                                        |
+| 登录会话过期 `-14`                 | ② daemon       | 暂停 1 小时，等重新登录后自动恢复                                                  |
 | 重复启动 / 多实例                  | ① 单实例守卫   | builtin watchdog 的 `wrapper.pid` 守卫 / shell 模式的命名 Mutex 让重复实例直接退出 |
-| 开机没起来                         | 〇 触发器      | 检查计划任务是否存在/启用、PS7 路径、`ExecutionTimeLimit=0`                      |
-| 开机没起来（陈旧 pid 被复用）      | 〇/① pid 文件  | pid 存活还须**身份校验**确属本程序，否则后台守护进程会误判「已有实例」而静默退出 |
+| 开机没起来                         | 〇 触发器      | 检查计划任务是否存在/启用、PS7 路径、`ExecutionTimeLimit=0`                        |
+| 开机没起来（陈旧 pid 被复用）      | 〇/① pid 文件  | pid 存活还须**身份校验**确属本程序，否则后台守护进程会误判「已有实例」而静默退出   |
 
 ---
 

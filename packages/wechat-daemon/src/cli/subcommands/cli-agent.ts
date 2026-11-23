@@ -135,7 +135,7 @@ function parseOpts(rest: string[]): { opts: AgentOpts; pos: string[] } {
     rejectPermissions: false,
   };
   const pos: string[] = [];
-  for (let i = 0; i < rest.length; ) {
+  for (let i = 0; i < rest.length;) {
     const arg = rest[i];
     if (!arg.startsWith("--")) {
       pos.push(arg);

@@ -42,16 +42,16 @@ transport（怎么让 agent 看到）
 
 关键代码：
 
-| 文件                                                          | 作用                                                                          |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `packages/wechat-daemon/src/agents/config/overlay.ts`         | 微信独享 `mcp.extra` / `mcp.disable`                                          |
-| `packages/wechat-daemon/src/agents/managed/mcp-brain.ts`    | brain 副本、catalog、激活集、`加载/卸载`                                      |
-| `packages/wechat-daemon/src/agents/managed/mcp-worker.ts` | worker 全量继承、排除集                                                       |
-| `packages/wechat-daemon/src/agents/managed/mcp-adapters.ts`   | 按文件格式的 MCP 适配器：路径、读写、剥离、ACP 转换、原生只读（Codex TOML）   |
-| `packages/wechat-daemon/src/agents/managed/agent-mcp.ts`      | MCP 格式纯函数（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）与 wechat 判定 |
-| `packages/wechat-daemon/src/cli/subcommands/cli-config.ts`    | `wemind mcp list/enable/disable/add/remove` 的 CLI 入口（`config mcp` 只是兼容别名） |
-| `packages/wechat-daemon/src/index.ts`                         | 指令拦截；加载/卸载后 `restart()`                                             |
-| `packages/wechat-daemon/src/acp/acp-brain.ts`                 | 重启 ACP，重建后恢复 session                                                  |
+| 文件                                                        | 作用                                                                                 |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `packages/wechat-daemon/src/agents/config/overlay.ts`       | 微信独享 `mcp.extra` / `mcp.disable`                                                 |
+| `packages/wechat-daemon/src/agents/managed/mcp-brain.ts`    | brain 副本、catalog、激活集、`加载/卸载`                                             |
+| `packages/wechat-daemon/src/agents/managed/mcp-worker.ts`   | worker 全量继承、排除集                                                              |
+| `packages/wechat-daemon/src/agents/managed/mcp-adapters.ts` | 按文件格式的 MCP 适配器：路径、读写、剥离、ACP 转换、原生只读（Codex TOML）          |
+| `packages/wechat-daemon/src/agents/managed/agent-mcp.ts`    | MCP 格式纯函数（顶层 `mcpServers` / 嵌套 `mcp.servers` / HTTP）与 wechat 判定        |
+| `packages/wechat-daemon/src/cli/subcommands/cli-config.ts`  | `wemind mcp list/enable/disable/add/remove` 的 CLI 入口（`config mcp` 只是兼容别名） |
+| `packages/wechat-daemon/src/index.ts`                       | 指令拦截；加载/卸载后 `restart()`                                                    |
+| `packages/wechat-daemon/src/acp/acp-brain.ts`               | 重启 ACP，重建后恢复 session                                                         |
 
 ---
 

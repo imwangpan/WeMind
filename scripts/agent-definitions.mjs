@@ -19,8 +19,7 @@ export function parseDefinition(source, file) {
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw))
     throw new Error(`${file}: 定义应是一个 JSON 对象`);
-  if (typeof raw.name !== "string" || raw.name === "")
-    throw new Error(`${file}: 缺少非空的 name`);
+  if (typeof raw.name !== "string" || raw.name === "") throw new Error(`${file}: 缺少非空的 name`);
   const expected = path.basename(file, ".json");
   if (raw.name !== expected)
     throw new Error(`${file}: name「${raw.name}」与文件名不一致（必须相同）`);

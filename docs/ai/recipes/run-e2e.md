@@ -9,15 +9,15 @@
 
 ## 0. 分层验收（从便宜到贵）
 
-| 层 | 命令 | 证明什么 |
-|---|---|---|
-| L1 编译/单测 | `npm run build && npm run typecheck && npm test` | 代码不崩 |
-| L2 大脑可用 | `node .../cli.js brain check <key>` | 二进制存在 + 能实现 ACP（initialize/session-new） |
-| L3 ACP 冒烟 | `wemind agent probe <bin> ... --deep`（旧 `node scripts/acp-probe.mjs` 兼容） | prompt / update / load\|resume / 反向请求 |
-| L4 微信单轮 | 发一条消息，看 `prompt ok` + 收到回复 | iLink + daemon + brain 全链路 |
-| L5 多轮/自愈 | 杀 daemon → 再起 → 追问上一轮 | session 恢复 |
-| L6 任务/图片/MCP | 按需 | 专项能力 |
-| L7 控制面（1.2.0） | §7.1 的九项（切脑 / 回滚 / 多任务 / 会话 / 交接 / CLI 桥） | 热切换、会话管理、CLI 免重启 |
+| 层                 | 命令                                                                          | 证明什么                                          |
+| ------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------- |
+| L1 编译/单测       | `npm run build && npm run typecheck && npm test`                              | 代码不崩                                          |
+| L2 大脑可用        | `node .../cli.js brain check <key>`                                           | 二进制存在 + 能实现 ACP（initialize/session-new） |
+| L3 ACP 冒烟        | `wemind agent probe <bin> ... --deep`（旧 `node scripts/acp-probe.mjs` 兼容） | prompt / update / load\|resume / 反向请求         |
+| L4 微信单轮        | 发一条消息，看 `prompt ok` + 收到回复                                         | iLink + daemon + brain 全链路                     |
+| L5 多轮/自愈       | 杀 daemon → 再起 → 追问上一轮                                                 | session 恢复                                      |
+| L6 任务/图片/MCP   | 按需                                                                          | 专项能力                                          |
+| L7 控制面（1.2.0） | §7.1 的九项（切脑 / 回滚 / 多任务 / 会话 / 交接 / CLI 桥）                    | 热切换、会话管理、CLI 免重启                      |
 
 > 没有 L4 的证据，不要写「已端到端验证」。
 > L7 会**改账号状态**（切大脑 / 删会话 / 派任务），跑之前想清楚你是在哪个账号上跑。
@@ -38,6 +38,7 @@ node scripts/acp-probe.mjs
 ```
 
 > **2026-11-03 两个回归点**（改 kiro/DSH 相关代码后重跑）：
+>
 > - **kiro v3**：临时 `KIRO_HOME` 的 `settings/cli.json` 写 `{"acp.agentEngine":"v3"}`，`wemind brain check` 应通过；看 `managed` 模式的 `brain-home/settings/permissions.yaml`（`direct` 直接用真实 `~/.kiro`）是 allow-all，且解析出的 args 已没有 `--trust-all-tools`（多了 `--agent-engine v3`）。真实设置已有 `permissions.yaml` 时不得被覆盖。
 > - **DSH 会话隔离（仅 `managed` 模式）**：看 `<账号目录>/agent-sessions/deepseek/session-root-{brain,worker}.patch.yml` 与两个 root 目录；要复现旧故障，先在 `brain-home/sessions/` 放一个平铺会话文件再跑 `wemind brain check`（修复后 DSH 不再读那个目录）。`direct` 不追加 `--patch`，用 DSH 真实会话库。模型过期用 `wemind brain` 看是否给出 `no configured model` 的替换提示。
 
@@ -144,7 +145,7 @@ Get-Content "$env:USERPROFILE\.wemind\<key>\daemon.log" -Tail 80
 
 ```text
 [wemind/wechat-daemon] turn start to=...
-[wemind/wechat-daemon/acp] spawn ... 
+[wemind/wechat-daemon/acp] spawn ...
 [wemind/wechat-daemon/acp] initialized
 [wemind/wechat-daemon/acp] session/new ok ...   # 首次
 [wemind/wechat-daemon/acp] → session/prompt#...
@@ -232,39 +233,39 @@ MCP
 
 ## 7. 验收清单
 
-| # | 项 | 通过标准 |
-|---|---|---|
-| 1 | 构建/单测 | 全绿 |
-| 2 | `brain check` | `initialize + session/new` 成功 |
-| 3 | 单轮 | 日志 `prompt ok`，微信收到非空回复 |
-| 4 | 多轮 | 重启后追问，上下文还在（load/resume） |
-| 5 | 新会话 | `新会话 [名字]` 后旧上下文清空、列表可见 |
-| 6 | 自愈 | 杀进程后下一条能重建并恢复 |
-| 7 | 长任务 | 不因首帧误杀；进度不刷屏 |
-| 8 | 反向请求 | 有则应答，不卡死 |
-| 9 | 图片 | 按 agent 能力工作或友好拒绝 |
-| 10 | MCP | 加载/卸载生效；`wechat` 禁止 |
-| 11 | worker | 派发/中断/继续可用（多任务见 §7.1） |
-| 12 | 多账号 | token/会话指针/overlay/工作区按账号隔离；`direct` 下 Agent 真实配置/技能/记忆/会话库按设计共享 |
-| 13 | 热切换 | 不重启 daemon 换大脑，在途回合跑完 |
-| 14 | 切换回滚 | 坏 bin（**存在但不是 ACP agent**）被拒，旧大脑继续答，`brain.json` 未变 |
-| 15 | 多任务并行 | 两条不同 agent 同时跑且都出结果 |
-| 16 | 任务上限 | 第三条被拒且提示清楚（CLI 答复＝拒绝原因，不是「已派发」） |
-| 17 | 中断续跑 | 重启后标「待继续」，回「继续」接上 |
-| 18 | 会话四件套 | 列表 / 恢复 / 重命名 / 删除 与权限都对 |
-| 19 | 交接 | 摘要只带上一次，切回来源不带上 |
-| 20 | CLI 热切换 | `wemind brain switch` 在 daemon 运行时免重启生效 |
-| 21 | 入站富媒体 | 文件/视频/无转写语音落盘到 `<账号>/media/inbound/`（`managed` 才是 `<managed>/media/inbound/`），prompt 带绝对路径；有转写语音按文本处理 |
-| 22 | 引用消息 | 引用后 prompt 带 `[引用消息] 标题 | 正文`（或占位），不中断回合；只引用不输入正文时收到明确提示，不零反馈 |
-| 23 | 出站附件 | `[附件]`/`[文件]`/`[视频]` 送达；非法/敏感/超限路径有失败说明 |
-| 24 | 工具进度 | 默认发文本「步骤 N」；`WECHAT_TOOL_PROGRESS_ITEMS=1` 才发结构化 11/12（客户端目前不渲染） |
-| 25 | 消息 ID 精度 | 连发两条，`state.json` 的字符串 ID 不同、不丢消息 |
-| 26 | 正在输入（typing） | 长回合里「正在输入」持续可见；每 5s 续发，发消息后立刻补一次 |
-| 27 | 终端等效 | 在终端改真实 Agent 配置/技能/记忆后，下一条微信消息可见；会话历史与终端共用（默认 `homeMode=direct`） |
-| 28 | 微信侧 overlay | `wemind config wechat edit <agent>` 只改 `<账号>/agent-overrides/<agent>.json`（`mcp.disable` / `mcp.extra`），真实配置不变；新会话生效 |
-| 29 | 默认工作区 | brain/worker 分别使用 `<账号>/workspace/{brain,worker}`；`wemind workspace set <绝对路径> --role brain\|worker` 后已有会话 cwd 不变、新会话用新目录 |
-| 30 | worker MCP 有效集（managed） | 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；`direct` 由 Agent 自己加载真实配置，WeMind 不写 `mcp.json` |
-| 31 | 配置热重载（三态，2026-11-15） | `wemind config reload` 重新读取 Agent 配置、重新 seed 槽位并重启大脑；无回合时回执「常驻大脑已重启」并当场生效；brain 有回合在跑时日志记「等当前回合结束再重启大脑」、回执明确说「重启已排队到回合结束」、回复不中断，`<账号>/runtime.json` 出现 `pendingReload:{reason,at}`，回合结束后标记被清；切脑进行中回执说「没有重启」并提示重试；daemon 未运行时命令返回非零 |
+| #   | 项                             | 通过标准                                                                                                                                                                                                                                                                                                                                                              |
+| --- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 构建/单测                      | 全绿                                                                                                                                                                                                                                                                                                                                                                  |
+| 2   | `brain check`                  | `initialize + session/new` 成功                                                                                                                                                                                                                                                                                                                                       |
+| 3   | 单轮                           | 日志 `prompt ok`，微信收到非空回复                                                                                                                                                                                                                                                                                                                                    |
+| 4   | 多轮                           | 重启后追问，上下文还在（load/resume）                                                                                                                                                                                                                                                                                                                                 |
+| 5   | 新会话                         | `新会话 [名字]` 后旧上下文清空、列表可见                                                                                                                                                                                                                                                                                                                              |
+| 6   | 自愈                           | 杀进程后下一条能重建并恢复                                                                                                                                                                                                                                                                                                                                            |
+| 7   | 长任务                         | 不因首帧误杀；进度不刷屏                                                                                                                                                                                                                                                                                                                                              |
+| 8   | 反向请求                       | 有则应答，不卡死                                                                                                                                                                                                                                                                                                                                                      |
+| 9   | 图片                           | 按 agent 能力工作或友好拒绝                                                                                                                                                                                                                                                                                                                                           |
+| 10  | MCP                            | 加载/卸载生效；`wechat` 禁止                                                                                                                                                                                                                                                                                                                                          |
+| 11  | worker                         | 派发/中断/继续可用（多任务见 §7.1）                                                                                                                                                                                                                                                                                                                                   |
+| 12  | 多账号                         | token/会话指针/overlay/工作区按账号隔离；`direct` 下 Agent 真实配置/技能/记忆/会话库按设计共享                                                                                                                                                                                                                                                                        |
+| 13  | 热切换                         | 不重启 daemon 换大脑，在途回合跑完                                                                                                                                                                                                                                                                                                                                    |
+| 14  | 切换回滚                       | 坏 bin（**存在但不是 ACP agent**）被拒，旧大脑继续答，`brain.json` 未变                                                                                                                                                                                                                                                                                               |
+| 15  | 多任务并行                     | 两条不同 agent 同时跑且都出结果                                                                                                                                                                                                                                                                                                                                       |
+| 16  | 任务上限                       | 第三条被拒且提示清楚（CLI 答复＝拒绝原因，不是「已派发」）                                                                                                                                                                                                                                                                                                            |
+| 17  | 中断续跑                       | 重启后标「待继续」，回「继续」接上                                                                                                                                                                                                                                                                                                                                    |
+| 18  | 会话四件套                     | 列表 / 恢复 / 重命名 / 删除 与权限都对                                                                                                                                                                                                                                                                                                                                |
+| 19  | 交接                           | 摘要只带上一次，切回来源不带上                                                                                                                                                                                                                                                                                                                                        |
+| 20  | CLI 热切换                     | `wemind brain switch` 在 daemon 运行时免重启生效                                                                                                                                                                                                                                                                                                                      |
+| 21  | 入站富媒体                     | 文件/视频/无转写语音落盘到 `<账号>/media/inbound/`（`managed` 才是 `<managed>/media/inbound/`），prompt 带绝对路径；有转写语音按文本处理                                                                                                                                                                                                                              |
+| 22  | 引用消息                       | 引用后 prompt 带 `[引用消息] 标题                                                                                                                                                                                                                                                                                                                                     | 正文`（或占位），不中断回合；只引用不输入正文时收到明确提示，不零反馈 |
+| 23  | 出站附件                       | `[附件]`/`[文件]`/`[视频]` 送达；非法/敏感/超限路径有失败说明                                                                                                                                                                                                                                                                                                         |
+| 24  | 工具进度                       | 默认发文本「步骤 N」；`WECHAT_TOOL_PROGRESS_ITEMS=1` 才发结构化 11/12（客户端目前不渲染）                                                                                                                                                                                                                                                                             |
+| 25  | 消息 ID 精度                   | 连发两条，`state.json` 的字符串 ID 不同、不丢消息                                                                                                                                                                                                                                                                                                                     |
+| 26  | 正在输入（typing）             | 长回合里「正在输入」持续可见；每 5s 续发，发消息后立刻补一次                                                                                                                                                                                                                                                                                                          |
+| 27  | 终端等效                       | 在终端改真实 Agent 配置/技能/记忆后，下一条微信消息可见；会话历史与终端共用（默认 `homeMode=direct`）                                                                                                                                                                                                                                                                 |
+| 28  | 微信侧 overlay                 | `wemind config wechat edit <agent>` 只改 `<账号>/agent-overrides/<agent>.json`（`mcp.disable` / `mcp.extra`），真实配置不变；新会话生效                                                                                                                                                                                                                               |
+| 29  | 默认工作区                     | brain/worker 分别使用 `<账号>/workspace/{brain,worker}`；`wemind workspace set <绝对路径> --role brain\|worker` 后已有会话 cwd 不变、新会话用新目录                                                                                                                                                                                                                   |
+| 30  | worker MCP 有效集（managed）   | 真实 catalog + overlay `mcp.extra` − `wechat` − `WEMIND_WORKER_MCP_EXCLUDE` − `disabled:true` − overlay `mcp.disable`；`direct` 由 Agent 自己加载真实配置，WeMind 不写 `mcp.json`                                                                                                                                                                                     |
+| 31  | 配置热重载（三态，2026-11-15） | `wemind config reload` 重新读取 Agent 配置、重新 seed 槽位并重启大脑；无回合时回执「常驻大脑已重启」并当场生效；brain 有回合在跑时日志记「等当前回合结束再重启大脑」、回执明确说「重启已排队到回合结束」、回复不中断，`<账号>/runtime.json` 出现 `pendingReload:{reason,at}`，回合结束后标记被清；切脑进行中回执说「没有重启」并提示重试；daemon 未运行时命令返回非零 |
 
 ### 7.1 控制面九项（1.2.0 新增，手工）
 
@@ -314,30 +315,30 @@ MCP
 
 下列问题当时**没有**静态答案。绝大部分已在 §7.3 实测并写进对应文档；本表保留作为复验清单，不要再把「表里还列着」当成「尚未测」——只剩 §7.3 中标明的少数未单独测项（如 `session/load` 途中强杀）仍开放（qoder 任务续跑已于 2026-10-27 实测）。
 
-| # | 问题 | 怎么测 | 结论影响 |
-|---|---|---|---|
-| 1 | ACP 是否有 `session/delete` | `scripts/acp-probe.mjs` 或手发该 method，看是否 `-32601` | 「删除会话」到底能不能删 agent 侧存档（当前按「不能」设计） |
-| 2 | 各 agent `session/load` 是否回放历史帧、规模多大 | 长会话 load 后看帧数与耗时 | 恢复会话的等待时长与提示文案 |
-| 3 | 各 agent 冷启动 `initialize`/`session/new` 真实耗时 | 空 HOME 起一次计时 | 对 `REQ_TIMEOUT=30s` 的余量；是否要给 agent 加 `reqTimeoutMs` |
-| 4 | 多任务并行时两条以上 `sendNotice` 是否撞 `ret=-2` | 真机微信并发派 2–3 条任务 | 进度/结果推送是否需要进一步退避 |
-| 5 | Windows `taskkill /T /F` 在 `session/load` 途中、以及**杀池中某个特定进程**时的行为 | 分别在 load 中、空闲时杀单个 pid | 回收策略与孤儿检测 |
-| 6 | 同一 agent 两个进程共用配置目录是否互踩（kiro/opencode/qoder 各一次） | 同 agent 并发两条任务 | 是否要禁止同 agent 并发 |
-| 7 | 被强杀后各 agent 能否 `session/load\|resume` 回该任务会话（kiro/opencode/qoder/DSH 各一次） | ⑤ 的做法，四家各跑一遍 | 「重启后续跑」的**可行边界** |
+| #   | 问题                                                                                        | 怎么测                                                   | 结论影响                                                      |
+| --- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------- |
+| 1   | ACP 是否有 `session/delete`                                                                 | `scripts/acp-probe.mjs` 或手发该 method，看是否 `-32601` | 「删除会话」到底能不能删 agent 侧存档（当前按「不能」设计）   |
+| 2   | 各 agent `session/load` 是否回放历史帧、规模多大                                            | 长会话 load 后看帧数与耗时                               | 恢复会话的等待时长与提示文案                                  |
+| 3   | 各 agent 冷启动 `initialize`/`session/new` 真实耗时                                         | 空 HOME 起一次计时                                       | 对 `REQ_TIMEOUT=30s` 的余量；是否要给 agent 加 `reqTimeoutMs` |
+| 4   | 多任务并行时两条以上 `sendNotice` 是否撞 `ret=-2`                                           | 真机微信并发派 2–3 条任务                                | 进度/结果推送是否需要进一步退避                               |
+| 5   | Windows `taskkill /T /F` 在 `session/load` 途中、以及**杀池中某个特定进程**时的行为         | 分别在 load 中、空闲时杀单个 pid                         | 回收策略与孤儿检测                                            |
+| 6   | 同一 agent 两个进程共用配置目录是否互踩（kiro/opencode/qoder 各一次）                       | 同 agent 并发两条任务                                    | 是否要禁止同 agent 并发                                       |
+| 7   | 被强杀后各 agent 能否 `session/load\|resume` 回该任务会话（kiro/opencode/qoder/DSH 各一次） | ⑤ 的做法，四家各跑一遍                                   | 「重启后续跑」的**可行边界**                                  |
 
 ### 7.3 实测结论（2026-10-29，本机；deepseek DSH 0.2.1-rc.2 / opencode 2.0.32 / qoder 1.1.78；cline 3.0.74 于 2026-10-30 补测）
 
 测量脚本：`%TEMP%\acp-measure.mjs`（起真进程 → `initialize`/`session/new` 计时 → 一轮 prompt → 在新会话上探 `session/delete` → **强杀** → 新进程 `session/load`，失败再 `session/resume` → 数回放帧 → 用第二问验证上下文是否还在）。三家全程**零反向请求**。
 
-| # | 结论 |
-|---|---|
-| 1 | **`session/delete` 存在性两家有、一家无**：opencode **有**（~8ms）、qoder **有**（130ms）；DSH **没有**（`-32601`）。当前实现「删除会话只删登记项、不动 agent 侧存档」因此仍是唯一可移植的默认；opencode/qoder 侧日后可以做成真删，但要有「删失败就只删登记项」的降级。 |
-| 2 | **`session/load` 回放**：opencode **857ms / 2 帧**、qoder **804ms / 3 帧**；DSH 无 `session/load`，`session/resume` **195ms / 0 帧**。回放帧在无 prompt 时本就被丢弃（`acp-brain.ts`），不会突然冒出旧正文；恢复等待远小于超时，不需要额外提示。 |
-| 3 | **冷启动**：DSH `initialize` **5834ms**（同进程第二次 2213ms）、`session/new` **50ms**；opencode `initialize` ~650ms、`session/new` ~800ms；qoder **1718ms / 1493ms**。全部远小于 `REQ_TIMEOUT=30s` → **暂不需要给 agent 加 `reqTimeoutMs`**。 |
-| 4 | **多任务并行推送到微信**：opencode + qoder 两条任务并行、结果都送达，**没有观察到限流型 `ret=-2`**。真机上出现的 `-2` 全部属于「daemon 重启后、用户下一条消息之前」的旧 `context_token`（见下方 7.4）——那条已修。 |
-| 5 | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 watchdog + daemon + worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。 |
-| 6 | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。 |
-| 7 | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑已实测（2026-10-27，1.1.78：`session/load ok`，STEP-A/STEP-B 产物齐全，见 `docs/接入方案/接入-Qoder.md` M3-3）。 |
-| 8 | **Cline 3.0.74（2026-10-30）**：`initialize` 声明 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**声明 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 定义 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由内置 adapter 的 `env.derive`（`clineCredentialEnv()`）从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进副本（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
+| #   | 结论                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | **`session/delete` 存在性两家有、一家无**：opencode **有**（~8ms）、qoder **有**（130ms）；DSH **没有**（`-32601`）。当前实现「删除会话只删登记项、不动 agent 侧存档」因此仍是唯一可移植的默认；opencode/qoder 侧日后可以做成真删，但要有「删失败就只删登记项」的降级。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 2   | **`session/load` 回放**：opencode **857ms / 2 帧**、qoder **804ms / 3 帧**；DSH 无 `session/load`，`session/resume` **195ms / 0 帧**。回放帧在无 prompt 时本就被丢弃（`acp-brain.ts`），不会突然冒出旧正文；恢复等待远小于超时，不需要额外提示。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 3   | **冷启动**：DSH `initialize` **5834ms**（同进程第二次 2213ms）、`session/new` **50ms**；opencode `initialize` ~650ms、`session/new` ~800ms；qoder **1718ms / 1493ms**。全部远小于 `REQ_TIMEOUT=30s` → **暂不需要给 agent 加 `reqTimeoutMs`**。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 4   | **多任务并行推送到微信**：opencode + qoder 两条任务并行、结果都送达，**没有观察到限流型 `ret=-2`**。真机上出现的 `-2` 全部属于「daemon 重启后、用户下一条消息之前」的旧 `context_token`（见下方 7.4）——那条已修。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 5   | **`taskkill /T /F`**：强杀 daemon 后后台守护进程 5s 内拉起新 daemon；`wemind stop` 一次杀光 watchdog + daemon + worker，**无孤儿**。**「`session/load` 进行中强杀」与「杀池中某个特定 pid」未单独测**。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 6   | **同 agent 并发**（opencode 两条）：两轮都完成，一轮样本内**没有**观察到配置目录互踩；长期风险仍需留意（等价「两个终端同目录跑」）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 7   | **强杀后接回原任务会话**：**DSH（`session/resume`）与 opencode（`session/load`）实测能接回同一 sessionId**；qoder 在切脑场景能复用旧会话。qoder 的**任务**中断续跑已实测（2026-10-27，1.1.78：`session/load ok`，STEP-A/STEP-B 产物齐全，见 `docs/接入方案/接入-Qoder.md` M3-3）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 8   | **Cline 3.0.74（2026-10-30）**：`initialize` 声明 `loadSession:true`、`image:true`、3 个 authMethods；`session/prompt` 首帧 **4.1s** / 首字 **4.4s**（带 thought 帧）；带图 prompt：**声明 `image:true` 但实际丢弃**（ACP `prompt` 的 `de()` 只保留 text 块；2026-10-31 真机模型只看到「用户发来一张图片」文字）→ 定义 `images:false`；**强杀后 `session/load` 成功、上下文保留**（PINEAPPLE，首字 2.1s）；`session/close` **不存在**（`-32601`，WeMind 不调用）；全程 0 反向请求；`session/new`/`load` 的 `mcpServers` 参数**只存不用** → MCP 必须走配置文件。认证：自定义 provider 由内置 adapter 的 `env.derive`（`clineCredentialEnv()`）从 `providers.json` 自动派生 `CLINE_PROVIDER`/`CLINE_API_KEY`（2026-10-31 补；显式 env 优先），OAuth 走 Cline 自己的 restore；`models.json` 必须同步进副本（缺它会回退 `gpt-4o`，真机 #16 复现、补文件后 #17 成功）。 |
 
 ### 7.4 真机踩到的坑：重启后旧 `context_token`（2026-10-29 已修）
 
@@ -364,29 +365,29 @@ send error: [sendMessage] errcode=-2 ... (prepare failed)
 
 ### 7.6 Claude Code 探针结论（2026-10-30/31，claude-agent-acp 0.99.1 / Claude Code 2.1.314，Windows）
 
-| # | 结论 |
-|---|---|
-| 1 | **`initialize`**：`loadSession: true`；`sessionCapabilities.resume/close/delete/fork/list`；`promptCapabilities.image: true`、`embeddedContext: true`；`mcpCapabilities: { http: true, sse: true }`——**没声明 stdio，实测可用**。 |
-| 2 | **`session/new`**：`modes` = `default / acceptEdits / plan / auto / bypassPermissions`；`configOptions` = `mode / model / effort / ultracode`。 |
-| 3 | **`session/set_mode bypassPermissions`**：返回 `{}`（成功）；之后 MCP 工具调用**0 反向请求**。不设该模式时 MCP 工具会触发 `session/request_permission`，宿主默认 yolo 放行（`WEMIND_ACP_AUTO_ALLOW=0` 时回 `cancelled`）。 |
-| 4 | **MCP（stdio）**：假 MCP 的 `echo` 以 `mcp__probe__echo` 暴露并被真实调用（`ECHO:hello`）。 |
-| 5 | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。 |
-| 6 | **耗时**：`session/new` ~1.2s、`session/load` ~1.0s、首帧 2–246ms、**首段正文 7.9–11.9s**；一轮 prompt 8–12s。远小于 `REQ_TIMEOUT=30s`，暂不需要 `reqTimeoutMs`。 |
-| 7 | **图片**：能力声明 true；本机用网关时 1×1 PNG 被上游 `400 WorkBuddy: … replace the image` 拒绝——**不是适配器/WeMind 的问题**，换正常模型/网关再验。 |
-| 8 | **真机微信单轮已过（2026-10-31）**：`wemind brain set claude-code` → 微信发一条 → `prompt ok 5381ms` → 回复送达。**仍未单独复测**：重启续聊（`session/load` 真机链路）、`加载 <MCP>`、任务派发；适配器升级后的回归按 §8 重跑探针。 |
+| #   | 结论                                                                                                                                                                                                                               |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **`initialize`**：`loadSession: true`；`sessionCapabilities.resume/close/delete/fork/list`；`promptCapabilities.image: true`、`embeddedContext: true`；`mcpCapabilities: { http: true, sse: true }`——**没声明 stdio，实测可用**。  |
+| 2   | **`session/new`**：`modes` = `default / acceptEdits / plan / auto / bypassPermissions`；`configOptions` = `mode / model / effort / ultracode`。                                                                                    |
+| 3   | **`session/set_mode bypassPermissions`**：返回 `{}`（成功）；之后 MCP 工具调用**0 反向请求**。不设该模式时 MCP 工具会触发 `session/request_permission`，宿主默认 yolo 放行（`WEMIND_ACP_AUTO_ALLOW=0` 时回 `cancelled`）。         |
+| 4   | **MCP（stdio）**：假 MCP 的 `echo` 以 `mcp__probe__echo` 暴露并被真实调用（`ECHO:hello`）。                                                                                                                                        |
+| 5   | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。                                                                                                                                                                        |
+| 6   | **耗时**：`session/new` ~1.2s、`session/load` ~1.0s、首帧 2–246ms、**首段正文 7.9–11.9s**；一轮 prompt 8–12s。远小于 `REQ_TIMEOUT=30s`，暂不需要 `reqTimeoutMs`。                                                                  |
+| 7   | **图片**：能力声明 true；本机用网关时 1×1 PNG 被上游 `400 WorkBuddy: … replace the image` 拒绝——**不是适配器/WeMind 的问题**，换正常模型/网关再验。                                                                                |
+| 8   | **真机微信单轮已过（2026-10-31）**：`wemind brain set claude-code` → 微信发一条 → `prompt ok 5381ms` → 回复送达。**仍未单独复测**：重启续聊（`session/load` 真机链路）、`加载 <MCP>`、任务派发；适配器升级后的回归按 §8 重跑探针。 |
 
 ### 7.7 pi 探针结论（2026-10-30，pi-acp 0.0.34 / pi 1.4.0，Windows）
 
-| # | 结论 |
-|---|---|
-| 1 | **`initialize`**：`protocolVersion: 1`、`loadSession: true`、`promptCapabilities.image: true`；`mcpCapabilities` http/sse 均否。 |
-| 2 | **`session/new`**：成功；`configOptions` 有 `model`（select，currentValue = 用户 pi 默认）与 `thought_level`（low/high）。 |
-| 3 | **prompt**：首帧 0–3ms、简单问答 4–7s；update 类型 `agent_message_chunk` / `agent_thought_chunk` / `session_info_update` / `usage_update` / `available_commands_update`，工具轮还有 `tool_call` / `tool_call_update`（有 activity 帧，心跳无忧）。 |
-| 4 | **图片**：接受（`end_turn`）。 |
-| 5 | **反向请求**：0（不问权限、不用 fs/terminal 委托）。`ACP_TEST_TOOL=1`：3 次工具调用全部执行、`drift-check.txt` 落盘、0 个 `session/request_permission`。 |
-| 6 | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。 |
-| 7 | **MCP**：pi 读 `<PI_CODING_AGENT_DIR>/mcp.json`（kiro 格式 `{mcpServers}`；`pi mcp list` 可识别）；`session/new` 的 `mcpServers` 被 pi-acp 只存不用 → 预设 `acpMcpServers: false`。 |
-| 8 | **真机 E2E 已过（2026-11-01）**：worker 通道 `wemind task --agent pi` → 回复「2」（删掉 worker-home 里的 settings/models 后由 `acquire` 自动重建）；brain 通道微信单轮 → `session/load` → `prompt ok 9705ms` → 回复送达（启动信息未混入）；热切换 pi↔codex 双向成功；微信「任务 pi：…」→ 任务 #27 → 回复「3」。**仍未单独复测**：微信侧 `加载 <MCP>`；适配器升级后的回归按 §8 重跑探针。 |
+| #   | 结论                                                                                                                                                                                                                                                                                                                                                                                     |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **`initialize`**：`protocolVersion: 1`、`loadSession: true`、`promptCapabilities.image: true`；`mcpCapabilities` http/sse 均否。                                                                                                                                                                                                                                                         |
+| 2   | **`session/new`**：成功；`configOptions` 有 `model`（select，currentValue = 用户 pi 默认）与 `thought_level`（low/high）。                                                                                                                                                                                                                                                               |
+| 3   | **prompt**：首帧 0–3ms、简单问答 4–7s；update 类型 `agent_message_chunk` / `agent_thought_chunk` / `session_info_update` / `usage_update` / `available_commands_update`，工具轮还有 `tool_call` / `tool_call_update`（有 activity 帧，心跳无忧）。                                                                                                                                       |
+| 4   | **图片**：接受（`end_turn`）。                                                                                                                                                                                                                                                                                                                                                           |
+| 5   | **反向请求**：0（不问权限、不用 fs/terminal 委托）。`ACP_TEST_TOOL=1`：3 次工具调用全部执行、`drift-check.txt` 落盘、0 个 `session/request_permission`。                                                                                                                                                                                                                                 |
+| 6   | **强杀后恢复**：`session/load` 成功，PINEAPPLE 上下文保留。                                                                                                                                                                                                                                                                                                                              |
+| 7   | **MCP**：pi 读 `<PI_CODING_AGENT_DIR>/mcp.json`（kiro 格式 `{mcpServers}`；`pi mcp list` 可识别）；`session/new` 的 `mcpServers` 被 pi-acp 只存不用 → 预设 `acpMcpServers: false`。                                                                                                                                                                                                      |
+| 8   | **真机 E2E 已过（2026-11-01）**：worker 通道 `wemind task --agent pi` → 回复「2」（删掉 worker-home 里的 settings/models 后由 `acquire` 自动重建）；brain 通道微信单轮 → `session/load` → `prompt ok 9705ms` → 回复送达（启动信息未混入）；热切换 pi↔codex 双向成功；微信「任务 pi：…」→ 任务 #27 → 回复「3」。**仍未单独复测**：微信侧 `加载 <MCP>`；适配器升级后的回归按 §8 重跑探针。 |
 
 ## 8. 清理 / 回滚
 

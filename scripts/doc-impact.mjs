@@ -147,7 +147,8 @@ export function docChanged(entry, changedPaths) {
  * 只排除登记 pattern 的三个脚本自身（它们的字面量会自命中），其它 scripts/ 下的 md/txt 仍要扫；
  * 依赖目录、构建产物、worktree 与 agent 私有目录跳过。
  */
-const STALE_SCAN_EXCLUDE = /^(?:\.worktrees\/|\.agents\/|\.git\/|node_modules\/|scripts\/doc-impact\.rules\.mjs$|scripts\/doc-guards\.test\.mjs$|scripts\/doc-impact\.mjs$)|(?:^|\/)node_modules\/|(?:^|\/)dist\//;
+const STALE_SCAN_EXCLUDE =
+  /^(?:\.worktrees\/|\.agents\/|\.git\/|node_modules\/|scripts\/doc-impact\.rules\.mjs$|scripts\/doc-guards\.test\.mjs$|scripts\/doc-impact\.mjs$)|(?:^|\/)node_modules\/|(?:^|\/)dist\//;
 
 export function isStaleScanPath(rel) {
   if (!rel || rel.endsWith("/") || STALE_SCAN_EXCLUDE.test(rel)) return false;
@@ -314,9 +315,7 @@ function collectDiff({ staged, base }) {
   const content = git(["diff", "-U0", mb]);
   const files = parseNameStatus(nameStatus);
   const added = parseAddedLines(content);
-  const commitCount = Number(
-    (tryGit(["rev-list", "--count", `${mb}..HEAD`]) ?? "").trim() || 0,
-  );
+  const commitCount = Number((tryGit(["rev-list", "--count", `${mb}..HEAD`]) ?? "").trim() || 0);
   // dirty 只看已跟踪文件的改动：TASK_NOTES.md 之类的本地未跟踪笔记不该让单提交的提交信息豁免失效。
   const dirty = Boolean((tryGit(["status", "--porcelain", "--untracked-files=no"]) ?? "").trim());
 
@@ -570,9 +569,7 @@ function main(argv) {
   }
   console.error("如确属纯重构/只改注释/只改测试，用 `Docs-Impact: none — <理由>` 豁免：");
   console.error('  pre-commit：DOCS_IMPACT="none — Pure refactor" git commit ...');
-  console.error(
-    "  单提交范围：在提交信息里加一行 `Docs-Impact: none — Pure refactor`",
-  );
+  console.error("  单提交范围：在提交信息里加一行 `Docs-Impact: none — Pure refactor`");
   console.error(
     '  多提交分支/CI：显式设置 DOCS_IMPACT_MESSAGE="none — Pure refactor"（提交信息不会跨提交生效）',
   );

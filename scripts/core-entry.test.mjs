@@ -45,9 +45,7 @@ describe("core 是 JIT 源码包（source-first）", () => {
       "packages/wechat-daemon/tsdown.config.ts",
       "packages/wechat-mcp/tsdown.config.ts",
     ]) {
-      expect(readText(rel)).toMatch(
-        /alwaysBundle:\s*\[[^\]]*["']@wemind\/wechat-ilink-core["']/s,
-      );
+      expect(readText(rel)).toMatch(/alwaysBundle:\s*\[[^\]]*["']@wemind\/wechat-ilink-core["']/s);
     }
   });
 

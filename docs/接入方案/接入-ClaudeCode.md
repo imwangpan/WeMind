@@ -111,17 +111,17 @@ claude-agent-acp --version     # 0.99.1
 
 用 [`scripts/acp-probe.mjs`](../../scripts/acp-probe.mjs)（另起一个临时 `CLAUDE_CONFIG_DIR`，不碰真实配置）：
 
-| 项目 | 结果 |
-|---|---|
-| `initialize` 能力 | `loadSession: true`；`sessionCapabilities` 含 `resume / close / delete / fork / list / additionalDirectories / systemPrompt`（按条件还有 `subagents`）；`promptCapabilities.image: true`、`embeddedContext: true`；`mcpCapabilities: { http: true, sse: true }`（**没有声明 stdio，但实测 stdio 可用**） |
-| `session/new` | 成功；`modes` = `default / acceptEdits / plan / auto / bypassPermissions`；`configOptions` = `mode / model / effort / ultracode`（`fast` 仅当前模型支持快速模式时出现，`agent` 仅配置了自定义 agent 时出现） |
-| `session/set_mode` | `bypassPermissions` → `{}`（成功）；随后 MCP 工具调用**0 反向请求** |
-| MCP（stdio） | 可用：假 MCP 的 `echo` 工具以 `mcp__probe__echo` 暴露并被模型真实调用（`ECHO:hello`）；不设 `bypassPermissions` 时会发 `session/request_permission`，宿主默认 yolo 放行（`WEMIND_ACP_AUTO_ALLOW=0` 时回 `cancelled`） |
-| 强杀后恢复 | `session/load` 成功；PINEAPPLE 上下文保留 |
-| 反向请求 | `bypassPermissions` 下为 0；`default` 模式下 MCP 工具调用会触发 `session/request_permission` |
-| 耗时 | `session/new` ~1.2s、`session/load` ~1.0s、首帧 2–246ms、**首段正文 7.9–11.9s**；一轮 prompt 8–12s |
-| 图片 | 能力声明为 true；本机用网关时 1×1 PNG 被上游以 `400 WorkBuddy: … replace the image` 拒绝——**不是适配器/WeMind 的问题**，换正常模型/网关再验 |
-| `session/delete` | 能力声明有；WeMind 仍按「只删登记项、不动 agent 侧存档」设计（与其它 agent 保持一致） |
+| 项目               | 结果                                                                                                                                                                                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `initialize` 能力  | `loadSession: true`；`sessionCapabilities` 含 `resume / close / delete / fork / list / additionalDirectories / systemPrompt`（按条件还有 `subagents`）；`promptCapabilities.image: true`、`embeddedContext: true`；`mcpCapabilities: { http: true, sse: true }`（**没有声明 stdio，但实测 stdio 可用**） |
+| `session/new`      | 成功；`modes` = `default / acceptEdits / plan / auto / bypassPermissions`；`configOptions` = `mode / model / effort / ultracode`（`fast` 仅当前模型支持快速模式时出现，`agent` 仅配置了自定义 agent 时出现）                                                                                             |
+| `session/set_mode` | `bypassPermissions` → `{}`（成功）；随后 MCP 工具调用**0 反向请求**                                                                                                                                                                                                                                      |
+| MCP（stdio）       | 可用：假 MCP 的 `echo` 工具以 `mcp__probe__echo` 暴露并被模型真实调用（`ECHO:hello`）；不设 `bypassPermissions` 时会发 `session/request_permission`，宿主默认 yolo 放行（`WEMIND_ACP_AUTO_ALLOW=0` 时回 `cancelled`）                                                                                    |
+| 强杀后恢复         | `session/load` 成功；PINEAPPLE 上下文保留                                                                                                                                                                                                                                                                |
+| 反向请求           | `bypassPermissions` 下为 0；`default` 模式下 MCP 工具调用会触发 `session/request_permission`                                                                                                                                                                                                             |
+| 耗时               | `session/new` ~1.2s、`session/load` ~1.0s、首帧 2–246ms、**首段正文 7.9–11.9s**；一轮 prompt 8–12s                                                                                                                                                                                                       |
+| 图片               | 能力声明为 true；本机用网关时 1×1 PNG 被上游以 `400 WorkBuddy: … replace the image` 拒绝——**不是适配器/WeMind 的问题**，换正常模型/网关再验                                                                                                                                                              |
+| `session/delete`   | 能力声明有；WeMind 仍按「只删登记项、不动 agent 侧存档」设计（与其它 agent 保持一致）                                                                                                                                                                                                                    |
 
 > **能力字段不可信**：`mcpCapabilities` 没写 `stdio`，实测却能连 stdio MCP。`image` / `restore` / `acpMcpServers` / `mcpDelivery` 全部来自 agent 配置字段，**不来自 `initialize` 自动解析**——升级适配器后必须重新探针（§8）。
 
@@ -162,15 +162,15 @@ wemind brain check      # 真机握手；结论里应带 mode=bypassPermissions
 
 ## 6. 常见问题与限制
 
-| 现象 | 原因 / 处理 |
-|---|---|
-| `找不到大脑「claude-code」的适配器「claude-agent-acp」` | 没全局安装。`npm i -g @agentclientprotocol/claude-agent-acp`；装完仍找不到就 `wemind brain set claude-code --bin "<绝对路径>"` |
-| `Claude native binary not found for win32-x64` | 适配器的 optional 依赖没装上（常见于 `--omit=optional` / 网络中断）。重装时不要 omit optional；或设 `CLAUDE_CODE_EXECUTABLE` 指向本机 `claude` |
-| `session/new` 报认证失败 | 没登录且 daemon 环境没有 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`；先 `claude` 登录，或把变量放到 daemon 环境 |
-| `bypassPermissions` 没生效（日志「跳过」） | 以 root 运行且没设 `IS_SANDBOX=1`，适配器不提供该模式；WeMind 会跳过 `set_mode`，权限请求回到应答器（默认 yolo；`WEMIND_ACP_AUTO_ALLOW=0` 时拒绝） |
-| 工具调用被拒 | `WEMIND_ACP_SESSION_MODE=0` 关掉了 `set_mode`，或模式不可用；恢复默认；仍被拒时确认 `WEMIND_ACP_AUTO_ALLOW` 没有被设成 `0`（默认放行，不是放宽副本） |
-| 连接慢 / 第一次回复慢 | 首次要起 SDK 与原生 Claude Code；实测首段正文 8–12s。npx 会更慢 |
-| `claude-agent-acp` 升级后行为变了 | 适配器 pre-1.0，能力/字段可能漂移；按 §8 重跑探针并更新 `brain-agents.ts` 注释与本文 |
+| 现象                                                    | 原因 / 处理                                                                                                                                          |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `找不到大脑「claude-code」的适配器「claude-agent-acp」` | 没全局安装。`npm i -g @agentclientprotocol/claude-agent-acp`；装完仍找不到就 `wemind brain set claude-code --bin "<绝对路径>"`                       |
+| `Claude native binary not found for win32-x64`          | 适配器的 optional 依赖没装上（常见于 `--omit=optional` / 网络中断）。重装时不要 omit optional；或设 `CLAUDE_CODE_EXECUTABLE` 指向本机 `claude`       |
+| `session/new` 报认证失败                                | 没登录且 daemon 环境没有 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`；先 `claude` 登录，或把变量放到 daemon 环境                                    |
+| `bypassPermissions` 没生效（日志「跳过」）              | 以 root 运行且没设 `IS_SANDBOX=1`，适配器不提供该模式；WeMind 会跳过 `set_mode`，权限请求回到应答器（默认 yolo；`WEMIND_ACP_AUTO_ALLOW=0` 时拒绝）   |
+| 工具调用被拒                                            | `WEMIND_ACP_SESSION_MODE=0` 关掉了 `set_mode`，或模式不可用；恢复默认；仍被拒时确认 `WEMIND_ACP_AUTO_ALLOW` 没有被设成 `0`（默认放行，不是放宽副本） |
+| 连接慢 / 第一次回复慢                                   | 首次要起 SDK 与原生 Claude Code；实测首段正文 8–12s。npx 会更慢                                                                                      |
+| `claude-agent-acp` 升级后行为变了                       | 适配器 pre-1.0，能力/字段可能漂移；按 §8 重跑探针并更新 `brain-agents.ts` 注释与本文                                                                 |
 
 ### 6.1 限制
 
@@ -242,6 +242,6 @@ node scripts/acp-probe.mjs
 3. **任务派发**：派一条任务（`任务 claude-code：…`）→ 跑通、结果送达（§5.2）。
 4. **长任务**：>30s 不因首帧误杀；进度不刷屏（§5.2）。
 5. **图片**：能力声明 `image: true`，本机用网关时 1×1 PNG 被上游以 `400 WorkBuddy: … replace the image` 拒绝，需换正常模型/网关再验（§4）。
-**2026-11-14 实测补充（`direct`）**：会话可见性 ✅ ——存量会话在 `~/.claude/projects/<工作区 slug>/*.jsonl`。技能/记忆与写回项**本轮没测到**：claude-code 经本机模型网关 `127.0.0.1:3425`，该端口当时未监听，`session/prompt` 直接回 `424 upstream rate-limited`；属 Agent/provider 侧依赖，网关可用后已复测通过（见下条）。来源：设计文档 §18.5。
+   **2026-11-14 实测补充（`direct`）**：会话可见性 ✅ ——存量会话在 `~/.claude/projects/<工作区 slug>/*.jsonl`。技能/记忆与写回项**本轮没测到**：claude-code 经本机模型网关 `127.0.0.1:3425`，该端口当时未监听，`session/prompt` 直接回 `424 upstream rate-limited`；属 Agent/provider 侧依赖，网关可用后已复测通过（见下条）。来源：设计文档 §18.5。
 
 **2026-11-15 复测（`direct`，网关已起）**：prompt 恢复 ✅ ——两轮 prompt 都拿到技能列表（`magpie-skills` 等在列），`session/prompt` 正常 `end_turn`、`session/load` 成功，技能可见性成立；**记忆写回 ✅** ——让它把标记文件写进真实 `~/.claude` 成功落盘，说明微信侧写的记忆与终端共用同一份文件。来源：设计文档 §18.5。

@@ -18,10 +18,14 @@ const PACKAGES = ["wechat-ilink-core", "wechat-daemon", "wechat-mcp"];
 
 function typecheck(name) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [tsc, "-p", path.join("packages", name, "tsconfig.json")], {
-      cwd: root,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(
+      process.execPath,
+      [tsc, "-p", path.join("packages", name, "tsconfig.json")],
+      {
+        cwd: root,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let out = "";
     child.stdout.on("data", (chunk) => (out += chunk));
     child.stderr.on("data", (chunk) => (out += chunk));

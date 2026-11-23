@@ -33,7 +33,7 @@ afterAll(() => {
 describe("check-docs", () => {
   it("相对链接存在时通过，http/锚点不计数", () => {
     const root = fixture({
-      "a.md": "[ok](b.md)\n[anchor](#x)\n[http](https://example.com)\n[title](b.md \"T\")\n",
+      "a.md": '[ok](b.md)\n[anchor](#x)\n[http](https://example.com)\n[title](b.md "T")\n',
       "b.md": "# b\n",
     });
     expect(checkDocs({ root })).toMatchObject({ checked: 2, files: 2, broken: [] });
@@ -54,7 +54,14 @@ describe("check-docs", () => {
 
   it("跳过代码围栏与行内代码，去掉 title 与 #锚点", () => {
     const root = fixture({
-      "a.md": ["```md", "[fenced](nope.md)", "```", "`[inline](nope2.md)`", "[ok](b.md#anchor \"t\")", ""].join("\n"),
+      "a.md": [
+        "```md",
+        "[fenced](nope.md)",
+        "```",
+        "`[inline](nope2.md)`",
+        '[ok](b.md#anchor "t")',
+        "",
+      ].join("\n"),
       "b.md": "",
     });
     expect(checkDocs({ root })).toMatchObject({ checked: 1, broken: [] });

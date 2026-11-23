@@ -13,14 +13,14 @@ WeMind 的 daemon 本体是纯 Node.js，**跨平台**；常驻外壳有三套�
 
 pm2 是 Node 生态的进程管理器，**一个工具同时顶替**常驻外壳要手写的所有东西：
 
-| 能力 | builtin `_watchdog` / `run-daemon.ps1`（默认薄壳或 `-Mode shell`） | pm2 |
-|------|----------------|-----|
-| 崩溃自动重拉（后台守护进程） | 各自的重拉循环（5s） | `autorestart`（内置） |
-| 开机自启 | 系统计划任务 / systemd / launchd | `pm2 startup` + `pm2 save` |
-| 单实例 | `wrapper.pid` 身份校验 / 命名 Mutex | 按 app 名天然唯一 |
-| 脱离终端 | detached spawn / `Start-Process` | pm2 守护化（内置） |
-| 多账号 | 每账号一条链（`run-all-daemons.ps1`） | `ecosystem.config.cjs` 按账号生成多 app |
-| 日志 | `RotatingLog` / `*>> daemon.log` | `out_file`/`error_file`（已指到各账号 `daemon.log`） |
+| 能力                         | builtin `_watchdog` / `run-daemon.ps1`（默认薄壳或 `-Mode shell`） | pm2                                                  |
+| ---------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------- |
+| 崩溃自动重拉（后台守护进程） | 各自的重拉循环（5s）                                               | `autorestart`（内置）                                |
+| 开机自启                     | 系统计划任务 / systemd / launchd                                   | `pm2 startup` + `pm2 save`                           |
+| 单实例                       | `wrapper.pid` 身份校验 / 命名 Mutex                                | 按 app 名天然唯一                                    |
+| 脱离终端                     | detached spawn / `Start-Process`                                   | pm2 守护化（内置）                                   |
+| 多账号                       | 每账号一条链（`run-all-daemons.ps1`）                              | `ecosystem.config.cjs` 按账号生成多 app              |
+| 日志                         | `RotatingLog` / `*>> daemon.log`                                   | `out_file`/`error_file`（已指到各账号 `daemon.log`） |
 
 所以 Linux/macOS 上本来就有 builtin（无需 pm2）；pm2 的价值在于**跨平台统一、多账号集中管理**。在 Windows 上 pm2 也能替代 `run-daemon.ps1`（后者默认也是薄壳转 builtin，自启那一步稍特殊，见 §4）。
 

@@ -9,9 +9,10 @@ const os = require("node:os");
 const path = require("node:path");
 
 const DAEMON = path.join(__dirname, "packages", "wechat-daemon", "dist", "cli.js");
-const ROOT = process.env.WEMIND_HOME && process.env.WEMIND_HOME.trim()
-  ? process.env.WEMIND_HOME.trim()
-  : path.join(os.homedir(), ".wemind");
+const ROOT =
+  process.env.WEMIND_HOME && process.env.WEMIND_HOME.trim()
+    ? process.env.WEMIND_HOME.trim()
+    : path.join(os.homedir(), ".wemind");
 const REG = path.join(ROOT, "accounts.json");
 
 function accountKeys() {
@@ -19,13 +20,19 @@ function accountKeys() {
     const j = JSON.parse(fs.readFileSync(REG, "utf8"));
     const keys = Object.keys(j.accounts || {});
     if (keys.length) return keys;
-  } catch { /* 无注册表/解析失败 → 回退 */ }
+  } catch {
+    /* 无注册表/解析失败 → 回退 */
+  }
   return ["default"];
 }
 
 function appFor(key) {
   const dataDir = path.join(ROOT, key);
-  try { fs.mkdirSync(dataDir, { recursive: true }); } catch { /* ignore */ }
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch {
+    /* ignore */
+  }
   return {
     name: `wemind-${key}`,
     script: DAEMON,

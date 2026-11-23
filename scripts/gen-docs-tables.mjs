@@ -13,6 +13,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { readBuiltinDefinitions } from "./agent-definitions.mjs";
@@ -20,10 +21,7 @@ import { readBuiltinDefinitions } from "./agent-definitions.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const TARGETS = {
-  "env-vars": [
-    "docs/repowiki/09-配置项与环境变量.md",
-    "docs/使用指南/速查-数据目录与环境变量.md",
-  ],
+  "env-vars": ["docs/repowiki/09-配置项与环境变量.md", "docs/使用指南/速查-数据目录与环境变量.md"],
   presets: ["docs/接入方案/接入其它-ACP-Agent.md"],
   "cli-commands": ["README.md"],
 };
@@ -100,9 +98,7 @@ export function collectEnvVars() {
         // 变量名允许大小写混合（Windows 的 SystemRoot），系统运行环境变量随后过滤。
         // `parentEnv.X` 也是 agent adapter 读取宿主环境变量的真实入口；
         // 只认 process.env 会让 KIRO_CLI_BIN 这类兼容变量从自动表里消失。
-        for (const m of line.matchAll(
-          /(?:process\.env|parentEnv)\.([A-Za-z_][A-Za-z0-9_]*)/g,
-        )) {
+        for (const m of line.matchAll(/(?:process\.env|parentEnv)\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
           const name = m[1];
           if (RUNTIME_ENV.has(name)) continue;
           if (!seen.has(name)) {
@@ -137,7 +133,9 @@ export function collectCliCommands(source) {
 /** 微信指令（chat-commands.ts 的 COMMAND_SPECS：zh + brief）。 */
 export function collectWechatCommands(source) {
   const rows = [];
-  for (const m of source.matchAll(/\bid:\s*"([^"]+)"[\s\S]*?\bzh:\s*"([^"]+)"[\s\S]*?\bbrief:\s*"([^"]+)"/g)) {
+  for (const m of source.matchAll(
+    /\bid:\s*"([^"]+)"[\s\S]*?\bzh:\s*"([^"]+)"[\s\S]*?\bbrief:\s*"([^"]+)"/g,
+  )) {
     rows.push({ id: m[1], zh: m[2], brief: m[3] });
   }
   return rows;
@@ -216,9 +214,33 @@ export function extractBlock(text, id) {
     .trim();
 }
 
+/**
+ * 表格内容比较：oxfmt 0.80 起会把 Markdown 表格单元格补空格对齐，分隔行也按列宽补短横线，
+ * 而生成器输出的是紧凑写法。比较前把每行还原成「单元格 trim + 固定 `---` 分隔」的形式，
+ * 只比内容、不比填充；单元格里的 `|` 已由 escapeCell 转义成 `\|`，按未转义的竖线切分。
+ */
+export function normalizeTableBlock(block) {
+  return block
+    .split("\n")
+    .map((line) => {
+      if (!line.startsWith("|") || !line.endsWith("|")) return line.trimEnd();
+      const cells = line
+        .slice(1, -1)
+        .split(/(?<!\\)\|/)
+        .map((cell) => cell.trim())
+        .map((cell) => {
+          const m = cell.match(/^(:?)-{3,}(:?)$/);
+          return m ? `${m[1]}---${m[2]}` : cell;
+        });
+      return `| ${cells.join(" | ")} |`;
+    })
+    .join("\n");
+}
+
 function main(argv) {
   const check = argv.includes("--check");
   const generated = generateAll();
+  const changed = [];
   let failures = 0;
 
   for (const [id, files] of Object.entries(TARGETS)) {
@@ -232,15 +254,25 @@ function main(argv) {
       }
       if (check) {
         const actual = extractBlock(text, id);
-        if (actual !== generated[id]) {
+        if (normalizeTableBlock(actual) !== normalizeTableBlock(generated[id])) {
           console.error(`${file} 的「${id}」表格已过期；运行 npm run docs:tables 重新生成。`);
           failures++;
         }
       } else if (next !== text) {
         writeText(file, next);
+        changed.push(file);
         console.log(`已更新 ${file} 的「${id}」表格`);
       }
     }
+  }
+
+  // oxfmt 0.80 起会把表格单元格补空格对齐；生成器写的是紧凑写法，写完立即格式化，
+  // 否则 `npm run docs:tables` 会留下一个过不了 `format:check` 的文件。
+  if (!check && changed.length > 0) {
+    const oxfmt = path.join(ROOT, "node_modules", "oxfmt", "bin", "oxfmt");
+    const result = spawnSync(process.execPath, [oxfmt, ...changed], { stdio: "inherit" });
+    if (result.status !== 0)
+      console.error("oxfmt 运行失败：表格已写入，但需要手动运行 npm run format。");
   }
 
   if (failures > 0) return 1;

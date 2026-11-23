@@ -361,9 +361,11 @@ describe("agentDefinitionJsonSchema", () => {
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const section = doc.slice(start, end);
+    // oxfmt 会把 Markdown 表格单元格补空格对齐，比较前先折叠空白。
+    const compact = section.replace(/\s+/g, " ");
     for (const field of AGENT_DEFINITION_FIELDS)
-      expect(section, `§4.3 缺少字段 ${field.key}`).toContain(`| \`${field.key}\` |`);
+      expect(compact, `§4.3 缺少字段 ${field.key}`).toContain(`| \`${field.key}\` |`);
     for (const key of ["adapter", "probe"])
-      expect(section, `§4.3 缺少顶层字段 ${key}`).toContain(`| \`${key}\` |`);
+      expect(compact, `§4.3 缺少顶层字段 ${key}`).toContain(`| \`${key}\` |`);
   });
 });

@@ -35,27 +35,27 @@ packages/wechat-mcp/src/
 
 ## 4.3 六个 MCP 工具
 
-| 工具                  | 说明                                                      | 代码 description（简要转述，非逐字原文）                                                                                                                                                                |
-| --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `login_qrcode`        | 取登录二维码（返回 URL，并在数据目录生成 PNG 与终端文本） | Get a WeChat login QR code. Scan it with WeChat to connect the bot. … You MUST show all three returned forms (image URL / PNG file / terminal text file) to the user.                                   |
-| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）               | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command instead.（未安装 CLI 时可临时用 `npx -y @wemind/cli login`） |
-| `logout`              | 登出并清除已保存的凭证                                    | Log out the current WeChat bot session. … Clears saved credentials, runtime state and any pending QR login. Only call this when the user asks to log out or wants to switch accounts.                   |
-| `get_messages`        | 长轮询收消息（`wait=true` 阻塞直到收到，最长 7 天；图片/视频/文件只给占位符，语音带微信转写） | Poll for new WeChat messages. Always call with `wait=true` to block until a message arrives.（后接 4 步 typing 工作流）                                                                                 |
-| `send_text_message`   | 发文本消息（`state="generating"` 发进度、默认 `finish` 发最终答复） | Send a text message to a WeChat user. … iLink bots cannot initiate conversations: if you have never received a message from that user, this call fails.                                                 |
-| `send_typing`         | 打字状态（`typing` 显示 / `cancel` 取消）                 | Show or cancel the "typing..." indicator for a WeChat user. … Re-send status `typing` every 15-20 seconds while still working, because the indicator expires on its own.                                |
+| 工具                  | 说明                                                                                          | 代码 description（简要转述，非逐字原文）                                                                                                                                                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `login_qrcode`        | 取登录二维码（返回 URL，并在数据目录生成 PNG 与终端文本）                                     | Get a WeChat login QR code. Scan it with WeChat to connect the bot. … You MUST show all three returned forms (image URL / PNG file / terminal text file) to the user.                                                                                       |
+| `check_qrcode_status` | 查扫码状态（轮询到 `confirmed` 即登录成功）                                                   | Check whether the QR code from `login_qrcode` has been scanned and confirmed. … If it returns `need_verifycode` or an IDC-redirect status, tell the user to run the `wemind login` CLI command instead.（未安装 CLI 时可临时用 `npx -y @wemind/cli login`） |
+| `logout`              | 登出并清除已保存的凭证                                                                        | Log out the current WeChat bot session. … Clears saved credentials, runtime state and any pending QR login. Only call this when the user asks to log out or wants to switch accounts.                                                                       |
+| `get_messages`        | 长轮询收消息（`wait=true` 阻塞直到收到，最长 7 天；图片/视频/文件只给占位符，语音带微信转写） | Poll for new WeChat messages. Always call with `wait=true` to block until a message arrives.（后接 4 步 typing 工作流）                                                                                                                                     |
+| `send_text_message`   | 发文本消息（`state="generating"` 发进度、默认 `finish` 发最终答复）                           | Send a text message to a WeChat user. … iLink bots cannot initiate conversations: if you have never received a message from that user, this call fails.                                                                                                     |
+| `send_typing`         | 打字状态（`typing` 显示 / `cancel` 取消）                                                     | Show or cancel the "typing..." indicator for a WeChat user. … Re-send status `typing` every 15-20 seconds while still working, because the indicator expires on its own.                                                                                    |
 
 每个工具用 `zod` schema 声明参数，工具描述（description）里写明用法与约束 —— 这些描述是引导 MCP 客户端正确编排的关键。6 个 description 统一为「做什么 → 何时调用/返回什么 → 硬约束」的空行分段格式（表格里是简写转述、以 `…` 标省略，完整原文见 `index.ts`），且**一律写英文**：MCP 生态惯例，且模型对 `MUST` / `wait=true` 这类强制约束的英文原文遵循度更高。用户能看到的提示文案在 `tools/*.ts` 的 `message` 字段，均为中文。
 
 ### 入参与返回体
 
-| 工具 | 入参（`zod` schema） | 返回体关键字段 |
-| --- | --- | --- |
-| `login_qrcode` | 无 | 二维码三形式（URL / PNG 路径 / 终端文本路径）与引导文案；已登录时 `already_logged_in` |
-| `check_qrcode_status` | 无 | `status`：`wait` / `scaned` / `confirmed` / `expired` / `need_verifycode` / IDC 重定向 |
-| `logout` | 无 | 是否真的清除了凭证；删不掉时 `logout_failed` + 原因 |
-| `get_messages` | `wait`（布尔，默认 `false`）、`timeout`（1000–60000，默认 `10000`，`wait=true` 时忽略） | `{ message_count, messages[], cancelled? }`；`-14` 时 `session_expired`（含剩余冷却分钟） |
-| `send_text_message` | `to`、`text`（均必填非空）、`state`（`finish` 默认 / `generating`） | 发送结果；`-2` 退避重试一次后仍失败给可操作错误 |
-| `send_typing` | `to`、`status`（`typing` 默认 / `cancel`） | 打字状态结果 |
+| 工具                  | 入参（`zod` schema）                                                                    | 返回体关键字段                                                                            |
+| --------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `login_qrcode`        | 无                                                                                      | 二维码三形式（URL / PNG 路径 / 终端文本路径）与引导文案；已登录时 `already_logged_in`     |
+| `check_qrcode_status` | 无                                                                                      | `status`：`wait` / `scaned` / `confirmed` / `expired` / `need_verifycode` / IDC 重定向    |
+| `logout`              | 无                                                                                      | 是否真的清除了凭证；删不掉时 `logout_failed` + 原因                                       |
+| `get_messages`        | `wait`（布尔，默认 `false`）、`timeout`（1000–60000，默认 `10000`，`wait=true` 时忽略） | `{ message_count, messages[], cancelled? }`；`-14` 时 `session_expired`（含剩余冷却分钟） |
+| `send_text_message`   | `to`、`text`（均必填非空）、`state`（`finish` 默认 / `generating`）                     | 发送结果；`-2` 退避重试一次后仍失败给可操作错误                                           |
+| `send_typing`         | `to`、`status`（`typing` 默认 / `cancel`）                                              | 打字状态结果                                                                              |
 
 所有工具都通过 `tools/tool-result.ts` 的 `jsonResult()` / `textResult()` 返回**单个 text content**（结构化结果用 `JSON.stringify(obj, null, 2)`）。
 

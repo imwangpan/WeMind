@@ -52,6 +52,7 @@
   ```
 
   没有 images / notes 参数、没有降级逻辑。`WorkerConn.agent: ResolvedAgent` 已带 `images` 能力位，可直接复用。
+
 - `packages/wechat-daemon/src/tasks/task-manager.ts` 的 `dispatchTask()` / `injectTask()` / `resumeTask()` 只传字符串指令。
 - 路由闸门（`daemon/daemon-routing.ts`）：
   - `isFastLane(text, tasks, attachmentCount = 0)` 第一道闸 `if (attachmentCount > 0) return false;`——**带任何附件的消息一律走大脑**。
@@ -85,10 +86,10 @@ worker 缺的不是「读图能力」（`WorkerConn.agent.images` 已在），�
 
 ```ts
 type Recipient = {
-  taskId: number;      // 指向某个任务的编号（#N）
-  taskKey: string;     // taskKeyOf(taskId, userId)，用于定位运行中的连接
+  taskId: number; // 指向某个任务的编号（#N）
+  taskKey: string; // taskKeyOf(taskId, userId)，用于定位运行中的连接
   armedAt: number;
-  expiresAt: number;   // 滑动空闲 TTL 的到期时刻（§8）
+  expiresAt: number; // 滑动空闲 TTL 的到期时刻（§8）
 };
 ```
 
@@ -98,9 +99,9 @@ type Recipient = {
 
 ```ts
 type PendingBatch = {
-  items: InboundAttachment[];   // 原样攒着，flush 时才下载 / 落盘（§7.3）
-  messageIds: string[];         // 去重 / 日志
-  taskId?: number;              // 这批附件当初是给哪条任务攒的（指针过期后仍按它认账）
+  items: InboundAttachment[]; // 原样攒着，flush 时才下载 / 落盘（§7.3）
+  messageIds: string[]; // 去重 / 日志
+  taskId?: number; // 这批附件当初是给哪条任务攒的（指针过期后仍按它认账）
 };
 ```
 
@@ -120,19 +121,19 @@ type PendingBatch = {
 
 ### 5.1 复用（进入收件人）
 
-| 指令 | 现状 | 变更 |
-| --- | --- | --- |
+| 指令                                                       | 现状       | 变更                                            |
+| ---------------------------------------------------------- | ---------- | ----------------------------------------------- |
 | `任务：正文` / `任务 <agent>：正文` / `/task …` / `> 正文` | 派发新任务 | 派发**并**把该任务设为收件人（`task.toWorker`） |
-| `#N 正文` / `/reply N 正文` | 回话给 #N | 回话**并**设为收件人（`task.reply`） |
-| `继续` 类短句（有可续跑任务） | 续跑 | 续跑**并**设为收件人 |
+| `#N 正文` / `/reply N 正文`                                | 回话给 #N  | 回话**并**设为收件人（`task.reply`）            |
+| `继续` 类短句（有可续跑任务）                              | 续跑       | 续跑**并**设为收件人                            |
 
 ### 5.2 新增
 
-| 指令 | 解析结果 | 行为 |
-| --- | --- | --- |
-| 裸 `#N`（仅编号，无正文） | `TaskCommand { kind: "recipient"; id }` | **只设收件人，不产生回合、不占额度** |
-| `发给任务 N`（别名，与裸 `#N` 并存） | 同上 | 同上（比裸 `#N` 更好读） |
-| `回到大脑`（斜杠 `/to-brain`） | `ChatCommand { kind: "toBrain" }` | **退出收件人** + 回执；先按 §8.3 处理积压再清 |
+| 指令                                 | 解析结果                                | 行为                                          |
+| ------------------------------------ | --------------------------------------- | --------------------------------------------- |
+| 裸 `#N`（仅编号，无正文）            | `TaskCommand { kind: "recipient"; id }` | **只设收件人，不产生回合、不占额度**          |
+| `发给任务 N`（别名，与裸 `#N` 并存） | 同上                                    | 同上（比裸 `#N` 更好读）                      |
+| `回到大脑`（斜杠 `/to-brain`）       | `ChatCommand { kind: "toBrain" }`       | **退出收件人** + 回执；先按 §8.3 处理积压再清 |
 
 > 冲突校验：`#N` 需与既有 `#1 号文件在哪`（普通消息）、`#1:30`（时间）区分——裸 `#N` 只在整串恰好是编号时命中，且数字后紧跟「号」按普通消息；`回到大脑` 与既有 `回到会话`（`session.resume` 别名）不同串，不冲突（§12）。
 
@@ -146,16 +147,16 @@ type PendingBatch = {
 
 ### 6.1 决策表（按 `from` 的收件人状态）
 
-| 消息 | 是否命中收件人 | 路由 |
-| --- | --- | --- |
-| 非文本（图 / 文件 / 视频 / 无转写语音） | 否 | **不变**：`msgQueue` → brain |
-| 非文本 | 是 | **待投递队列**：入队 + 重置 TTL +（首批）回执；**不**入任何队列 |
-| 纯文本 = 控制指令 | — | 快车道；`回到大脑` 清收件人；`结束任务` 清对应收件人 |
-| 纯文本 = 任务指令 | — | 快车道；按 §5.1 更新 / 设置收件人；（如 `任务：…`）立即派发（A1，§7.2） |
-| 纯文本 = `问大脑：…` / `大脑：…` / `brain: …` | — | **一次性逃逸**：本条给 brain，**不清收件人**（§12） |
-| 纯文本 = 其它 | 是 | **给收件人任务**：与积压附件一起提交（§7） |
-| 纯文本 = 其它 | 否 | **不变**：`msgQueue` → brain |
-| 无文本、无媒体、无引用 | — | 丢弃 + 日志（不变） |
+| 消息                                          | 是否命中收件人 | 路由                                                                    |
+| --------------------------------------------- | -------------- | ----------------------------------------------------------------------- |
+| 非文本（图 / 文件 / 视频 / 无转写语音）       | 否             | **不变**：`msgQueue` → brain                                            |
+| 非文本                                        | 是             | **待投递队列**：入队 + 重置 TTL +（首批）回执；**不**入任何队列         |
+| 纯文本 = 控制指令                             | —              | 快车道；`回到大脑` 清收件人；`结束任务` 清对应收件人                    |
+| 纯文本 = 任务指令                             | —              | 快车道；按 §5.1 更新 / 设置收件人；（如 `任务：…`）立即派发（A1，§7.2） |
+| 纯文本 = `问大脑：…` / `大脑：…` / `brain: …` | —              | **一次性逃逸**：本条给 brain，**不清收件人**（§12）                     |
+| 纯文本 = 其它                                 | 是             | **给收件人任务**：与积压附件一起提交（§7）                              |
+| 纯文本 = 其它                                 | 否             | **不变**：`msgQueue` → brain                                            |
+| 无文本、无媒体、无引用                        | —              | 丢弃 + 日志（不变）                                                     |
 
 口诀：**「命令归命令，逃逸是例外，其余全部给收件人。」**
 
@@ -165,33 +166,52 @@ type PendingBatch = {
 const parts = extractInbound(msg);
 const ctrl = parseControl(parts.text);
 const tctrl = parseTaskControl(parts.text);
-const escaped = parts.text ? parseBrainEscape(parts.text) : null;   // 问大脑 / 大脑 / brain
+const escaped = parts.text ? parseBrainEscape(parts.text) : null; // 问大脑 / 大脑 / brain
 const recipient = mediaRoute.recipient(from);
 const route = decideInboundRoute({
   recipientTaskId: recipient?.taskId ?? null,
   attachmentCount: parts.attachments.length,
   hasText: !!parts.text.trim(),
-  hasCommand: !!(ctrl || tctrl || escaped),   // 命令/逃逸永远优先
+  hasCommand: !!(ctrl || tctrl || escaped), // 命令/逃逸永远优先
   fastLane: isFastLane(parts.text, facts, parts.attachments.length),
   mcpToBrain: passMcpToggleToBrain(ctrl, homeModeAtBoot === "direct"),
 });
 
 switch (route.kind) {
-  case "buffer": {                             // 非文本 + 收件人：攒起来
-    const { first, count } = mediaRoute.buffer(from, parts.attachments, messageId, route.recipientTaskId);
-    if (first) void sends.sendNotice(from, msg.context_token, `📎 已把收到的附件交给 #${route.recipientTaskId}…`, token);
-    if (parts.text.trim()) {                   // 同条消息还带文字（客户端组合）：文字进快车道，出队时合并提交
-      queued.attachments = [];                 // 附件已归队列，清掉副本防重复
+  case "buffer": {
+    // 非文本 + 收件人：攒起来
+    const { first, count } = mediaRoute.buffer(
+      from,
+      parts.attachments,
+      messageId,
+      route.recipientTaskId,
+    );
+    if (first)
+      void sends.sendNotice(
+        from,
+        msg.context_token,
+        `📎 已把收到的附件交给 #${route.recipientTaskId}…`,
+        token,
+      );
+    if (parts.text.trim()) {
+      // 同条消息还带文字（客户端组合）：文字进快车道，出队时合并提交
+      queued.attachments = []; // 附件已归队列，清掉副本防重复
       queued.toRecipientTaskId = route.recipientTaskId;
-      fastQueue.push(queued); enq = true;
+      fastQueue.push(queued);
+      enq = true;
     }
     continue;
   }
-  case "recipient":                            // 无前缀文字 + 收件人：出队时合并附件
+  case "recipient": // 无前缀文字 + 收件人：出队时合并附件
     queued.toRecipientTaskId = route.recipientTaskId;
-    fastQueue.push(queued); enq = true; continue;
-  case "fast": fastQueue.push(queued); break;
-  default: msgQueue.push(queued);              // brain
+    fastQueue.push(queued);
+    enq = true;
+    continue;
+  case "fast":
+    fastQueue.push(queued);
+    break;
+  default:
+    msgQueue.push(queued); // brain
 }
 ```
 
@@ -252,12 +272,12 @@ switch (route.kind) {
 
 ### 8.2 清退通道
 
-| 通道 | 行为 |
-| --- | --- |
-| `回到大脑` | 积压非空→先提交给任务；再清；回执 |
-| 空闲 TTL 到期 | 积压非空→兜底提交；再清；超时回执 |
+| 通道                           | 行为                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------ |
+| `回到大脑`                     | 积压非空→先提交给任务；再清；回执                                                          |
+| 空闲 TTL 到期                  | 积压非空→兜底提交；再清；超时回执                                                          |
 | 收件人任务结束 / 被 `结束任务` | 清收件人；积压非空 → 在答复末尾回执「（还有 N 个暂存的附件没有提交，已一并丢弃。）」并丢弃 |
-| 进程重启 | 不落盘、不清迁移，自然失效（§13） |
+| 进程重启                       | 不落盘、不清迁移，自然失效（§13）                                                          |
 
 ### 8.3 状态可见：不做
 
@@ -274,10 +294,10 @@ switch (route.kind) {
 ```ts
 export interface PreparedMedia {
   images: Array<{ data: string; mimeType: string }>; // base64
-  notes: string[];      // 文件/视频/语音的 [用户发来…] 绝对路径说明
-  failures: string[];   // 中文失败标签
-  imageCount: number;   // 收到的图片条数（含下载失败的）
-  otherCount: number;   // 文件 / 视频 / 语音条数
+  notes: string[]; // 文件/视频/语音的 [用户发来…] 绝对路径说明
+  failures: string[]; // 中文失败标签
+  imageCount: number; // 收到的图片条数（含下载失败的）
+  otherCount: number; // 文件 / 视频 / 语音条数
 }
 export async function prepareInboundMedia(
   attachments: InboundAttachment[],
@@ -351,18 +371,19 @@ prompt 组装：`applyMediaToPrompt(prompt, opts.images, this.agent.images)` →
 
 ### 12.1 关键词占用排查（结论）
 
-| 关键词 | 现有占用 | 是否冲突 |
-| --- | --- | --- |
-| `问大脑` | 已是逃逸前缀（`parseBrainEscape`） | 无 |
-| 裸 `大脑` 开头 | **无**任何指令以「大脑」开头（`切换大脑` / `任务大脑` / `ai 大脑` 都以 切换/任务/ai 开头） | 指令层无冲突；但「大脑」是极常见词首，**必须要求分隔符**否则误伤「大脑的工作原理…」 |
-| 裸 `brain` | 未占用 | `/brain …`、`/ai brain …` 是 `切换大脑` 指令，**已占用**；故逃逸只用**不带斜杠**的 `brain`，且要求分隔符，避免与 `/brain` 混淆、也避免命中 `brainstorm` |
-| `回到大脑`（新退出指令） | 与 `回到会话`（`session.resume`）不同串 | 无 |
+| 关键词                   | 现有占用                                                                                   | 是否冲突                                                                                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `问大脑`                 | 已是逃逸前缀（`parseBrainEscape`）                                                         | 无                                                                                                                                                      |
+| 裸 `大脑` 开头           | **无**任何指令以「大脑」开头（`切换大脑` / `任务大脑` / `ai 大脑` 都以 切换/任务/ai 开头） | 指令层无冲突；但「大脑」是极常见词首，**必须要求分隔符**否则误伤「大脑的工作原理…」                                                                     |
+| 裸 `brain`               | 未占用                                                                                     | `/brain …`、`/ai brain …` 是 `切换大脑` 指令，**已占用**；故逃逸只用**不带斜杠**的 `brain`，且要求分隔符，避免与 `/brain` 混淆、也避免命中 `brainstorm` |
+| `回到大脑`（新退出指令） | 与 `回到会话`（`session.resume`）不同串                                                    | 无                                                                                                                                                      |
 
 ### 12.2 规则（写进代码 + 文档）
 
 ```ts
 // 冒号 / 空白分隔；`问大脑` 保留历史宽松写法（分隔符可选）
-const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?:大脑|brain)\s+)([\s\S]+)$/i;
+const BRAIN_ESCAPE =
+  /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?:大脑|brain)\s+)([\s\S]+)$/i;
 ```
 
 - `问大脑 你好` / `问大脑：你好` / `问大脑你好`（历史宽松）→ 逃逸；
@@ -388,27 +409,27 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 
 ### 新增
 
-| 文件 | 内容 |
-| --- | --- |
-| `packages/wechat-daemon/src/daemon/media-route.ts` | 收件人 + 待投递队列状态机（可注入 `now` / 定时器 / `inject` 回调，便于单测） |
-| `packages/wechat-daemon/src/daemon/media-route.test.ts` | 状态机单测（TTL 滑动 / 各清退通道 / 提交点） |
-| `packages/wechat-daemon/src/daemon/messaging/inbound-media.ts` | `prepareInboundMedia()`（自 `index.ts` 抽出） |
-| `packages/wechat-daemon/src/daemon/messaging/inbound-media.test.ts` | 与 brain 现行为等价的回归用例 |
-| `packages/wechat-daemon/src/acp/prompt-media.ts` | `applyMediaToPrompt()`（brain / worker 共用） |
-| `packages/wechat-daemon/src/acp/prompt-media.test.ts` | 图片能力开 / 关、降级文案用例 |
+| 文件                                                                | 内容                                                                         |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `packages/wechat-daemon/src/daemon/media-route.ts`                  | 收件人 + 待投递队列状态机（可注入 `now` / 定时器 / `inject` 回调，便于单测） |
+| `packages/wechat-daemon/src/daemon/media-route.test.ts`             | 状态机单测（TTL 滑动 / 各清退通道 / 提交点）                                 |
+| `packages/wechat-daemon/src/daemon/messaging/inbound-media.ts`      | `prepareInboundMedia()`（自 `index.ts` 抽出）                                |
+| `packages/wechat-daemon/src/daemon/messaging/inbound-media.test.ts` | 与 brain 现行为等价的回归用例                                                |
+| `packages/wechat-daemon/src/acp/prompt-media.ts`                    | `applyMediaToPrompt()`（brain / worker 共用）                                |
+| `packages/wechat-daemon/src/acp/prompt-media.test.ts`               | 图片能力开 / 关、降级文案用例                                                |
 
 ### 修改
 
-| 文件 | 变更 |
-| --- | --- |
-| `packages/wechat-daemon/src/ipc/chat-command-specs.ts` | `TaskCommand` 加 `{ kind:"recipient"; id }`（裸 `#N` / `发给任务 N`）；`ChatCommand` 加 `{ kind:"toBrain" }`（`回到大脑`）；`TASK_COMMAND_SPECS` / `COMMAND_SPECS` 各加一条 spec |
-| `packages/wechat-daemon/src/daemon/daemon-routing.ts` | `parseBrainEscape` 扩展到 §12.2（`问大脑` / `大脑` / `brain`） |
-| `packages/wechat-daemon/src/acp/acp-brain.ts` | `runTurn` 改用 `applyMediaToPrompt`（等价重构） |
-| `packages/wechat-daemon/src/tasks/worker-acp.ts` | `ask()` 支持 `images`，prompt 走 `applyMediaToPrompt`；每会话首轮加一次出站约定提示（§19.8） |
-| `packages/wechat-daemon/src/daemon/messaging/attachments.ts` | `assertLocalPath()` 改为 `export`（图片通道复用同一套闸，§19.6） |
-| `packages/wechat-daemon/src/daemon/messaging/image-reply.ts` | `resolveImageBytes()` 的本地分支补 realpath / 扩展名 / `isSensitiveFilePath()`（§19.6） |
-| `packages/wechat-daemon/src/tasks/task-manager.ts` | `dispatchTask` / `injectTask` / `resumeTask` 支持 `media`；`Task` 流转 `pendingMedia`；新增解析目标任务的辅助（供收件人 arm 复用） |
-| `packages/wechat-daemon/src/index.ts` | 收件人 / 待投递 Map 与调度；poller 分拣（§6.2）；`handleFastItem` 新分支（§6.3）；媒体段改用 `prepareInboundMedia`；`kind:"toBrain"` / `kind:"recipient"` / flush 处理；出站抽成 `sendReplyMedia()`（brain + worker 共用），`sendTaskReply()` 按用户串行 + token 现取 + 额度让位（§19.3–§19.5） |
+| 文件                                                         | 变更                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/wechat-daemon/src/ipc/chat-command-specs.ts`       | `TaskCommand` 加 `{ kind:"recipient"; id }`（裸 `#N` / `发给任务 N`）；`ChatCommand` 加 `{ kind:"toBrain" }`（`回到大脑`）；`TASK_COMMAND_SPECS` / `COMMAND_SPECS` 各加一条 spec                                                                                                                |
+| `packages/wechat-daemon/src/daemon/daemon-routing.ts`        | `parseBrainEscape` 扩展到 §12.2（`问大脑` / `大脑` / `brain`）                                                                                                                                                                                                                                  |
+| `packages/wechat-daemon/src/acp/acp-brain.ts`                | `runTurn` 改用 `applyMediaToPrompt`（等价重构）                                                                                                                                                                                                                                                 |
+| `packages/wechat-daemon/src/tasks/worker-acp.ts`             | `ask()` 支持 `images`，prompt 走 `applyMediaToPrompt`；每会话首轮加一次出站约定提示（§19.8）                                                                                                                                                                                                    |
+| `packages/wechat-daemon/src/daemon/messaging/attachments.ts` | `assertLocalPath()` 改为 `export`（图片通道复用同一套闸，§19.6）                                                                                                                                                                                                                                |
+| `packages/wechat-daemon/src/daemon/messaging/image-reply.ts` | `resolveImageBytes()` 的本地分支补 realpath / 扩展名 / `isSensitiveFilePath()`（§19.6）                                                                                                                                                                                                         |
+| `packages/wechat-daemon/src/tasks/task-manager.ts`           | `dispatchTask` / `injectTask` / `resumeTask` 支持 `media`；`Task` 流转 `pendingMedia`；新增解析目标任务的辅助（供收件人 arm 复用）                                                                                                                                                              |
+| `packages/wechat-daemon/src/index.ts`                        | 收件人 / 待投递 Map 与调度；poller 分拣（§6.2）；`handleFastItem` 新分支（§6.3）；媒体段改用 `prepareInboundMedia`；`kind:"toBrain"` / `kind:"recipient"` / flush 处理；出站抽成 `sendReplyMedia()`（brain + worker 共用），`sendTaskReply()` 按用户串行 + token 现取 + 额度让位（§19.3–§19.5） |
 
 ### 测试
 
@@ -482,14 +503,14 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 
 ### 19.2 语法（worker 结果里认什么）
 
-| 写法 | 结果 | 备注 |
-| --- | --- | --- |
-| `![alt](路径)` / `![alt](https://…)` | 图片 | 可带 `"title"`；同一 `src` 去重 |
-| 裸图片 URL（`https://…/x.png`） | 图片 | 只认 `png` / `jpe?g` / `gif` / `webp` / `bmp` |
-| `[附件](<路径>)` | 文件或视频 | 带尖括号才能在路径里写 `)` |
-| `[文件](file:///…)` | 文件 | `file://` 只接受空 host（`file:///…`） |
-| `[视频](file:///…)` | 视频 | 微信侧按视频消息发 |
-| `[附件](路径)` | 文件或视频 | 类型由扩展名判（`classifyMediaByName()`） |
+| 写法                                 | 结果       | 备注                                          |
+| ------------------------------------ | ---------- | --------------------------------------------- |
+| `![alt](路径)` / `![alt](https://…)` | 图片       | 可带 `"title"`；同一 `src` 去重               |
+| 裸图片 URL（`https://…/x.png`）      | 图片       | 只认 `png` / `jpe?g` / `gif` / `webp` / `bmp` |
+| `[附件](<路径>)`                     | 文件或视频 | 带尖括号才能在路径里写 `)`                    |
+| `[文件](file:///…)`                  | 文件       | `file://` 只接受空 host（`file:///…`）        |
+| `[视频](file:///…)`                  | 视频       | 微信侧按视频消息发                            |
+| `[附件](路径)`                       | 文件或视频 | 类型由扩展名判（`classifyMediaByName()`）     |
 
 实现约束：
 
@@ -538,14 +559,14 @@ const BRAIN_ESCAPE = /^(?:问大脑\s*[:：]?\s*|(?:大脑|brain)\s*[:：]\s*|(?
 
 失败不静默：按原因归类后拼在正文尾部，保留原始链接/路径，用户可以直接重发。
 
-| 通道 | 原因 | 文案 |
-| --- | --- | --- |
-| 图片 | `download` | 「有 N 张图片没能下载下来，附原链接」 |
-| 图片 | `send` | 「有 N 张图片没能发出去」 |
-| 图片 | `budget` | 「有 N 张图片因接近微信连续发送上限没发」 |
-| 附件 | `read` | 「有 N 个附件没能读取/校验通过」 |
-| 附件 | `send` | 「有 N 个附件没能发出去」 |
-| 附件 | `budget` | 「有 N 个附件因接近微信连续发送上限没发」 |
+| 通道 | 原因        | 文案                                                            |
+| ---- | ----------- | --------------------------------------------------------------- |
+| 图片 | `download`  | 「有 N 张图片没能下载下来，附原链接」                           |
+| 图片 | `send`      | 「有 N 张图片没能发出去」                                       |
+| 图片 | `budget`    | 「有 N 张图片因接近微信连续发送上限没发」                       |
+| 附件 | `read`      | 「有 N 个附件没能读取/校验通过」                                |
+| 附件 | `send`      | 「有 N 个附件没能发出去」                                       |
+| 附件 | `budget`    | 「有 N 个附件因接近微信连续发送上限没发」                       |
 | 附件 | `sensitive` | 「有 N 个附件被敏感文件名单拦下（回复「允许敏感文件」可补发）」 |
 
 ### 19.8 可发现性：每会话一次的约定提示
@@ -579,7 +600,6 @@ worker agent 默认不知道「写 Markdown 图片就会发出去」。（brain 
 - ✅ worker 结果里的本地图片：`sent image: C:\Users\imwan\.wemind\5699d5d92ea9\workspace\worker\chart.png`。
 - ⚠️ http 图片被 fake-IP 判成内网（§19.6 已知边界）。
 - 未测：视频、`[文件]` 大文件、敏感文件窗口补发（当时的敏感文件用例写成了全角 `］`，`extractAttachments()` 没匹配到）。
-
 
 ## 20. 独立审查后的修复（2026-11-16）
 

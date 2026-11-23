@@ -12,10 +12,10 @@
 
 两个使用形态：
 
-| 形态 | 谁在调用 | 怎么接进来 |
-|---|---|---|
-| A. 会话内 | 微信侧 brain / worker 的模型 | WeMind 把该 server 作为一个 stdio `mcpServers` 项注入会话（仅对接受 ACP `mcpServers` 的 Agent），或写进 Agent 配置 |
-| B. 独立 | Claude Desktop / Cursor 等外部 MCP 客户端 | 与 `wemind-mcp` 平级，作为第二个 bin 发布 |
+| 形态      | 谁在调用                                  | 怎么接进来                                                                                                         |
+| --------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| A. 会话内 | 微信侧 brain / worker 的模型              | WeMind 把该 server 作为一个 stdio `mcpServers` 项注入会话（仅对接受 ACP `mcpServers` 的 Agent），或写进 Agent 配置 |
+| B. 独立   | Claude Desktop / Cursor 等外部 MCP 客户端 | 与 `wemind-mcp` 平级，作为第二个 bin 发布                                                                          |
 
 **决定成本的关键事实**：ACP 没有「宿主向模型注册工具」的标准方法。所以形态 A 也必须落成一个真实的本地 MCP server 进程，再经 `mcpServers` 交给 Agent，而不能在 ACP 连接层直接塞工具进去。
 

@@ -62,4 +62,3 @@ if (problems.length) {
 console.log(
   `[check-version] OK：${name}@${version}（命令 wemind；版本号单一来源 package.json，lock 已同步）`,
 );
-

@@ -26,13 +26,13 @@
 
 ## 1. 安装形态（本机实测）
 
-| 项 | 实测 |
-|---|---|
-| CLI 本体 | `~/.qoder/bin/qodercli/qodercli.exe`（约 210 MB 单文件，旁边还有 `qodercli-1.1.78.exe` 与 `version.txt`）；该目录已加入**用户 PATH** |
-| `qoder` 命令 | `~/.qoder/entry/qoder.cmd` → `qoder-dispatcher.ps1`：参数以 `-` 开头转发给 `qodercli`，`qoder ide` / 路径参数转发给 IDE。**常驻 stdio 进程不要走它** |
-| 配置目录 | `~/.qoder`（与 Qoder Desktop 共用：`settings.json`、`memory/`、`plugins/`、`.auth/` 都在这里） |
-| 登录态 | `~/.qoder/.auth/user`（token）+ `~/.qoder/.auth/machine_id`（机器标识，token 与它绑定） |
-| 初次运行副产物 | 在 `QODER_CONFIG_DIR` 下生成 `.auth/machine_id`（**新的**）、`.bin/umid-*`、`.cache/`、`logs/`、`security-resources/`、`tmp/`、`installation_id` |
+| 项             | 实测                                                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLI 本体       | `~/.qoder/bin/qodercli/qodercli.exe`（约 210 MB 单文件，旁边还有 `qodercli-1.1.78.exe` 与 `version.txt`）；该目录已加入**用户 PATH**                 |
+| `qoder` 命令   | `~/.qoder/entry/qoder.cmd` → `qoder-dispatcher.ps1`：参数以 `-` 开头转发给 `qodercli`，`qoder ide` / 路径参数转发给 IDE。**常驻 stdio 进程不要走它** |
+| 配置目录       | `~/.qoder`（与 Qoder Desktop 共用：`settings.json`、`memory/`、`plugins/`、`.auth/` 都在这里）                                                       |
+| 登录态         | `~/.qoder/.auth/user`（token）+ `~/.qoder/.auth/machine_id`（机器标识，token 与它绑定）                                                              |
+| 初次运行副产物 | 在 `QODER_CONFIG_DIR` 下生成 `.auth/machine_id`（**新的**）、`.bin/umid-*`、`.cache/`、`logs/`、`security-resources/`、`tmp/`、`installation_id`     |
 
 ---
 
@@ -49,38 +49,38 @@ $env:ACP_HARD_KILL = "1"
 node scripts/acp-probe.mjs
 ```
 
-| # | 问题 | 结果 |
-|---|---|---|
-| Q1 | 启动方式 / capabilities | `--acp` 可用。`loadSession:true`；`sessionCapabilities` 含 `resume/close/fork/list/delete/additionalDirectories`；`image:true`、`embeddedContext:true`；`mcpCapabilities: {http, sse}`；`authMethods: qodercli-login` |
-| Q2 | 空副本能否用登录态 | **不能**（`-32000 Authentication required`）。复制 `.auth/user` + `.auth/machine_id` 后通过；**只复制 `user` 仍失败** |
-| Q3 | 反向请求 | `--yolo` 下 prompt 触发 3 次工具调用，**0 个反向请求**（无 `request_permission`、无 `fs/*`、无 `terminal/*`） |
-| Q4 | 首帧 / 帧类型 | 首帧 1.0–1.7 s，首字 1.4–2.8 s；`agent_thought_chunk`、`agent_message_chunk`、`tool_call`、`tool_call_update` → 默认 25 s 首帧 / 15 s 心跳均适用 |
-| Q5 | 硬杀后恢复 | `taskkill /T /F` 后新进程 `session/load` 成功，追问答出 `PINEAPPLE` ✅ |
-| Q6 | 模型 / 模式 | `session/new` 返回 `modes`（`default/acceptEdits/auto/dontAsk/yolo`，当前 `yolo`）、`models`（默认 `auto`，另有 `ultimate/fast/efficient` 等 15 个）与 `configOptions`（`mode`、`model` 两个 select）→ **能力声明层面**支持现有 `model` agent 配置字段走 `session/set_config_option`；**尚未实测下发**（Q1 只证明能力声明，没有一次真实的 `set_config_option` 调用记录，2026-11-05 核对） |
-| Q7 | 图片 | 1×1 PNG 的 prompt 返回 `end_turn` 无报错；真实图片识别留到 M3 真机验证 |
-| — | stdout 杂质 | 无非 JSON 行 |
+| #   | 问题                    | 结果                                                                                                                                                                                                                                                                                                                                                                                      |
+| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1  | 启动方式 / capabilities | `--acp` 可用。`loadSession:true`；`sessionCapabilities` 含 `resume/close/fork/list/delete/additionalDirectories`；`image:true`、`embeddedContext:true`；`mcpCapabilities: {http, sse}`；`authMethods: qodercli-login`                                                                                                                                                                     |
+| Q2  | 空副本能否用登录态      | **不能**（`-32000 Authentication required`）。复制 `.auth/user` + `.auth/machine_id` 后通过；**只复制 `user` 仍失败**                                                                                                                                                                                                                                                                     |
+| Q3  | 反向请求                | `--yolo` 下 prompt 触发 3 次工具调用，**0 个反向请求**（无 `request_permission`、无 `fs/*`、无 `terminal/*`）                                                                                                                                                                                                                                                                             |
+| Q4  | 首帧 / 帧类型           | 首帧 1.0–1.7 s，首字 1.4–2.8 s；`agent_thought_chunk`、`agent_message_chunk`、`tool_call`、`tool_call_update` → 默认 25 s 首帧 / 15 s 心跳均适用                                                                                                                                                                                                                                          |
+| Q5  | 硬杀后恢复              | `taskkill /T /F` 后新进程 `session/load` 成功，追问答出 `PINEAPPLE` ✅                                                                                                                                                                                                                                                                                                                    |
+| Q6  | 模型 / 模式             | `session/new` 返回 `modes`（`default/acceptEdits/auto/dontAsk/yolo`，当前 `yolo`）、`models`（默认 `auto`，另有 `ultimate/fast/efficient` 等 15 个）与 `configOptions`（`mode`、`model` 两个 select）→ **能力声明层面**支持现有 `model` agent 配置字段走 `session/set_config_option`；**尚未实测下发**（Q1 只证明能力声明，没有一次真实的 `set_config_option` 调用记录，2026-11-05 核对） |
+| Q7  | 图片                    | 1×1 PNG 的 prompt 返回 `end_turn` 无报错；真实图片识别留到 M3 真机验证                                                                                                                                                                                                                                                                                                                    |
+| —   | stdout 杂质             | 无非 JSON 行                                                                                                                                                                                                                                                                                                                                                                              |
 
 M1 期间补测（2026-10-26）：
 
-| # | 问题 | 结果 |
-|---|---|---|
-| Q8 | 副本 `settings.json` 的 `mcpServers` 生效吗 | ✅ 用 canary MCP 实测生效；`--yolo` 下模型会真实调用 |
-| Q9 | worker 的项目级 `.mcp.json` 会被自动加载吗 | **不会**（`--yolo` 也不加载）→ worker 不会被项目里的 `wechat` MCP 抢消息；仍建议项目侧不要放 `.qoder/` 配置（未单独实测） |
-| Q10 | `--setting-sources user` 能否简化继承 | ❌ 会直接 `Authentication required`，放弃；改用复制 `settings.json` 做基底 |
+| #   | 问题                                        | 结果                                                                                                                      |
+| --- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Q8  | 副本 `settings.json` 的 `mcpServers` 生效吗 | ✅ 用 canary MCP 实测生效；`--yolo` 下模型会真实调用                                                                      |
+| Q9  | worker 的项目级 `.mcp.json` 会被自动加载吗  | **不会**（`--yolo` 也不加载）→ worker 不会被项目里的 `wechat` MCP 抢消息；仍建议项目侧不要放 `.qoder/` 配置（未单独实测） |
+| Q10 | `--setting-sources user` 能否简化继承       | ❌ 会直接 `Authentication required`，放弃；改用复制 `settings.json` 做基底                                                |
 
 ### 2.1 M3 真机 E2E（2026-10-26 / 27）
 
 环境：daemon 跑在真实微信账号上，`WEMIND_BRAIN=qoder` 临时覆盖（`brain.json` 保持 deepseek，用于顺带验证切换隔离）。
 
-| # | 场景 | 结果 |
-|---|---|---|
-| M3-1 | 发图片（真实照片） | ✅ 回复准确描述画面（「大红苹果…巨型苹果雕塑」），`prompt ok 5650ms chunks=73`；`image:true` 落实到端到端 |
-| M3-2 | 动态 MCP：`列出 MCP` → `加载 wemind-test` → 让 agent 调工具 → `卸载` | ✅ 目录列出临时 MCP；加载后副本 `settings.json.mcpServers` 写入、`brain-mcps.json` 记录、ACP 自动重启；agent 真实调用并回 `pong from wemind-mcp-test`（临时 server 日志可见握手）；`加载 wechat` 被拒（防它把消息发回自己）；卸载后清理；真实 `~/.qoder/settings.json` 已按备份还原 |
-| M3-3 | worker：派发约 25 s 任务 → `taskkill /T /F` 强杀 worker → 微信「继续」 | ✅ 强杀后 `prompt FAIL → rebuild`，任务进入 waiting；「继续」触发重拉 + `session/load ok`，工具调用续跑，两步产物 `STEP-A-DONE` / `STEP-B-DONE` 齐全；`worker-sessions.json` 新增 `qoder:task`（**当时格式**；现行键为 `<agent>:task-<编号>@<userId>`） |
-| M3-4 | 冷重启后追问 | ✅ daemon 重启后首轮 `session/load ok`，上下文保留（配合 M3-3 的硬杀恢复，覆盖两种重启路径） |
-| M3-5 | 记忆/技能继承 | ✅ `memory/` junction 生效：大脑能读到日常 Qoder 写入的用户偏好（实测答出真实记忆里的内容）；`skills`/`agents`/`commands`/`AGENTS.md` 在 1.1.78 不存在，保持空操作 |
-| — | 切换隔离（会话映射按 agent 分开存） | ✅ qoder 与 deepseek 各自 `session/load` 自己的 sessionId；来回切换不再出现 `-32602 INVALID_SESSION_IDENTIFIER`，切回时原上下文仍在 |
-| — | 日常 Qoder 登录态 | ✅ E2E 全程未被登出（token 轮换暂未观察到，见 §6） |
+| #    | 场景                                                                   | 结果                                                                                                                                                                                                                                                                                |
+| ---- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M3-1 | 发图片（真实照片）                                                     | ✅ 回复准确描述画面（「大红苹果…巨型苹果雕塑」），`prompt ok 5650ms chunks=73`；`image:true` 落实到端到端                                                                                                                                                                           |
+| M3-2 | 动态 MCP：`列出 MCP` → `加载 wemind-test` → 让 agent 调工具 → `卸载`   | ✅ 目录列出临时 MCP；加载后副本 `settings.json.mcpServers` 写入、`brain-mcps.json` 记录、ACP 自动重启；agent 真实调用并回 `pong from wemind-mcp-test`（临时 server 日志可见握手）；`加载 wechat` 被拒（防它把消息发回自己）；卸载后清理；真实 `~/.qoder/settings.json` 已按备份还原 |
+| M3-3 | worker：派发约 25 s 任务 → `taskkill /T /F` 强杀 worker → 微信「继续」 | ✅ 强杀后 `prompt FAIL → rebuild`，任务进入 waiting；「继续」触发重拉 + `session/load ok`，工具调用续跑，两步产物 `STEP-A-DONE` / `STEP-B-DONE` 齐全；`worker-sessions.json` 新增 `qoder:task`（**当时格式**；现行键为 `<agent>:task-<编号>@<userId>`）                             |
+| M3-4 | 冷重启后追问                                                           | ✅ daemon 重启后首轮 `session/load ok`，上下文保留（配合 M3-3 的硬杀恢复，覆盖两种重启路径）                                                                                                                                                                                        |
+| M3-5 | 记忆/技能继承                                                          | ✅ `memory/` junction 生效：大脑能读到日常 Qoder 写入的用户偏好（实测答出真实记忆里的内容）；`skills`/`agents`/`commands`/`AGENTS.md` 在 1.1.78 不存在，保持空操作                                                                                                                  |
+| —    | 切换隔离（会话映射按 agent 分开存）                                    | ✅ qoder 与 deepseek 各自 `session/load` 自己的 sessionId；来回切换不再出现 `-32602 INVALID_SESSION_IDENTIFIER`，切回时原上下文仍在                                                                                                                                                 |
+| —    | 日常 Qoder 登录态                                                      | ✅ E2E 全程未被登出（token 轮换暂未观察到，见 §6）                                                                                                                                                                                                                                  |
 
 ---
 
@@ -143,10 +143,10 @@ syncSettings():
 
 `syncCredentialFile(file, mode)` + `syncCredentials()`，按 agent 配置字段分两组：
 
-| 字段 | 文件 | 规则 | 原因 |
-|---|---|---|---|
-| `credentialFiles` | `.auth/user` | 新者胜（现有逻辑） | 真实目录重新登录 → 覆盖副本；副本自己刷新过 → 保留 |
-| `identityFiles` | `.auth/machine_id` | **内容不同就覆盖** | Qoder 在缺凭据时会**自己生成**新的 `machine_id`，它比真实文件新，「新者胜」会把错的留下 → 永久认证失败 |
+| 字段              | 文件               | 规则               | 原因                                                                                                   |
+| ----------------- | ------------------ | ------------------ | ------------------------------------------------------------------------------------------------------ |
+| `credentialFiles` | `.auth/user`       | 新者胜（现有逻辑） | 真实目录重新登录 → 覆盖副本；副本自己刷新过 → 保留                                                     |
+| `identityFiles`   | `.auth/machine_id` | **内容不同就覆盖** | Qoder 在缺凭据时会**自己生成**新的 `machine_id`，它比真实文件新，「新者胜」会把错的留下 → 永久认证失败 |
 
 `brain-check.ts` 也把这两类文件复制进临时副本，否则 `wemind brain check` 会误报「未登录」。
 
@@ -174,10 +174,10 @@ syncSettings():
 
 `settings.json` 的 `providers` 是 Qoder 的**自定义模型供应商（BYOK / 本地端点）**配置，Qoder Desktop「个人模型」和 CLI `/model` 向导都会写它。每个供应商条目包含 `baseUrl`、明文 `apiKey`、协议适配器、模型列表。它与 Qoder 账号登录（`.auth/`）是两回事：内置模型（`auto`、`ultimate`、`fast`…）只靠账号登录，不需要 `providers`。
 
-| 口径 | 做法 | 代价 |
-|---|---|---|
-| 早先（≤ 2026-11-13） | 剥掉 `providers` / `model` | 大脑用不了你配的 BYOK 模型；`model.name` 指向被剥供应商时大脑起不来或静默回退 |
-| **现在（2026-11-14 起）** | **整份复制，只剥 MCP 段** | 明文 `apiKey` 多出 2 份 × 账号数（仅 `managed` 的 `brain-home` / `worker-home`）；账号副本不是安全边界 |
+| 口径                      | 做法                       | 代价                                                                                                   |
+| ------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 早先（≤ 2026-11-13）      | 剥掉 `providers` / `model` | 大脑用不了你配的 BYOK 模型；`model.name` 指向被剥供应商时大脑起不来或静默回退                          |
+| **现在（2026-11-14 起）** | **整份复制，只剥 MCP 段**  | 明文 `apiKey` 多出 2 份 × 账号数（仅 `managed` 的 `brain-home` / `worker-home`）；账号副本不是安全边界 |
 
 改口径的理由与全局一致（[设计文档 §4.9 / §7.3](../设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md)）：**剥键等于替用户改配置**，上游一改键名就静默剥错，表现成「终端能用、微信不能用」；而凭据本来也会随 `credentialFiles` 进副本（Cline 的 `providers.json` 就是这样），单独剥 Qoder 的 `providers` 口径不一致。**要避免密钥副本**：别把 BYOK 密钥写进 `~/.qoder/settings.json`，或者不用 `managed` 模式——默认 `direct` 完全不复制任何配置文件。
 
@@ -198,13 +198,13 @@ syncSettings():
 
 ## 7. 里程碑
 
-| 里程碑 | 内容 | 验收 |
-|---|---|---|
-| M0 ✅ | 安装 + 登录 + 探针 | 本文 §1/§2 |
-| M1 ✅ | agent + `settingsBase` + `credentialFiles` / `identityFiles` + 单测 | `npm run typecheck && npm test && npm run lint && npm run format:check` 全绿；`wemind brain check` 真机握手通过（临时数据目录，未动正在运行的 daemon） |
-| M2 ✅（空） | 协议适配 | 按 M0 结果为空，跳过 |
-| M3 ✅ | 真机 E2E：对话、发图、`加载 <MCP>`、重启后追问、worker 派发 → 中断 →「继续」、记忆继承 | 全部通过，见 §2.1；`wechat` 始终未加载；日常 Qoder 未被登出 |
-| M4 ✅ | 文档同步（§4.5）+ `check-docs.mjs` | 链接检查通过 |
+| 里程碑      | 内容                                                                                   | 验收                                                                                                                                                   |
+| ----------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| M0 ✅       | 安装 + 登录 + 探针                                                                     | 本文 §1/§2                                                                                                                                             |
+| M1 ✅       | agent + `settingsBase` + `credentialFiles` / `identityFiles` + 单测                    | `npm run typecheck && npm test && npm run lint && npm run format:check` 全绿；`wemind brain check` 真机握手通过（临时数据目录，未动正在运行的 daemon） |
+| M2 ✅（空） | 协议适配                                                                               | 按 M0 结果为空，跳过                                                                                                                                   |
+| M3 ✅       | 真机 E2E：对话、发图、`加载 <MCP>`、重启后追问、worker 派发 → 中断 →「继续」、记忆继承 | 全部通过，见 §2.1；`wechat` 始终未加载；日常 Qoder 未被登出                                                                                            |
+| M4 ✅       | 文档同步（§4.5）+ `check-docs.mjs`                                                     | 链接检查通过                                                                                                                                           |
 
 ---
 
@@ -212,26 +212,26 @@ syncSettings():
 
 以下结论取自本文 §1、§2、§2.1 的实测结果与 §7 的里程碑验收，均已在 qodercli 1.1.78 上确认。
 
-| 验证项 | 结论 | 依据 |
-|---|---|---|
-| 安装形态 | 官方原生安装（`~/.qoder/bin/qodercli/qodercli.exe`，已加入用户 PATH）；`qoder` 分发器会多套一层 `cmd → powershell`，常驻 stdio 进程直接起本体、不走它 | §1 |
-| 登录态 | 空副本报 `-32000 Authentication required`；复制 `.auth/user` + `.auth/machine_id` 后通过，只复制 `user` 仍失败 | §2 Q2 |
-| ACP 能力声明 | `loadSession:true`；`sessionCapabilities` 含 `resume/close/fork/list/delete/additionalDirectories`；`image:true`、`embeddedContext:true`；`mcpCapabilities: {http, sse}`；`authMethods: qodercli-login` | §2 Q1 |
-| 免审批 | `--yolo` 下 3 次工具调用，0 个反向请求（无 `request_permission`、`fs/*`、`terminal/*`） | §2 Q3 |
-| 首帧与帧类型 | 首帧 1.0–1.7 s、首字 1.4–2.8 s；有 `agent_thought_chunk` / `agent_message_chunk` / `tool_call` / `tool_call_update`；默认 25 s 首帧 / 15 s 心跳适用 | §2 Q4 |
-| 硬杀恢复 | `taskkill /T /F` 后新进程 `session/load` 成功，追问答出 `PINEAPPLE` | §2 Q5 |
-| 图片 | 1×1 PNG 返回 `end_turn` 无报错；真实照片识别通过（M3-1，`prompt ok 5650ms chunks=73`） | §2 Q7、§2.1 M3-1 |
-| 副本 MCP | 副本 `settings.json.mcpServers` 生效（canary MCP 实测）；`加载/卸载` 动态 MCP 真实调用，`wechat` 被拒，卸载后清理；真实 `~/.qoder/settings.json` 已按备份还原 | §2 Q8、§2.1 M3-2 |
-| worker 项目级 MCP | 项目根 `.mcp.json` 不会被自动加载（`--yolo` 也不加载） | §2 Q9 |
-| 设置继承 | `--setting-sources user` 会直接 `Authentication required`，不可用；复制 `settings.json` 做基底可行 | §2 Q10 |
-| worker 中断续跑 | 强杀后 `prompt FAIL → rebuild`，任务进入 waiting；「继续」触发重拉 + `session/load ok`，`STEP-A-DONE` / `STEP-B-DONE` 齐全 | §2.1 M3-3 |
-| 冷重启 | daemon 重启后首轮 `session/load ok`，上下文保留 | §2.1 M3-4 |
-| 记忆/技能继承 | `memory/` junction 生效，大脑能读到日常 Qoder 写入的用户偏好；`skills`/`agents`/`commands`/`AGENTS.md` 在 1.1.78 不存在，为空操作 | §2.1 M3-5 |
-| 切换隔离 | qoder 与 deepseek 各自 `session/load` 自己的 sessionId，来回切换不再出现 `-32602 INVALID_SESSION_IDENTIFIER`，切回时原上下文仍在 | §2.1 |
-| 登录态稳定 | M3 全程（含多次重启、换脑、worker 重建）未被登出 | §2.1、§6 |
-| `wemind brain check` | 真机握手通过（约 2.4 s） | §0、§7 M1 |
-| 静态检查 | `npm run typecheck && npm test && npm run lint && npm run format:check` 全绿 | §7 M1 |
-| 文档链接 | `check-docs.mjs` 链接检查通过 | §7 M4 |
+| 验证项               | 结论                                                                                                                                                                                                    | 依据             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 安装形态             | 官方原生安装（`~/.qoder/bin/qodercli/qodercli.exe`，已加入用户 PATH）；`qoder` 分发器会多套一层 `cmd → powershell`，常驻 stdio 进程直接起本体、不走它                                                   | §1               |
+| 登录态               | 空副本报 `-32000 Authentication required`；复制 `.auth/user` + `.auth/machine_id` 后通过，只复制 `user` 仍失败                                                                                          | §2 Q2            |
+| ACP 能力声明         | `loadSession:true`；`sessionCapabilities` 含 `resume/close/fork/list/delete/additionalDirectories`；`image:true`、`embeddedContext:true`；`mcpCapabilities: {http, sse}`；`authMethods: qodercli-login` | §2 Q1            |
+| 免审批               | `--yolo` 下 3 次工具调用，0 个反向请求（无 `request_permission`、`fs/*`、`terminal/*`）                                                                                                                 | §2 Q3            |
+| 首帧与帧类型         | 首帧 1.0–1.7 s、首字 1.4–2.8 s；有 `agent_thought_chunk` / `agent_message_chunk` / `tool_call` / `tool_call_update`；默认 25 s 首帧 / 15 s 心跳适用                                                     | §2 Q4            |
+| 硬杀恢复             | `taskkill /T /F` 后新进程 `session/load` 成功，追问答出 `PINEAPPLE`                                                                                                                                     | §2 Q5            |
+| 图片                 | 1×1 PNG 返回 `end_turn` 无报错；真实照片识别通过（M3-1，`prompt ok 5650ms chunks=73`）                                                                                                                  | §2 Q7、§2.1 M3-1 |
+| 副本 MCP             | 副本 `settings.json.mcpServers` 生效（canary MCP 实测）；`加载/卸载` 动态 MCP 真实调用，`wechat` 被拒，卸载后清理；真实 `~/.qoder/settings.json` 已按备份还原                                           | §2 Q8、§2.1 M3-2 |
+| worker 项目级 MCP    | 项目根 `.mcp.json` 不会被自动加载（`--yolo` 也不加载）                                                                                                                                                  | §2 Q9            |
+| 设置继承             | `--setting-sources user` 会直接 `Authentication required`，不可用；复制 `settings.json` 做基底可行                                                                                                      | §2 Q10           |
+| worker 中断续跑      | 强杀后 `prompt FAIL → rebuild`，任务进入 waiting；「继续」触发重拉 + `session/load ok`，`STEP-A-DONE` / `STEP-B-DONE` 齐全                                                                              | §2.1 M3-3        |
+| 冷重启               | daemon 重启后首轮 `session/load ok`，上下文保留                                                                                                                                                         | §2.1 M3-4        |
+| 记忆/技能继承        | `memory/` junction 生效，大脑能读到日常 Qoder 写入的用户偏好；`skills`/`agents`/`commands`/`AGENTS.md` 在 1.1.78 不存在，为空操作                                                                       | §2.1 M3-5        |
+| 切换隔离             | qoder 与 deepseek 各自 `session/load` 自己的 sessionId，来回切换不再出现 `-32602 INVALID_SESSION_IDENTIFIER`，切回时原上下文仍在                                                                        | §2.1             |
+| 登录态稳定           | M3 全程（含多次重启、换脑、worker 重建）未被登出                                                                                                                                                        | §2.1、§6         |
+| `wemind brain check` | 真机握手通过（约 2.4 s）                                                                                                                                                                                | §0、§7 M1        |
+| 静态检查             | `npm run typecheck && npm test && npm run lint && npm run format:check` 全绿                                                                                                                            | §7 M1            |
+| 文档链接             | `check-docs.mjs` 链接检查通过                                                                                                                                                                           | §7 M4            |
 
 ---
 

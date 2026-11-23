@@ -2,53 +2,53 @@
   "name": "@wemind/cli",
   "version": "2.2.0",
   "description": "WeMind — your AI mind, reachable on WeChat. 常驻微信 AI 助手：自动收发 + 远程任务 + 多账号，自带 AI 大脑（任意 ACP agent 可接，默认自动探测）。安装后命令为 wemind。",
-  "type": "module",
+  "keywords": [
+    "acp",
+    "agent",
+    "ai",
+    "assistant",
+    "bot",
+    "cli",
+    "daemon",
+    "wechat",
+    "weixin",
+    "wemind"
+  ],
+  "homepage": "https://github.com/imwangpan/WeMind/tree/main/packages/wechat-daemon#readme",
+  "bugs": {
+    "url": "https://github.com/imwangpan/WeMind/issues"
+  },
+  "license": "MIT",
+  "author": "imwangpan",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/imwangpan/WeMind.git",
     "directory": "packages/wechat-daemon"
   },
-  "homepage": "https://github.com/imwangpan/WeMind/tree/main/packages/wechat-daemon#readme",
-  "bugs": {
-    "url": "https://github.com/imwangpan/WeMind/issues"
-  },
-  "author": "imwangpan",
   "bin": {
     "wemind": "dist/cli.js"
   },
   "files": [
     "dist"
   ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/cli.js",
     "prepack": "node ../../scripts/prepack-guard.mjs ."
   },
-  "keywords": [
-    "wemind",
-    "wechat",
-    "weixin",
-    "ai",
-    "agent",
-    "bot",
-    "acp",
-    "assistant",
-    "daemon",
-    "cli"
-  ],
-  "license": "MIT",
-  "engines": {
-    "node": ">=24.11.0"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
   "dependencies": {
     "silk-wasm": "^3.7.1"
   },
   "devDependencies": {
     "@wemind/wechat-ilink-core": "*",
-    "tsdown": "^0.22.3"
+    "tsdown": "^0.23.7"
+  },
+  "engines": {
+    "node": ">=24.11.0"
   }
 }

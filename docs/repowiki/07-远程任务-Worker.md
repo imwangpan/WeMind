@@ -16,11 +16,11 @@
 
 三种方案对比：
 
-| 方案 | 做法 | 评价 |
-|------|------|------|
-| A | 任务跑在对话大脑里（brain 自己干活） | 简单，但重活阻塞对话、无法多任务（方案 C 的退化版） |
-| B | 文件状态/命令桥 | 适合任务在无 ACP 能力的环境跑，但需任务侧改造、非实时 |
-| **C** | **独立受控 ACP worker 进程** | 双向、实时、多轮、可重连、可多 worker（**已采用**） |
+| 方案  | 做法                                 | 评价                                                  |
+| ----- | ------------------------------------ | ----------------------------------------------------- |
+| A     | 任务跑在对话大脑里（brain 自己干活） | 简单，但重活阻塞对话、无法多任务（方案 C 的退化版）   |
+| B     | 文件状态/命令桥                      | 适合任务在无 ACP 能力的环境跑，但需任务侧改造、非实时 |
+| **C** | **独立受控 ACP worker 进程**         | 双向、实时、多轮、可重连、可多 worker（**已采用**）   |
 
 **为什么用 ACP**：ACP 天生为「外部程序控制 agent」设计，`session/prompt` 下发指令、`session/update` 实时回传、`session/load`（或 `resume`）断线续传。worker 本质就是把对话大脑那套 ACP 客户端能力复用到「第二个及以后的 agent 进程」上；**它同样受 agent 能力差异影响**（见 §6.6）。
 
@@ -111,11 +111,11 @@ stateDiagram-v2
 
 取用顺序：**同 agent 的空闲命中** → **回收最旧空闲腾位** → spawn。三把闸：
 
-| 闸 | 变量 | 默认 | 行为 |
-|---|---|---|---|
-| 并发任务数 | `WEMIND_MAX_WORKERS` | 3 | 超出时派发被拒并提示（不是排队） |
-| 空闲进程数 | `WEMIND_IDLE_MAX` | 2 | 保留的池中空闲进程上限 |
-| 空闲回收 | `WEMIND_WORKER_REAP_MS` | 300000（5min） | 空闲超时后杀掉该进程 |
+| 闸         | 变量                    | 默认           | 行为                             |
+| ---------- | ----------------------- | -------------- | -------------------------------- |
+| 并发任务数 | `WEMIND_MAX_WORKERS`    | 3              | 超出时派发被拒并提示（不是排队） |
+| 空闲进程数 | `WEMIND_IDLE_MAX`       | 2              | 保留的池中空闲进程上限           |
+| 空闲回收   | `WEMIND_WORKER_REAP_MS` | 300000（5min） | 空闲超时后杀掉该进程             |
 
 > **命名坑**：空闲**进程**回收是 `WEMIND_WORKER_REAP_MS`；`WEMIND_WORKER_IDLE_MS` 是「单轮 prompt 空闲超时」。同名两义必然踩，所以没复用。
 >
@@ -129,14 +129,14 @@ stateDiagram-v2
 
 与 brain 侧的差异：
 
-| 项 | brain | worker |
-|---|-------|--------|
-| 进程 | 1 个（槽位里的当前大脑） | **N 个**（池，各自一条任务） |
-| 会话 | 每用户一 session | 每任务一 session（键 `<agent>:task-<编号>@<userId>`） |
-| 持久化 | `brain-sessions.json`（键 `<agent>:userId`） | `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`） |
-| cwd | 账号 `workspace/brain`（或 `session-cwd.json` 记录；恢复时用 `usableSessionCwd()` 校验 UNC/不存在/非目录并回落） | **任务工作目录**：`--cwd` > `WEMIND_WORKER_CWD` > `<账号>/workspace/worker` |
-| 配置 home | 默认 `direct` 直接用真实 home（`managed` 才是 `BRAIN_HOME`；managed 下 brain 默认空 MCP） | 默认 `direct` 直接用真实 home（`managed` 才是 `WORKER_HOME`；WeMind 生成的 worker 集为真实全量除 wechat） |
-| 超时 | idle 120s / cap 15min / 首帧 25s | idle 180s / cap 30min / 首帧 30s（更宽松） |
+| 项        | brain                                                                                                            | worker                                                                                                    |
+| --------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 进程      | 1 个（槽位里的当前大脑）                                                                                         | **N 个**（池，各自一条任务）                                                                              |
+| 会话      | 每用户一 session                                                                                                 | 每任务一 session（键 `<agent>:task-<编号>@<userId>`）                                                     |
+| 持久化    | `brain-sessions.json`（键 `<agent>:userId`）                                                                     | `worker-sessions.json`（键 `<agent>:task-<编号>@<userId>`）                                               |
+| cwd       | 账号 `workspace/brain`（或 `session-cwd.json` 记录；恢复时用 `usableSessionCwd()` 校验 UNC/不存在/非目录并回落） | **任务工作目录**：`--cwd` > `WEMIND_WORKER_CWD` > `<账号>/workspace/worker`                               |
+| 配置 home | 默认 `direct` 直接用真实 home（`managed` 才是 `BRAIN_HOME`；managed 下 brain 默认空 MCP）                        | 默认 `direct` 直接用真实 home（`managed` 才是 `WORKER_HOME`；WeMind 生成的 worker 集为真实全量除 wechat） |
+| 超时      | idle 120s / cap 15min / 首帧 25s                                                                                 | idle 180s / cap 30min / 首帧 30s（更宽松）                                                                |
 
 子进程 cwd 在 spawn 时固定，**且 cwd 是连接身份的一部分**（`connKey = agent 身份 + 实际生效 cwd`）：换 `--cwd` 会起新进程，绝不会复用停在上一个项目里的旧进程。中断恢复靠 `reset()` 后下次 `ensureSession` 走 `session/load`（不支持时 `session/resume`）。
 
@@ -156,18 +156,18 @@ spawn 失败（cwd 不存在/权限不足）时，`WorkerConn` 把 `error` 事�
 
 worker 的微信侧路由在 `fastWorkerLoop` 的任务分支（详见 [5. daemon](05-daemon.md#消息路由)）。指令集：
 
-| 你发的消息 | 去向 |
-|-----------|------|
-| `任务：xxx` / `>xxx` | 明确发 worker：**一律新建**一条任务（2026-11-17 改，此前是「有活跃任务就追加」）；已有任务还在跑就并行，回执会说明 |
-| `任务 <agent 名>：xxx` | 用指定 agent **新开**一条任务（冒号前必须是不带空格的已知 agent 名；只影响这一条，不改默认任务大脑） |
-| `#2 正文` / `/reply 2 正文` | 把话发给**第 2 条**任务（多任务并存时用它指定编号），并设为**收件人** |
-| `#2` / `发给任务 2` | 只把第 2 条任务设为**收件人**：之后的文字、图片、文件都交给它 |
-| `任务列表` / `/tasks` | markdown 表格：`#编号` / 状态（带图标）/ 最近输出 / agent / 轮次 / 时长（手机上表格可横向滑动） |
+| 你发的消息                                              | 去向                                                                                                                                           |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `任务：xxx` / `>xxx`                                    | 明确发 worker：**一律新建**一条任务（2026-11-17 改，此前是「有活跃任务就追加」）；已有任务还在跑就并行，回执会说明                             |
+| `任务 <agent 名>：xxx`                                  | 用指定 agent **新开**一条任务（冒号前必须是不带空格的已知 agent 名；只影响这一条，不改默认任务大脑）                                           |
+| `#2 正文` / `/reply 2 正文`                             | 把话发给**第 2 条**任务（多任务并存时用它指定编号），并设为**收件人**                                                                          |
+| `#2` / `发给任务 2`                                     | 只把第 2 条任务设为**收件人**：之后的文字、图片、文件都交给它                                                                                  |
+| `任务列表` / `/tasks`                                   | markdown 表格：`#编号` / 状态（带图标）/ 最近输出 / agent / 轮次 / 时长（手机上表格可横向滑动）                                                |
 | `结束任务` / `结束全部任务` / `全部结束` / `结束任务 2` | 结束任务（「等你回复」的进程留着复用；「正在跑」的力杀；被等的回话会被丢弃）；**不带编号结束全部时，连「待继续」的记录一起清掉**（2026-11-17） |
-| `全部继续` / `继续全部` / `/resume all` | 把「待继续」的任务**全部恢复运行（同时跑，互不等待）**；重启后连「等你回复」的也会变成「待继续」，一并恢复运行 |
-| `问大脑 xxx` / `大脑：xxx` / `brain: xxx` | 一次性发对话大脑（worker 正等你时也能临时插话；不退出收件人） |
-| `回到大脑` / `/to-brain` | 退出收件人模式，之后的文字和附件重新交给对话大脑 |
-| 任何无前缀消息（含 worker 刚问你后） | **默认走对话大脑**——任务不接管（例外：设了收件人时交给它，裸「继续」类短句交给任务） |
+| `全部继续` / `继续全部` / `/resume all`                 | 把「待继续」的任务**全部恢复运行（同时跑，互不等待）**；重启后连「等你回复」的也会变成「待继续」，一并恢复运行                                 |
+| `问大脑 xxx` / `大脑：xxx` / `brain: xxx`               | 一次性发对话大脑（worker 正等你时也能临时插话；不退出收件人）                                                                                  |
+| `回到大脑` / `/to-brain`                                | 退出收件人模式，之后的文字和附件重新交给对话大脑                                                                                               |
+| 任何无前缀消息（含 worker 刚问你后）                    | **默认走对话大脑**——任务不接管（例外：设了收件人时交给它，裸「继续」类短句交给任务）                                                           |
 
 行为约定：
 
@@ -270,17 +270,17 @@ graph LR
 
 ### 本地命令
 
-| 命令 | 作用 |
-|------|------|
-| `task "<描述>" [--cwd <目录>] [--agent <名字>] [<key\|label>]` | 派发任务（默认 cwd=终端当前目录；相对路径按终端当前目录解析，不存在/非目录提前报错） |
-| `task-list [<key\|label>]` | 任务列表（CLI 自己画**对齐表格**：编号/状态/最近输出/agent/轮次/时长，按显示宽度补齐；微信侧是 markdown 表格） |
-| `task-status [<key\|label>]` | 任务概览（任务表有记录时与 `task-list` 同一份；表为空才退回读 `task-state.json` 记录） |
-| `task-resume-all [<key\|label>]` | 把「待继续」的任务全部恢复运行（并行；与微信「全部继续」同一实现） |
-| `task-reply <编号> "<内容>" [<key\|label>]` | 回复/发话给任务（编号也可写成 `"#2 继续"` 放在第一个参数里；不给编号 = 唯一那条） |
-| `task-stop [<编号\|全部\|all>] [<key\|label>]` | 结束任务（不给编号 = 唯一那条，多条并存回一份编号清单） |
-| `brain switch <agent 名\|auto> [--worker]` | 热切换对话大脑 / 设默认任务大脑 |
-| `session list\|new\|resume\|rename\|delete\|current [<key\|label>]` | 会话管理（走控制桥；省略账号 = 默认账号） |
-| `brain handoff` | 生成交接摘要 |
+| 命令                                                                | 作用                                                                                                           |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `task "<描述>" [--cwd <目录>] [--agent <名字>] [<key\|label>]`      | 派发任务（默认 cwd=终端当前目录；相对路径按终端当前目录解析，不存在/非目录提前报错）                           |
+| `task-list [<key\|label>]`                                          | 任务列表（CLI 自己画**对齐表格**：编号/状态/最近输出/agent/轮次/时长，按显示宽度补齐；微信侧是 markdown 表格） |
+| `task-status [<key\|label>]`                                        | 任务概览（任务表有记录时与 `task-list` 同一份；表为空才退回读 `task-state.json` 记录）                         |
+| `task-resume-all [<key\|label>]`                                    | 把「待继续」的任务全部恢复运行（并行；与微信「全部继续」同一实现）                                             |
+| `task-reply <编号> "<内容>" [<key\|label>]`                         | 回复/发话给任务（编号也可写成 `"#2 继续"` 放在第一个参数里；不给编号 = 唯一那条）                              |
+| `task-stop [<编号\|全部\|all>] [<key\|label>]`                      | 结束任务（不给编号 = 唯一那条，多条并存回一份编号清单）                                                        |
+| `brain switch <agent 名\|auto> [--worker]`                          | 热切换对话大脑 / 设默认任务大脑                                                                                |
+| `session list\|new\|resume\|rename\|delete\|current [<key\|label>]` | 会话管理（走控制桥；省略账号 = 默认账号）                                                                      |
+| `brain handoff`                                                     | 生成交接摘要                                                                                                   |
 
 两个入口最终都汇到同一套 task-manager，微信侧行为不变。
 
@@ -303,21 +303,21 @@ worker 指向真实目录 + 默认免审批（内置预设各用自己 agent 的
 
 ## 7.8 配置项
 
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `WEMIND_WORKER_CWD` | `<账号>/workspace/worker` | worker 默认工作目录的一次性覆盖；本地 `task --cwd` 仍优先 |
-| `WEMIND_WORKER_BRAIN` | — | **默认任务大脑**（agent 名）。优先级：`WEMIND_WORKER_BRAIN` → `WEMIND_BRAIN`（env 回落）→ `brain.json` 的 `worker.agent ?? agent` → `auto` |
-| `WEMIND_MAX_WORKERS` | 3 | 同时运行的**任务**数上限 |
-| `WEMIND_IDLE_MAX` | 2 | 池中保留的**空闲** worker 进程数上限 |
-| `WEMIND_WORKER_REAP_MS` | 300000 | 空闲 worker 进程回收时间（**不是**单轮空闲超时） |
-| `WEMIND_WORKER_IDLE_MS` | 180000 | 单轮 prompt 空闲超时 |
-| `WEMIND_WORKER_CAP_MS` | 1800000 | 单轮硬上限（30min） |
-| `WEMIND_WORKER_FIRST_FRAME_MS` | 30000 | 首帧超时 |
-| `WEMIND_WORKER_PROGRESS` | `0` | 是否推全程文字进度 |
-| `WEMIND_WORKER_HOME` | `<数据目录>/worker-home` | **仅 `managed` 模式**的 worker 副本目录；`direct` 直接用真实 home |
-| `WEMIND_WORKER_MCP_EXCLUDE` | `wechat` | 不继承的 MCP（`wechat` 强制排除） |
-| `WEMIND_TASK_SCAN_MS` | 1000 | daemon 扫描 `task-inbox/` 与 `control-inbox/` 的间隔 |
-| `WEMIND_CONTROL_TIMEOUT_MS` | 30000 | CLI 等 daemon 回话的上限（`brain switch` 自动放大） |
+| 变量                           | 默认                      | 说明                                                                                                                                       |
+| ------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WEMIND_WORKER_CWD`            | `<账号>/workspace/worker` | worker 默认工作目录的一次性覆盖；本地 `task --cwd` 仍优先                                                                                  |
+| `WEMIND_WORKER_BRAIN`          | —                         | **默认任务大脑**（agent 名）。优先级：`WEMIND_WORKER_BRAIN` → `WEMIND_BRAIN`（env 回落）→ `brain.json` 的 `worker.agent ?? agent` → `auto` |
+| `WEMIND_MAX_WORKERS`           | 3                         | 同时运行的**任务**数上限                                                                                                                   |
+| `WEMIND_IDLE_MAX`              | 2                         | 池中保留的**空闲** worker 进程数上限                                                                                                       |
+| `WEMIND_WORKER_REAP_MS`        | 300000                    | 空闲 worker 进程回收时间（**不是**单轮空闲超时）                                                                                           |
+| `WEMIND_WORKER_IDLE_MS`        | 180000                    | 单轮 prompt 空闲超时                                                                                                                       |
+| `WEMIND_WORKER_CAP_MS`         | 1800000                   | 单轮硬上限（30min）                                                                                                                        |
+| `WEMIND_WORKER_FIRST_FRAME_MS` | 30000                     | 首帧超时                                                                                                                                   |
+| `WEMIND_WORKER_PROGRESS`       | `0`                       | 是否推全程文字进度                                                                                                                         |
+| `WEMIND_WORKER_HOME`           | `<数据目录>/worker-home`  | **仅 `managed` 模式**的 worker 副本目录；`direct` 直接用真实 home                                                                          |
+| `WEMIND_WORKER_MCP_EXCLUDE`    | `wechat`                  | 不继承的 MCP（`wechat` 强制排除）                                                                                                          |
+| `WEMIND_TASK_SCAN_MS`          | 1000                      | daemon 扫描 `task-inbox/` 与 `control-inbox/` 的间隔                                                                                       |
+| `WEMIND_CONTROL_TIMEOUT_MS`    | 30000                     | CLI 等 daemon 回话的上限（`brain switch` 自动放大）                                                                                        |
 
 ## 7.9 测试覆盖
 

@@ -53,12 +53,17 @@ export function normName(text) {
 export function findDocForPreset(name, docs) {
   const target = normName(name);
   const byFile = docs.find((doc) => {
-    const base = doc.file.replace(/^.*[\\/]/, "").replace(/^接入-/, "").replace(/\.md$/, "");
+    const base = doc.file
+      .replace(/^.*[\\/]/, "")
+      .replace(/^接入-/, "")
+      .replace(/\.md$/, "");
     return normName(base) === target;
   });
   if (byFile) return byFile;
   const hits = docs.filter((doc) =>
-    new RegExp(`(^|[^\\w-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\w-]|$)`).test(doc.text),
+    new RegExp(`(^|[^\\w-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\w-]|$)`).test(
+      doc.text,
+    ),
   );
   return hits.length === 1 ? hits[0] : null;
 }

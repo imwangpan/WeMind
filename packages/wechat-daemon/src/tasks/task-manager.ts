@@ -773,8 +773,7 @@ export function stopTask(to: string, id?: number | "all", ackId?: string): strin
       try {
         conn.dropSession(t.key);
       } finally {
-        if (wasWaiting)
-          release(conn); // 等回复的任务进程是干净的 → 留着复用
+        if (wasWaiting) release(conn); // 等回复的任务进程是干净的 → 留着复用
         else drop(conn); // 正在跑的那条：回合没法「优雅取消」，只能杀掉（正在做的动作就此作罢）
         t.conn = undefined;
       }

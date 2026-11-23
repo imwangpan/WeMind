@@ -38,10 +38,10 @@ cline --version        # 期望 3.x（本项目实测 3.0.74）
 
 Cline 的 ACP 在 `session/new` 前检查登录态（`isSessionReady`）：只有下面三个 provider 会被 `tryRestoreAuth()` 自动恢复，凭据来自 `~/.cline/data/settings/providers.json`：
 
-| authMethod id | 说明 |
-|---|---|
-| `cline` | Cline 账号 |
-| `cline-pass` | ClinePass |
+| authMethod id  | 说明         |
+| -------------- | ------------ |
+| `cline`        | Cline 账号   |
+| `cline-pass`   | ClinePass    |
 | `openai-codex` | ChatGPT 订阅 |
 
 先在日常环境里跑 `cline auth` 完成登录；`direct` 下直接使用真实 `~/.cline`，`managed` 下 WeMind 会把 `providers.json` 同步进大脑/worker 副本。
@@ -100,14 +100,14 @@ $env:CLINE_PROVIDER='openai-compatible'; $env:CLINE_API_KEY='…'
 node scripts/acp-probe.mjs
 ```
 
-| # | 问题 | 结果（3.0.74） |
-|---|---|---|
-| Q1 | `initialize` 能力 | `loadSession:true`；`promptCapabilities.image:true`、`audio:false`、`embeddedContext:false`；`authMethods: cline / cline-pass / openai-codex` |
-| Q2 | `session/new` | 需要先有登录态（见 §1）；返回 `modes`（`plan`/`act`）、`models`、`configOptions`：`model`（select）、`mode`（plan/act）、`auto_approve`（boolean） |
-| Q3 | 首帧 / 更新类型 | prompt 首帧 **4.1s**、首字 **4.4s**；帧类型 `agent_thought_chunk` / `agent_message_chunk` / `session_info_update` |
-| Q4 | 反向请求 | **0 个**（未触发 `session/request_permission` / `fs/*` / `terminal/*`） |
-| Q5 | 硬杀后恢复 | `session/load` **成功**，`PINEAPPLE` 上下文保留（首字 2.1s）；`session/close` → `-32601` |
-| Q6 | 图片 / MCP | **图片实际不可用**：`initialize` 声明 `image:true`，但 3.0.74 的 ACP `prompt` 里 `de(e.prompt)` 只 `filter(type==="text")`，image 块被直接丢弃（2026-10-31 真机：模型只看到「用户发来一张图片」文字，回复没收到图）→ 预设 `images:false`；`session/new` 的 `mcpServers` **不生效**（只存进 session 对象，`buildConfig` 不再使用），MCP 走配置文件 |
+| #   | 问题              | 结果（3.0.74）                                                                                                                                                                                                                                                                                                                                    |
+| --- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1  | `initialize` 能力 | `loadSession:true`；`promptCapabilities.image:true`、`audio:false`、`embeddedContext:false`；`authMethods: cline / cline-pass / openai-codex`                                                                                                                                                                                                     |
+| Q2  | `session/new`     | 需要先有登录态（见 §1）；返回 `modes`（`plan`/`act`）、`models`、`configOptions`：`model`（select）、`mode`（plan/act）、`auto_approve`（boolean）                                                                                                                                                                                                |
+| Q3  | 首帧 / 更新类型   | prompt 首帧 **4.1s**、首字 **4.4s**；帧类型 `agent_thought_chunk` / `agent_message_chunk` / `session_info_update`                                                                                                                                                                                                                                 |
+| Q4  | 反向请求          | **0 个**（未触发 `session/request_permission` / `fs/*` / `terminal/*`）                                                                                                                                                                                                                                                                           |
+| Q5  | 硬杀后恢复        | `session/load` **成功**，`PINEAPPLE` 上下文保留（首字 2.1s）；`session/close` → `-32601`                                                                                                                                                                                                                                                          |
+| Q6  | 图片 / MCP        | **图片实际不可用**：`initialize` 声明 `image:true`，但 3.0.74 的 ACP `prompt` 里 `de(e.prompt)` 只 `filter(type==="text")`，image 块被直接丢弃（2026-10-31 真机：模型只看到「用户发来一张图片」文字，回复没收到图）→ 预设 `images:false`；`session/new` 的 `mcpServers` **不生效**（只存进 session 对象，`buildConfig` 不再使用），MCP 走配置文件 |
 
 结论：**协议层零改动**——默认 `restore: "load"`、默认首帧/心跳都够用；只要 agent + 副本。图片例外：预设显式 `images:false`（见 Q6）。
 

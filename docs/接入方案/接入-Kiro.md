@@ -30,15 +30,15 @@ wemind brain check          # initialize + session/new
 
 ## 2. 预设要点（`brain-agents.ts`）
 
-| 项 | 值 | 说明 |
-|---|---|---|
-| 启动（v2） | `kiro-cli acp --trust-all-tools` | 预设 `args` 原样；v3 会被 `kiroEngine` 逻辑改写（见 §3） |
-| 二进制 | `kiro-cli`；Windows `kiro-cli.exe` | 直接起 `.exe`，预设不设 `shell` |
-| 配置目录 | `homeEnvVar: "KIRO_HOME"`，`configSubdir` 为空 | `direct` 不注入、用真实 `~/.kiro`；`managed` 下 `KIRO_HOME` 指向副本根，配置目录就是该根本身 |
-| 真实配置 | `realHome: ~/.kiro` | 继承清单从这里取；真实文件一律不改 |
-| 记忆 / 技能继承 | `inheritDirs: steering, memories, skills, agents, powers, tasks, extensions` | 与日常 kiro 的这七类目录共享 |
-| 引擎 | `kiroEngine: true` | 启用 v2 / v3 判定、启动参数改写与 `managed` 的 `permissions.yaml` |
-| 自动探测 | `AUTO_PROBE_ORDER` 最后一位 | `opencode → cline → qoder → gemini → deepseek → kiro` |
+| 项              | 值                                                                           | 说明                                                                                         |
+| --------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 启动（v2）      | `kiro-cli acp --trust-all-tools`                                             | 预设 `args` 原样；v3 会被 `kiroEngine` 逻辑改写（见 §3）                                     |
+| 二进制          | `kiro-cli`；Windows `kiro-cli.exe`                                           | 直接起 `.exe`，预设不设 `shell`                                                              |
+| 配置目录        | `homeEnvVar: "KIRO_HOME"`，`configSubdir` 为空                               | `direct` 不注入、用真实 `~/.kiro`；`managed` 下 `KIRO_HOME` 指向副本根，配置目录就是该根本身 |
+| 真实配置        | `realHome: ~/.kiro`                                                          | 继承清单从这里取；真实文件一律不改                                                           |
+| 记忆 / 技能继承 | `inheritDirs: steering, memories, skills, agents, powers, tasks, extensions` | 与日常 kiro 的这七类目录共享                                                                 |
+| 引擎            | `kiroEngine: true`                                                           | 启用 v2 / v3 判定、启动参数改写与 `managed` 的 `permissions.yaml`                            |
+| 自动探测        | `AUTO_PROBE_ORDER` 最后一位                                                  | `opencode → cline → qoder → gemini → deepseek → kiro`                                        |
 
 ## 3. v2 / v3 引擎判定与免审批
 
@@ -71,11 +71,11 @@ rules:
 
 ## 4. 探针实测结论
 
-| 项 | 结果 |
-|---|---|
-| v2 `wemind brain check`（2.37.1） | ✅ 握手通过（initialize + session/new，2026-11-03） |
-| v3 握手（临时 `KIRO_HOME` + `acp.agentEngine=v3`） | ✅ 通过，3812ms（2026-11-03） |
-| v3 微信真机单轮 | 待复测（见 §7） |
+| 项                                                 | 结果                                                |
+| -------------------------------------------------- | --------------------------------------------------- |
+| v2 `wemind brain check`（2.37.1）                  | ✅ 握手通过（initialize + session/new，2026-11-03） |
+| v3 握手（临时 `KIRO_HOME` + `acp.agentEngine=v3`） | ✅ 通过，3812ms（2026-11-03）                       |
+| v3 微信真机单轮                                    | 待复测（见 §7）                                     |
 
 复跑方式：
 

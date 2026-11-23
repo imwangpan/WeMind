@@ -22,32 +22,32 @@ npm i -g pi-acp                             # ACP 适配器（实测 0.0.34）
 
 ## 2. 预设要点（`brain-agents.ts`）
 
-| 项 | 值 | 说明 |
-|---|---|---|
-| 启动 | `pi-acp`（无参数），Windows shim 是 `.cmd` → `shell: true` | 适配器是 npm 全局装的**独立二进制**，非 npx |
-| 运行时依赖 | `requiresBins: ["pi"]` | pi-acp 内部 spawn `pi --mode rpc`；只装适配器不够 |
-| 配置目录 | `PI_CODING_AGENT_DIR` 仅在 `managed` 指向副本根；`direct` 不注入，直接用 pi 自己的 `~/.pi/agent` | `configSubdir` 为空，配置目录 = 该根本身（同 kiro 布局） |
-| 凭据同步 | `settings.json` / `auth.json` / `models.json` / `models-store.json`（新者胜、原样复制） | 默认模型/供应商、登录态、自定义供应商（如用户自建网关）跟着用户日常配置走 |
-| 记忆/技能继承 | `skills/`（junction）+ `AGENTS.md`（拷贝） | pi 读 `<agent-dir>/AGENTS.md` 作跨目录全局指令（官方 configuration.md） |
-| 免审批 | **无需任何开关** | pi 默认不逐次审批（官方 security.md 明说），也没有需要切的 `session/set_mode` |
-| 启动信息 | `settingsDefaults: { quietStartup: true }` | pi-acp 把 pi 的启动信息（`## Context` / `## Skills` …）当 `agent_message_chunk` 发出来；用 pi 自己的 `quietStartup`（官方 settings.md）关掉。只补缺失键：用户显式设过就保留用户的值，真实配置不动 |
-| 模型 | 预设不带 `model` → 跟随用户 pi 的默认（`settings.json` 的 `defaultProvider`/`defaultModel`） | 覆盖：`wemind brain set pi --model "<provider>/<model>"`（走 `session/set_config_option`，pi-acp 的 configId 就叫 `model`） |
-| 恢复 | 默认 `load`（pi-acp `loadSession: true`） | 会话映射表在**真实 home** 的 `~/.pi/pi-acp/session-map.json`（适配器写死 `homedir()`，不随副本走）；会话文件本体仍在各自副本的 `sessions/` 下 |
-| 自动探测 | **不在 `AUTO_PROBE_ORDER`** | 适配器类不参与 auto（装好适配器 ≠ 已登录/配好模型）；用 `wemind brain set\|switch pi`、一次性 `WEMIND_BRAIN=pi`，或微信「切换大脑 pi」显式选用 |
-| MCP | `direct`：真实 `~/.pi/agent/mcp.json`；`managed`：`<副本根>/mcp.json`（kiro 格式 `{mcpServers:{名:{command,args,env}}}`），`acpMcpServers: false` | `pi mcp list` 实测读 `<PI_CODING_AGENT_DIR>/mcp.json`（不是 `settings/mcp.json`）；pi-acp 只把 `session/new` 的 `mcpServers` 存进会话、从不读取，所以 `managed` 的动态 MCP 走配置文件 |
+| 项            | 值                                                                                                                                                | 说明                                                                                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 启动          | `pi-acp`（无参数），Windows shim 是 `.cmd` → `shell: true`                                                                                        | 适配器是 npm 全局装的**独立二进制**，非 npx                                                                                                                                                       |
+| 运行时依赖    | `requiresBins: ["pi"]`                                                                                                                            | pi-acp 内部 spawn `pi --mode rpc`；只装适配器不够                                                                                                                                                 |
+| 配置目录      | `PI_CODING_AGENT_DIR` 仅在 `managed` 指向副本根；`direct` 不注入，直接用 pi 自己的 `~/.pi/agent`                                                  | `configSubdir` 为空，配置目录 = 该根本身（同 kiro 布局）                                                                                                                                          |
+| 凭据同步      | `settings.json` / `auth.json` / `models.json` / `models-store.json`（新者胜、原样复制）                                                           | 默认模型/供应商、登录态、自定义供应商（如用户自建网关）跟着用户日常配置走                                                                                                                         |
+| 记忆/技能继承 | `skills/`（junction）+ `AGENTS.md`（拷贝）                                                                                                        | pi 读 `<agent-dir>/AGENTS.md` 作跨目录全局指令（官方 configuration.md）                                                                                                                           |
+| 免审批        | **无需任何开关**                                                                                                                                  | pi 默认不逐次审批（官方 security.md 明说），也没有需要切的 `session/set_mode`                                                                                                                     |
+| 启动信息      | `settingsDefaults: { quietStartup: true }`                                                                                                        | pi-acp 把 pi 的启动信息（`## Context` / `## Skills` …）当 `agent_message_chunk` 发出来；用 pi 自己的 `quietStartup`（官方 settings.md）关掉。只补缺失键：用户显式设过就保留用户的值，真实配置不动 |
+| 模型          | 预设不带 `model` → 跟随用户 pi 的默认（`settings.json` 的 `defaultProvider`/`defaultModel`）                                                      | 覆盖：`wemind brain set pi --model "<provider>/<model>"`（走 `session/set_config_option`，pi-acp 的 configId 就叫 `model`）                                                                       |
+| 恢复          | 默认 `load`（pi-acp `loadSession: true`）                                                                                                         | 会话映射表在**真实 home** 的 `~/.pi/pi-acp/session-map.json`（适配器写死 `homedir()`，不随副本走）；会话文件本体仍在各自副本的 `sessions/` 下                                                     |
+| 自动探测      | **不在 `AUTO_PROBE_ORDER`**                                                                                                                       | 适配器类不参与 auto（装好适配器 ≠ 已登录/配好模型）；用 `wemind brain set\|switch pi`、一次性 `WEMIND_BRAIN=pi`，或微信「切换大脑 pi」显式选用                                                    |
+| MCP           | `direct`：真实 `~/.pi/agent/mcp.json`；`managed`：`<副本根>/mcp.json`（kiro 格式 `{mcpServers:{名:{command,args,env}}}`），`acpMcpServers: false` | `pi mcp list` 实测读 `<PI_CODING_AGENT_DIR>/mcp.json`（不是 `settings/mcp.json`）；pi-acp 只把 `session/new` 的 `mcpServers` 存进会话、从不读取，所以 `managed` 的动态 MCP 走配置文件             |
 
 ## 3. 探针实测结论（`scripts/acp-probe.mjs`，2026-10-30）
 
-| 项 | 结果 |
-|---|---|
-| `initialize` | `protocolVersion: 1`；`loadSession: true`；`image: true`；mcpCapabilities http/sse 均否 |
-| `session/new` | OK；`configOptions` 有 `model`（select，currentValue = 用户 pi 默认）与 `thought_level`——档位**按当前模型支持的集合动态生成**（pi 有 off/minimal/low/medium/high/xhigh/max，xhigh/max 仅在模型支持时暴露；本机实测只出现 low/high） |
-| prompt | 首帧 **0–3ms**；简单问答 4–7s；update 类型 `agent_message_chunk` / `agent_thought_chunk` / `session_info_update` / `usage_update` / `available_commands_update`，工具轮还有 `tool_call` / `tool_call_update`（有 activity 帧，心跳无忧） |
-| 图片 | 接受（`end_turn`） |
-| 反向请求 | **0**（不问权限、不用 fs/terminal 委托） |
-| `ACP_HARD_KILL=1` 后 `session/load` | ✅ 上下文接上（PINEAPPLE） |
-| 漂移检测（`ACP_TEST_TOOL=1`） | ✅ 工具强制 prompt → 3 次工具调用全部执行、标记文件落盘、**0 个 `session/request_permission`**（2026-11-01 复跑同结论；上游改审批默认时探针会红） |
-| MCP | ✅ 配置路径：`pi mcp list` 能识别 `<PI_CODING_AGENT_DIR>/mcp.json` 里的 `mcpServers`（kiro 格式）；`session/new` 的 `mcpServers` 不被 pi-acp 使用（只存不读） |
+| 项                                  | 结果                                                                                                                                                                                                                                     |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `initialize`                        | `protocolVersion: 1`；`loadSession: true`；`image: true`；mcpCapabilities http/sse 均否                                                                                                                                                  |
+| `session/new`                       | OK；`configOptions` 有 `model`（select，currentValue = 用户 pi 默认）与 `thought_level`——档位**按当前模型支持的集合动态生成**（pi 有 off/minimal/low/medium/high/xhigh/max，xhigh/max 仅在模型支持时暴露；本机实测只出现 low/high）      |
+| prompt                              | 首帧 **0–3ms**；简单问答 4–7s；update 类型 `agent_message_chunk` / `agent_thought_chunk` / `session_info_update` / `usage_update` / `available_commands_update`，工具轮还有 `tool_call` / `tool_call_update`（有 activity 帧，心跳无忧） |
+| 图片                                | 接受（`end_turn`）                                                                                                                                                                                                                       |
+| 反向请求                            | **0**（不问权限、不用 fs/terminal 委托）                                                                                                                                                                                                 |
+| `ACP_HARD_KILL=1` 后 `session/load` | ✅ 上下文接上（PINEAPPLE）                                                                                                                                                                                                               |
+| 漂移检测（`ACP_TEST_TOOL=1`）       | ✅ 工具强制 prompt → 3 次工具调用全部执行、标记文件落盘、**0 个 `session/request_permission`**（2026-11-01 复跑同结论；上游改审批默认时探针会红）                                                                                        |
+| MCP                                 | ✅ 配置路径：`pi mcp list` 能识别 `<PI_CODING_AGENT_DIR>/mcp.json` 里的 `mcpServers`（kiro 格式）；`session/new` 的 `mcpServers` 不被 pi-acp 使用（只存不读）                                                                            |
 
 升级后复跑上表：
 

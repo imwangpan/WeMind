@@ -14,10 +14,10 @@
 
 对外形成**两个发布入口**：
 
-| 入口 | 定位 | 现状 |
-| --- | --- | --- |
-| `@wemind/wechat-mcp` | 轻包，纯 MCP server，插进任意 MCP 客户端 | 子包已发布到 npm（走 GitHub Actions 自动发布，最新版本见 npm），不动 |
-| `@wemind/cli`（命令 `wemind`） | 完整应用 CLI：常驻自动收发 + 远程任务 + 多账号 | 本设计新增 |
+| 入口                           | 定位                                           | 现状                                                                 |
+| ------------------------------ | ---------------------------------------------- | -------------------------------------------------------------------- |
+| `@wemind/wechat-mcp`           | 轻包，纯 MCP server，插进任意 MCP 客户端       | 子包已发布到 npm（走 GitHub Actions 自动发布，最新版本见 npm），不动 |
+| `@wemind/cli`（命令 `wemind`） | 完整应用 CLI：常驻自动收发 + 远程任务 + 多账号 | 本设计新增                                                           |
 
 ## 2. 决策记录（2026-06-24 拍板）
 
@@ -28,16 +28,16 @@
 
 ## 3. 命令结构（统一一个 `wemind` bin）
 
-| 命令 | 作用 |
-| --- | --- |
-| `wemind login [--label 名] [--start]` | 扫码登录（扫码即自动接入 ClawBot）；`--start` 顺带常驻 |
-| `wemind list` | 账号 + 运行状态（含 pm2 进程状态） |
-| `wemind start [<key\|label>]` | 启动常驻（封装 pm2） |
-| `wemind stop [<key\|label>]` | 停止常驻（新增） |
-| `wemind logout / delete / label / set-default / adopt` | 账号管理（同现有 manage） |
-| `wemind allow / revoke / allowlist` | 授权管理 |
-| `wemind task / task-status / task-reply / task-stop` | 远程任务 |
-| `wemind daemon` | （内部）跑 daemon 本体，供 pm2 调用，用户一般不直接用 |
+| 命令                                                   | 作用                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------ |
+| `wemind login [--label 名] [--start]`                  | 扫码登录（扫码即自动接入 ClawBot）；`--start` 顺带常驻 |
+| `wemind list`                                          | 账号 + 运行状态（含 pm2 进程状态）                     |
+| `wemind start [<key\|label>]`                          | 启动常驻（封装 pm2）                                   |
+| `wemind stop [<key\|label>]`                           | 停止常驻（新增）                                       |
+| `wemind logout / delete / label / set-default / adopt` | 账号管理（同现有 manage）                              |
+| `wemind allow / revoke / allowlist`                    | 授权管理                                               |
+| `wemind task / task-status / task-reply / task-stop`   | 远程任务                                               |
+| `wemind daemon`                                        | （内部）跑 daemon 本体，供 pm2 调用，用户一般不直接用  |
 
 对用户只是多了 `start/stop`，其余由 `node …/manage.js X` 变为 `wemind X`。
 

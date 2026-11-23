@@ -3,6 +3,7 @@
   "version": "1.0.1",
   "private": true,
   "description": "iLink protocol core for the WeChat bot: HTTP client, types, session guard, account/state persistence, and image decryption.",
+  "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -18,7 +19,6 @@
   "dependencies": {
     "uqr": "^0.1.3"
   },
-  "license": "MIT",
   "engines": {
     "node": ">=24.11.0"
   }

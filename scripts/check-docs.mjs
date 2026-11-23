@@ -33,7 +33,9 @@ function isSkipped(rel) {
 function listMarkdown(root) {
   const files = [];
   const walk = (dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const entry of fs
+      .readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name))) {
       const full = path.join(dir, entry.name);
       const rel = toPosix(path.relative(root, full));
       if (isSkipped(rel)) continue;

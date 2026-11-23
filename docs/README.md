@@ -8,16 +8,16 @@
 
 ## 按读者
 
-| 你是 | 先读 | 说明 |
-| --- | --- | --- |
-| **第一次用 WeMind** | [新手教程](使用指南/新手教程.md) → [速查：数据目录与环境变量](使用指南/速查-数据目录与环境变量.md) | 从扫码登录到微信聊天，一步步来 |
-| **只想用 MCP 形态** | [packages/wechat-mcp/README.md](../packages/wechat-mcp/README.md) → [repowiki 04](repowiki/04-MCP-Server.md) | 挂到 Claude Desktop / Cursor / OpenCode |
-| **想用常驻 daemon** | [packages/wechat-daemon/README.md](../packages/wechat-daemon/README.md) → [使用指南-远程任务](使用指南/使用指南-远程任务（worker）.md) | `npm i -g @wemind/cli`，命令 `wemind` |
-| **想换 AI 大脑** | [接入其它 ACP Agent](接入方案/接入其它-ACP-Agent.md) → 各 agent 的接入文档 | 10 个内置预设 + 通用接入流程 |
-| **要部署 / 长期运维** | [daemon 常驻原理](部署与运维/daemon-常驻原理.md) → [开机自启](部署与运维/开机自启.md) → [跨平台常驻（pm2）](部署与运维/跨平台常驻-pm2.md) → [repowiki 10](repowiki/10-部署与运维.md) | 后台守护、开机自启、多账号、日志轮转 |
-| **要改这个仓库** | [AGENTS.md](../AGENTS.md) → [repowiki 11 开发指南](repowiki/11-开发指南.md) → [系统架构](repowiki/02-系统架构.md) | 硬约束、构建、测试、代码地图 |
-| **要发版** | [如何发布新版本](发布与变更记录/如何发布新版本.md) | 两个包的版本号、CI、验收与常见坑 |
-| **AI 编码助手** | [AGENTS.md](../AGENTS.md) → [docs/ai/README.md](ai/README.md) → [术语表](ai/术语表.md) → [任务配方](ai/recipes/) | 压缩上下文、术语口径、按任务的操作步骤 |
+| 你是                  | 先读                                                                                                                                                                                 | 说明                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
+| **第一次用 WeMind**   | [新手教程](使用指南/新手教程.md) → [速查：数据目录与环境变量](使用指南/速查-数据目录与环境变量.md)                                                                                   | 从扫码登录到微信聊天，一步步来          |
+| **只想用 MCP 形态**   | [packages/wechat-mcp/README.md](../packages/wechat-mcp/README.md) → [repowiki 04](repowiki/04-MCP-Server.md)                                                                         | 挂到 Claude Desktop / Cursor / OpenCode |
+| **想用常驻 daemon**   | [packages/wechat-daemon/README.md](../packages/wechat-daemon/README.md) → [使用指南-远程任务](使用指南/使用指南-远程任务（worker）.md)                                               | `npm i -g @wemind/cli`，命令 `wemind`   |
+| **想换 AI 大脑**      | [接入其它 ACP Agent](接入方案/接入其它-ACP-Agent.md) → 各 agent 的接入文档                                                                                                           | 10 个内置预设 + 通用接入流程            |
+| **要部署 / 长期运维** | [daemon 常驻原理](部署与运维/daemon-常驻原理.md) → [开机自启](部署与运维/开机自启.md) → [跨平台常驻（pm2）](部署与运维/跨平台常驻-pm2.md) → [repowiki 10](repowiki/10-部署与运维.md) | 后台守护、开机自启、多账号、日志轮转    |
+| **要改这个仓库**      | [AGENTS.md](../AGENTS.md) → [repowiki 11 开发指南](repowiki/11-开发指南.md) → [系统架构](repowiki/02-系统架构.md)                                                                    | 硬约束、构建、测试、代码地图            |
+| **要发版**            | [如何发布新版本](发布与变更记录/如何发布新版本.md)                                                                                                                                   | 两个包的版本号、CI、验收与常见坑        |
+| **AI 编码助手**       | [AGENTS.md](../AGENTS.md) → [docs/ai/README.md](ai/README.md) → [术语表](ai/术语表.md) → [任务配方](ai/recipes/)                                                                     | 压缩上下文、术语口径、按任务的操作步骤  |
 
 ---
 
@@ -68,7 +68,7 @@
 - [WeMind 接入本机 Agent 工作模式设计与实现](设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md) —— 让 daemon / worker 直接使用本机 Agent 的真实配置、技能、记忆与会话；`direct`（默认）/ `managed` 两种模式、微信 overlay、工作区、MCP 策略、yolo、迁移与验收
 - [远程任务（Worker）human-in-the-loop 设计与实现](<设计文档/远程任务（Worker）human-in-the-loop 设计与实现.md>) —— 把漫长任务交给受控 ACP worker 进程：单任务单进程 → 多任务 + 进程池 + 重启续跑；消息路由与状态机、会话恢复、配置与权限、进度反馈、双入口、边界
 - [Agent 接入：配置化与插件化设计与实现](设计文档/Agent-接入配置化与插件化设计与实现.md) —— 把「接入新 ACP Agent」从改 TS + 发版变成加一份定义（必要时加一个插件）：定义放 `~/.wemind/.agents/`、来源优先级、adapter hook 边界、探针与自助接入、`agent add/remove` 分发（**P0–P4 已实现**）
-- [远程任务（Worker）接收、发送非文本消息设计与实现](<设计文档/远程任务（Worker）接收、发送非文本消息设计与实现.md>) —— 两个方向：用户把图片/文件/视频/语音发给任务（收件人模式 + 待投递队列、共享入站媒体与 prompt 媒体层、路由与 TTL），任务结果把图片/文件/视频发回微信（出站语法、共用管线、额度、安全闸、可发现性）
+- [远程任务（Worker）接收、发送非文本消息设计与实现](设计文档/远程任务（Worker）接收、发送非文本消息设计与实现.md) —— 两个方向：用户把图片/文件/视频/语音发给任务（收件人模式 + 待投递队列、共享入站媒体与 prompt 媒体层、路由与 TTL），任务结果把图片/文件/视频发回微信（出站语法、共用管线、额度、安全闸、可发现性）
 
 ### 历史归档（明确标注，不作为现行说明）
 

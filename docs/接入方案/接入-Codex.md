@@ -53,17 +53,17 @@ $env:CODEX_PATH = "<codex.exe 绝对路径>" # 用本机已装的 Codex 时（�
 node scripts/acp-probe.mjs
 ```
 
-| # | 问题 | 结果 |
-|---|---|---|
-| C1 | capabilities | `loadSession:true`；`promptCapabilities:{image:true, embeddedContext:true}`；`sessionCapabilities:{resume,list,close,delete,fork,additionalDirectories,subagents,systemPrompt}`；`mcpCapabilities:{acp:false, http:true, sse:false}`；`authMethods:[api-key, chat-gpt]` |
-| C2 | 恢复会话 | `session/load` ✅（`loadSession:true`）；恢复后再问，**上下文保留**（答出 `PINEAPPLE`）→ WeMind 用默认 `restore:"load"` 即可 |
-| C3 | 免审批模式 | `session/new` 返回 `modes.availableModes = [read-only, workspace-write, agent, agent-full-access]`；`session/set_mode {modeId:"agent-full-access"}` **成功** |
-| C4 | 模型 | `configOptions` 含 `mode` / `collaboration_mode` / `model` / `reasoning_effort`；`session/set_config_option {configId:"model"}` **成功**（本机默认 `auto/MiniMax-M3.1-Flash`，来自用户自己的模型网关路由） |
-| C5 | 图片 | 带 1×1 PNG 的 prompt 正常 `end_turn`，模型能看到「附件在会话日志里」→ **图片可用** |
-| C6 | 反向请求 | 触发 78 次工具调用，**0 个 `session/request_permission`**；只收到一个**通知** `_auth/status_update`（无 id，WeMind 忽略即可——`acp-brain.ts` 只应答带 id 的反向请求） |
-| C7 | 客户端提供的 stdio MCP | **支持**。2026-11-12 复测（codex-acp 2.5.0）：`session/new` 带 `mcpServers:[{name:"fake",command:"node",args:[fake-mcp],env:[]}]`，模型实际调用 `fake_ping` 并返回 `FAKE_PONG`。旧版探针的 `NO_SUCH_TOOL` 是假阴性（`mcpCapabilities.acp=false` 被误读成 stdio 不支持；`acp` 指 MCP-over-ACP 传输，stdio 是基础传输） |
-| C8 | 首帧 / 耗时 | 首帧（任意帧）≈ 20 ms，首字 3–4 s；带图回合整轮 ~24 s → 默认 25 s 首帧够用，但**心跳放长到 60 s**（少占微信连发额度） |
-| C9 | 硬杀恢复 | `session/load` ✅（探针的 load/resume 段；未做 `taskkill /T /F` 后的强杀恢复 E2E） |
+| #   | 问题                   | 结果                                                                                                                                                                                                                                                                                                                  |
+| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | capabilities           | `loadSession:true`；`promptCapabilities:{image:true, embeddedContext:true}`；`sessionCapabilities:{resume,list,close,delete,fork,additionalDirectories,subagents,systemPrompt}`；`mcpCapabilities:{acp:false, http:true, sse:false}`；`authMethods:[api-key, chat-gpt]`                                               |
+| C2  | 恢复会话               | `session/load` ✅（`loadSession:true`）；恢复后再问，**上下文保留**（答出 `PINEAPPLE`）→ WeMind 用默认 `restore:"load"` 即可                                                                                                                                                                                          |
+| C3  | 免审批模式             | `session/new` 返回 `modes.availableModes = [read-only, workspace-write, agent, agent-full-access]`；`session/set_mode {modeId:"agent-full-access"}` **成功**                                                                                                                                                          |
+| C4  | 模型                   | `configOptions` 含 `mode` / `collaboration_mode` / `model` / `reasoning_effort`；`session/set_config_option {configId:"model"}` **成功**（本机默认 `auto/MiniMax-M3.1-Flash`，来自用户自己的模型网关路由）                                                                                                            |
+| C5  | 图片                   | 带 1×1 PNG 的 prompt 正常 `end_turn`，模型能看到「附件在会话日志里」→ **图片可用**                                                                                                                                                                                                                                    |
+| C6  | 反向请求               | 触发 78 次工具调用，**0 个 `session/request_permission`**；只收到一个**通知** `_auth/status_update`（无 id，WeMind 忽略即可——`acp-brain.ts` 只应答带 id 的反向请求）                                                                                                                                                  |
+| C7  | 客户端提供的 stdio MCP | **支持**。2026-11-12 复测（codex-acp 2.5.0）：`session/new` 带 `mcpServers:[{name:"fake",command:"node",args:[fake-mcp],env:[]}]`，模型实际调用 `fake_ping` 并返回 `FAKE_PONG`。旧版探针的 `NO_SUCH_TOOL` 是假阴性（`mcpCapabilities.acp=false` 被误读成 stdio 不支持；`acp` 指 MCP-over-ACP 传输，stdio 是基础传输） |
+| C8  | 首帧 / 耗时            | 首帧（任意帧）≈ 20 ms，首字 3–4 s；带图回合整轮 ~24 s → 默认 25 s 首帧够用，但**心跳放长到 60 s**（少占微信连发额度）                                                                                                                                                                                                 |
+| C9  | 硬杀恢复               | `session/load` ✅（探针的 load/resume 段；未做 `taskkill /T /F` 后的强杀恢复 E2E）                                                                                                                                                                                                                                    |
 
 ### 2.1 2.6.0 复测（2026-11-12）
 
@@ -77,14 +77,14 @@ $env:ACP_PROMPT = "Use the fake tool fake_ping and reply with exactly its output
 node scripts/acp-probe.mjs
 ```
 
-| 项 | 2.6.0 结果 |
-|---|---|
+| 项                  | 2.6.0 结果                                                                                                                                                                                                                                                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 版本 / capabilities | `agentInfo.version=2.6.0`；`loadSession:true`；`promptCapabilities.image:true`；`sessionCapabilities` 新增声明 `resume/list/close/delete/fork/title/additionalDirectories/subagents/systemPrompt`（WeMind 仍只用 `new/load/resume`，不因为对方声明了就假定可用）；`mcpCapabilities:{acp:false,http:true,sse:false}`；`_meta.steering.supported:true` |
-| 首轮 prompt | `ok`，15.8 s；首帧 33 ms、首字 5.4 s；4 次工具调用（含定位 `fake_ping`） |
-| stdio MCP | **仍支持**：模型调用 `fake_ping`，回答里出现 `FAKE_PONG` |
-| 图片 | 1×1 PNG prompt `end_turn`，4.7 s ✅ |
-| 免审批 | 工具漂移检测 `ok`：10 次工具调用、**0 个 `session/request_permission`**、标记文件成功写出、答复 `WROTE` |
-| 恢复 | `session/load` ✅；`resumeOk:true`；恢复后模型仍能拿到上一轮 MCP 工具结果（回答 `FAKE_PONG`） |
+| 首轮 prompt         | `ok`，15.8 s；首帧 33 ms、首字 5.4 s；4 次工具调用（含定位 `fake_ping`）                                                                                                                                                                                                                                                                             |
+| stdio MCP           | **仍支持**：模型调用 `fake_ping`，回答里出现 `FAKE_PONG`                                                                                                                                                                                                                                                                                             |
+| 图片                | 1×1 PNG prompt `end_turn`，4.7 s ✅                                                                                                                                                                                                                                                                                                                  |
+| 免审批              | 工具漂移检测 `ok`：10 次工具调用、**0 个 `session/request_permission`**、标记文件成功写出、答复 `WROTE`                                                                                                                                                                                                                                              |
+| 恢复                | `session/load` ✅；`resumeOk:true`；恢复后模型仍能拿到上一轮 MCP 工具结果（回答 `FAKE_PONG`）                                                                                                                                                                                                                                                        |
 
 > 该次探针的 `summary.ok=false` 是**探针自身的断言**：第二次 prompt 被改成「工具返回了什么」，而 `contextKept` 仍按 `PINEAPPLE` 判定，所以为 false；`load`/MCP/图片/工具各项均为通过。正常按默认两问跑时仍以 `PINEAPPLE` 判定。
 

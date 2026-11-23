@@ -24,17 +24,13 @@ import {
 } from "./doc-impact.mjs";
 import { RULES, STALE_FACTS } from "./doc-impact.rules.mjs";
 import { parseDefinition } from "./agent-definitions.mjs";
-import {
-  checkDocContent,
-  checkIndexes,
-  findDocForPreset,
-  normName,
-} from "./check-agent-docs.mjs";
+import { checkDocContent, checkIndexes, findDocForPreset, normName } from "./check-agent-docs.mjs";
 import {
   collectCliCommands,
   collectWechatCommands,
   extractBlock,
   extractDefault,
+  normalizeTableBlock,
   parsePresetRows,
   renderEnvVarsTable,
   replaceBlock,
@@ -129,16 +125,17 @@ describe("doc-impact 解析", () => {
     expect(commitMessageCoversDiff({ commitCount: 1, dirty: false })).toBe(true);
     expect(commitMessageCoversDiff({ commitCount: 1, dirty: true })).toBe(false);
     expect(commitMessageCoversDiff({ commitCount: 2, dirty: false })).toBe(false);
-    expect(
-      commitMessageCoversDiff({ commitCount: 1, dirty: false, untrackedInScope: false }),
-    ).toBe(true);
-    expect(
-      commitMessageCoversDiff({ commitCount: 1, dirty: false, untrackedInScope: true }),
-    ).toBe(false);
+    expect(commitMessageCoversDiff({ commitCount: 1, dirty: false, untrackedInScope: false })).toBe(
+      true,
+    );
+    expect(commitMessageCoversDiff({ commitCount: 1, dirty: false, untrackedInScope: true })).toBe(
+      false,
+    );
   });
 
   it("git ls-files 的 C 风格引号路径先还原，空行与目录项丢掉", () => {
-    const quoted = '"docs/repowiki/06-ACP-\\345\\244\\247\\350\\204\\221\\344\\270\\216\\345\\211\\257\\346\\234\\254.md"';
+    const quoted =
+      '"docs/repowiki/06-ACP-\\345\\244\\247\\350\\204\\221\\344\\270\\216\\345\\211\\257\\346\\234\\254.md"';
     expect(parseLsFiles([quoted, "", "scripts/", "docs/x.md"].join("\n"))).toEqual([
       "docs/repowiki/06-ACP-大脑与副本.md",
       "docs/x.md",
@@ -251,9 +248,7 @@ describe("doc-impact 规则匹配", () => {
 describe("check-agent-docs", () => {
   it("解析内置定义：name 必须与文件名一致", () => {
     expect(parseDefinition('{"name":"kiro"}', "kiro.json").name).toBe("kiro");
-    expect(parseDefinition('{"name":"claude-code"}', "claude-code.json").name).toBe(
-      "claude-code",
-    );
+    expect(parseDefinition('{"name":"claude-code"}', "claude-code.json").name).toBe("claude-code");
     expect(() => parseDefinition('{"name":"acme"}', "kiro.json")).toThrow("文件名不一致");
     expect(() => parseDefinition("{}", "acme.json")).toThrow("缺少非空的 name");
     expect(() => parseDefinition("{", "acme.json")).toThrow("JSON 解析失败");
@@ -315,6 +310,18 @@ describe("gen-docs-tables", () => {
     ]);
   });
 
+  it("表格比较忽略 oxfmt 的单元格填充与分隔行宽度", () => {
+    const compact = "| 变量 | 默认 |\n|:---|:---:|\n| `A` | — |";
+    const padded =
+      "| 变量         | 默认    |\n| :----------- | :-----: |\n| `A`          | —       |";
+    expect(normalizeTableBlock(padded)).toBe(normalizeTableBlock(compact));
+  });
+
+  it("表格比较仍能看出内容与对齐差异", () => {
+    expect(normalizeTableBlock("| a |")).not.toBe(normalizeTableBlock("| b |"));
+    expect(normalizeTableBlock("|:---|")).not.toBe(normalizeTableBlock("|:---:|"));
+  });
+
   it("表格：空串默认值显示为双引号", () => {
     const table = renderEnvVarsTable([
       { name: "A", defaultValue: null, location: "x.ts:1" },
@@ -361,7 +368,9 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     expect(isStaleScanPath("llms.txt")).toBe(true);
     expect(isStaleScanPath("docs/ai/已知坑.md")).toBe(true);
     expect(isStaleScanPath("packages/wechat-daemon/README.md")).toBe(true);
-    expect(isStaleScanPath("packages/wechat-daemon/src/agents/managed/managed-common.ts")).toBe(true);
+    expect(isStaleScanPath("packages/wechat-daemon/src/agents/managed/managed-common.ts")).toBe(
+      true,
+    );
     expect(isStaleScanPath("scripts/doc-impact.rules.mjs")).toBe(false);
     expect(isStaleScanPath("scripts/doc-guards.test.mjs")).toBe(false);
     expect(isStaleScanPath("scripts/doc-impact.mjs")).toBe(false);
@@ -372,9 +381,10 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
   });
 
   it("命中报「文件:行号」并带现行结论，命中行按 trim 截断", () => {
-    const hits = checkStaleFacts([fact()], [
-      { path: "docs/x.md", content: "# 标题\n\n正文写着旧结论，还有一句。\n" },
-    ]);
+    const hits = checkStaleFacts(
+      [fact()],
+      [{ path: "docs/x.md", content: "# 标题\n\n正文写着旧结论，还有一句。\n" }],
+    );
     expect(hits).toHaveLength(1);
     expect(hits[0]).toMatchObject({
       id: "stale-demo",
@@ -390,8 +400,12 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     const f = fact({
       allow: [{ path: "docs/x.md", marker: /版本边界/, why: "已发布段按版本边界保留" }],
     });
-    expect(checkStaleFacts([f], [{ path: "docs/x.md", content: "> **版本边界** …\n\n旧结论\n" }])).toEqual([]);
-    expect(checkStaleFacts([f], [{ path: "docs/x.md", content: "> 没写约定\n\n旧结论\n" }])).toHaveLength(1);
+    expect(
+      checkStaleFacts([f], [{ path: "docs/x.md", content: "> **版本边界** …\n\n旧结论\n" }]),
+    ).toEqual([]);
+    expect(
+      checkStaleFacts([f], [{ path: "docs/x.md", content: "> 没写约定\n\n旧结论\n" }]),
+    ).toHaveLength(1);
   });
 
   it("allow 的 path / section / linePattern / marker 四个条件全满足才放行", () => {
@@ -409,19 +423,22 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     expect(checkStaleFacts([f], [{ path: "docs/x.md", content: base }])).toEqual([]);
     expect(checkStaleFacts([f], [{ path: "docs/y.md", content: base }])).toHaveLength(1);
     expect(
-      checkStaleFacts([f], [
-        { path: "docs/x.md", content: "> **版本边界**\n## [Unreleased] 未发布\n旧结论\n" },
-      ]),
+      checkStaleFacts(
+        [f],
+        [{ path: "docs/x.md", content: "> **版本边界**\n## [Unreleased] 未发布\n旧结论\n" }],
+      ),
     ).toHaveLength(1);
-    const mixed = checkStaleFacts([f], [
-      { path: "docs/x.md", content: "> **版本边界**\n## [1.7.0] 已发布\n旧结论\n别的旧说法\n" },
-    ]);
+    const mixed = checkStaleFacts(
+      [f],
+      [{ path: "docs/x.md", content: "> **版本边界**\n## [1.7.0] 已发布\n旧结论\n别的旧说法\n" }],
+    );
     expect(mixed).toHaveLength(1);
     expect(mixed[0].line).toBe(4);
     expect(
-      checkStaleFacts([f], [
-        { path: "docs/x.md", content: "> 没有标记\n## [1.7.0] 已发布\n旧结论\n" },
-      ]),
+      checkStaleFacts(
+        [f],
+        [{ path: "docs/x.md", content: "> 没有标记\n## [1.7.0] 已发布\n旧结论\n" }],
+      ),
     ).toHaveLength(1);
   });
 
@@ -444,10 +461,13 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
 
   it("allow.path 支持正则：测试里的反例字符串放行，源码里的同名串不放行", () => {
     const f = fact({ pattern: /反例串/, allow: [{ path: /\.test\.ts$/, why: "测试反例" }] });
-    const hits = checkStaleFacts([f], [
-      { path: "packages/a/src/x.test.ts", content: "反例串\n" },
-      { path: "packages/a/src/x.ts", content: "反例串\n" },
-    ]);
+    const hits = checkStaleFacts(
+      [f],
+      [
+        { path: "packages/a/src/x.test.ts", content: "反例串\n" },
+        { path: "packages/a/src/x.ts", content: "反例串\n" },
+      ],
+    );
     expect(hits).toHaveLength(1);
     expect(hits[0].path).toBe("packages/a/src/x.ts");
   });
@@ -542,9 +562,15 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     const f = STALE_FACTS.find((x) => x.id === "empty-config-fingerprint");
     expect(f).toBeDefined();
     expect(
-      checkStaleFacts([f], [
-        { path: "docs/x.md", content: "`claude-code`/`cline` 没有可重定向配置目录，返回空指纹，改完重启 daemon。\n" },
-      ]),
+      checkStaleFacts(
+        [f],
+        [
+          {
+            path: "docs/x.md",
+            content: "`claude-code`/`cline` 没有可重定向配置目录，返回空指纹，改完重启 daemon。\n",
+          },
+        ],
+      ),
     ).toHaveLength(1);
     const current = [
       "即使没有 `homeEnvVar` 也不再返回空指纹，homeMode 改变会触发进程重建。",
@@ -565,9 +591,10 @@ describe("doc-impact 内容级校验（STALE_FACTS）", () => {
     expect(checkStaleFacts([f], [withNote(design, "守卫自身解析口径")])).toEqual([]);
     expect(checkStaleFacts([f], [withNote(audit, "守卫自身口径")])).toEqual([]);
     expect(
-      checkStaleFacts([f], [
-        { path: design, content: "> **2026-11-14 旧说明**：不会把 `1.0.107` 误判为现行结论。\n" },
-      ]),
+      checkStaleFacts(
+        [f],
+        [{ path: design, content: "> **2026-11-14 旧说明**：不会把 `1.0.107` 误判为现行结论。\n" }],
+      ),
     ).toHaveLength(1);
   });
 });
