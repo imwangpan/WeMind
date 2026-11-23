@@ -204,7 +204,7 @@ syncSettings():
 | M1 ✅ | agent + `settingsBase` + `credentialFiles` / `identityFiles` + 单测 | `npm run typecheck && npm test && npm run lint && npm run format:check` 全绿；`wemind brain check` 真机握手通过（临时数据目录，未动正在运行的 daemon） |
 | M2 ✅（空） | 协议适配 | 按 M0 结果为空，跳过 |
 | M3 ✅ | 真机 E2E：对话、发图、`加载 <MCP>`、重启后追问、worker 派发 → 中断 →「继续」、记忆继承 | 全部通过，见 §2.1；`wechat` 始终未加载；日常 Qoder 未被登出 |
-| M4 ✅ | 文档同步（§4.5）+ `check-docs.ps1` | 链接检查通过 |
+| M4 ✅ | 文档同步（§4.5）+ `check-docs.mjs` | 链接检查通过 |
 
 ---
 
@@ -231,7 +231,7 @@ syncSettings():
 | 登录态稳定 | M3 全程（含多次重启、换脑、worker 重建）未被登出 | §2.1、§6 |
 | `wemind brain check` | 真机握手通过（约 2.4 s） | §0、§7 M1 |
 | 静态检查 | `npm run typecheck && npm test && npm run lint && npm run format:check` 全绿 | §7 M1 |
-| 文档链接 | `check-docs.ps1` 链接检查通过 | §7 M4 |
+| 文档链接 | `check-docs.mjs` 链接检查通过 | §7 M4 |
 
 ---
 

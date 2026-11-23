@@ -111,7 +111,7 @@
 - `wemind env capture|show|clear [--dry-run]` (non-secret environment snapshot: PATH/proxy/locale)
 - `node packages/wechat-daemon/dist/cli.js list` (same thing from source)
 - `pwsh -NoProfile -File scripts/doctor.ps1`
-- `pwsh -NoProfile -File scripts/check-docs.ps1`
+- `node scripts/check-docs.mjs`
 - `wemind agent spec` / `wemind agent probe <bin> ... [--draft] [--deep]` (the old `node scripts/acp-probe.mjs` remains as a compatibility wrapper; env: `ACP_BIN`, `ACP_ARGS`, `ACP_SHELL`, `ACP_HOME_ENV`, `ACP_HOME`, `ACP_MODEL`)
 
 ## Hard facts (2026-11-15)

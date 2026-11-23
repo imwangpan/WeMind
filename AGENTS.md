@@ -90,7 +90,7 @@ wemind workspace show|set|reset [--role brain|worker]   # 默认工作区；新�
 wemind env capture|show|clear   # 非敏感环境快照（PATH/代理/locale）
 wemind session list|new|resume|rename|delete / task-list|task-resume-all|task-reply|task-stop
 node packages/wechat-daemon/dist/cli.js brain   # 从源码跑等价命令
-pwsh -NoProfile -File scripts/check-docs.ps1    # 检查 Markdown 相对链接
+node scripts/check-docs.mjs    # 检查 Markdown 相对链接
 ```
 
 完整命令（自动生成：28 个 CLI 子命令 + 21 条微信指令）见 [`README.md`](README.md)「命令一览」；首次使用/环境不确定先跑 [`scripts/doctor.ps1`](scripts/doctor.ps1)。

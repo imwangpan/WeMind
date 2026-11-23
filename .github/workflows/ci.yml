@@ -60,7 +60,7 @@ jobs:
         run: node scripts/doc-impact.mjs --check --base "origin/${{ github.base_ref || 'main' }}"
       - name: Check docs links
         shell: pwsh
-        run: ./scripts/check-docs.ps1
+        run: node scripts/check-docs.mjs
       - run: npm run typecheck
       - run: npm run build
       - run: npm run check:version

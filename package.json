@@ -15,7 +15,7 @@
     "lint:fix": "oxlint --fix",
     "format": "oxfmt \"packages/**/*.ts\"",
     "format:check": "oxfmt --check \"packages/**/*.ts\"",
-    "verify": "npm run lint && npm run format:check && npm run typecheck && npm run build && npm run check:version && npm pack --dry-run -w @wemind/cli -w @wemind/wechat-mcp && npm test && node scripts/check-user-copy.mjs && node scripts/check-agent-docs.mjs && node scripts/gen-docs-tables.mjs --check && node scripts/doc-impact.mjs --check && pwsh -NoProfile -File scripts/check-docs.ps1",
+    "verify": "npm run lint && npm run format:check && npm run typecheck && npm run build && npm run check:version && npm pack --dry-run -w @wemind/cli -w @wemind/wechat-mcp && npm test && node scripts/check-user-copy.mjs && node scripts/check-agent-docs.mjs && node scripts/gen-docs-tables.mjs --check && node scripts/doc-impact.mjs --check && node scripts/check-docs.mjs",
     "doc-impact": "node scripts/doc-impact.mjs",
     "doc-impact:check": "node scripts/doc-impact.mjs --check",
     "check:agent-docs": "node scripts/check-agent-docs.mjs",
