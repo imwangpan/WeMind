@@ -126,7 +126,7 @@ describe("probeAgent", () => {
       const r = await probeAgent({
         bin: wrapper,
         args: ["ok"],
-        timeoutMs: 5000,
+        timeoutMs: 15_000,
         testMcp: false,
       });
       expect(r.shell).toBe(true);
@@ -147,7 +147,7 @@ describe("probeAgent", () => {
         const r = await probeAgent({
           bin: "fake-bare-acp",
           args: ["ok"],
-          timeoutMs: 5000,
+          timeoutMs: 15_000,
           testMcp: false,
         });
         expect(r.shell).toBe(true);

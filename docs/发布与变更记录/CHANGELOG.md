@@ -13,6 +13,7 @@
 
 ### Changed
 
+- **`vitest` 3 → 5.1.1（2026-11-24）**：只升大版本、配置不变（`pool: "threads"` + 默认隔离）；`agent-probe.test.ts` 里两处 Windows `.cmd` 探针用例的内部超时从 5s 提到 15s——全量并发下曾偶发 5.4s 才完成握手（单跑稳定 13/13），避免 CI 抖动。
 - **Node 下限提到 24.11（2026-11-24）**：Node 20 已于 2026-04-30 EOL、22 进入维护期，而开发工具链（`tsdown@0.23`）本来就要 `^22.18 || >=24.11`。四个 `package.json` 的 `engines` 统一为 `>=24.11.0`，两个发布包的 tsdown `target` 从 `node20` 改为 `node24`；CI 的 `min-node` 任务改在 Node 24.11 上跑测试**与构建**（同时继续断言没有 `core/dist`），主矩阵改 Node 24。**影响**：只装包的用户不再支持 Node 20/22；升级 Node 后无需改任何配置。
 - **构建、类型检查与链接检查提速（2026-11-24）**：`npm run build` / `typecheck` 不再走三层 `npm run -w`：新增 `scripts/build.mjs`（先 core tsc，再两个包并行 tsdown）与 `scripts/typecheck.mjs`（三个 tsc 并行），直接 `node` 起 `node_modules` 里的 JS 入口，Windows 上也不经过 `.cmd` 包装。`scripts/check-docs.ps1` 改写为 `scripts/check-docs.mjs`（行为一致：同一份 575 链接/66 文件、同样的跳过规则，附 4 个用例），`npm run verify` 与 CI 不再依赖 PowerShell。实测 `build` 3.0s → 1.7s、`typecheck` 3.0s → 1.7s、`check-docs` 2.4s → 0.3s。
 - **构建与测试链路提速（2026-11-23）**：五处各自独立的浪费。① 两个发布包的 `tsdown` 都加 `outputOptions: { sourcemapExcludeSources: true }`——map 只留 mappings、不内嵌源码原文，`describeError()` 只用 mappings，因此映射结果不变（已抽产物里的真实字符串反查核对），而 `@wemind/cli` 的 map 1.63MB → 441KB、tarball 756KB → 380KB，`@wemind/wechat-mcp` 的 map 201KB → 47KB、tarball 99KB → 48KB。② `agent-probe.ts` 换探针时原来固定 `sleep(500)` 白等，改成等子进程 `exit`（2 秒兜底）：`agent-probe.test.ts` 23.1s → 9.4s。③ `run-daemon-script.test.ts` 的 5 次 pwsh 调用改成 `beforeAll` 里并发：6.2s → 2.7s。④ `vitest.config.ts` 换 `pool: "threads"`（隔离保持开启）：本机全量 29s → 23s。⑤ CI 加 `concurrency`：同一分支连推时取消上一次运行（`main` 上不取消）。
