@@ -1,3 +1,4 @@
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -140,6 +141,24 @@ function frameError(frame: Frame): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 等第一个探针进程真正退出，再起第二个。
+ *
+ * disposeAgentProcess 已经 taskkill / SIGKILL 并 destroy 三路 stdio，正常情况下 exit 几毫秒内就到。
+ * 原来固定 sleep(500) 是为了「别和还活着的进程抢同一份会话库」，但它每次都白等 0.5 秒（probeAgent 一个
+ * 用例要探两轮，13 个用例就是约 7 秒）。这里改成等 exit（最多 2 秒兜底）：进程没了，锁自然就放开了。
+ */
+async function waitForExit(
+  child: Pick<ChildProcessWithoutNullStreams, "exitCode" | "signalCode" | "once">,
+  timeoutMs = 2000,
+): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await Promise.race([
+    new Promise<void>((resolve) => child.once("exit", () => resolve())),
+    sleep(timeoutMs),
+  ]);
 }
 
 function uniqueStrings(values: unknown[]): string[] {
@@ -679,7 +698,7 @@ export async function probeAgent(rawOpts: AgentProbeOptions): Promise<AgentProbe
     const originalSession = result.sessionId;
     if (!opts.hardKill) await first.close();
     first.kill();
-    await sleep(500);
+    await waitForExit(first.child);
 
     second = new ProbeClient(opts, cwd, env, log);
     second.useMcpServers(mcpServers);

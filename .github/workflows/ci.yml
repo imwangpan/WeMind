@@ -5,6 +5,12 @@ on:
     branches: ["main", "feat/**", "fix/**"]
   pull_request:
 
+# 同一分支连推两次时，旧的那次已经没意义了：直接取消，省掉一台 runner 的排队与电费。
+# main 上不取消——它是发布前必须跑完的那次。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   # 最低运行版本：只验证运行时（不跑 tsdown——它的 engines 要求 Node >=22.18，属于开发工具链）。
   # 发布包声明 Node >=20.19；这里用 Node 20 的最新小版本真跑一遍测试，避免「声明的最低版本从未验证」。

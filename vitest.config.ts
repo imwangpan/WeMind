@@ -7,6 +7,10 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   test: {
+    // 默认池是 forks（每个测试文件一个子进程）；threads 省掉重复的进程启动，实测快约 10%
+    // （全量 29.2s vs 32.1s，125 文件 / 1400+ 用例）。isolate 不能关：关掉后模块级 env/单例
+    // 互相污染，13 个文件直接失败（试过），所以只换池、不碰隔离。
+    pool: "threads",
     setupFiles: ["./vitest.setup.ts"],
     include: ["packages/**/*.test.ts", "scripts/**/*.test.mjs"],
     exclude: [

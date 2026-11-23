@@ -17,6 +17,8 @@ export default defineConfig({
   // 与 @wemind/cli 对齐：单文件产物的报错只有打包后行号，带 sourcemap 才能映射回 .ts；prepack 守卫会检查 .map 随包。
   // Node 默认不应用 sourcemap（运行时调用 setSourceMapsEnabled 也无效），所以由 core 的 describeError() 在 fatal 出口读同目录的 .map 改写 stack；用户零配置，版本天然配对。
   sourcemap: true,
+  // 与 @wemind/cli 同口径：map 只留 mappings，不内嵌源码原文（201KB → 47KB），映射结果不变。
+  outputOptions: { sourcemapExcludeSources: true },
   // 把内核内联进单一产物：发布时无需单独发布 @wemind/wechat-ilink-core。
   // uqr 只有登录二维码用，tree-shake 后约 20KB，内联掉可以少让用户装一个包。
   // 其余运行时依赖（MCP SDK / zod）在 package.json 的 dependencies 中，tsdown 默认 external。

@@ -13,6 +13,7 @@
 
 ### Changed
 
+- **构建与测试链路提速（2026-11-23）**：五处各自独立的浪费。① 两个发布包的 `tsdown` 都加 `outputOptions: { sourcemapExcludeSources: true }`——map 只留 mappings、不内嵌源码原文，`describeError()` 只用 mappings，因此映射结果不变（已抽产物里的真实字符串反查核对），而 `@wemind/cli` 的 map 1.63MB → 441KB、tarball 756KB → 380KB，`@wemind/wechat-mcp` 的 map 201KB → 47KB、tarball 99KB → 48KB。② `agent-probe.ts` 换探针时原来固定 `sleep(500)` 白等，改成等子进程 `exit`（2 秒兜底）：`agent-probe.test.ts` 23.1s → 9.4s。③ `run-daemon-script.test.ts` 的 5 次 pwsh 调用改成 `beforeAll` 里并发：6.2s → 2.7s。④ `vitest.config.ts` 换 `pool: "threads"`（隔离保持开启）：本机全量 29s → 23s。⑤ CI 加 `concurrency`：同一分支连推时取消上一次运行（`main` 上不取消）。
 - **登录二维码改用 `uqr` + 自编码 PNG，`qrcode` 从依赖里移除（2026-11-23）**：原来 `qrcode@1.5.4` 为了它自己的 CLI 拖着 yargs@15，整棵子树 29 个包、约 1.66MB，而两个包只用到 `toFile` + `toString`。现在矩阵与纠错交给 `uqr`（0 依赖，只取 `encode` + `renderUnicodeCompact`，tree-shake 后约 20KB），PNG 由 core 新增的 `qr.ts` 用 `node:zlib` 直接编码（8 位灰度，真正被解码验证过）；`uqr` 内联进两个发布包，用户不再需要多装任何东西。`@wemind/cli` 的运行时依赖只剩 `silk-wasm`。扫码用的文件同时改名：`qrcode.png` / `qrcode.txt` → **`login-code.png` / `login-code.txt`**（登录、登出时连旧名残留一起清理）。`qr.test.ts` 用 jsqr 把 PNG 与终端码真扫一遍，断言解出的就是原文。
 - **`任务列表` 的说明改成一句正常描述（2026-11-19）**：`brief` 原写 `#编号 / 状态（带图标）/ 最近输出 / agent / 轮次 / 时长`，会原样出现在微信「帮助」与 `wemind help` 里；改为「列出所有任务：编号、状态、最近输出、agent、轮次、时长」。
 
