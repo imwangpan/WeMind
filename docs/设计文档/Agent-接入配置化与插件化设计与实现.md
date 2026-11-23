@@ -112,7 +112,7 @@
 
 ※ 这 3 个是**数据字段、但语义要靠代码解释**（见 §3.3）：`realProfile`（profile 读写）、`isolateSessions`（启动前生成会话 patch 文件）、`kiroEngine`（引擎探测与免审批方式）。另外 `credentialEnv` 是函数值，必须留在代码侧。
 
-**校验用自写校验器**：现有运行时依赖只有 `qrcode` 与 `silk-wasm`（`packages/wechat-daemon/package.json`），不引入 `ajv` / `zod`。JSON Schema 由**同一份定义**生成，供 `agent spec` 输出，避免两套真相。
+**校验用自写校验器**：现有运行时依赖只有 `silk-wasm`（`packages/wechat-daemon/package.json`；二维码编码器 `uqr` 已内联进产物），不引入 `ajv` / `zod`。JSON Schema 由**同一份定义**生成，供 `agent spec` 输出，避免两套真相。
 
 **内置定义的位置**：源码 `packages/wechat-daemon/src/agents/definitions/<name>.json`，**构建期内联进 bundle**（tsdown 直接内联 JSON 导入），保持 `files: ["dist"]` 与 `scripts/prepack-guard.mjs` 的检查口径不变，运行期零 IO。仓库脚本（`check-agent-docs.mjs` / `gen-docs-tables.mjs`）直接读这些 JSON 作为键源；同一份目录结构就是未来官方数据包的结构（预留）。
 

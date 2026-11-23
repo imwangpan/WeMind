@@ -170,8 +170,8 @@ Cursor 等客户端用与 Claude Desktop 相同的 `mcpServers` 结构（Cursor 
 
 AI Agent 调用 `login_qrcode` 生成二维码，你可以通过以下方式扫码：
 
-- 在终端运行 `cat ~/.wemind/default/qrcode.txt` 查看二维码
-- 打开图片文件 `~/.wemind/default/qrcode.png`
+- 在终端运行 `cat ~/.wemind/default/login-code.txt` 查看二维码
+- 打开图片文件 `~/.wemind/default/login-code.png`
 - 将链接复制到微信中打开
 
 > **提示**：如果手机扫码后页面一直加载，请切换到**移动数据网络**（关闭 WiFi）。
@@ -219,7 +219,7 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 | `brain.json`                                  | **持久大脑配置**（`agent` 与各 agent 的 `presets` 启动覆盖）；热切换**成功才写**、失败不动，所以它始终等于「下次会用的那个大脑」 |
 | `allowFrom.json`                              | **登录者白名单**（兜底鉴权，默认拒绝；正常只含登录者一个 userId，**别清空**——清空后除登录者外的发件人全部被拒） |
 | `state.json`                                  | 长轮询游标（记录读到哪条了；`updatesBuf`）、各会话 `context_token`、`lastMessageId`（去重；POSIX 下权限 600） |
-| `qr_login.json` / `qrcode.png` / `qrcode.txt` | 扫码登录临时态与二维码（登录后即失效；`qr_login.json` POSIX 下权限 600）                                    |
+| `qr_login.json` / `login-code.png` / `login-code.txt` | 扫码登录临时态与二维码（登录后即失效；`qr_login.json` POSIX 下权限 600）                              |
 | `brain-sessions.json`                         | `<agent>:<userId> → ACP sessionId` 映射（按大脑分开存，切换 agent 互不覆盖）；daemon 重启后据此尝试 `session/load` 或 `session/resume` 恢复多轮上下文（agent 不支持则新建）；「当前是哪个会话」的唯一权威，会话指针一律**先落盘成功再写内存** |
 | `worker-sessions.json`                        | worker（远程任务）`ACP sessionId` 映射（键 `<agent>:task-<编号>@<userId>`），任务中断后据此 `load`/`resume` 续跑 |
 | `brain-mcps.json`                             | **仅 `managed`**：brain 当前激活的 MCP 集（按 agent 分键，默认空）；`direct` 不读，MCP 完全由 Agent 真实配置决定 |
@@ -360,7 +360,7 @@ npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（�
 `packages/wechat-daemon/` 提供一个独立 daemon：自己长轮询 iLink 收消息 →
 调 **常驻 ACP agent**（JSON-RPC over stdio；未配置时 `auto` 探测 opencode/cline/qoder/gemini/deepseek/kiro）当大脑生成回复 → 自动回发。
 进程常驻、原生多轮记忆，回复从 `agent_message_chunk` 流式拼接（天然无 ANSI/工具旁白）；
-带**存活检测**（进程不在自动重启）。运行时只依赖第三方 `qrcode`（登录画码时才加载），内核 `@wemind/wechat-ilink-core` 已内联进产物，不碰 MCP 那层，是一个完全独立、可单独运行的包。
+带**存活检测**（进程不在自动重启）。运行时只依赖第三方 `silk-wasm`（语音转码时才加载）；二维码渲染（`uqr`，tree-shake 后约 20KB）与内核 `@wemind/wechat-ilink-core` 都已内联进产物，不碰 MCP 那层，是一个完全独立、可单独运行的包。
 
 ```bash
 # 方式一：装好的 CLI（推荐最终用户）

@@ -18,8 +18,9 @@ export default defineConfig({
   // Node 默认不应用 sourcemap（运行时调用 setSourceMapsEnabled 也无效），所以由 core 的 describeError() 在 fatal 出口读同目录的 .map 改写 stack；用户零配置，版本天然配对。
   sourcemap: true,
   // 把内核内联进单一产物：发布时无需单独发布 @wemind/wechat-ilink-core。
-  // 其余运行时依赖（MCP SDK / zod / qrcode）在 package.json 的 dependencies 中，tsdown 默认 external。
+  // uqr 只有登录二维码用，tree-shake 后约 20KB，内联掉可以少让用户装一个包。
+  // 其余运行时依赖（MCP SDK / zod）在 package.json 的 dependencies 中，tsdown 默认 external。
   deps: {
-    alwaysBundle: ["@wemind/wechat-ilink-core"],
+    alwaysBundle: ["@wemind/wechat-ilink-core", "uqr"],
   },
 });

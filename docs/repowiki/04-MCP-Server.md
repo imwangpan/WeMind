@@ -97,7 +97,7 @@ sequenceDiagram
 
 要点：
 
-- `login_qrcode` 会生成三种扫码形式：二维码 URL、PNG 图片（`qrcode.png`）、终端 ANSI 文本（`qrcode.txt`），并在文案里**强制要求 Agent 自己 `cat qrcode.txt`** 把二维码显示给用户。
+- `login_qrcode` 会生成三种扫码形式：二维码 URL、PNG 图片（`login-code.png`）、终端 ANSI 文本（`login-code.txt`），并在文案里**强制要求 Agent 自己 `cat login-code.txt`** 把二维码显示给用户。
 - 二维码 TTL 为 5 分钟（`QR_TTL_MS`），新鲜则复用。
 - `check_qrcode_status` 在 `confirmed` 时保存凭证、清扫码态、清会话冷却、通知上线；若数据目录就是 CLI 的标准账号目录（`DATA_DIR === accountDir(ACCOUNT_KEY)`，默认 `~/.wemind/default` 且未设 `WECHAT_DATA_DIR`），再按目录名登记进 `accounts.json`——否则 CLI 的 `list` / `start` 看不到 MCP 登录的账号。自定义 `WECHAT_DATA_DIR` 不登记（注册表只能指向 `accountDir(key)`，登记会让 CLI 去错目录找凭证）。
 - `logout`：通知下线 + 重置状态 + 清凭证 +（标准目录且注册表条目 botId 与本账号一致时）注销账号条目；凭证文件删不掉时返回 `logout_failed` 并说明原因，不谎称「已清除」。需要验证码 / IDC 重定向时，MCP 与 CLI 都会直接说明暂不支持该步骤并提示稍后重试（两者共用同一套登录能力）。
@@ -141,8 +141,8 @@ sequenceDiagram
 MCP server 用 [tsdown](https://tsdown.dev/)（rolldown + oxc，tsup 的继任者）打包：
 
 - 输出 ESM、target node20、入口 `src/index.ts`，并用 `outExtensions` 强制输出 `dist/index.js`（而非默认 `.mjs`，保持 bin/main 引用不变）；
-- **`deps.alwaysBundle: ["@wemind/wechat-ilink-core"]`** —— 把内核内联进单一产物，发布时无需单独发布 core；
-- 其余运行时依赖（MCP SDK / zod / qrcode）保持 external，但**已声明在 `dependencies`**，安装包时由 npm / npx 一并装好；只有离线手工部署或自行重新打包时才需要单独准备；
+- **`deps.alwaysBundle: ["@wemind/wechat-ilink-core", "uqr"]`** —— 把内核和二维码编码器内联进单一产物，发布时无需单独发布 core，用户也不用为登录二维码多装一个包（uqr tree-shake 后约 20KB）；
+- 其余运行时依赖（MCP SDK / zod）保持 external，但**已声明在 `dependencies`**，安装包时由 npm / npx 一并装好；只有离线手工部署或自行重新打包时才需要单独准备；
 - **`dts: false`** —— 该包不对外暴露类型；关掉也避免 tsdown 加载 `typescript` 包（TypeScript 7.0 原生已不再暴露旧 JS API，否则启动即报错）；
 - **`sourcemap: true`**（2026-11-11 起）—— `dist/index.js.map` 随包，与 `@wemind/cli` 对齐；`prepack` 守卫会检查 `.map` 存在且被 `files` 覆盖。Node 默认不应用 sourcemap，所以 `main().catch` 走 `describeError()` 自己读同目录的 map，fatal 日志直接显示 `src/xxx.ts:NN`，MCP 客户端无需任何配置（见 [已知坑](../ai/已知坑.md)）；
 - 入口 shebang（`#!/usr/bin/env node`）由 rolldown 自动保留。

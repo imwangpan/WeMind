@@ -120,7 +120,16 @@ export async function cmdLogout(sel: string): Promise<string> {
       /* ignore */
     }
   }
-  for (const f of ["account.json", "state.json", "qr_login.json", "qrcode.png", "qrcode.txt"]) {
+  for (const f of [
+    "account.json",
+    "state.json",
+    "qr_login.json",
+    "login-code.png",
+    "login-code.txt",
+    // 旧版文件名：升级前留下的残留也一并删掉
+    "qrcode.png",
+    "qrcode.txt",
+  ]) {
     try {
       fs.unlinkSync(path.join(dir, f));
     } catch {

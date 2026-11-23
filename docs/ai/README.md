@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **最后核对**：2026-11-18
+> **最后核对**：2026-11-23
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -43,7 +43,7 @@ wechat-ilink-core  ◄──  wechat-mcp      （tsdown 内联 core，发布单�
 
 | 包                          | 路径                         | 职责                                                        | 发布                                                                                                         |
 | --------------------------- | ---------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink HTTP、类型、错误码、会话守卫、账号/状态、收发图加解密 | 私有（JIT 源码包，入口 `src/index.ts`、无 dist；发布时 tsdown 内联进 `@wemind/wechat-mcp` 与 `@wemind/cli`） |
+| `@wemind/wechat-ilink-core` | `packages/wechat-ilink-core` | iLink HTTP、类型、错误码、会话守卫、账号/状态、收发图加解密、登录二维码渲染（`qr.ts`） | 私有（JIT 源码包，入口 `src/index.ts`、无 dist；发布时 tsdown 内联进 `@wemind/wechat-mcp` 与 `@wemind/cli`） |
 | `@wemind/wechat-mcp`        | `packages/wechat-mcp`        | 6 个 MCP 工具                                               | 已发布（bin `wemind-mcp`）                                                                                   |
 | `@wemind/cli`               | `packages/wechat-daemon`     | daemon + ACP 大脑 + worker + CLI                            | 已发布（命令 `wemind`）                                                                                      |
 
@@ -221,6 +221,7 @@ poller（长轮询，不被大脑阻塞）
 | 改 CLI                                 | `cli.ts`（分派 `cli/cli-dispatch.ts`）                                                                                    | `cli/manage.ts`（参数解析/分派）+ `cli/account-commands.ts` / `cli/process-lifecycle.ts` + `cli/cli-context.ts` + `cli/subcommands/cli-*.ts`                                                                                                                                                                  |
 | **改开机自启**                         | `cli/subcommands/autostart.ts`（install/status/uninstall）                                                                | `cli/subcommands/windows-autostart.ts`、`cli/subcommands/posix-autostart.ts`、`shared/process/powershell.ts`（5.1 优先、回退 `pwsh`）、`shared/mixed-config.ts`（冲突探测/清理）、`shared/pm2-detector.ts`、`shared/launcher-env.ts`、`docs/部署与运维/开机自启.md`                                           |
 | 改启动器环境（P0）                     | `shared/launcher-env.ts`（丢弃 `WECHAT_DATA_DIR`、强制 `WECHAT_ACCOUNT`）                                                 | 集成点：`cli/watchdog-runner.ts`、`cli/pm2-runner.ts`；`wemind daemon` 直跑不走这里                                                                                                                                                                                                                           |
+| 改登录二维码                           | `wechat-ilink-core/src/qr.ts`（`qrPng` 自编码 8 位灰度 PNG、`qrTerminal` 半块字符 + 白底 ANSI，编码用 `uqr`）                    | `cli/subcommands/cli-login.ts`、`wechat-mcp/src/tools/login.ts`、`wechat-ilink-core/src/qr.test.ts`（jsqr 真扫回原文） |
 | 改数据/账号                            | `wechat-ilink-core/src/store/*`                                                                                           | `agents/brain-config.ts`、`docs/repowiki/08`                                                                                                                                                                                                                                                                  |
 | 排查不回复                             | `docs/ai/recipes/debug-daemon.md`                                                                                         | `daemon.log`、`brain.json`、`brain check`                                                                                                                                                                                                                                                                     |
 | 端到端验收                             | `docs/ai/recipes/run-e2e.md`                                                                                              | `scripts/doctor.ps1`                                                                                                                                                                                                                                                                                          |

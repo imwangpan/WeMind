@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import QRCode from "qrcode";
 import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 
 import {
@@ -17,6 +16,8 @@ import {
   loadQrState,
   saveQrState,
   clearQrState,
+  qrPng,
+  qrTerminal,
   resetState,
   DATA_DIR,
   ACCOUNT_KEY,
@@ -83,20 +84,17 @@ function isQrFresh(createdAt: number): boolean {
 
 function qrPaths(): { png: string; txt: string } {
   return {
-    png: path.join(DATA_DIR, "qrcode.png"),
-    txt: path.join(DATA_DIR, "qrcode.txt"),
+    png: path.join(DATA_DIR, "login-code.png"),
+    txt: path.join(DATA_DIR, "login-code.txt"),
   };
 }
 
 /** 生成二维码的三种形式：PNG 图片 + 终端可渲染的 ANSI 文本。 */
-async function saveQrPng(url: string): Promise<string> {
+function saveQrPng(url: string): string {
   const { png, txt } = qrPaths();
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const [, terminal] = await Promise.all([
-    QRCode.toFile(png, url, { width: 400, margin: 2 }),
-    QRCode.toString(url, { type: "terminal", small: true }),
-  ]);
-  fs.writeFileSync(txt, terminal, "utf-8");
+  fs.writeFileSync(png, qrPng(url, { size: 400 }));
+  fs.writeFileSync(txt, qrTerminal(url), "utf-8");
   return png;
 }
 
@@ -134,7 +132,7 @@ export async function loginQrcode(): Promise<ToolResult> {
   // 复用未过期二维码；但图片文件可能被清理/未生成，缺了就按同一 URL 重新渲染，不必再打服务端。
   if (existing && isQrFresh(existing.createdAt) && existingUrl) {
     if (!fs.existsSync(png) || !fs.existsSync(txt)) {
-      await saveQrPng(existingUrl);
+      saveQrPng(existingUrl);
     }
     return textResult(qrHelpText(existingUrl, png, txt));
   }
@@ -146,7 +144,7 @@ export async function loginQrcode(): Promise<ToolResult> {
     qrcodeUrl: qrResponse.qrcode_img_content,
     createdAt,
   });
-  await saveQrPng(qrResponse.qrcode_img_content);
+  saveQrPng(qrResponse.qrcode_img_content);
 
   return textResult(qrHelpText(qrResponse.qrcode_img_content, png, txt));
 }

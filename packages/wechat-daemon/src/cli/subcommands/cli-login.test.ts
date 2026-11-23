@@ -50,6 +50,8 @@ describe("finalizeStaging（首次归档与重登并入）", () => {
   it("首次登录：登记、种子白名单、清掉二维码等临时文件", () => {
     const staging = createStaging();
     writeCred(staging, "t1");
+    fs.writeFileSync(path.join(staging, "login-code.png"), "png", "utf-8");
+    // 旧版残留：升级前用 qrcode.png 命名，合并进现有账号目录时也要清掉
     fs.writeFileSync(path.join(staging, "qrcode.png"), "png", "utf-8");
 
     const { key, msg } = finalize(staging, "工作号");
@@ -59,6 +61,7 @@ describe("finalizeStaging（首次归档与重登并入）", () => {
     expect(fs.existsSync(staging)).toBe(false);
     const dest = path.join(home, key);
     expect(loadAccount(dest)?.botToken).toBe("t1");
+    expect(fs.existsSync(path.join(dest, "login-code.png"))).toBe(false);
     expect(fs.existsSync(path.join(dest, "qrcode.png"))).toBe(false);
     expect(readAllowFrom(dest)).toEqual(["u1"]);
     expect(listAccounts().find((a) => a.key === key)?.label).toBe("工作号");

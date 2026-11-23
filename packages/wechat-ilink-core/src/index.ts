@@ -18,4 +18,5 @@ export * from "./store/accounts.js";
 export * from "./store/allow-from.js";
 export * from "./cdn/image.js";
 export * from "./cdn/media.js";
+export * from "./qr.js";
 export * from "./messaging/send-item.js";

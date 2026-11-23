@@ -13,6 +13,8 @@ import {
   saveQrState,
   saveAccountTo,
   clearSessionPause,
+  qrPng,
+  qrTerminal,
   notifyStart,
   addAllowFrom,
   loadAccount as readAccount,
@@ -94,6 +96,9 @@ export function finalizeStaging(staging: string, label?: string): { key: string;
     fs.renameSync(staging, dest);
   }
   for (const f of [
+    "login-code.png",
+    "login-code.txt",
+    // 旧版文件名：升级前写入的残留一起清掉，账号目录里不留下过期二维码
     "qrcode.png",
     "qrcode.txt",
     "qr_login.json",
@@ -120,27 +125,6 @@ export function finalizeStaging(staging: string, label?: string): { key: string;
     key,
     msg: `已登录：key=${key}  label=${meta.label}  botId=${acc.botId}\n目录：${dest}${existed ? "（已并入现有账号，会话与白名单保留）" : ""}`,
   };
-}
-
-/**
- * 懒加载 `qrcode`：只有扫码登录要画二维码，`list` / `brain` / `task` / `daemon` 全用不上。
- * 顶层 `import` 会让**每次**启动都付约 36ms（实测）解析 qrcode + yargs 依赖树；这里在第一次画码时才加载，之后同进程内复用（登录过程会因过期刷新多次）。
- * 用函数声明而非 `const QRCode = await import(...)`：后者在 ESM 顶层要多一层 TDZ 心智负担。
- */
-let qrcodeMod: typeof import("qrcode") | undefined;
-
-async function loadQrCode(): Promise<typeof import("qrcode")> {
-  if (!qrcodeMod) {
-    try {
-      qrcodeMod = await import("qrcode");
-    } catch (e) {
-      throw new Error(
-        `无法加载二维码库 qrcode（依赖缺失或安装损坏）：${e instanceof Error ? e.message : String(e)}\n` +
-          "请重试安装：npm i -g @wemind/cli",
-      );
-    }
-  }
-  return qrcodeMod;
 }
 
 /** 一条命令完成扫码登录：自刷新二维码 + 终端码 + 自动开图 + 自动登记（→ 可选自动启动）。 */
@@ -170,8 +154,7 @@ async function loginInto(
   runner: string | undefined,
   deps: LoginCliDeps,
 ): Promise<void> {
-  const QRCode = await loadQrCode(); // 只有登录路径才加载 qrcode
-  const png = path.join(staging, "qrcode.png");
+  const png = path.join(staging, "login-code.png");
   const overall = Date.now() + 15 * 60 * 1000;
   let code = "";
   let opened = false;
@@ -183,9 +166,10 @@ async function loginInto(
       { qrcode: qr.qrcode, qrcodeUrl: qr.qrcode_img_content, createdAt: Date.now() },
       staging,
     );
-    await QRCode.toFile(png, qr.qrcode_img_content, { width: 480, margin: 2 });
-    // 用 small：半块字符一行装两行模块，宽高各约为默认渲染器的一半（面积约 1/4）；否则登录码会大到一屏放不下（字体比例可能让它偏长方形，PNG 始终是正方形）。
-    const term = await QRCode.toString(qr.qrcode_img_content, { type: "terminal", small: true });
+    // PNG 自己编码（core/qr.ts）：登录路径只在这里画码，不需要额外依赖。
+    fs.writeFileSync(png, qrPng(qr.qrcode_img_content, { size: 480 }));
+    // 半块字符：一个字符装上下两个模块，宽高各约为整块渲染器的一半（面积约 1/4）；否则登录码会大到一屏放不下（字体比例可能让它偏长方形，PNG 始终是正方形）。
+    const term = qrTerminal(qr.qrcode_img_content);
     print("\n用要登录的微信扫下面的二维码（过期会自动刷新）：\n");
     print(term);
     print("图片(已自动打开): " + png);
@@ -220,7 +204,7 @@ async function loginInto(
       });
       clearSessionPause(s.ilink_bot_id);
       await notifyStart({ baseUrl: s.baseurl ?? BASE, token: s.bot_token }).catch(() => {});
-      for (const f of ["qrcode.png", "qr_login.json"]) {
+      for (const f of ["login-code.png", "qrcode.png", "qr_login.json"]) {
         try {
           fs.unlinkSync(path.join(staging, f));
         } catch {

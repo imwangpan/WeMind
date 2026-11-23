@@ -30,21 +30,27 @@ m.root = fs.mkdtempSync(path.join(os.tmpdir(), "wemind-login-"));
 // 标准 CLI 布局：DATA_DIR = accountDir("default")，登录后应登记进 accounts.json
 m.dataDir = path.join(m.root, "default");
 fs.mkdirSync(m.dataDir, { recursive: true });
-vi.mock("@wemind/wechat-ilink-core", () => ({
-  ...m,
-  ACCOUNT_KEY: "default",
-  // login.ts 现在用统一 logger；测试不需要真的输出，给一个全 noop 的实现。
-  createLogger: () => {
-    const noop = () => {};
-    const logger = { info: noop, warn: noop, error: noop, debug: noop, child: () => logger };
-    return logger;
-  },
-  // 函数在调用时读 m.root（工厂执行时它还没赋值，不能像常量一样提前捕获）
-  accountDir: (key: string) => path.join(m.root, key),
-  get DATA_DIR() {
-    return m.dataDir;
-  },
-}));
+vi.mock("@wemind/wechat-ilink-core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@wemind/wechat-ilink-core")>();
+  return {
+    // 二维码渲染是被测行为本身，用真实实现（只 mock 协议/存储）
+    qrPng: actual.qrPng,
+    qrTerminal: actual.qrTerminal,
+    ...m,
+    ACCOUNT_KEY: "default",
+    // login.ts 现在用统一 logger；测试不需要真的输出，给一个全 noop 的实现。
+    createLogger: () => {
+      const noop = () => {};
+      const logger = { info: noop, warn: noop, error: noop, debug: noop, child: () => logger };
+      return logger;
+    },
+    // 函数在调用时读 m.root（工厂执行时它还没赋值，不能像常量一样提前捕获）
+    accountDir: (key: string) => path.join(m.root, key),
+    get DATA_DIR() {
+      return m.dataDir;
+    },
+  };
+});
 
 const dataDir = m.dataDir;
 
@@ -60,7 +66,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const f of ["qrcode.png", "qrcode.txt"]) {
+  for (const f of ["login-code.png", "login-code.txt", "qrcode.png", "qrcode.txt"]) {
     fs.rmSync(path.join(dataDir, f), { force: true });
   }
 });
@@ -213,8 +219,8 @@ describe("loginQrcode", () => {
   });
 
   it("复用未过期二维码：图片/文本存在时不重渲染、不请求服务端", async () => {
-    fs.writeFileSync(path.join(dataDir, "qrcode.png"), "png");
-    fs.writeFileSync(path.join(dataDir, "qrcode.txt"), "txt");
+    fs.writeFileSync(path.join(dataDir, "login-code.png"), "png");
+    fs.writeFileSync(path.join(dataDir, "login-code.txt"), "txt");
 
     const r = await loginQrcode();
     expect(r.content[0].text).toContain("url");
@@ -226,9 +232,14 @@ describe("loginQrcode", () => {
     const r = await loginQrcode();
 
     expect(m.fetchQRCode).not.toHaveBeenCalled();
-    expect(fs.existsSync(path.join(dataDir, "qrcode.png"))).toBe(true);
-    expect(fs.readFileSync(path.join(dataDir, "qrcode.txt"), "utf-8").length).toBeGreaterThan(0);
-    expect(r.content[0].text).toContain(path.join(dataDir, "qrcode.txt"));
+    expect(fs.existsSync(path.join(dataDir, "login-code.png"))).toBe(true);
+    // 真的写了 PNG（签名 4 字节），不是把 URL 当图片塞进去
+    const png = fs.readFileSync(path.join(dataDir, "login-code.png"));
+    expect([...png.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    expect(fs.readFileSync(path.join(dataDir, "login-code.txt"), "utf-8").length).toBeGreaterThan(
+      0,
+    );
+    expect(r.content[0].text).toContain(path.join(dataDir, "login-code.txt"));
   });
 
   it("二维码已过期 → 取新码、覆盖扫码态、生成两种文件", async () => {
@@ -241,8 +252,8 @@ describe("loginQrcode", () => {
     expect(m.saveQrState).toHaveBeenCalledWith(
       expect.objectContaining({ qrcode: "new", qrcodeUrl: "new-url" }),
     );
-    expect(fs.existsSync(path.join(dataDir, "qrcode.png"))).toBe(true);
-    expect(fs.existsSync(path.join(dataDir, "qrcode.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(dataDir, "login-code.png"))).toBe(true);
+    expect(fs.existsSync(path.join(dataDir, "login-code.txt"))).toBe(true);
     expect(r.content[0].text).toContain("new-url");
   });
 
