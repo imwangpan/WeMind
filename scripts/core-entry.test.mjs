@@ -97,10 +97,11 @@ describe("core 是 JIT 源码包（source-first）", () => {
     expect(root.scripts.typecheck).not.toContain("build -w @wemind/wechat-ilink-core");
     expect(root.scripts.build).toBe("node scripts/build.mjs");
     expect(root.scripts.typecheck).toBe("node scripts/typecheck.mjs");
-    // 新脚本仍然先 typecheck core（不 emit），再打两个发布包；这条不变量由脚本内容保证。
+    // 新脚本不再单独 tsc core：build 复用 typecheck.mjs 的 typecheckAll()，三个包（含 core 的测试）一起查；
+    // core 仍然没有 tsdown 配置，永不产出 dist。
     const buildScript = readText("scripts/build.mjs");
-    expect(buildScript).toContain('"packages/wechat-ilink-core"');
-    expect(buildScript).toContain('"tsconfig.json"');
+    expect(buildScript).toContain("typecheckAll");
     expect(buildScript).not.toContain("packages/wechat-ilink-core/tsdown.config.ts");
+    expect(readText("scripts/typecheck.mjs")).toContain('"wechat-ilink-core"');
   });
 });

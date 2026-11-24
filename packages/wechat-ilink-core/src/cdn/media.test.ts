@@ -42,7 +42,8 @@ describe("downloadMediaBuffer", () => {
     const cipher = encryptAesEcb(plain, KEY);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(cipher, { status: 200 })),
+      // Buffer<ArrayBufferLike> 不在 BodyInit 里（SharedArrayBuffer 的情形），拷成 Uint8Array 再交给 fetch。
+      vi.fn(async () => new Response(new Uint8Array(cipher), { status: 200 })),
     );
 
     const got = await downloadMediaBuffer({

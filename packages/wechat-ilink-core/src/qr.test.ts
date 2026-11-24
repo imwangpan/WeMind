@@ -1,9 +1,17 @@
 import { stripVTControlCharacters } from "node:util";
 import { crc32, inflateSync } from "node:zlib";
-import jsQR from "jsqr";
+import jsQrModule from "jsqr";
 import { describe, expect, it } from "vitest";
 
 import { qrPng, qrTerminal } from "./qr.js";
+
+// jsqr 的类型声明写的是 `export default`，产物却是 `module.exports = fn`：NodeNext 下
+// TS 把默认导出当成命名空间、认为不可调用，这里按运行时的真实形状收窄一次。
+const jsQR = jsQrModule as unknown as (
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+) => { data: string } | null;
 
 /**
  * 登录二维码的自测：**必须能解回原文**。

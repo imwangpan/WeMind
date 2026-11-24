@@ -12,7 +12,7 @@
 > 在提交信息或本 PR 描述里单独加一行，例如：
 > `Docs-Impact: none — Pure refactor`
 >
-> 豁免只放行「这次该同步哪些文档」的路径规则，不能放行 `STALE_FACTS` 内容级校验报出的已废弃结论；后者按 `npm run doc-impact:check` 报的「文件:行号」改正文。
+> 豁免只放行「这次该同步哪些文档」的路径规则，不能放行 `STALE_FACTS` 内容级校验报出的已废弃结论；后者按 `npm run check:impact` 报的「文件:行号」改正文。
 
 ## 验证
 

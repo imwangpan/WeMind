@@ -7,6 +7,9 @@
  * 不依赖 .bin 里的 shell 包装（Windows 上是 .cmd），三个进程同时启动。
  *
  * 输出按包顺序汇总，只有失败才打印该包的 tsc 诊断（tsc 把诊断写到 stdout）。
+ *
+ * 导出 `typecheckAll()` 给 `scripts/build.mjs` 复用：构建前必须保证类型是干净的，
+ * 但类型检查只能有一份实现，否则两条路径迟早会漂。
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -14,7 +17,9 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tsc = path.join(root, "node_modules/typescript/bin/tsc");
-const PACKAGES = ["wechat-ilink-core", "wechat-daemon", "wechat-mcp"];
+
+/** 三个包都查；core 是 JIT 源码包，它的类型错误会直接让两个发布包在运行时炸。 */
+export const PACKAGES = ["wechat-ilink-core", "wechat-daemon", "wechat-mcp"];
 
 function typecheck(name) {
   return new Promise((resolve) => {
@@ -34,12 +39,25 @@ function typecheck(name) {
   });
 }
 
-const results = await Promise.all(PACKAGES.map(typecheck));
-let failed = false;
-for (const result of results) {
-  if (result.code === 0) continue;
-  failed = true;
-  process.stderr.write(`\n[${result.name}] 类型检查失败\n${result.out}`);
+/**
+ * 并行检查给定的包；失败时把每个包的诊断打到 stderr，返回是否全部通过。
+ * 调用方决定失败后怎么退出（build 需要先停掉，不继续出产物）。
+ */
+export async function typecheckAll(packages = PACKAGES) {
+  const results = await Promise.all(packages.map(typecheck));
+  let failed = false;
+  for (const result of results) {
+    if (result.code === 0) continue;
+    failed = true;
+    process.stderr.write(`\n[${result.name}] 类型检查失败\n${result.out}`);
+  }
+  return !failed;
 }
-if (failed) process.exit(1);
-console.log(`typecheck ok: ${PACKAGES.join(", ")}`);
+
+const invokedDirectly =
+  process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  if (!(await typecheckAll())) process.exit(1);
+  console.log(`typecheck ok: ${PACKAGES.join(", ")}`);
+}

@@ -46,24 +46,10 @@ jobs:
           node-version: "24"
           cache: "npm"
       - run: npm ci
-      - run: npm run lint
-      - run: npm run format:check
-      - name: Check agent docs
-        run: node scripts/check-agent-docs.mjs
-      - name: Check generated doc tables
-        run: node scripts/gen-docs-tables.mjs --check
-
-      - name: 面向用户的文案
-        run: node scripts/check-user-copy.mjs
-      - name: Check docs impact
+      # 全部检查走这一条：脚本定义在 package.json 的 verify（verify:publish → verify:code → verify:docs），
+      # CI 不再抄一遍步骤——两边各写一份时已经漂过一次（PWsh 残留、顺序不同）。
+      - name: Verify
         env:
+          # doc-impact 在 PR 上读 PR 描述里的「Docs-Impact: none — …」豁免声明。
           DOCS_IMPACT_MESSAGE: ${{ github.event.pull_request.body }}
-        run: node scripts/doc-impact.mjs --check --base "origin/${{ github.base_ref || 'main' }}"
-      - name: Check docs links
-        shell: pwsh
-        run: node scripts/check-docs.mjs
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm run check:version
-      - run: npm pack --dry-run -w @wemind/cli -w @wemind/wechat-mcp
-      - run: npm test
+        run: npm run verify

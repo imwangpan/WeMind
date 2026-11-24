@@ -45,11 +45,10 @@ jobs:
         run: |
           binding_version="$(node -p "require('./node_modules/rolldown/package.json').optionalDependencies['@rolldown/binding-linux-x64-gnu']")"
           npm install --no-save --ignore-scripts "@rolldown/binding-linux-x64-gnu@$binding_version"
-      - run: npm run lint
-      - run: npm run format:check
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm test
+      # 与 CI 同一套组合脚本：build 内含三包 typecheck，verify:code 是 lint / 格式 / 测试。
+      # 发布环境不跑文档守卫（main 上的提交已经过 CI 的 verify），也避免浅克隆下 doc-impact 没有对比基准。
+      - name: Verify (types / build / tests)
+        run: npm run verify:publish && npm run verify:code
       # prepack 守卫会拒绝「忘了 build / bin 缺失」的空壳包。
       - name: Verify npm package contents
         run: npm pack --dry-run --workspace @wemind/cli

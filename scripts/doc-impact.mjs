@@ -4,7 +4,7 @@
  *
  * 两种用法：
  *   npm run doc-impact           打印本次改动触发了哪些规则、每条规则要求同步哪些文档（只读、不失败）
- *   npm run doc-impact:check  断言这些文档确实也在本次 diff 里；缺一个就 exit 1
+ *   npm run check:impact  断言这些文档确实也在本次 diff 里；缺一个就 exit 1
  *
  * 两层检查（--check 都跑，互不替代）：
  *   路径层    RULES 判断「该改的文档有没有出现在 diff 里」，只看路径不看内容；

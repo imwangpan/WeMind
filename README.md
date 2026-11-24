@@ -260,13 +260,13 @@ Agent 调用 `check_qrcode_status` 确认登录状态。
 git clone https://github.com/imwangpan/WeMind.git
 cd WeMind
 npm install
-npm run build      # 只打两个发布包；core 是 JIT 源码包，无需预构建
+npm run build      # 三包类型检查 + 打两个发布包；core 是 JIT 源码包，无需预构建
 npm start          # 运行 node packages/wechat-mcp/dist/index.js
 npm test           # 运行单元测试
 npm run dev -w @wemind/wechat-mcp   # tsx 热重载开发 @wemind/wechat-mcp（可选）
 ```
 
-本轮修复同时补齐了配置写入边界、三态重启与 `pendingReload`、会话指针落盘、原子写 0600、媒体清理节流、ACP 反向请求/模型回包与文档守卫等回归测试；`npm test` / `npm run verify` 是提交前统一自检（含文档守卫与相对链接检查）。
+本轮修复同时补齐了配置写入边界、三态重启与 `pendingReload`、会话指针落盘、原子写 0600、媒体清理节流、ACP 反向请求/模型回包与文档守卫等回归测试；`npm test` / `npm run verify` 是提交前统一自检：`verify` 分三组（包装/版本/打包 → lint/格式/测试 → 六个文档守卫），CI 与发布工作流调的是同一组脚本。
 
 ## 安全说明
 
@@ -372,7 +372,7 @@ wemind list                          # 账号与运行状态
 wemind brain check                   # 验证大脑能实现 ACP（真起一次握手）
 
 # 方式二：从源码跑（开发者）
-npm run build       # 只打两个发布包（core 是 JIT 源码包，内联进产物）
+npm run build       # 三包类型检查 + 打两个发布包（core 是 JIT 源码包，内联进产物）
 npm run daemon      # 前台运行；需先完成扫码登录（见上文）
 ```
 

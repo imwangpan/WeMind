@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /**
- * 构建两个发布包：先 core 类型检查，再并行 tsdown。
+ * 构建两个发布包：先并行检查三个包的类型，再并行 tsdown。
+ *
+ * 类型检查放在 build 里，是为了让「能出包」等价于「类型干净」：
+ * tsdown（rolldown/oxc）只剥类型、不做类型检查，以前 `build` 只 tsc 了 core，
+ * daemon/mcp 的类型错误能一路出到 dist 里，只能等 `npm run verify` 或运行时才发现。
+ * 实现复用 `scripts/typecheck.mjs`，类型检查只有一份。
  *
  * 原来是 `npm run typecheck -w core && npm run build -w cli -w mcp`，
  * 三层 npm 启动占了大半耗时（tsdown 本身只要 70–180ms）。这里直接跑
@@ -13,8 +18,9 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { typecheckAll } from "./typecheck.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const tsc = path.join(root, "node_modules/typescript/bin/tsc");
 const tsdown = path.join(root, "node_modules/tsdown/dist/run.mjs");
 
 function run(args, cwd) {
@@ -28,11 +34,7 @@ function run(args, cwd) {
   });
 }
 
-const core = await run([tsc, "-p", path.join("packages/wechat-ilink-core", "tsconfig.json")], root);
-if (core.code !== 0) {
-  process.stderr.write(`[wechat-ilink-core] 类型检查失败\n${core.out}`);
-  process.exit(core.code);
-}
+if (!(await typecheckAll())) process.exit(1);
 
 const builds = await Promise.all([
   run([tsdown, "-c", "tsdown.config.ts"], path.join(root, "packages/wechat-daemon")),
