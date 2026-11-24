@@ -86,6 +86,39 @@ describe("npm 脚本：一个入口一个职责", () => {
   });
 });
 
+describe("子包命令", () => {
+  const packages = ["wechat-ilink-core", "wechat-daemon", "wechat-mcp"];
+  const sub = (name) => JSON.parse(read("packages", name, "package.json")).scripts;
+
+  it("三个包的 test 各指向自己，并带回仓库根需要的 --root / --config", () => {
+    for (const name of packages) {
+      // 两个旗标缺一不可：vitest 把 cwd 当 root，include/setupFiles 都相对 root 解析。
+      expect(sub(name).test, name).toBe(
+        `vitest run --root ../.. --config ../../vitest.config.ts packages/${name}`,
+      );
+      expect(sub(name)["test:watch"], name).toBe(
+        `vitest --root ../.. --config ../../vitest.config.ts packages/${name}`,
+      );
+    }
+    expect(scripts.test).toBe("vitest run");
+  });
+
+  it("daemon 的 start 走带单实例守卫的 start，不是裸 daemon", () => {
+    expect(sub("wechat-daemon").start).toBe("node dist/cli.js start");
+  });
+
+  it("从 dist 启动的两个包，start 前会先 build", () => {
+    for (const name of ["wechat-daemon", "wechat-mcp"]) {
+      expect(sub(name).prestart, name).toBe("npm run build");
+    }
+  });
+
+  it("daemon 的 dev 从源码跑，且不提供 watch（重启会打断长轮询）", () => {
+    expect(sub("wechat-daemon").dev).toBe("tsx src/cli.ts");
+    expect(sub("wechat-daemon")["dev:watch"]).toBeUndefined();
+  });
+});
+
 describe("CI / 钩子复用同一套脚本", () => {
   const ci = read(".github", "workflows", "ci.yml");
   const buildTest = ci.split("\n  build-test:")[1] ?? "";

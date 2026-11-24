@@ -38,7 +38,11 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json",
-    "start": "node dist/cli.js",
+    "test": "vitest run --root ../.. --config ../../vitest.config.ts packages/wechat-daemon",
+    "test:watch": "vitest --root ../.. --config ../../vitest.config.ts packages/wechat-daemon",
+    "dev": "tsx src/cli.ts",
+    "prestart": "npm run build",
+    "start": "node dist/cli.js start",
     "prepack": "node ../../scripts/prepack-guard.mjs ."
   },
   "dependencies": {

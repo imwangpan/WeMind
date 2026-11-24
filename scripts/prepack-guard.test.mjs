@@ -41,7 +41,8 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe("prepack-guard：产物自包含", () => {
+// 每个用例都 spawn 一个 node 进程；全量并发时（127 个 worker）冷启动会超过默认 5s。
+describe("prepack-guard：产物自包含", { timeout: 15_000 }, () => {
   it("自包含产物通过", () => {
     const r = runGuard(makePkg());
     expect(r.status).toBe(0);
