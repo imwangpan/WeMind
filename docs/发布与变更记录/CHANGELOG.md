@@ -22,6 +22,10 @@
 - **登录二维码改用 `uqr` + 自编码 PNG，`qrcode` 从依赖里移除（2026-11-23）**：原来 `qrcode@1.5.4` 为了它自己的 CLI 拖着 yargs@15，整棵子树 29 个包、约 1.66MB，而两个包只用到 `toFile` + `toString`。现在矩阵与纠错交给 `uqr`（0 依赖，只取 `encode` + `renderUnicodeCompact`，tree-shake 后约 20KB），PNG 由 core 新增的 `qr.ts` 用 `node:zlib` 直接编码（8 位灰度，真正被解码验证过）；`uqr` 内联进两个发布包，用户不再需要多装任何东西。`@wemind/cli` 的运行时依赖只剩 `silk-wasm`。扫码用的文件同时改名：`qrcode.png` / `qrcode.txt` → **`login-code.png` / `login-code.txt`**（登录、登出时连旧名残留一起清理）。`qr.test.ts` 用 jsqr 把 PNG 与终端码真扫一遍，断言解出的就是原文。
 - **`任务列表` 的说明改成一句正常描述（2026-11-19）**：`brief` 原写 `#编号 / 状态（带图标）/ 最近输出 / agent / 轮次 / 时长`，会原样出现在微信「帮助」与 `wemind help` 里；改为「列出所有任务：编号、状态、最近输出、agent、轮次、时长」。
 
+### Fixed
+
+- **CI 上真实系统调用类测试的默认 5s 不够（2026-11-24）**：`proc-identity.test.ts` 的「另一个我们自己进程 → 返回 pid」在 windows-latest 上以 `TestTimeoutError: Test timed out in 5000ms` 失败（同一次 ubuntu 通过）。原因不是逻辑：Windows 每次身份判定都要起一次 PowerShell 查 CIM（正常 1–2s），CI runner 只有 4 核、127 个测试文件并发时进程启动会排队。现在 `vitest.config.ts` 的 `testTimeout` 统一为 15s，该文件两组真实系统调用用例单独给 20s（`OS_QUERY_TIMEOUT`），纯逻辑用例仍按默认预算；失败仍然会失败，只是不再因为机器慢而误报。
+
 ## [2.2.0] 收件人模式：worker 收发非文本消息 · 任务列表与状态整理（2026-11-18）
 
 > 把图片/文件/视频交给 worker，也让 worker 的结果能发回图片/文件/视频；顺带把任务列表改成 markdown 表格、状态「已中断」改名「待继续」、新增 `全部继续` / `全部结束`。

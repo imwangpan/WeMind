@@ -159,7 +159,12 @@ describe("identifyProcess（三态身份）", () => {
   });
 });
 
-describe("findOtherOurProcess（同账号单实例判定）", () => {
+// Windows 上每次身份查询都要起一次 PowerShell（CIM），正常 1–2s；CI 的 windows-latest 只有 4 核，
+// 并发跑 127 个测试文件时进程启动会排队，2026-11-24 的 CI 在这里撞到默认 5s（ubuntu 通过）。
+// 这两组用例是真实系统调用，给它们单独的时间预算；纯逻辑用例仍用默认值。
+const OS_QUERY_TIMEOUT = 20_000;
+
+describe("findOtherOurProcess（同账号单实例判定）", { timeout: OS_QUERY_TIMEOUT }, () => {
   it("null/自己 → 没有别的实例", () => {
     expect(findOtherOurProcess(null, 1, CLI_PID_MARKERS)).toEqual({
       pid: null,
@@ -181,28 +186,32 @@ describe("findOtherOurProcess（同账号单实例判定）", () => {
   });
 });
 
-describe("isAlive / commandLines / isOurProcess（真实系统调用）", () => {
-  it("isAlive：自己活着；非法/不存在的 pid 为否", () => {
-    expect(isAlive(process.pid)).toBe(true);
-    expect(isAlive(NEVER)).toBe(false);
-    expect(isAlive(0)).toBe(false);
-    expect(isAlive(-1)).toBe(false);
-    expect(isAlive(null)).toBe(false);
-    expect(isAlive(undefined)).toBe(false);
-  });
+describe(
+  "isAlive / commandLines / isOurProcess（真实系统调用）",
+  { timeout: OS_QUERY_TIMEOUT },
+  () => {
+    it("isAlive：自己活着；非法/不存在的 pid 为否", () => {
+      expect(isAlive(process.pid)).toBe(true);
+      expect(isAlive(NEVER)).toBe(false);
+      expect(isAlive(0)).toBe(false);
+      expect(isAlive(-1)).toBe(false);
+      expect(isAlive(null)).toBe(false);
+      expect(isAlive(undefined)).toBe(false);
+    });
 
-  it("commandLines：能查到自己与 dummy；不存在的 pid 查不到（不白起进程）", () => {
-    const { lines, error } = commandLines([process.pid, dummyPid, NEVER]);
-    expect(error).toBeNull();
-    expect(lines.get(process.pid)?.toLowerCase()).toContain("node");
-    expect(lines.has(dummyPid)).toBe(true);
-    expect(lines.has(NEVER)).toBe(false);
-  });
+    it("commandLines：能查到自己与 dummy；不存在的 pid 查不到（不白起进程）", () => {
+      const { lines, error } = commandLines([process.pid, dummyPid, NEVER]);
+      expect(error).toBeNull();
+      expect(lines.get(process.pid)?.toLowerCase()).toContain("node");
+      expect(lines.has(dummyPid)).toBe(true);
+      expect(lines.has(NEVER)).toBe(false);
+    });
 
-  it("isOurProcess：活着但不是我们的进程 → false（重启后误杀/误判的根因场景）", () => {
-    expect(isAlive(dummyPid)).toBe(true);
-    expect(isOurProcess(dummyPid, CLI_PID_MARKERS)).toBe(false);
-    expect(isOurProcess(dummyPid, brainPidMarkers("opencode", ["acp"]))).toBe(false);
-    expect(isOurProcess(NEVER, CLI_PID_MARKERS)).toBe(false);
-  });
-});
+    it("isOurProcess：活着但不是我们的进程 → false（重启后误杀/误判的根因场景）", () => {
+      expect(isAlive(dummyPid)).toBe(true);
+      expect(isOurProcess(dummyPid, CLI_PID_MARKERS)).toBe(false);
+      expect(isOurProcess(dummyPid, brainPidMarkers("opencode", ["acp"]))).toBe(false);
+      expect(isOurProcess(NEVER, CLI_PID_MARKERS)).toBe(false);
+    });
+  },
+);

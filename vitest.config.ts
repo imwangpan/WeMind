@@ -11,6 +11,10 @@ export default defineConfig({
     // （全量 29.2s vs 32.1s，126 文件 / 1400+ 用例）。isolate 不能关：关掉后模块级 env 常量
     // 与 vi.mock 会跨文件残留，复现时 12–39 个用例失败、且失败集合随 worker 调度变化，所以只换池、不碰隔离。
     pool: "threads",
+    // 默认 5s 在 CI 的 windows-latest 上不够：127 个测试文件并发时，真实系统调用（PowerShell CIM
+    // 查询、spawn 子进程）会被排队拖慢——2026-11-24 的 CI 里 proc-identity 就因此超时（同一次
+    // ubuntu 通过），此前 prepack-guard 也撞过一次 5.4s。放到 15s 后仍会失败，只是不再因为机器慢而误报。
+    testTimeout: 15_000,
     setupFiles: ["./vitest.setup.ts"],
     include: ["packages/**/*.test.ts", "scripts/**/*.test.mjs"],
     exclude: [
