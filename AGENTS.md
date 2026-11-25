@@ -139,6 +139,8 @@ DOCS_BASE=/WeMind/ DOCS_CLEAN_URLS=false npm run build   # GitHub Pages 产物�
 
 21. **面向用户的文案用日常口语，不要直译腔和内部术语**：微信里的回执、提示、命令说明是用户唯一能看到的东西；`把停在半路的任务全部拉起`、`收掉发`、`兜底`、`落盘`、`口径` 这类词，写的人不觉得，读的人要停一下（前三例来自 {{PHONE_tbgr8n6u}} 的真实反馈）。写或改文案时先自问「不熟悉这个项目的人看得懂吗」，宁可多一个短句，也别生造。**守卫**：`scripts/check-user-copy.mjs`（在 `npm run verify` 里跑，禁用词表 `BANNED` 每条都带「该怎么改」；注释、日志、`copy-ok: <理由>` 豁免），用例 `scripts/check-user-copy.test.mjs`。文案改动要同步改断言——`toContain` 的句子就是验收标准。
 
+22. **不要假定运行时一定是 Node，但也不要把 Bun 当受支持运行时（2026-11-25）**：代码本身在 Bun 里能跑（无原生模块），但官方只支持 Node ≥ 24.11——别在文档/回执里承诺「支持 Bun」，也别给包加第二个 bin（npm 按包名推断可执行文件：`@wemind/cli` 多挂一个 bin，`npx -y @wemind/cli` 就会 `could not determine executable to run`），`bun x vitest` 的 worker 仍然是 Node、不能当 Bun 的回归。三处已知差异已各自兼容，改这几处时别退回去：① `process.versions.node` 在 Bun 下是**伪装值**（1.4.4 报 26.3.0），判断真实运行时看 `process.versions.bun`（`version.ts` 的 `runtimeLabel()`）；② `SourceMap.findOrigin()` 在 Node 返回 `lineNumber`/`columnNumber`、在 Bun 返回 `line`/`column`（`stack-map.ts` 的 `SourceOrigin` 两种都接）；③ pm2 的 `interpreter` 用 `stableExecPath(process.execPath)`，写死 `"node"` 会把从别的运行时起的 daemon 悄悄换回去。**守卫**：`stack-map.test.ts`、`version.test.ts`、`pm2-runner.test.ts`。
+
 > **日志与错误定位的三个边界（2026-11-11 审查修复）**：① `stack-map.ts` 按**完整路径**认自己的产物——npm 全局安装 / npx 的路径含 `node_modules` 同样映射，同名的第三方文件不误伤；不要再用目录名启发式。② `run-daemon.ps1 -Mode shell` 直接写 `daemon.log` 的包装行也必须带 `[INFO]/[WARN]/[ERROR]`（否则 `--errors` 认不出「大脑配置错误」「连续崩溃」）。③ 回调式组件（`SendPipeline` / task 与 control 收件箱 / `AcpHost`）的日志第一参数是级别，不要整块绑成 `log.info`。守卫：`stack-map.test.ts`、`run-daemon-script.test.ts`、`leveled-log.test.ts`。
 
 ---

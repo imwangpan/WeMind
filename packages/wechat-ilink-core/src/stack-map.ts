@@ -11,12 +11,20 @@ import { fileURLToPath } from "node:url";
 /** 匹配堆栈里的 `<路径>/文件名.js:行:列`；是否属于本产物由完整路径判定，不靠目录名猜。 */
 const STACK_FRAME = /((?:file:\/\/)?[^\s()]*[/\\])?([\w.-]+\.js):(\d+):(\d+)/g;
 
+/** `findOrigin()` 的返回：Node 给 `lineNumber`/`columnNumber`，Bun 的 `SourceMap` 给 `line`/`column`（同一语义、字段名不同，1.4.4 实测）。 */
+export interface SourceOrigin {
+  fileName?: string;
+  /** Node 用的字段。 */
+  lineNumber?: number;
+  /** Bun 用的字段。 */
+  line?: number;
+  /** Bun 的列号字段（Node 对应 `columnNumber`，这里用不到，只求类型上放行）。 */
+  column?: number;
+}
+
 /** SourceMap 的最小可测接口（生产用 node:module 的 SourceMap，测试用假对象）。 */
 export interface StackSourceMap {
-  findOrigin(
-    line: number,
-    column: number,
-  ): { fileName?: string; lineNumber?: number } | Record<string, never>;
+  findOrigin(line: number, column: number): SourceOrigin | undefined;
 }
 
 /**
@@ -36,17 +44,16 @@ export function mapStackToSource(
     STACK_FRAME,
     (frame, prefix: string | undefined, file: string, line: string, column: string) => {
       if (!isOwnFrame(prefix, file, bundle, bundleName)) return frame;
-      let origin: { fileName?: string; lineNumber?: number };
+      let origin: SourceOrigin | undefined;
       try {
-        origin = map.findOrigin(Number(line), Number(column)) as {
-          fileName?: string;
-          lineNumber?: number;
-        };
+        origin = map.findOrigin(Number(line), Number(column));
       } catch {
         return frame;
       }
-      if (!origin?.fileName || origin.lineNumber === undefined) return frame;
-      return `${origin.fileName.replace(/^(\.\.\/)+/, "")}:${origin.lineNumber}`;
+      // 两种运行时都会走到这里：只认其中一种会让 Bun 下的堆栈停在 dist 行号。
+      const originLine = origin?.lineNumber ?? origin?.line;
+      if (!origin?.fileName || originLine === undefined) return frame;
+      return `${origin.fileName.replace(/^(\.\.\/)+/, "")}:${originLine}`;
     },
   );
 }
