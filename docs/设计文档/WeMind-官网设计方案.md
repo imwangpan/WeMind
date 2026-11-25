@@ -218,7 +218,7 @@ M3 实际导航在 M2 最小集上扩展，不挂空链接：
 - 右侧自定义语言开关（`中文 | EN`）
 - 首页底部：文档、GitHub、免责声明；英文首页同样全英文
 
-中文 sidebar 分组为「开始 / 使用 / 接入 / 参考 / 常见问题」，共 14 个链接、5 组；英文 sidebar 只列 7 篇正文 + Docs Home。中文 sidebar 是跨 `/guide`、`/agents`、`/reference`、`/faq` 共用的一份完整侧栏，不按路由缩成单组；所有分组 `collapsed: false`，默认展开、标题可点击折叠；当前页用浅松绿底、左侧松绿竖线、松绿 600 字重高亮。移动端「本页目录」点击任一子项后自动收起。桌面端侧栏顶部右侧提供整体收起/展开按钮（`SidebarToggle`），点「«」图标后侧栏整体滑出，左边缘留一个 30×30 的「»」页签可重新展开；状态写入 `localStorage` 的 `wemind-sidebar-collapsed`，并在 `<head>` 内联脚本里先读，避免刷新时侧栏先展开再收起；首页 `sidebar: false` 时不渲染。默认主题自带的语言菜单隐藏，只保留一个自定义 `LocaleSwitch`；英文文档页的默认主题文案（`Skip to content`、`Return to top`、`Change language`、`Main Navigation`、`On this page` 等）在 `config.ts` 的 `THEME_LABELS` 中逐项覆盖。
+中文 sidebar 分组为「开始 / 使用 / 接入 / 参考 / 常见问题」，共 14 个链接、5 组；英文 sidebar 只列 7 篇正文 + Docs Home。中文 sidebar 是跨 `/guide`、`/agents`、`/reference`、`/faq` 共用的一份完整侧栏，不按路由缩成单组；所有分组 `collapsed: false`，默认展开、标题可点击折叠；当前页用浅松绿底、左侧松绿竖线、松绿 600 字重高亮。移动端「本页目录」点击任一子项后自动收起。桌面端侧栏底部右侧提供整体收起/展开按钮（`SidebarToggle`），避免与首组标题的折叠箭头重叠，点「«」图标后侧栏整体滑出，左边缘留一个 30×30 的「»」页签可重新展开；状态写入 `localStorage` 的 `wemind-sidebar-collapsed`，并在 `<head>` 内联脚本里先读，避免刷新时侧栏先展开再收起；首页 `sidebar: false` 时不渲染。默认主题自带的语言菜单隐藏，只保留一个自定义 `LocaleSwitch`；英文文档页的默认主题文案（`Skip to content`、`Return to top`、`Change language`、`Main Navigation`、`On this page` 等）在 `config.ts` 的 `THEME_LABELS` 中逐项覆盖。
 
 ### 4.3 公开文档范围
 
@@ -797,7 +797,7 @@ Q4 已定「先用免费子域」。以后买域名时：
 | 2026-11-25 | M2 首页落地          | 五幕、手机 mockup、三 tab 假 demo、docs 入口、中英/base 验收               |
 | 2026-11-25 | M3 文档落地          | 15 篇中文 + 7 篇英文；nav/sidebar 扩展；构建/抽检通过；不含内部文档        |
 | 2026-11-25 | 侧栏体验修复         | 全站共用完整中文侧栏；分组可折叠；当前页高亮；移动端本页目录点后收起       |
-| 2026-11-25 | 整体侧栏收起/展开    | 侧栏顶部按钮；收起后左边缘展开页签；localStorage 记忆；首页/移动端不显示   |
+| 2026-11-25 | 整体侧栏收起/展开    | 侧栏底部按钮；收起后左边缘展开页签；localStorage 记忆；首页/移动端不显示   |
 | 2026-11-25 | GitHub Pages 部署    | 独立 workflow；`base=/WeMind/`、`cleanUrls=false`；PR 只构建，main 部署    |
 
 ---

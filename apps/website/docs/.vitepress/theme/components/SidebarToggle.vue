@@ -37,9 +37,10 @@ onMounted(syncFromDocument)
 
 <style scoped>
 .sidebar-toggle {
-  position: absolute;
-  top: calc(var(--vp-nav-height) + 8px);
-  right: 32px;
+  position: fixed;
+  bottom: 20px;
+  left: calc(var(--vp-sidebar-width) - 62px);
+  z-index: 30;
   display: flex;
   width: 30px;
   height: 30px;
@@ -79,6 +80,7 @@ onMounted(syncFromDocument)
 .sidebar-toggle--floating {
   position: fixed;
   top: 96px;
+  bottom: auto;
   left: 0;
   right: auto;
   z-index: 40;
