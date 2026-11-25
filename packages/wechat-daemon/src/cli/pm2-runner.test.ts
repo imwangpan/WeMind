@@ -35,7 +35,7 @@ describe("pm2 app 声明", () => {
     expect(d.script).toBe("C:\\Program Files\\wemind\\cli.js");
     // args 是字符串（pm2 的声明格式），不是 `-- daemon` 分隔符
     expect(d.args).toBe("daemon");
-    // 解释器跟当前进程一致（Node 下是 node，从 `wemind bun` 启动时是 bun）——写死 "node" 会把 Bun 用户悄悄换回 Node。
+    // 解释器跟当前进程同一个可执行文件（Node 下就是 node）：写死 "node" 会把从别的运行时启动的 daemon 悄悄换回去。
     expect(d.interpreter).toBe(stableExecPath(process.execPath));
   });
 
