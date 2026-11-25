@@ -1,0 +1,292 @@
+:root {
+  --wm-paper: #f6f1e7;
+  --wm-paper-deep: #ece3d2;
+  --wm-surface: #fffdf8;
+  --wm-ink: #26302b;
+  --wm-muted: #6b6f66;
+  --wm-line: #d8cdbb;
+  --wm-pine: #4f6f52;
+  --wm-clay: #b45f3f;
+  --wm-sage: #e7eddf;
+  --wm-serif:
+    'Iowan Old Style', 'Palatino Linotype', 'Songti SC', 'Noto Serif CJK SC', 'Source Han Serif SC',
+    Georgia, serif;
+  --wm-sans:
+    'Avenir Next', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --wm-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+
+  --vp-c-bg: var(--wm-paper);
+  --vp-c-bg-alt: var(--wm-paper-deep);
+  --vp-c-bg-elv: var(--wm-surface);
+  --vp-c-bg-soft: #f1eadc;
+  --vp-c-text-1: var(--wm-ink);
+  --vp-c-text-2: var(--wm-muted);
+  --vp-c-text-3: #8a8f82;
+  --vp-c-divider: var(--wm-line);
+  --vp-c-border: #d6cbb8;
+  --vp-c-gutter: #e8dfcf;
+  --vp-c-brand-1: var(--wm-pine);
+  --vp-c-brand-2: #3f5b43;
+  --vp-c-brand-3: #6f8a6d;
+  --vp-c-brand-soft: rgba(79, 111, 82, 0.12);
+  --vp-c-tip-1: var(--wm-pine);
+  --vp-c-tip-soft: rgba(79, 111, 82, 0.1);
+  --vp-c-warning-1: var(--wm-clay);
+  --vp-c-warning-soft: rgba(180, 95, 63, 0.1);
+
+  --vp-font-family-base: var(--wm-sans);
+  --vp-font-family-mono: var(--wm-mono);
+  --vp-code-font-size: 0.875em;
+  --vp-nav-height: 64px;
+}
+
+html {
+  color-scheme: light;
+  background: var(--wm-paper);
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(79, 111, 82, 0.055), transparent 32rem),
+    radial-gradient(circle at 88% 8%, rgba(180, 95, 63, 0.04), transparent 26rem), var(--wm-paper);
+  color: var(--wm-ink);
+}
+
+::selection {
+  background: rgba(79, 111, 82, 0.2);
+}
+
+.VPNavBar {
+  border-bottom: 1px solid var(--wm-line);
+  background: rgba(246, 241, 231, 0.9);
+  backdrop-filter: blur(12px);
+}
+
+.VPNavBar .divider-line {
+  background: var(--wm-line);
+}
+
+.VPNavBarTitle .title {
+  font-family: var(--wm-serif);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.VPNavBarMenuLink {
+  font-size: 13px;
+}
+
+.VPSidebar {
+  border-right: 1px solid var(--wm-line);
+  background: var(--wm-paper);
+}
+
+.VPSidebarItem .text {
+  font-size: 13px;
+}
+
+/* Make the current page unmistakable in the sidebar. VitePress only draws
+   the level-2+ indicator by default, which is easy to miss on this paper
+   background. */
+.VPSidebarItem.level-1.is-active > .item,
+.VPSidebarItem.level-2.is-active > .item,
+.VPSidebarItem.level-3.is-active > .item {
+  margin-inline: -8px;
+  padding-inline: 8px;
+  border-radius: 4px;
+  background: var(--vp-c-brand-soft);
+  box-shadow: inset 2px 0 0 var(--vp-c-brand-1);
+}
+
+.VPSidebarItem.level-1.is-active > .item > .link > .text,
+.VPSidebarItem.level-1.is-active > .item > .text,
+.VPSidebarItem.level-2.is-active > .item > .link > .text,
+.VPSidebarItem.level-2.is-active > .item > .text,
+.VPSidebarItem.level-3.is-active > .item > .link > .text,
+.VPSidebarItem.level-3.is-active > .item > .text {
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
+}
+
+.VPSidebarItem.level-1.is-link:not(.is-active) > .item:hover,
+.VPSidebarItem.level-2.is-link:not(.is-active) > .item:hover,
+.VPSidebarItem.level-3.is-link:not(.is-active) > .item:hover {
+  margin-inline: -8px;
+  padding-inline: 8px;
+  border-radius: 4px;
+  background: var(--vp-c-bg-soft);
+}
+
+.VPSidebarItem.level-1.is-active > .item > .indicator,
+.VPSidebarItem.level-2.is-active > .item > .indicator,
+.VPSidebarItem.level-3.is-active > .item > .indicator {
+  background-color: var(--vp-c-brand-1);
+}
+
+/* Collapse the whole sidebar on desktop. The preference is read in an inline
+   head script, so a collapsed sidebar does not flash open on reload. */
+@media (min-width: 60rem) {
+  html[data-sidebar-collapsed='true'] .VPSidebar {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateX(-100%);
+  }
+
+  html[data-sidebar-collapsed='true'] .VPContent.has-sidebar,
+  html[data-sidebar-collapsed='true'] .VPLocalNav.has-sidebar {
+    padding-inline-start: 0;
+  }
+
+  html[data-sidebar-collapsed='true'] .VPNavBar.has-sidebar .title,
+  html[data-sidebar-collapsed='true'] .VPNavBarTitle.has-sidebar {
+    min-width: 0;
+    max-width: none;
+  }
+
+  html[data-sidebar-collapsed='true'] .VPNavBar.has-sidebar .divider::before {
+    display: none;
+  }
+
+  html[data-sidebar-collapsed='true'] .VPLocalNavOutlineDropdown .items {
+    inset-inline-start: 2rem;
+  }
+}
+
+@media (min-width: 90rem) {
+  html[data-sidebar-collapsed='true'] .VPContent.has-sidebar {
+    padding-inline-start: calc((100% - var(--vp-layout-max-width)) / 2);
+  }
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.vp-doc h4 {
+  font-family: var(--wm-serif);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.vp-doc h1 {
+  font-size: 36px;
+}
+
+.vp-doc h2 {
+  margin-top: 44px;
+  border-top-color: var(--wm-line);
+}
+
+.vp-doc a {
+  color: var(--wm-pine);
+  text-decoration-color: rgba(79, 111, 82, 0.35);
+  text-underline-offset: 3px;
+}
+
+.vp-doc a:hover {
+  color: var(--wm-clay);
+}
+
+.vp-doc blockquote {
+  border-left-color: var(--wm-clay);
+  background: rgba(180, 95, 63, 0.045);
+}
+
+.vp-doc code {
+  border-radius: 3px;
+  background: #ece4d5;
+}
+
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--wm-line);
+  border-radius: 4px;
+  background: #f1eadc;
+}
+
+.VPFooter {
+  border-top-color: var(--wm-line);
+  background: var(--wm-paper);
+}
+
+/* The custom LocaleSwitch is the only language switch. */
+.VPNavBarTranslations,
+.VPNavBarExtra .translations,
+.VPNavScreen .translations {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .VPNavBar .locale-switch,
+  .VPNavBar .nav-docs-link {
+    display: none;
+  }
+}
+
+/* The head script sets this before first paint when a saved English visitor
+   lands on /. Keep the page out of the way until Lingui has switched, with a
+   1s timeout fallback in the same script. */
+.home-skeleton {
+  display: none;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 96px 24px 64px;
+}
+
+html[data-locale-pending='en'] .home-skeleton {
+  display: block;
+}
+
+html[data-locale-pending='en'] .home-page {
+  visibility: hidden;
+}
+
+.skeleton-line {
+  display: block;
+  height: 18px;
+  margin: 12px 0;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--vp-c-bg-soft) 25%,
+    var(--vp-c-bg-alt) 37%,
+    var(--vp-c-bg-soft) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+.skeleton-line--eyebrow {
+  width: 180px;
+  height: 12px;
+}
+
+.skeleton-line--title {
+  width: 80%;
+  height: 56px;
+  margin: 24px 0;
+}
+
+.skeleton-line--lead {
+  width: 100%;
+  height: 22px;
+}
+
+.skeleton-line--short {
+  width: 62%;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line {
+    animation: none;
+  }
+}

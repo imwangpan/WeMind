@@ -1,0 +1,380 @@
+msgid ""
+msgstr ""
+"POT-Creation-Date: 2026-11-24 23:56+0800\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: @lingui/cli\n"
+"Language: en\n"
+
+#: docs/.vitepress/theme/data/story.ts:14
+msgid "01 · 发一句话"
+msgstr "01 · Say it in WeChat"
+
+#: docs/.vitepress/theme/data/story.ts:20
+msgid "02 · 接住消息"
+msgstr "02 · WeMind catches it"
+
+#: docs/.vitepress/theme/data/story.ts:26
+msgid "03 · 换一个 Agent"
+msgstr "03 · Switch agents"
+
+#: docs/.vitepress/theme/data/story.ts:32
+msgid "04 · 开始干活"
+msgstr "04 · Get to work"
+
+#: docs/.vitepress/theme/data/story.ts:38
+msgid "05 · 回到微信"
+msgstr "05 · Back to WeChat"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:93
+msgid "128 KB · 已完成"
+msgstr "128 KB · Done"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:33
+msgid "5 分钟开始"
+msgstr "Get started in 5 minutes"
+
+#: docs/.vitepress/theme/components/ScrollStory.vue:43
+msgid "A MESSAGE'S JOURNEY"
+msgstr "A MESSAGE'S JOURNEY"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:9
+msgid "Agent 列表"
+msgstr "Agent roster"
+
+#: docs/.vitepress/theme/data/story.ts:33
+msgid "Agent 开始干活"
+msgstr "The agent gets to work"
+
+#: docs/.vitepress/theme/data/story.ts:28
+msgid "Claude Code、Codex、Gemini、Kiro、Pi……想用哪个，随时换。微信入口不变。"
+msgstr "Claude Code, Codex, Gemini, Kiro, Pi…use whichever you like, whenever you like. The WeChat entry stays the same."
+
+#: docs/.vitepress/theme/components/SiteFooter.vue:20
+msgid "WeMind 不是腾讯或微信官方产品；相关名称归各自权利人所有。"
+msgstr "WeMind is not an official Tencent or WeChat product. All related names belong to their respective owners."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:37
+msgid "WeMind 已接收"
+msgstr "WeMind has it"
+
+#: docs/.vitepress/theme/data/story.ts:21
+msgid "WeMind 接住这条消息"
+msgstr "WeMind catches the message"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:18
+msgid "一个微信入口，"
+msgstr "One WeChat entry,"
+
+#: docs/.vitepress/theme/components/ScrollStory.vue:44
+msgid "一条消息，走完五步"
+msgstr "One message. Five steps."
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:88
+msgid "三个固定脚本，按时间出现。只是演示，不会真的发消息。"
+msgstr "Three fixed scripts, revealed over time. A demo only—nothing is actually sent."
+
+#: docs/.vitepress/theme/data/story.ts:16
+msgid "不打开终端，不装新 App。微信就是入口。"
+msgstr "No terminal, no new app. WeChat is the interface."
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:36
+msgid "两种形态不能同时跑：同一个微信 bot 只能有一个程序收消息，否则会互相抢消息。"
+msgstr "Don't run both forms at once: one WeChat bot can only have one program receiving messages, or they'll fight over them."
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:9
+msgid "两种接法，选顺手的"
+msgstr "Two ways in. Pick what fits."
+
+#: docs/.vitepress/theme/components/HomeHero.vue:51
+msgid "主聊"
+msgstr "Main chat"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:44
+msgid "今天谁接手？"
+msgstr "Who's taking over today?"
+
+#: docs/.vitepress/theme/components/ScrollStory.vue:45
+msgid "从微信到 Agent，再回到微信。你看到的每一步，都是本机在跑。"
+msgstr "From WeChat to the agent, and back. Every step you see runs on your machine."
+
+#: docs/.vitepress/theme/data/demo.ts:68
+msgid "任务 #12 · 完成"
+msgstr "Task #12 · Done"
+
+#: docs/.vitepress/theme/data/demo.ts:52
+msgid "关键点：恢复会话时优先用原 cwd；失败就报错，不要偷偷新建。"
+msgstr "Key point: when resuming a session, use the original cwd first; if that fails, report the error—don't quietly create a new one."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:29
+msgid "刚刚"
+msgstr "Just now"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:101
+msgid "发消息…"
+msgstr "Message…"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:43
+msgid "只处理白名单里的发送者"
+msgstr "Only allowlisted senders are handled"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:11
+msgid "同一个微信入口，可以接进已有客户端，也可以让 WeMind 常驻本机。"
+msgstr "One WeChat entry can plug into your existing client, or let WeMind run on your machine."
+
+#: docs/.vitepress/theme/components/HomeHero.vue:36
+msgid "在 GitHub 查看"
+msgstr "View on GitHub"
+
+#: docs/.vitepress/theme/data/story.ts:15
+msgid "在微信里，说一句话"
+msgstr "Say it in WeChat"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:42
+msgid "在本机运行，不经过云端中转"
+msgstr "Runs on your machine—no cloud relay"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:96
+msgid "完成"
+msgstr "Done"
+
+#: docs/.vitepress/theme/data/demo.ts:63
+msgid "已交给任务 Agent。微信这边可以继续聊，跑完会回来。"
+msgstr "Handed off to the task agent. Keep chatting here in WeChat; it'll come back when it's done."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:40
+msgid "已确认是你"
+msgstr "It's you—confirmed"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:31
+#: docs/.vitepress/theme/data/demo.ts:29
+msgid "帮我把 docs 里的接入方案整理成一页说明。"
+msgstr "Summarize the integration docs into a one-page brief."
+
+#: docs/.vitepress/theme/components/HomeHero.vue:56
+#: docs/.vitepress/theme/components/HomeHero.vue:66
+msgid "待命"
+msgstr "Standing by"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:23
+msgid "微信"
+msgstr "WeChat"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:16
+msgid "微信 × AI Agent"
+msgstr "WeChat × AI Agent"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:58
+msgid "微信不动，Agent 可以换。"
+msgstr "WeChat stays put. Agents can change."
+
+#: docs/.vitepress/theme/components/HomeHero.vue:21
+#: docs/.vitepress/theme/components/SiteFooter.vue:13
+msgid "微信不用换，Agent 随心换。"
+msgstr "Keep WeChat. Switch agents."
+
+#: docs/.vitepress/theme/components/HomeHero.vue:69
+msgid "微信入口只有一个，Agent 可以换。"
+msgstr "One WeChat entry. Any agent can take over."
+
+#: docs/.vitepress/theme/data/story.ts:40
+msgid "总结、图片、文件、视频都能回；不用切回终端，也不用另开一个 App。"
+msgstr "Summaries, images, files, and videos all come back—no terminal, no second app."
+
+#: docs/.vitepress/theme/data/demo.ts:18
+msgid "总结文档"
+msgstr "Summarize docs"
+
+#: docs/.vitepress/theme/data/demo.ts:59
+msgid "把这 12 个页面的链接检查一遍，慢一点没关系。"
+msgstr "Check the links on these 12 pages. No rush."
+
+#: docs/.vitepress/theme/data/story.ts:27
+msgid "换一个 Agent 接手"
+msgstr "Switch to another agent"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:61
+msgid "换好了。接下来由 Pi 接手。"
+msgstr "Switched. Pi will take it from here."
+
+#: docs/.vitepress/theme/components/HomeHero.vue:19
+msgid "接入任意 AI Agent"
+msgstr "connect any AI agent"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:92
+msgid "接入方案-一页说明.pdf"
+msgstr "integration-brief.pdf"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:20
+msgid "接进 Claude Desktop、Cursor、OpenCode 等客户端，由客户端收消息、生成回复。"
+msgstr "Plug into Claude Desktop, Cursor, OpenCode, and other clients; the client receives messages and writes replies."
+
+#: docs/.vitepress/theme/components/HomeHero.vue:29
+msgid "支持 CLI 与 ACP 的 AI Agent 均可接入，完整列表见文档。"
+msgstr "Any AI agent that supports both CLI and ACP can connect. See the docs for the full list."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:45
+msgid "收到，我先看看这条消息要做什么。"
+msgstr "Got it. Let me see what this message needs."
+
+#: docs/.vitepress/theme/data/demo.ts:33
+msgid "收到。我先读目录，再按「接入方式 / 配置 / 常见问题」整理。"
+msgstr "Got it. I'll read the directory first, then organize it as interface / config / FAQ."
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:44
+msgid "敏感文件会被拦下"
+msgstr "Sensitive files are blocked"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:74
+msgid "整理 3 个要点"
+msgstr "Pull out 3 key points"
+
+#: docs/.vitepress/theme/data/demo.ts:37
+msgid "整理好了：3 个要点，1 张流程图，末尾附了原文链接。"
+msgstr "Done: 3 key points, 1 flow diagram, with source links at the end."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:87
+msgid "整理好了：一页说明 + 3 个待办。"
+msgstr "Done: a one-page brief + 3 follow-ups."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:38
+msgid "文本 · 图片 · 文件 · 语音都能进"
+msgstr "Text, images, files, and voice all get in"
+
+#: docs/.vitepress/theme/data/story.ts:22
+msgid "文本、图片、文件、语音都能进；消息留在本机，不用交给云端中转。"
+msgstr "Text, images, files, and voice all get in; messages stay on your machine—no cloud relay."
+
+#: docs/.vitepress/theme/components/SiteFooter.vue:15
+msgid "文档"
+msgstr "Docs"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:39
+msgid "本机运行 · 不接云端中转"
+msgstr "Runs locally · no cloud relay"
+
+#: docs/.vitepress/theme/data/demo.ts:53
+msgid "来源 · ACP 文档"
+msgstr "Source · ACP docs"
+
+#: docs/.vitepress/theme/data/demo.ts:44
+msgid "查一下 ACP 协议里 session/resume 的用法。"
+msgstr "Look up how session/resume works in the ACP spec."
+
+#: docs/.vitepress/theme/data/demo.ts:48
+msgid "查到了 3 处相关说明，先看官方文档这一节。"
+msgstr "Found 3 relevant passages. Start with this section of the official docs."
+
+#: docs/.vitepress/theme/data/demo.ts:19
+msgid "查资料"
+msgstr "Research"
+
+#: docs/.vitepress/theme/data/demo.ts:67
+msgid "检查完成：2 个失效链接，已按页面列好。"
+msgstr "Done: 2 broken links, listed by page."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:67
+msgid "正在处理"
+msgstr "Working on it"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:128
+msgid "正在等第一条消息…"
+msgstr "Waiting for the first message…"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:40
+#: docs/.vitepress/theme/components/PhoneFrame.vue:41
+msgid "消息留在本机"
+msgstr "Messages stay on your machine"
+
+#: docs/.vitepress/theme/components/ScrollStory.vue:51
+msgid "演示界面 · 不连接真实微信"
+msgstr "Demo UI · not connected to real WeChat"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:11
+msgid "演示脚本"
+msgstr "Demo scripts"
+
+#: docs/.vitepress/theme/data/demo.ts:23
+msgid "演示脚本，不会真的发消息。"
+msgstr "Demo script—nothing is actually sent."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:78
+msgid "生成一页说明"
+msgstr "Generate a one-page brief"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:86
+msgid "看它怎么接住一句话"
+msgstr "See how it catches a message"
+
+#: docs/.vitepress/theme/data/story.ts:39
+msgid "结果回到微信"
+msgstr "The result comes back to WeChat"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:29
+msgid "让 WeMind 常驻本机，自己收消息、调用常驻 Agent，适合长期在线和远程任务。"
+msgstr "Keep WeMind running on your machine to receive messages and call your agent—good for always-on and remote tasks."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:70
+msgid "读取 docs/接入方案.md"
+msgstr "Read docs/integration.md"
+
+#: docs/.vitepress/theme/data/story.ts:34
+msgid "读文件、跑命令、查资料；长任务交给另一个 Agent，进度会回到微信。"
+msgstr "Read files, run commands, look things up; hand long tasks to another agent and watch progress back in WeChat."
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:46
+msgid "账号与数据按账号隔离"
+msgstr "Accounts and data are isolated per account"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:96
+msgid "跳过"
+msgstr "Skip"
+
+#: docs/.vitepress/theme/data/demo.ts:20
+msgid "远程任务"
+msgstr "Remote task"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:22
+msgid "适合：已经有常用客户端，只想补一个微信入口。"
+msgstr "Best for: you already have a client and just want a WeChat entry."
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:31
+msgid "适合：想要一个一直在线的微信助手。"
+msgstr "Best for: you want an always-on WeChat assistant."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:51
+msgid "选择接手的 Agent"
+msgstr "Choose an agent"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:93
+msgid "重播"
+msgstr "Replay"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:61
+msgid "长任务"
+msgstr "Long tasks"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:71
+msgid "长任务可以另派一个 Agent，微信这边照常聊。"
+msgstr "Long tasks can go to another agent; keep chatting in WeChat."
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:82
+msgid "长任务已交给另一个 Agent，微信这边可以继续聊。"
+msgstr "Long task handed to another agent. Keep chatting here in WeChat."
+
+#: docs/.vitepress/theme/data/demo.ts:38
+msgid "附件 · 接入方案-一页说明.pdf"
+msgstr "Attachment · integration-brief.pdf"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:45
+msgid "附件有大小上限"
+msgstr "Attachments have a size limit"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:45
+msgid "随时换"
+msgstr "Switch anytime"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:23
+msgid "随时随地，在微信里切换你想用的 Agent。今天 Claude Code，明天 Codex；长任务交给 Pi，一切尽在微信中！"
+msgstr "Switch agents in WeChat, anytime. Claude Code today, Codex tomorrow; hand long tasks to Pi—all inside WeChat."

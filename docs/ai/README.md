@@ -1,6 +1,6 @@
 # WeMind · AI 上下文包
 
-> **最后核对**：2026-11-23
+> **最后核对**：2026-11-25
 >
 > 这是给 AI agent（以及赶时间的人）的**压缩上下文**。目标：用 5–10 分钟建立正确心智模型，然后按任务跳到代码/配方，而不是通读 11 篇 repowiki。
 >
@@ -48,6 +48,8 @@ wechat-ilink-core  ◄──  wechat-mcp      （tsdown 内联 core，发布单�
 | `@wemind/cli`               | `packages/wechat-daemon`     | daemon + ACP 大脑 + worker + CLI                                                       | 已发布（命令 `wemind`）                                                                                      |
 
 依赖方向单向；两个发布包只依赖 core，mcp 与 daemon 互不耦合。**包名与命令名分离**：装 `@wemind/cli`，敲 `wemind`（`npx` 必须写全包名）。
+
+> **官网不是第四个包**：`apps/website` 是独立 app，有自己的 `package.json`/`package-lock.json`，不加入根 `workspaces`，Node 要求 >=24.11。它只消费 Markdown 和公开命令，不 import `packages/*` 的运行时代码（core 有 Node API，浏览器不能直接跑）。站点命令是 `cd apps/website && npm run dev|build|preview|check|test`；GitHub Pages 构建用 `DOCS_BASE=/WeMind/ DOCS_CLEAN_URLS=false`，设计见 [`设计文档/WeMind-官网设计方案.md`](../设计文档/WeMind-官网设计方案.md)。
 
 两个发布包都是单文件 ESM 产物且都带 `dist/*.js.map`（`tsdown` 的 `sourcemap: true`）。**Node 默认不应用 sourcemap、运行时调 `setSourceMapsEnabled` 也无效**（实测），所以不靠 Node：core 的 `describeError()` 在 CLI 三个 fatal 出口、daemon 的 `uncaughtException`/`unhandledRejection` 与业务循环四处打印 stack 的 catch、MCP 的 `main().catch` 与两个全局钩子自己读同目录的 map，把 `cli.js:NNNN` 改写成 `src/xxx.ts:NN`。map 与产物同一次构建、同一目录，**版本天然配对，不用问用户版本、不用设环境变量**；任何一步失败都原样返回，不影响主流程。管理命令的 fatal 输出用 `log.child("cli")` 打印 `[wemind/wechat-daemon/cli][ERROR] Error: …`（级别已在 `[ERROR]`，不再重复 `error:` 字面量；与 `[wemind/wechat-daemon]` / `…/watchdog` 同构，标明同一产物的第三个入口分支；打到终端、不进 `daemon.log`）；前缀由 logger 生成，调用点不自带。守卫：`stack-map.test.ts`、`scripts/core-entry.test.mjs`。
 

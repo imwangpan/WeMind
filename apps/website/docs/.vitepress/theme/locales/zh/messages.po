@@ -1,0 +1,380 @@
+msgid ""
+msgstr ""
+"POT-Creation-Date: 2026-11-24 23:56+0800\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: @lingui/cli\n"
+"Language: zh\n"
+
+#: docs/.vitepress/theme/data/story.ts:14
+msgid "01 · 发一句话"
+msgstr "01 · 发一句话"
+
+#: docs/.vitepress/theme/data/story.ts:20
+msgid "02 · 接住消息"
+msgstr "02 · 接住消息"
+
+#: docs/.vitepress/theme/data/story.ts:26
+msgid "03 · 换一个 Agent"
+msgstr "03 · 换一个 Agent"
+
+#: docs/.vitepress/theme/data/story.ts:32
+msgid "04 · 开始干活"
+msgstr "04 · 开始干活"
+
+#: docs/.vitepress/theme/data/story.ts:38
+msgid "05 · 回到微信"
+msgstr "05 · 回到微信"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:93
+msgid "128 KB · 已完成"
+msgstr "128 KB · 已完成"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:33
+msgid "5 分钟开始"
+msgstr "5 分钟开始"
+
+#: docs/.vitepress/theme/components/ScrollStory.vue:43
+msgid "A MESSAGE'S JOURNEY"
+msgstr "A MESSAGE'S JOURNEY"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:9
+msgid "Agent 列表"
+msgstr "Agent 列表"
+
+#: docs/.vitepress/theme/data/story.ts:33
+msgid "Agent 开始干活"
+msgstr "Agent 开始干活"
+
+#: docs/.vitepress/theme/data/story.ts:28
+msgid "Claude Code、Codex、Gemini、Kiro、Pi……想用哪个，随时换。微信入口不变。"
+msgstr "Claude Code、Codex、Gemini、Kiro、Pi……想用哪个，随时换。微信入口不变。"
+
+#: docs/.vitepress/theme/components/SiteFooter.vue:20
+msgid "WeMind 不是腾讯或微信官方产品；相关名称归各自权利人所有。"
+msgstr "WeMind 不是腾讯或微信官方产品；相关名称归各自权利人所有。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:37
+msgid "WeMind 已接收"
+msgstr "WeMind 已接收"
+
+#: docs/.vitepress/theme/data/story.ts:21
+msgid "WeMind 接住这条消息"
+msgstr "WeMind 接住这条消息"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:18
+msgid "一个微信入口，"
+msgstr "一个微信入口，"
+
+#: docs/.vitepress/theme/components/ScrollStory.vue:44
+msgid "一条消息，走完五步"
+msgstr "一条消息，走完五步"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:88
+msgid "三个固定脚本，按时间出现。只是演示，不会真的发消息。"
+msgstr "三个固定脚本，按时间出现。只是演示，不会真的发消息。"
+
+#: docs/.vitepress/theme/data/story.ts:16
+msgid "不打开终端，不装新 App。微信就是入口。"
+msgstr "不打开终端，不装新 App。微信就是入口。"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:36
+msgid "两种形态不能同时跑：同一个微信 bot 只能有一个程序收消息，否则会互相抢消息。"
+msgstr "两种形态不能同时跑：同一个微信 bot 只能有一个程序收消息，否则会互相抢消息。"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:9
+msgid "两种接法，选顺手的"
+msgstr "两种接法，选顺手的"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:51
+msgid "主聊"
+msgstr "主聊"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:44
+msgid "今天谁接手？"
+msgstr "今天谁接手？"
+
+#: docs/.vitepress/theme/components/ScrollStory.vue:45
+msgid "从微信到 Agent，再回到微信。你看到的每一步，都是本机在跑。"
+msgstr "从微信到 Agent，再回到微信。你看到的每一步，都是本机在跑。"
+
+#: docs/.vitepress/theme/data/demo.ts:68
+msgid "任务 #12 · 完成"
+msgstr "任务 #12 · 完成"
+
+#: docs/.vitepress/theme/data/demo.ts:52
+msgid "关键点：恢复会话时优先用原 cwd；失败就报错，不要偷偷新建。"
+msgstr "关键点：恢复会话时优先用原 cwd；失败就报错，不要偷偷新建。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:29
+msgid "刚刚"
+msgstr "刚刚"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:101
+msgid "发消息…"
+msgstr "发消息…"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:43
+msgid "只处理白名单里的发送者"
+msgstr "只处理白名单里的发送者"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:11
+msgid "同一个微信入口，可以接进已有客户端，也可以让 WeMind 常驻本机。"
+msgstr "同一个微信入口，可以接进已有客户端，也可以让 WeMind 常驻本机。"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:36
+msgid "在 GitHub 查看"
+msgstr "在 GitHub 查看"
+
+#: docs/.vitepress/theme/data/story.ts:15
+msgid "在微信里，说一句话"
+msgstr "在微信里，说一句话"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:42
+msgid "在本机运行，不经过云端中转"
+msgstr "在本机运行，不经过云端中转"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:96
+msgid "完成"
+msgstr "完成"
+
+#: docs/.vitepress/theme/data/demo.ts:63
+msgid "已交给任务 Agent。微信这边可以继续聊，跑完会回来。"
+msgstr "已交给任务 Agent。微信这边可以继续聊，跑完会回来。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:40
+msgid "已确认是你"
+msgstr "已确认是你"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:31
+#: docs/.vitepress/theme/data/demo.ts:29
+msgid "帮我把 docs 里的接入方案整理成一页说明。"
+msgstr "帮我把 docs 里的接入方案整理成一页说明。"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:56
+#: docs/.vitepress/theme/components/HomeHero.vue:66
+msgid "待命"
+msgstr "待命"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:23
+msgid "微信"
+msgstr "微信"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:16
+msgid "微信 × AI Agent"
+msgstr "微信 × AI Agent"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:58
+msgid "微信不动，Agent 可以换。"
+msgstr "微信不动，Agent 可以换。"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:21
+#: docs/.vitepress/theme/components/SiteFooter.vue:13
+msgid "微信不用换，Agent 随心换。"
+msgstr "微信不用换，Agent 随心换。"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:69
+msgid "微信入口只有一个，Agent 可以换。"
+msgstr "微信入口只有一个，Agent 可以换。"
+
+#: docs/.vitepress/theme/data/story.ts:40
+msgid "总结、图片、文件、视频都能回；不用切回终端，也不用另开一个 App。"
+msgstr "总结、图片、文件、视频都能回；不用切回终端，也不用另开一个 App。"
+
+#: docs/.vitepress/theme/data/demo.ts:18
+msgid "总结文档"
+msgstr "总结文档"
+
+#: docs/.vitepress/theme/data/demo.ts:59
+msgid "把这 12 个页面的链接检查一遍，慢一点没关系。"
+msgstr "把这 12 个页面的链接检查一遍，慢一点没关系。"
+
+#: docs/.vitepress/theme/data/story.ts:27
+msgid "换一个 Agent 接手"
+msgstr "换一个 Agent 接手"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:61
+msgid "换好了。接下来由 Pi 接手。"
+msgstr "换好了。接下来由 Pi 接手。"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:19
+msgid "接入任意 AI Agent"
+msgstr "接入任意 AI Agent"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:92
+msgid "接入方案-一页说明.pdf"
+msgstr "接入方案-一页说明.pdf"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:20
+msgid "接进 Claude Desktop、Cursor、OpenCode 等客户端，由客户端收消息、生成回复。"
+msgstr "接进 Claude Desktop、Cursor、OpenCode 等客户端，由客户端收消息、生成回复。"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:29
+msgid "支持 CLI 与 ACP 的 AI Agent 均可接入，完整列表见文档。"
+msgstr "支持 CLI 与 ACP 的 AI Agent 均可接入，完整列表见文档。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:45
+msgid "收到，我先看看这条消息要做什么。"
+msgstr "收到，我先看看这条消息要做什么。"
+
+#: docs/.vitepress/theme/data/demo.ts:33
+msgid "收到。我先读目录，再按「接入方式 / 配置 / 常见问题」整理。"
+msgstr "收到。我先读目录，再按「接入方式 / 配置 / 常见问题」整理。"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:44
+msgid "敏感文件会被拦下"
+msgstr "敏感文件会被拦下"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:74
+msgid "整理 3 个要点"
+msgstr "整理 3 个要点"
+
+#: docs/.vitepress/theme/data/demo.ts:37
+msgid "整理好了：3 个要点，1 张流程图，末尾附了原文链接。"
+msgstr "整理好了：3 个要点，1 张流程图，末尾附了原文链接。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:87
+msgid "整理好了：一页说明 + 3 个待办。"
+msgstr "整理好了：一页说明 + 3 个待办。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:38
+msgid "文本 · 图片 · 文件 · 语音都能进"
+msgstr "文本 · 图片 · 文件 · 语音都能进"
+
+#: docs/.vitepress/theme/data/story.ts:22
+msgid "文本、图片、文件、语音都能进；消息留在本机，不用交给云端中转。"
+msgstr "文本、图片、文件、语音都能进；消息留在本机，不用交给云端中转。"
+
+#: docs/.vitepress/theme/components/SiteFooter.vue:15
+msgid "文档"
+msgstr "文档"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:39
+msgid "本机运行 · 不接云端中转"
+msgstr "本机运行 · 不接云端中转"
+
+#: docs/.vitepress/theme/data/demo.ts:53
+msgid "来源 · ACP 文档"
+msgstr "来源 · ACP 文档"
+
+#: docs/.vitepress/theme/data/demo.ts:44
+msgid "查一下 ACP 协议里 session/resume 的用法。"
+msgstr "查一下 ACP 协议里 session/resume 的用法。"
+
+#: docs/.vitepress/theme/data/demo.ts:48
+msgid "查到了 3 处相关说明，先看官方文档这一节。"
+msgstr "查到了 3 处相关说明，先看官方文档这一节。"
+
+#: docs/.vitepress/theme/data/demo.ts:19
+msgid "查资料"
+msgstr "查资料"
+
+#: docs/.vitepress/theme/data/demo.ts:67
+msgid "检查完成：2 个失效链接，已按页面列好。"
+msgstr "检查完成：2 个失效链接，已按页面列好。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:67
+msgid "正在处理"
+msgstr "正在处理"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:128
+msgid "正在等第一条消息…"
+msgstr "正在等第一条消息…"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:40
+#: docs/.vitepress/theme/components/PhoneFrame.vue:41
+msgid "消息留在本机"
+msgstr "消息留在本机"
+
+#: docs/.vitepress/theme/components/ScrollStory.vue:51
+msgid "演示界面 · 不连接真实微信"
+msgstr "演示界面 · 不连接真实微信"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:11
+msgid "演示脚本"
+msgstr "演示脚本"
+
+#: docs/.vitepress/theme/data/demo.ts:23
+msgid "演示脚本，不会真的发消息。"
+msgstr "演示脚本，不会真的发消息。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:78
+msgid "生成一页说明"
+msgstr "生成一页说明"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:86
+msgid "看它怎么接住一句话"
+msgstr "看它怎么接住一句话"
+
+#: docs/.vitepress/theme/data/story.ts:39
+msgid "结果回到微信"
+msgstr "结果回到微信"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:29
+msgid "让 WeMind 常驻本机，自己收消息、调用常驻 Agent，适合长期在线和远程任务。"
+msgstr "让 WeMind 常驻本机，自己收消息、调用常驻 Agent，适合长期在线和远程任务。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:70
+msgid "读取 docs/接入方案.md"
+msgstr "读取 docs/接入方案.md"
+
+#: docs/.vitepress/theme/data/story.ts:34
+msgid "读文件、跑命令、查资料；长任务交给另一个 Agent，进度会回到微信。"
+msgstr "读文件、跑命令、查资料；长任务交给另一个 Agent，进度会回到微信。"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:46
+msgid "账号与数据按账号隔离"
+msgstr "账号与数据按账号隔离"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:96
+msgid "跳过"
+msgstr "跳过"
+
+#: docs/.vitepress/theme/data/demo.ts:20
+msgid "远程任务"
+msgstr "远程任务"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:22
+msgid "适合：已经有常用客户端，只想补一个微信入口。"
+msgstr "适合：已经有常用客户端，只想补一个微信入口。"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:31
+msgid "适合：想要一个一直在线的微信助手。"
+msgstr "适合：想要一个一直在线的微信助手。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:51
+msgid "选择接手的 Agent"
+msgstr "选择接手的 Agent"
+
+#: docs/.vitepress/theme/components/PhoneDemo.vue:93
+msgid "重播"
+msgstr "重播"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:61
+msgid "长任务"
+msgstr "长任务"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:71
+msgid "长任务可以另派一个 Agent，微信这边照常聊。"
+msgstr "长任务可以另派一个 Agent，微信这边照常聊。"
+
+#: docs/.vitepress/theme/components/PhoneFrame.vue:82
+msgid "长任务已交给另一个 Agent，微信这边可以继续聊。"
+msgstr "长任务已交给另一个 Agent，微信这边可以继续聊。"
+
+#: docs/.vitepress/theme/data/demo.ts:38
+msgid "附件 · 接入方案-一页说明.pdf"
+msgstr "附件 · 接入方案-一页说明.pdf"
+
+#: docs/.vitepress/theme/components/FeatureGrid.vue:45
+msgid "附件有大小上限"
+msgstr "附件有大小上限"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:45
+msgid "随时换"
+msgstr "随时换"
+
+#: docs/.vitepress/theme/components/HomeHero.vue:23
+msgid "随时随地，在微信里切换你想用的 Agent。今天 Claude Code，明天 Codex；长任务交给 Pi，一切尽在微信中！"
+msgstr "随时随地，在微信里切换你想用的 Agent。今天 Claude Code，明天 Codex；长任务交给 Pi，一切尽在微信中！"

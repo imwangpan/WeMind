@@ -64,6 +64,7 @@
 
 ### 设计与开发（现行）
 
+- [WeMind 官网设计方案](设计文档/WeMind-官网设计方案.md) —— 公开官网（产品落地页 + 文档）的提案：VitePress 2.0 + Vue 自定义首页、五幕滚动叙事、固定脚本聊天演示、公开文档范围、部署与 CI；尚未实现
 - [文档守卫设计](设计文档/文档守卫设计.md) —— 四个守卫脚本（doc-impact / check-agent-docs / gen-docs-tables / check-user-copy）的设计、运行方式、已知边界与维护指南；`doc-impact` 另有内容级校验（`STALE_FACTS`），逐行拦截已废弃结论
 - [WeMind 接入本机 Agent 工作模式设计与实现](设计文档/WeMind-接入本机-Agent-工作模式设计与实现.md) —— 让 daemon / worker 直接使用本机 Agent 的真实配置、技能、记忆与会话；`direct`（默认）/ `managed` 两种模式、微信 overlay、工作区、MCP 策略、yolo、迁移与验收
 - [远程任务（Worker）human-in-the-loop 设计与实现](<设计文档/远程任务（Worker）human-in-the-loop 设计与实现.md>) —— 把漫长任务交给受控 ACP worker 进程：单任务单进程 → 多任务 + 进程池 + 重启续跑；消息路由与状态机、会话恢复、配置与权限、进度反馈、双入口、边界

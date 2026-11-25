@@ -1,6 +1,6 @@
 # AGENTS.md — WeMind 的 AI 协作者入口
 
-> **最后核对**：2026-11-23 ｜ 本文档及全库文档描述当前分支的最新代码，不绑定已发布版本号 ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
+> **最后核对**：2026-11-25 ｜ 本文档及全库文档描述当前分支的最新代码，不绑定已发布版本号 ｜ **维护约定**：改代码时同步本文件、全部相关文档与测试用例（硬性要求，见 §4.15）；不确定的结论标注「假设/待实测」。
 >
 > 这份文件写给 AI agent，也写给人。**首轮读 §0–§4**；已知坑、验收清单、单文件职责都按需查（链接在 §5）。不要一上来通读 `docs/repowiki/`。
 
@@ -48,6 +48,8 @@ packages/
       cli/              参数解析/分派、账号与进程生命周期；subcommands/ 主题命令
       ipc/              控制桥、指令表与解析
       shared/           通用工具；process/ 进程身份与 spawn，io/ 原子写与日志
+apps/
+  website/            官网（VitePress 2 + Lingui + Vite+ 检查层；独立 package.json/lockfile，不加入根 workspaces，Node >=24.11）
 docs/
   README.md             全库文档总索引（按读者与主题分组；新增/移动文档后必须同步）
   repowiki/             完整技术 wiki（人读；AI 可按需检索）
@@ -92,6 +94,8 @@ wemind env capture|show|clear   # 非敏感环境快照（PATH/代理/locale）
 wemind session list|new|resume|rename|delete / task-list|task-resume-all|task-reply|task-stop
 node packages/wechat-daemon/dist/cli.js brain   # 从源码跑等价命令
 node scripts/check-docs.mjs    # 检查 Markdown 相对链接
+cd apps/website && npm run dev|build|preview|check|test   # 官网；dev 热更新，build/preview 用于验收
+DOCS_BASE=/WeMind/ DOCS_CLEAN_URLS=false npm run build   # GitHub Pages 产物（工作目录 apps/website）
 ```
 
 完整命令（自动生成：28 个 CLI 子命令 + 21 条微信指令）见 [`README.md`](README.md)「命令一览」；首次使用/环境不确定先跑 [`scripts/doctor.ps1`](scripts/doctor.ps1)。
