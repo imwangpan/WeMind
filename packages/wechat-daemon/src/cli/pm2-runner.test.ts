@@ -6,6 +6,7 @@ import path from "node:path";
 import { buildAppDeclaration, writeAppDeclaration } from "./pm2-runner.js";
 import { BRAIN_CONFIG_EXIT_CODE } from "../agents/brain-agents.js";
 import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from "./watchdog-runner.js";
+import { stableExecPath } from "../shared/launcher-env.js";
 
 /*
  * 只测「声明怎么生成」——不调 pm2、不需要装 pm2。
@@ -34,7 +35,8 @@ describe("pm2 app 声明", () => {
     expect(d.script).toBe("C:\\Program Files\\wemind\\cli.js");
     // args 是字符串（pm2 的声明格式），不是 `-- daemon` 分隔符
     expect(d.args).toBe("daemon");
-    expect(d.interpreter).toBe("node");
+    // 解释器跟当前进程一致（Node 下是 node，从 `wemind bun` 启动时是 bun）——写死 "node" 会把 Bun 用户悄悄换回 Node。
+    expect(d.interpreter).toBe(stableExecPath(process.execPath));
   });
 
   it("与 builtin 后台守护进程 / ecosystem.config.cjs 对齐的保活项", () => {

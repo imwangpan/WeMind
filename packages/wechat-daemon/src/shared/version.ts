@@ -19,7 +19,13 @@ export const CLI_PKG_NAME = "@wemind/cli";
  */
 export const CLI_VERSION = readOwnVersion(import.meta.url, CLI_PKG_NAME) ?? "0.0.0-unknown";
 
+/** 当前运行时标签：Bun 会把 `process.versions.node` 伪装成自己的兼容版本号（1.4.4 报 26.3.0），直接用会把人带偏。 */
+function runtimeLabel(): string {
+  const { bun, node } = process.versions as NodeJS.ProcessVersions & { bun?: string };
+  return bun ? `bun ${bun}` : `node ${node}`;
+}
+
 /** 单行版本串（供 --version 输出）：命令名 + 版本，包名放括号里便于反馈问题时对上 npm 页面。 */
 export function versionLine(): string {
-  return `wemind ${CLI_VERSION} (${CLI_PKG_NAME}, node ${process.versions.node}, ${process.platform}-${process.arch})`;
+  return `wemind ${CLI_VERSION} (${CLI_PKG_NAME}, ${runtimeLabel()}, ${process.platform}-${process.arch})`;
 }

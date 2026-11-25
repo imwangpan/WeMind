@@ -34,13 +34,23 @@ describe("CLI 版本号与包身份", () => {
     // 发布到 @wemind scope 下，但用户敲的命令仍是 wemind；两者不一致是**有意**的，
     // 这条断言防止有人「顺手」把 bin 也改成 @wemind/cli。
     expect(pkg.name).toBe("@wemind/cli");
-    expect(Object.keys(pkg.bin)).toEqual(["wemind"]);
+    expect(pkg.bin.wemind).toBe("dist/cli.js");
   });
 
-  it("versionLine 带上命令名、包名与当前 node 版本", () => {
+  it("只有一个 bin：npx 按包名推断可执行文件，多挂一个就会让它失败", () => {
+    // npm 的 bin 推断（libnpmexec/lib/get-bin-from-manifest.js）：bin 不止一个不同目标时，
+    // 只认「包名去掉 scope」（@wemind/cli → cli），凑不上就报 could not determine executable to run，
+    // npx -y @wemind/cli 直接坏掉。
+    expect(Object.keys(pkg.bin)).toEqual(["wemind"]);
+    expect(pkg.bin.wemind).toBe("dist/cli.js");
+  });
+
+  it("versionLine 带上命令名、包名与当前运行时", () => {
     const line = versionLine();
     expect(line.startsWith(`wemind ${CLI_VERSION}`)).toBe(true);
     expect(line).toContain(CLI_PKG_NAME);
-    expect(line).toContain(process.versions.node);
+    // Bun 会把 process.versions.node 伪装成兼容版本号（1.4.4 报 26.3.0），所以按真实运行时断言。
+    const runtime = (process.versions as { bun?: string }).bun;
+    expect(line).toContain(runtime ? `bun ${runtime}` : `node ${process.versions.node}`);
   });
 });

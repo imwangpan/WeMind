@@ -50,6 +50,16 @@ describe("mapStackToSource（纯函数）", () => {
     );
   });
 
+  it("Bun 的 findOrigin 用 line/column 字段（1.4.4 实测），同样能映射", () => {
+    // Node 返回 lineNumber/columnNumber，Bun 返回 line/column；只认一种会让 Bun 下的堆栈停在 dist 行号。
+    const bunMap: StackSourceMap = {
+      findOrigin: () => ({ fileName: "../src/cli/cli-dispatch.ts", line: 5, column: 3 }),
+    };
+    expect(mapStackToSource("    at f (cli.js:13:8)", bunMap, bundle)).toBe(
+      "    at f (src/cli/cli-dispatch.ts:5)",
+    );
+  });
+
   it("裸文件名（无路径前缀）也能映射", () => {
     expect(mapStackToSource("    at f (cli.js:13:8)", fakeMap, bundle)).toBe(
       "    at f (src/cli/cli-dispatch.ts:5)",

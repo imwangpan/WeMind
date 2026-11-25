@@ -61,7 +61,8 @@ export function buildAppDeclaration(
     name: `wemind-${key}`,
     script: cliPath,
     args: "daemon", // 等价于 `cli.js daemon`；不必再依赖 `-- daemon` 分隔符
-    interpreter: "node",
+    // 解释器跟当前进程同一个可执行文件（Node 下就是 node）：写死 "node" 会把从别的运行时启动的 daemon 悄悄换回去。
+    interpreter: stableExecPath(process.execPath),
     cwd: os.homedir(), // 不继承 `pm2 start` 时的 shell 目录（换了目录再 start 行为才一致）
     autorestart: true,
     restart_delay: 5000, // 与 builtin 后台守护进程 / run-daemon.ps1 -Mode shell 的 5s 重拉一致

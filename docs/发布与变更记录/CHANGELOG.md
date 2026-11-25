@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- **三种运行时不再被写死成 Node（2026-11-25）**：`wemind version` 以前直接打 `process.versions.node`，Bun 会把该字段伪装成兼容版本号（1.4.4 报 26.3.0），于是 Bun 下显示成 `node 26.3.0`——现在按 `process.versions.bun` 判断，如实打印 `bun 1.4.4`；`stack-map.ts` 只认 Node 的 `{lineNumber,columnNumber}`，而 Bun 的 `SourceMap.findOrigin()` 返回 `{line,column}`，堆栈因此停在 dist 行号——现在两种字段都接；pm2 的 `interpreter` 写死 `"node"`，会把从别的运行时启动的 daemon 悄悄换回去——改用 `process.execPath`。官方仍只支持 Node ≥ 24.11，Bun 不在支持范围内。
 - **CI 上真实系统调用类测试的默认 5s 不够（2026-11-24）**：`proc-identity.test.ts` 的「另一个我们自己进程 → 返回 pid」在 windows-latest 上以 `TestTimeoutError: Test timed out in 5000ms` 失败（同一次 ubuntu 通过）。原因不是逻辑：Windows 每次身份判定都要起一次 PowerShell 查 CIM（正常 1–2s），CI runner 只有 4 核、127 个测试文件并发时进程启动会排队。现在 `vitest.config.ts` 的 `testTimeout` 统一为 15s，该文件两组真实系统调用用例单独给 20s（`OS_QUERY_TIMEOUT`），纯逻辑用例仍按默认预算；失败仍然会失败，只是不再因为机器慢而误报。
 
 ## [2.2.0] 收件人模式：worker 收发非文本消息 · 任务列表与状态整理（2026-11-18）
